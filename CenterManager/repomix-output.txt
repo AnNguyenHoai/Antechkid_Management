@@ -1,0 +1,5051 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+docs/
+  ARCHITECTURE.md
+  DATABASE_DESIGN.md
+  DEVELOPMENT_GUIDE.md
+  PROJECT_CONTEXT.md
+  STUDENT_SERVICE.md
+migrations/
+  versions/
+    __init__.py
+    1f892cab66f1_initial_schema.py
+  env.py
+  README
+  script.py.mako
+runtime/
+  Config/
+    config.json
+src/
+  centermanager/
+    core/
+      __init__.py
+      config.py
+      logging.py
+      paths.py
+    database/
+      __init__.py
+      base.py
+      engine.py
+      session.py
+    export/
+      excel/
+        __init__.py
+      pdf/
+        __init__.py
+      __init__.py
+    models/
+      __init__.py
+      assessment.py
+      attachment.py
+      enrollment.py
+      mixins.py
+      parent.py
+      progress.py
+      student_product.py
+      student.py
+      timeline_event.py
+    modules/
+      __init__.py
+    repositories/
+      __init__.py
+      base.py
+      student_repository.py
+    services/
+      __init__.py
+      exceptions.py
+      student_service.py
+    ui/
+      students/
+        __init__.py
+        helpers.py
+        student_form_dialog.py
+        student_list_page.py
+        student_profile_dialog.py
+      __init__.py
+      main_window.py
+    utils/
+      __init__.py
+    __init__.py
+    app.py
+tests/
+  __init__.py
+  conftest.py
+  test_config.py
+  test_database.py
+  test_migrations.py
+  test_models.py
+  test_paths.py
+  test_repositories.py
+  test_smoke.py
+  test_student_service.py
+  test_student_ui_helpers.py
+  test_student_ui.py
+.gitignore
+alembic.ini
+migrations.zip
+pytest.ini
+README.md
+requirements-dev.txt
+requirements.txt
+run.py
+
+================================================================
+Files
+================================================================
+
+================
+File: docs/ARCHITECTURE.md
+================
+# ARCHITECTURE – CenterManager
+
+## Layered Architecture
+
+CenterManager follows a strict layered architecture to separate concerns and enable future extensibility.
+┌─────────────────────────────────────────────────────────────┐
+│ UI Layer │
+│ (PySide6 Widgets/Views) │
+│ main_window.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Service Layer │
+│ (Business Logic / Use Cases) │
+│ services/.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Repository Layer │
+│ (Data Access / Query Builders) │
+│ repositories/.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Database Layer │
+│ (SQLAlchemy ORM / SQLite Connection) │
+│ database/.py, models/.py │
+└─────────────────────────────────────────────────────────────┘
+
+
+
+### Responsibilities
+
+| Layer | Responsibility |
+|-------|----------------|
+| **UI** | Displays data, captures user input, delegates actions to Services. Never touches SQL or business logic directly. |
+| **Services** | Implements use cases (e.g., "register student", "generate PDF", "export to Excel"). Orchestrates repositories. |
+| **Repositories** | Provides a clean data access API. Encapsulates queries and transactions. Returns domain models or DTOs. |
+| **Database / Models** | Defines SQLAlchemy ORM models. Manages connection and session lifecycle. |
+
+## Data Flow – Export/Attachment
+┌─────────────────────┐
+│ SQLite (center.db)│
+└──────────┬──────────┘
+│
+▼
+┌─────────────────────┐
+│ Service generates │
+│ PDF / Excel file │
+└──────────┬──────────┘
+│
+▼
+┌───────────────────────────────────┐
+│ File saved to runtime/Export/ │
+└───────────────────────────────────┘
+│
+▼
+┌───────────────────────────────────┐
+│ Google Drive Desktop syncs to │
+│ cloud (if configured) │
+└───────────────────────────────────┘
+
+
+
+Attachments follow a similar flow but are user‑uploaded files stored in `runtime/Attachment/{student_id}/`.
+
+## Module‑Based Architecture
+
+Business features are organised into **modules** under `src/centermanager/modules/`. Each module encapsulates its own UI, services, and repository dependencies as needed. This allows adding or removing features without impacting the core.
+
+Example module structure (future):
+modules/
+├── student/
+│ ├── init.py
+│ ├── models.py
+│ ├── services.py
+│ ├── repositories.py
+│ └── ui/
+│ ├── list_view.py
+│ └── detail_view.py
+├── attendance/
+│ └── ...
+└── payment/
+└── ...
+
+
+
+## Offline‑First Design
+
+- No external API calls are required for core functionality.
+- All data is stored locally.
+- Google Drive sync is **optional** and handled by an external process (Google Drive Desktop).
+
+## Filesystem vs Database
+
+| Data Type | Storage | Notes |
+|-----------|---------|-------|
+|  fields, numbers, dates | SQLite | All structured data |
+| Images, videos, PDFs, project files | Filesystem (`runtime/Attachment/`) | Database stores relative path only |
+| Exported PDFs, Excel files | Filesystem (`runtime/Export/`) | Derived, can be regenerated |
+
+## Core Foundation (`core/`)
+
+- `paths.py`: Centralised path resolution (pathlib, cross‑platform).
+- `config.py`: JSON configuration loader.
+- `logging.py`: Console + file logging (UTF‑8, rotation).
+
+These are the only modules allowed to touch the filesystem for infrastructure purposes. Business modules must use the `core` APIs.
+
+## Future Packaging
+
+The `src/` structure is designed to be compatible with PyInstaller. The `run.py` script inserts `src/` into `sys.path` for development, but the final executable will bundle all Python code, while runtime paths remain relative to the executable (or a fixed user‑data directory).
+
+
+## Database Layer
+
+- **Engine**: SQLite with foreign key enforcement
+- **ORM**: SQLAlchemy 2.0 with declarative models
+- **Migration**: Alembic for schema version control
+- **Session**: Context manager pattern (`session_scope`)
+- **Test**: All database tests use isolated temporary databases
+
+### Database Flow
+
+```text
+Service
+   ↓
+Repository
+   ↓
+SQLAlchemy ORM
+   ↓
+SQLite (center.db)
+
+================
+File: docs/DATABASE_DESIGN.md
+================
+# DATABASE_DESIGN – CenterManager
+
+## Overview
+
+CenterManager uses SQLite as its embedded database with SQLAlchemy ORM for data access. The design prioritizes:
+
+- **Data preservation** – historical records are never deleted
+- **Soft delete** – students can be marked inactive without losing data
+- **Single source of truth** – all business data lives in SQLite
+- **Relative paths** – attachments stored by reference, not content
+
+## 8 Domain Tables
+
+### 1. students (Core)
+- `id` – Internal primary key (INTEGER, PK)
+- `student_code` – Human-readable identifier (TEXT, NOT NULL, UNIQUE)
+- `full_name` – Student's full name (TEXT, NOT NULL)
+- `preferred_name` – Optional preferred name (TEXT, NULL)
+- `date_of_birth` – Birth date (DATE, NULL)
+- `gender` – Gender (TEXT, NULL)
+- `status` – Current status, default 'ACTIVE' (TEXT)
+- `current_level` – Current level/grade (TEXT, NULL)
+- `notes` – Additional notes (TEXT, NULL)
+- `deleted_at` – Soft delete timestamp (DATETIME, NULL)
+- `created_at`, `updated_at` – Timestamps (DATETIME, NOT NULL)
+
+### 2. parents
+- Student-parent relationship (Student 1 — N Parent)
+- `student_id` FK → students.id
+- `relationship` – FATHER/MOTHER/GUARDIAN/OTHER
+- `is_primary_contact` – Boolean, default False
+
+### 3. enrollments
+- Student enrollment history (Student 1 — N Enrollment)
+- `student_id` FK → students.id
+- Class/course/teacher info as text fields (no separate tables yet)
+
+### 4. assessments
+- Student assessment history (Student 1 — N Assessment)
+- `student_id` FK → students.id
+- `cycle_months` – 3, 6, etc. (integer, no DB constraint)
+- Free-text fields for strengths, improvements, comments
+
+### 5. timeline_events
+- Student timeline history (Student 1 — N TimelineEvent)
+- `student_id` FK → students.id
+- `event_type` – LEARNING/PROJECT/ACHIEVEMENT/NOTE/LEVEL_CHANGE/OTHER
+
+### 6. student_products
+- Student project/product portfolio (Student 1 — N StudentProduct)
+- `student_id` FK → students.id
+- `url` – Web URL (Google Drive, Scratch, GitHub, etc.)
+
+### 7. progress
+- Student progress tracking (Student 1 — N Progress)
+- `student_id` FK → students.id
+- `category` – Skill/competency name
+- `value` – Numeric score (0-100 concept, no DB constraint)
+
+### 8. attachments
+- File references for student documents (Student 1 — N Attachment)
+- `student_id` FK → students.id
+- `relative_path` – Only relative path, e.g., `HS023/photo.jpg`
+- No actual file operations in this sprint
+
+## Relationships Summary
+
+| Parent | Child | Type | Preserve History |
+|--------|-------|------|------------------|
+| Student | Parent | 1:N | ✅ Yes |
+| Student | Enrollment | 1:N | ✅ Yes |
+| Student | Assessment | 1:N | ✅ Yes |
+| Student | TimelineEvent | 1:N | ✅ Yes |
+| Student | StudentProduct | 1:N | ✅ Yes |
+| Student | Progress | 1:N | ✅ Yes |
+| Student | Attachment | 1:N | ✅ Yes |
+
+## Internal ID vs Student Code
+
+- **id (INTEGER, PK)** – Internal database identity. Never exposed in UI as primary identifier.
+- **student_code (TEXT, UNIQUE)** – Human-readable identifier. Visible in UI, used in exports/filenames.
+
+## Soft Delete Strategy
+
+- Students are soft-deleted by setting `deleted_at = NOW()`.
+- `list_active()` queries filter: `deleted_at IS NULL`.
+- Historical child records remain accessible for reporting/audit.
+
+## Timestamp Strategy
+
+- All tables use `created_at` and `updated_at`.
+- **UTC** is used internally (via SQLite's current_timestamp).
+- Formatting to local time/display strings belongs to UI/PDF layers.
+
+## Attachment Path Strategy
+
+- Only relative paths are stored in database.
+- Example: `HS023/portfolio.pdf`
+- Full path resolved at runtime: `runtime/Attachment/HS023/portfolio.pdf`
+- No hardcoded absolute paths.
+
+## Foreign Key Enforcement
+
+- SQLite FK enforcement enabled via `PRAGMA foreign_keys = ON`.
+- Tested: orphan records cannot be created.
+
+## Migration Strategy
+
+- Alembic manages schema evolution.
+- Initial migration creates all 8 tables.
+- `upgrade` and `downgrade` both supported.
+- Migration tests run against temporary databases only.
+
+## Repository Responsibility
+
+- Repository = data access layer.
+- Maps ORM queries to simple operations.
+- Future business logic belongs to Service layer.
+- Repository does NOT know about UI or business validation.
+
+================
+File: docs/DEVELOPMENT_GUIDE.md
+================
+# DEVELOPMENT_GUIDE – CenterManager
+
+This guide provides everything a developer needs to set up, run, test, and extend CenterManager.
+
+---
+
+## Environment Setup
+
+### Prerequisites
+- Python 3.9 or higher
+- pip (package installer)
+
+### Create Virtual Environment
+```
+python -m venv .venv
+Activate it:
+
+Linux/macOS: source .venv/bin/activate
+
+Windows: .venv\Scripts\activate
+
+Install Dependencies
+Runtime Dependencies
+
+pip install -r requirements.txt
+Development Dependencies
+
+pip install -r requirements-dev.txt
+Run the Application
+
+python run.py
+A minimal PySide6 window titled "CenterManager" should appear.
+
+Run Tests
+All tests are written with pytest.
+
+
+pytest
+Expected output:
+
+
+============================= test session starts ==============================
+collected 12 items
+
+tests/test_config.py ....                                                 [ 33%]
+tests/test_paths.py ...                                                   [ 58%]
+tests/test_smoke.py .....                                                 [100%]
+
+============================== 12 passed in 0.45s ==============================
+For verbose output:
+
+
+pytest -v
+To run a specific test file:
+
+
+pytest tests/test_paths.py
+Coding Rules
+Must Use
+Python type hints for all function signatures.
+
+pathlib.Path for all filesystem operations.
+
+Clear naming: functions should be verbs (get_student), classes nouns (StudentService).
+
+Small, focused classes/functions: Single Responsibility Principle.
+
+Docstrings for public APIs (Google or NumPy style).
+
+Avoid
+God classes – keep classes under ~300 lines (guideline).
+
+Global mutable state – except for the approved singletons in core/.
+
+Hardcoded absolute paths – always use core.paths.
+
+Business logic inside UI – delegate to Services.
+
+SQL inside UI – use Repositories.
+
+Catch‑all exception swallowing – except Exception: pass is forbidden.
+
+Premature abstraction – YAGNI.
+
+Principles
+KISS: Keep It Simple, Stupid.
+
+YAGNI: You Ain't Gonna Need It.
+
+Separation of Concerns.
+
+Architecture Rules
+Layer Violations
+❌ UI → Database (direct)
+
+❌ UI → Repository
+
+✅ UI → Service
+
+❌ Service → Database (direct)
+
+✅ Service → Repository
+
+✅ Repository → Database (SQLAlchemy)
+
+Accessing Paths
+Always use the global paths:
+
+python
+from centermanager.core.paths import get_paths, database_dir, export_dir
+
+paths = get_paths()
+db_path = paths.database_dir / "center.db"
+# or
+db_path = database_dir() / "center.db"
+Accessing Configuration
+python
+from centermanager.core.config import get_config
+
+config = get_config()
+app_name = config.get("application.name")
+Logging
+Use logging.getLogger(__name__) and log appropriately:
+
+python
+import logging
+logger = logging.getLogger(__name__)
+
+logger.info("Student saved")
+logger.error("Failed to export PDF", exc_info=True)
+Adding a Future Module
+To add a new business feature (e.g., attendance):
+
+Create a new package under src/centermanager/modules/attendance/.
+
+Inside, create the typical layers if needed:
+
+models.py (SQLAlchemy models)
+
+services.py (business logic)
+
+repositories.py (data access)
+
+ui/ (PySide6 widgets)
+
+Register the module in the main UI (e.g., add a menu item in MainWindow).
+
+Update the database schema (add migrations – future sprint).
+
+Write tests in tests/modules/test_attendance.py.
+
+Never modify core/ for business‑specific logic.
+
+PyInstaller Packaging (Future)
+When the application is ready for distribution, run:
+
+
+pyinstaller centermanager.spec
+The runtime/ directory will be created relative to the executable. Ensure all paths are resolved dynamically using core.paths – no hardcoded paths.
+
+Troubleshooting
+Issue	Solution
+ModuleNotFoundError: No module named 'centermanager'	Ensure you are running python run.py from the project root, or check that src/ is in sys.path.
+PermissionError on runtime directories	Check write permissions for the project folder.
+PySide6 import errors	Reinstall PySide6: pip install --force-reinstall PySide6
+Tests fail with "config.json not found"	The tests use a temporary runtime; ensure you have pytest installed and are running from the root.
+Logging does not write to file	Check that runtime/Logs/ exists and is writable. setup_logging creates it.
+
+================
+File: docs/PROJECT_CONTEXT.md
+================
+# PROJECT_CONTEXT – CenterManager
+
+## What is CenterManager?
+
+CenterManager is a desktop application designed to manage student information for educational centers (e.g., language schools, tutoring centers, vocational training centers). It provides a single, offline‑first interface for administrators and staff to track student profiles, progress, attendance, payments, and more.
+
+## Product Goal
+
+To replace fragmented spreadsheets and paper records with a structured, locally‑stored database that is simple to deploy, fast to use, and requires minimal IT support. The application is built for small‑to‑medium centers (starting at ~100 students, scaling to several hundred) where data privacy, offline availability, and predictable cost are priorities.
+
+## User Model
+
+- **Primary users**: Center administrators, receptionists, and academic staff.
+- **Secondary users**: Teachers (view‑only access to student lists and profiles).
+- **No internet dependency**: All core operations work offline. Internet is used only for Google Drive file sync (via Google Drive Desktop) and optional updates.
+
+## Desktop‑First Philosophy
+
+CenterManager is a native desktop application (Windows, macOS, Linux). It is **not** a web application. All data is stored locally, and the UI is built with PySide6 (Qt) for responsiveness and native look‑and‑feel.
+
+## Google Drive Role
+
+Google Drive is used **only as an external sync mechanism** for attachments and exports. The application does **not** implement the Google Drive API directly in V1. Instead, we rely on **Google Drive Desktop** to synchronise the `Attachment/` and `Export/` folders with the user's Google Drive account. This keeps the application simple, avoids OAuth complexity, and leverages an existing reliable sync tool.
+
+## PDF Distribution Concept
+
+PDF exports (e.g., student profiles, class rosters) are generated on‑demand and saved to `Export/StudentProfile/`. These files can be shared via email, printed, or synced to Google Drive. They are **derived artefacts** – they do not affect the source of truth (SQLite).
+
+## SQLite as Single Source of Truth
+
+The database (`center.db`) is the **only authoritative source** for all business data. PDFs, Excel exports, and attachments are derived from or referenced by the database. This ensures consistency and makes backup simple (just copy the `.db` file plus the `Attachment/` folder).
+
+## Current V1 Scope
+
+Version 1 focuses on:
+
+- Student CRUD (create, read, update, delete)
+- Student profiles with contact information, enrollment dates, and notes
+- Basic search and filtering
+- PDF profile export (individual)
+- Excel export (full list)
+- Attachment management (upload/view files per student)
+- Local backup (manual)
+
+Deliberately out of scope for V1:
+
+- Multi‑user authentication / roles
+- Online payments
+- Google Drive API integration
+- Advanced reporting / dashboards
+- Parent / student portal
+- Mobile app
+
+## Development Status
+
+Sprint 0.1 (this baseline) provides only the **foundation**: project structure, paths, configuration, logging, and a minimal UI skeleton. Business features start in Sprint 0.2.
+
+================
+File: docs/STUDENT_SERVICE.md
+================
+# STUDENT_SERVICE – CenterManager
+
+## Student Lifecycle
+
+CenterManager Student undergoes the following lifecycle:
+
+1. **Create** – New Student is created with automatically generated code (e.g., HS001). Status defaults to ACTIVE.
+2. **Update** – Editable fields: full_name, preferred_name, date_of_birth, gender, status, current_level, notes. Student code is permanent.
+3. **Soft Delete** – Student is marked deleted (deleted_at = timestamp). Child records are preserved.
+4. **Restore** – Deleted Student can be restored (deleted_at = NULL). Original student code is preserved.
+
+## Student Code Rule
+
+- Format: `HS` followed by a numeric portion (minimum 3 digits). 
+- First student: `HS001`.
+- Next code: highest existing HS code + 1 (including deleted students). Gaps are NOT filled.
+- Legacy codes (e.g., `ABC`, `TEMP`) are ignored for generation but do not break the system.
+- Codes are never reused.
+
+Examples:
+- Existing: `HS001, HS002, HS003` → Next: `HS004`
+- Existing: `HS001, HS005` → Next: `HS006`
+- Existing: `ABC, HS005, TEMP` → Next: `HS006`
+- Existing: `HS999` → Next: `HS1000`
+
+## Service API
+
+### `create_student(full_name, ...) -> Student`
+- Required: `full_name` (non-empty, normalized).
+- Optional: `preferred_name`, `date_of_birth`, `gender`, `status`, `current_level`, `notes`.
+- Status defaults to `ACTIVE`.
+- Generates student code automatically.
+
+### `get_student(student_id) -> Student`
+- Returns active Student (deleted_at IS NULL). Raises `StudentNotFoundError` if not found or deleted.
+
+### `get_student_by_code(student_code) -> Student`
+- Same as above but by student_code.
+
+### `get_student_including_deleted(student_id) -> Optional[Student]`
+- Returns Student even if deleted, or None.
+
+### `list_students() -> List[Student]`
+- Returns all active students, sorted by student_code ascending.
+
+### `update_student(student_id, ...) -> Student`
+- Only supplied fields are updated.
+- `student_code` cannot be changed.
+- `full_name` cannot be blank.
+
+### `delete_student(student_id) -> None`
+- Soft-delete: sets `deleted_at = now()`. Raises if already deleted or not found.
+
+### `restore_student(student_id) -> None`
+- Restores soft-deleted Student: sets `deleted_at = NULL`. Raises if not deleted or not found.
+
+## Business Exceptions
+
+- `StudentNotFoundError` – Student does not exist or is deleted.
+- `StudentValidationError` – Invalid input (e.g., blank full_name).
+- `StudentAlreadyDeletedError` – Attempt to delete already-deleted Student.
+- `StudentNotDeletedError` – Attempt to restore active Student.
+
+## Transaction Ownership
+
+Service owns all transaction boundaries. Each method creates its own session, commits on success, rolls back on failure. The caller (UI) does not manage sessions.
+
+## Service vs Repository
+
+- **Service**: Business rules, validation, code generation, transaction management.
+- **Repository**: Persistence queries, ORM operations only.
+
+## Partial Update Semantics
+
+`update_student()` uses a sentinel value `UNSET` to distinguish between:
+
+- **Field not supplied** → preserve existing value.
+- **`None`** → explicitly clear nullable field (set to NULL).
+- **Other value** → update field with normalized value.
+
+Nullable fields: `preferred_name`, `date_of_birth`, `gender`, `current_level`, `notes`.
+
+`full_name` is required and cannot be cleared.
+
+================
+File: migrations/versions/__init__.py
+================
+
+
+================
+File: migrations/versions/1f892cab66f1_initial_schema.py
+================
+"""Initial schema
+
+Revision ID: 1f892cab66f1
+Revises: 
+Create Date: 2026-07-27 22:54:08.630277
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = '1f892cab66f1'
+down_revision: Union[str, Sequence[str], None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.create_table('students',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_code', sa.String(length=20), nullable=False),
+    sa.Column('full_name', sa.String(length=200), nullable=False),
+    sa.Column('preferred_name', sa.String(length=100), nullable=True),
+    sa.Column('date_of_birth', sa.Date(), nullable=True),
+    sa.Column('gender', sa.String(length=20), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('current_level', sa.String(length=50), nullable=True),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('student_code')
+    )
+    op.create_table('assessments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('assessment_date', sa.Date(), nullable=True),
+    sa.Column('cycle_months', sa.Integer(), nullable=True),
+    sa.Column('period_start', sa.Date(), nullable=True),
+    sa.Column('period_end', sa.Date(), nullable=True),
+    sa.Column('level', sa.String(length=50), nullable=True),
+    sa.Column('strengths', sa.Text(), nullable=True),
+    sa.Column('areas_for_improvement', sa.Text(), nullable=True),
+    sa.Column('comments', sa.Text(), nullable=True),
+    sa.Column('recommendation', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('attachments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('file_name', sa.String(length=255), nullable=True),
+    sa.Column('file_type', sa.String(length=50), nullable=True),
+    sa.Column('relative_path', sa.String(length=500), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('enrollments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('class_name', sa.String(length=100), nullable=True),
+    sa.Column('course_name', sa.String(length=100), nullable=True),
+    sa.Column('teacher_name', sa.String(length=100), nullable=True),
+    sa.Column('level', sa.String(length=50), nullable=True),
+    sa.Column('start_date', sa.Date(), nullable=True),
+    sa.Column('end_date', sa.Date(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('parents',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('relation_type', sa.String(length=50), nullable=True),
+    sa.Column('name', sa.String(length=200), nullable=True),
+    sa.Column('phone', sa.String(length=50), nullable=True),
+    sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('is_primary_contact', sa.Boolean(), nullable=False),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('progress',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('category', sa.String(length=100), nullable=True),
+    sa.Column('value', sa.Integer(), nullable=True),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('student_products',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=True),
+    sa.Column('product_type', sa.String(length=50), nullable=True),
+    sa.Column('url', sa.String(length=500), nullable=True),
+    sa.Column('completed_date', sa.Date(), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('timeline_events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('event_date', sa.Date(), nullable=True),
+    sa.Column('event_type', sa.String(length=50), nullable=True),
+    sa.Column('title', sa.String(length=200), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    # ### end Alembic commands ###
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_table('timeline_events')
+    op.drop_table('student_products')
+    op.drop_table('progress')
+    op.drop_table('parents')
+    op.drop_table('enrollments')
+    op.drop_table('attachments')
+    op.drop_table('assessments')
+    op.drop_table('students')
+    # ### end Alembic commands ###
+
+================
+File: migrations/env.py
+================
+# -*- coding: utf-8 -*-
+import sys
+from pathlib import Path
+from logging.config import fileConfig
+
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
+
+from alembic import context
+
+# Thêm src/ vào sys.path để import models
+src_path = Path(__file__).resolve().parent.parent / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+# Import Base và các models để Alembic biết metadata
+from centermanager.database.base import Base
+from centermanager.models import *  # noqa
+
+# Alembic Config object
+config = context.config
+
+# Logging
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection, target_metadata=target_metadata
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+================
+File: migrations/README
+================
+Generic single-database configuration.
+
+================
+File: migrations/script.py.mako
+================
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, Sequence[str], None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    ${downgrades if downgrades else "pass"}
+
+================
+File: runtime/Config/config.json
+================
+{
+    "application": {
+        "name": "CenterManager",
+        "version": "0.1.0"
+    }
+}
+
+================
+File: src/centermanager/core/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Core foundation modules: paths, config, logging."""
+
+================
+File: src/centermanager/core/config.py
+================
+# -*- coding: utf-8 -*-
+"""
+Configuration loader for CenterManager.
+...
+"""
+import json
+import logging
+import copy
+from typing import Any, Dict, Optional
+from pathlib import Path
+
+from centermanager.core.paths import get_paths
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_CONFIG: Dict[str, Any] = {
+    "application": {
+        "name": "CenterManager",
+        "version": "0.1.0",
+    }
+}
+
+
+class Config:
+    """Configuration container."""
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self._data = data
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value using dot notation, e.g. 'application.name'."""
+        parts = key.split(".")
+        current = self._data
+        try:
+            for part in parts:
+                current = current[part]
+            return current
+        except (KeyError, TypeError):
+            return default
+
+    @property
+    def raw(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._data)
+
+
+_config: Optional[Config] = None
+
+
+def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
+    """
+    Load configuration from JSON file.
+
+    Args:
+        path: Path to config.json (defaults to runtime/Config/config.json)
+
+    Returns:
+        Dictionary with configuration data.
+    """
+    if path is None:
+        path = get_paths().config_file
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.debug(f"Configuration loaded from {path}")
+        return data
+    except FileNotFoundError:
+        logger.warning(f"Config file not found: {path}. Using defaults.")
+        return _DEFAULT_CONFIG.copy()
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file: {e}. Using defaults.")
+        return _DEFAULT_CONFIG.copy()
+
+
+def save_config(data: Dict[str, Any], path: Optional[Path] = None) -> None:
+    """
+    Save configuration to JSON file.
+
+    Args:
+        data: Configuration dictionary.
+        path: Path to config.json (defaults to runtime/Config/config.json)
+    """
+    if path is None:
+        path = get_paths().config_file
+
+    # Ensure directory exists
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    logger.debug(f"Configuration saved to {path}")
+
+
+def init_config() -> None:
+    """Initialize global configuration. Create default if missing."""
+    global _config
+    path = get_paths().config_file
+
+    if not path.exists():
+        logger.info("Creating default config.json")
+        save_config(_DEFAULT_CONFIG, path)
+
+    data = load_config(path)
+    _config = Config(data)
+
+
+def get_config() -> Config:
+    """Get the global Config singleton."""
+    if _config is None:
+        init_config()
+    return _config
+
+================
+File: src/centermanager/core/logging.py
+================
+# -*- coding: utf-8 -*-
+"""
+Logging setup for CenterManager.
+
+Configures console and file logging with UTF-8 encoding.
+"""
+import logging
+import sys
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
+from typing import Optional
+
+
+def setup_logging(
+    log_dir: Path,
+    app_name: str = "CenterManager",
+    app_version: str = "0.1.0",
+    console_level: str = "INFO",
+    file_level: str = "DEBUG",
+    max_bytes: int = 5 * 1024 * 1024,  # 5MB
+    backup_count: int = 3,
+) -> None:
+    """
+    Configure logging for both console and file.
+
+    Args:
+        log_dir: Directory to store log files.
+        app_name: Application name for log header.
+        app_version: Application version for log header.
+        console_level: Log level for console output.
+        file_level: Log level for file output.
+        max_bytes: Maximum size of each log file before rotation.
+        backup_count: Number of rotated log files to keep.
+    """
+    # Ensure log directory exists
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_file = log_dir / f"{app_name.lower().replace(' ', '_')}.log"
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Allow all levels, handlers filter
+
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # ----- Console handler -----
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, console_level.upper(), logging.INFO))
+    console_format = logging.Formatter(
+        "%(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    console_handler.setFormatter(console_format)
+    root_logger.addHandler(console_handler)
+
+    # ----- File handler (with rotation) -----
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(getattr(logging, file_level.upper(), logging.DEBUG))
+    file_format = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_handler.setFormatter(file_format)
+    root_logger.addHandler(file_handler)
+
+    # Log startup banner
+    logger = logging.getLogger("centermanager")
+    logger.info(f"{app_name} v{app_version} starting")
+    logger.info(f"Log file: {log_file}")
+
+================
+File: src/centermanager/core/paths.py
+================
+# -*- coding: utf-8 -*-
+"""
+Centralized path resolution for CenterManager.
+
+All runtime paths are derived from the project root and resolved
+using pathlib. No hardcoded absolute paths are used.
+"""
+from pathlib import Path
+from typing import Optional
+
+
+class Paths:
+    """
+    Container for all application paths.
+
+    Attributes:
+        project_root: Root directory of the project (parent of src/).
+        runtime_root: Runtime directory (project_root / 'runtime').
+    """
+
+    def __init__(self) -> None:
+        # Project root = parent of 'src' directory
+        # paths.py is in src/centermanager/core/
+        self._project_root = Path(__file__).resolve().parent.parent.parent.parent
+        self._runtime_root = self._project_root / "runtime"
+
+    @property
+    def project_root(self) -> Path:
+        return self._project_root
+
+    @property
+    def runtime_root(self) -> Path:
+        return self._runtime_root
+
+    @property
+    def database_dir(self) -> Path:
+        return self._runtime_root / "Database"
+
+    @property
+    def export_dir(self) -> Path:
+        return self._runtime_root / "Export"
+
+    @property
+    def student_profile_dir(self) -> Path:
+        return self.export_dir / "StudentProfile"
+
+    @property
+    def excel_export_dir(self) -> Path:
+        return self.export_dir / "Excel"
+
+    @property
+    def attachment_dir(self) -> Path:
+        return self._runtime_root / "Attachment"
+
+    @property
+    def config_dir(self) -> Path:
+        return self._runtime_root / "Config"
+
+    @property
+    def config_file(self) -> Path:
+        return self.config_dir / "config.json"
+
+    @property
+    def backup_dir(self) -> Path:
+        return self._runtime_root / "Backup"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self._runtime_root / "Logs"
+
+    def ensure_directories(self) -> None:
+        """
+        Create all required runtime directories if they do not exist.
+        """
+        dirs = [
+            self.database_dir,
+            self.export_dir,
+            self.student_profile_dir,
+            self.excel_export_dir,
+            self.attachment_dir,
+            self.config_dir,
+            self.backup_dir,
+            self.logs_dir,
+        ]
+        for d in dirs:
+            d.mkdir(parents=True, exist_ok=True)
+
+
+# Singleton instance
+_paths: Optional[Paths] = None
+
+
+def get_paths() -> Paths:
+    """Get the global Paths singleton."""
+    global _paths
+    if _paths is None:
+        _paths = Paths()
+    return _paths
+
+
+# Convenience functions for direct import
+def project_root() -> Path:
+    return get_paths().project_root
+
+
+def runtime_root() -> Path:
+    return get_paths().runtime_root
+
+
+def database_dir() -> Path:
+    return get_paths().database_dir
+
+
+def export_dir() -> Path:
+    return get_paths().export_dir
+
+
+def student_profile_dir() -> Path:
+    return get_paths().student_profile_dir
+
+
+def excel_export_dir() -> Path:
+    return get_paths().excel_export_dir
+
+
+def attachment_dir() -> Path:
+    return get_paths().attachment_dir
+
+
+def config_dir() -> Path:
+    return get_paths().config_dir
+
+
+def config_file() -> Path:
+    return get_paths().config_file
+
+
+def backup_dir() -> Path:
+    return get_paths().backup_dir
+
+
+def logs_dir() -> Path:
+    return get_paths().logs_dir
+
+================
+File: src/centermanager/database/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Database connection and management."""
+
+================
+File: src/centermanager/database/base.py
+================
+# -*- coding: utf-8 -*-
+"""
+SQLAlchemy declarative base for CenterManager.
+"""
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    """Base class for all ORM models."""
+    pass
+
+================
+File: src/centermanager/database/engine.py
+================
+# -*- coding: utf-8 -*-
+"""
+Database engine creation and management.
+"""
+from pathlib import Path
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
+
+from centermanager.core.paths import get_paths
+
+
+def get_database_path() -> Path:
+    """Get the path to the production database."""
+    paths = get_paths()
+    db_dir = paths.database_dir
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "center.db"
+
+
+def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
+    """
+    Create SQLAlchemy engine for SQLite with foreign key enforcement.
+
+    Args:
+        db_path: Path to SQLite database file.
+        echo: Enable SQL echo for debugging.
+
+    Returns:
+        SQLAlchemy Engine instance.
+    """
+    db_path = Path(db_path)
+    # Ensure parent directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        echo=echo,
+        connect_args={
+            "check_same_thread": False,
+        },
+    )
+
+    # Enable foreign key enforcement
+    @event.listens_for(engine, "connect")
+    def set_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON;")
+        cursor.close()
+
+    return engine
+
+
+def create_production_engine(echo: bool = False) -> Engine:
+    """Create engine for production database."""
+    return create_engine_for_path(get_database_path(), echo=echo)
+
+================
+File: src/centermanager/database/session.py
+================
+# -*- coding: utf-8 -*-
+"""
+Database session management with context manager pattern.
+"""
+from contextlib import contextmanager
+from typing import Generator
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from centermanager.database.engine import create_production_engine
+
+
+def create_session_factory(echo: bool = False) -> sessionmaker:
+    """Create a session factory bound to the production engine."""
+    engine = create_production_engine(echo=echo)
+    return sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+@contextmanager
+def session_scope(echo: bool = False) -> Generator[Session, None, None]:
+    """
+    Provide a transactional scope around a series of operations.
+
+    Usage:
+        with session_scope() as session:
+            session.add(some_object)
+            # commit on success, rollback on failure
+
+    Args:
+        echo: Enable SQL echo for debugging.
+
+    Yields:
+        SQLAlchemy Session object.
+    """
+    session = create_session_factory(echo=echo)()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+================
+File: src/centermanager/export/excel/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Excel generation using openpyxl."""
+
+================
+File: src/centermanager/export/pdf/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""PDF generation using ReportLab."""
+
+================
+File: src/centermanager/export/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Export functionality (PDF, Excel)."""
+
+================
+File: src/centermanager/models/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""
+SQLAlchemy ORM models.
+"""
+from centermanager.models.student import Student
+from centermanager.models.parent import Parent
+from centermanager.models.enrollment import Enrollment
+from centermanager.models.assessment import Assessment
+from centermanager.models.timeline_event import TimelineEvent
+from centermanager.models.student_product import StudentProduct
+from centermanager.models.progress import Progress
+from centermanager.models.attachment import Attachment
+
+__all__ = [
+    "Student",
+    "Parent",
+    "Enrollment",
+    "Assessment",
+    "TimelineEvent",
+    "StudentProduct",
+    "Progress",
+    "Attachment",
+]
+
+================
+File: src/centermanager/models/assessment.py
+================
+# -*- coding: utf-8 -*-
+"""
+Assessment model - student progress evaluation history.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, Integer, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class Assessment(Base, TimestampMixin):
+    __tablename__ = "assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    assessment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    cycle_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    period_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    strengths: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    areas_for_improvement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    student: Mapped[Student] = relationship("Student", back_populates="assessments")
+
+    def __repr__(self) -> str:
+        return f"<Assessment(id={self.id}, student_id={self.student_id}, date='{self.assessment_date}')>"
+
+================
+File: src/centermanager/models/attachment.py
+================
+# -*- coding: utf-8 -*-
+"""
+Attachment model - file reference for student documents.
+"""
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class Attachment(Base, TimestampMixin):
+    __tablename__ = "attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    relative_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    student: Mapped[Student] = relationship("Student", back_populates="attachments")
+
+    def __repr__(self) -> str:
+        return f"<Attachment(id={self.id}, student_id={self.student_id}, file='{self.file_name}')>"
+
+================
+File: src/centermanager/models/enrollment.py
+================
+# -*- coding: utf-8 -*-
+"""
+Enrollment model - student's class/course enrollment.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Date, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class Enrollment(Base, TimestampMixin):
+    __tablename__ = "enrollments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    class_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    course_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    teacher_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    student: Mapped[Student] = relationship("Student", back_populates="enrollments")
+
+    def __repr__(self) -> str:
+        return f"<Enrollment(id={self.id}, student_id={self.student_id}, class='{self.class_name}')>"
+
+================
+File: src/centermanager/models/mixins.py
+================
+# -*- coding: utf-8 -*-
+"""
+Shared model mixins for CenterManager.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import declared_attr, Mapped, mapped_column
+
+
+class TimestampMixin:
+    """
+    Mixin that adds created_at and updated_at timestamp fields.
+
+    Usage:
+        class MyModel(Base, TimestampMixin):
+            __tablename__ = "my_table"
+            ...
+    """
+
+    @declared_attr
+    def created_at(cls) -> Mapped[datetime]:
+        return mapped_column(
+            DateTime(timezone=False),
+            nullable=False,
+            server_default=func.current_timestamp(),
+        )
+
+    @declared_attr
+    def updated_at(cls) -> Mapped[datetime]:
+        return mapped_column(
+            DateTime(timezone=False),
+            nullable=False,
+            server_default=func.current_timestamp(),
+            onupdate=func.current_timestamp(),
+        )
+
+================
+File: src/centermanager/models/parent.py
+================
+# -*- coding: utf-8 -*-
+"""
+Parent model - student's parent/guardian information.
+"""
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Boolean, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class Parent(Base, TimestampMixin):
+    __tablename__ = "parents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    relation_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Renamed from 'relationship'
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    is_primary_contact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    student: Mapped[Student] = relationship("Student", back_populates="parents")
+
+    def __repr__(self) -> str:
+        return f"<Parent(id={self.id}, student_id={self.student_id}, name='{self.name}')>"
+
+================
+File: src/centermanager/models/progress.py
+================
+# -*- coding: utf-8 -*-
+"""
+Progress model - student skill/competency tracking.
+"""
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Integer, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class Progress(Base, TimestampMixin):
+    __tablename__ = "progress"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    student: Mapped[Student] = relationship("Student", back_populates="progress_records")
+
+    def __repr__(self) -> str:
+        return f"<Progress(id={self.id}, student_id={self.student_id}, category='{self.category}', value={self.value})>"
+
+================
+File: src/centermanager/models/student_product.py
+================
+# -*- coding: utf-8 -*-
+"""
+StudentProduct model - student's project/product portfolio.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class StudentProduct(Base, TimestampMixin):
+    __tablename__ = "student_products"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    product_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    completed_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    student: Mapped[Student] = relationship("Student", back_populates="products")
+
+    def __repr__(self) -> str:
+        return f"<StudentProduct(id={self.id}, student_id={self.student_id}, title='{self.title}')>"
+
+================
+File: src/centermanager/models/student.py
+================
+# -*- coding: utf-8 -*-
+"""
+Student model - core entity for CenterManager.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional, List, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.parent import Parent
+    from centermanager.models.enrollment import Enrollment
+    from centermanager.models.assessment import Assessment
+    from centermanager.models.timeline_event import TimelineEvent
+    from centermanager.models.student_product import StudentProduct
+    from centermanager.models.progress import Progress
+    from centermanager.models.attachment import Attachment
+
+
+class Student(Base, TimestampMixin):
+    __tablename__ = "students"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    preferred_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)  # đã sửa
+    gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    current_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships - đã bỏ cascade="all"
+    parents: Mapped[List[Parent]] = relationship("Parent", back_populates="student")
+    enrollments: Mapped[List[Enrollment]] = relationship("Enrollment", back_populates="student")
+    assessments: Mapped[List[Assessment]] = relationship("Assessment", back_populates="student")
+    timeline_events: Mapped[List[TimelineEvent]] = relationship("TimelineEvent", back_populates="student")
+    products: Mapped[List[StudentProduct]] = relationship("StudentProduct", back_populates="student")
+    progress_records: Mapped[List[Progress]] = relationship("Progress", back_populates="student")
+    attachments: Mapped[List[Attachment]] = relationship("Attachment", back_populates="student")
+
+    def __repr__(self) -> str:
+        return f"<Student(id={self.id}, code='{self.student_code}', name='{self.full_name}')>"
+
+================
+File: src/centermanager/models/timeline_event.py
+================
+# -*- coding: utf-8 -*-
+"""
+TimelineEvent model - student timeline history.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.student import Student
+
+
+class TimelineEvent(Base, TimestampMixin):
+    __tablename__ = "timeline_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+
+    event_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    event_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    student: Mapped[Student] = relationship("Student", back_populates="timeline_events")
+
+    def __repr__(self) -> str:
+        return f"<TimelineEvent(id={self.id}, student_id={self.student_id}, title='{self.title}')>"
+
+================
+File: src/centermanager/modules/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Pluggable business modules."""
+
+================
+File: src/centermanager/repositories/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""
+Data access layer (Repository pattern).
+"""
+from centermanager.repositories.base import BaseRepository
+from centermanager.repositories.student_repository import StudentRepository
+
+__all__ = [
+    "BaseRepository",
+    "StudentRepository",
+]
+
+================
+File: src/centermanager/repositories/base.py
+================
+# -*- coding: utf-8 -*-
+"""
+Base repository foundation with common operations.
+"""
+from typing import Generic, TypeVar, Optional, List, Any
+
+from sqlalchemy.orm import Session
+
+T = TypeVar("T")
+
+
+class BaseRepository(Generic[T]):
+    """
+    Generic base repository with common CRUD operations.
+
+    Usage:
+        class StudentRepository(BaseRepository[Student]):
+            def __init__(self, session: Session):
+                super().__init__(session, Student)
+    """
+
+    def __init__(self, session: Session, model_class: Any) -> None:
+        self._session = session
+        self._model_class = model_class
+
+    def add(self, entity: T) -> T:
+        """Add an entity to the session."""
+        self._session.add(entity)
+        return entity
+
+    def get_by_id(self, id_value: int) -> Optional[T]:
+        """Get entity by primary key."""
+        return self._session.get(self._model_class, id_value)
+
+    def list_all(self) -> List[T]:
+        """Get all entities."""
+        return self._session.query(self._model_class).all()
+
+    @property
+    def session(self) -> Session:
+        """Get the underlying session."""
+        return self._session
+
+================
+File: src/centermanager/repositories/student_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+Student repository with domain-specific queries.
+"""
+import re
+from typing import Optional, List
+
+from sqlalchemy.orm import Session
+
+from centermanager.models.student import Student
+from centermanager.repositories.base import BaseRepository
+
+
+class StudentRepository(BaseRepository[Student]):
+    """Repository for Student entity with domain-specific methods."""
+
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, Student)
+
+    def get_by_code(self, student_code: str) -> Optional[Student]:
+        """Get a student by unique student_code (active only)."""
+        return self._session.query(Student).filter(
+            Student.student_code == student_code,
+            Student.deleted_at.is_(None),
+        ).first()
+
+    def get_by_code_including_deleted(self, student_code: str) -> Optional[Student]:
+        """Get a student by code regardless of deleted status."""
+        return self._session.query(Student).filter(
+            Student.student_code == student_code
+        ).first()
+
+    def get_by_id_including_deleted(self, student_id: int) -> Optional[Student]:
+        """Get student by ID regardless of deleted status."""
+        return self._session.get(Student, student_id)
+
+    def list_active(self) -> List[Student]:
+        """List active students (deleted_at IS NULL) ordered by student_code."""
+        return self._session.query(Student).filter(
+            Student.deleted_at.is_(None)
+        ).order_by(Student.student_code).all()
+
+    def list_all_including_deleted(self) -> List[Student]:
+        """List all students including soft-deleted ones."""
+        return self._session.query(Student).all()
+
+    def get_all_student_codes(self) -> List[str]:
+        """Return all student_code values (including deleted)."""
+        results = self._session.query(Student.student_code).all()
+        return [r[0] for r in results]
+
+    def get_highest_hs_number(self) -> Optional[int]:
+        """
+        Find the highest numeric value from student codes matching pattern ^HS\\d+$.
+        Returns None if no valid HS code exists.
+        """
+        # Use raw string for regex pattern to avoid escape warnings
+        pattern = re.compile(r"^HS(\d+)$")
+        all_codes = self.get_all_student_codes()
+        max_num = None
+        for code in all_codes:
+            if code is None:
+                continue
+            match = pattern.match(code)
+            if match:
+                num = int(match.group(1))
+                if max_num is None or num > max_num:
+                    max_num = num
+        return max_num
+
+================
+File: src/centermanager/services/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""
+Business logic services.
+"""
+from centermanager.services.student_service import StudentService
+from centermanager.services.exceptions import (
+    StudentServiceError,
+    StudentNotFoundError,
+    StudentValidationError,
+    StudentAlreadyDeletedError,
+    StudentNotDeletedError,
+)
+
+__all__ = [
+    "StudentService",
+    "StudentServiceError",
+    "StudentNotFoundError",
+    "StudentValidationError",
+    "StudentAlreadyDeletedError",
+    "StudentNotDeletedError",
+]
+
+================
+File: src/centermanager/services/exceptions.py
+================
+# -*- coding: utf-8 -*-
+"""
+Business exceptions for Service layer.
+"""
+
+
+class StudentServiceError(Exception):
+    """Base exception for StudentService."""
+    pass
+
+
+class StudentNotFoundError(StudentServiceError):
+    """Raised when a Student is not found (active or including deleted)."""
+    pass
+
+
+class StudentValidationError(StudentServiceError):
+    """Raised when validation fails."""
+    pass
+
+
+class StudentAlreadyDeletedError(StudentServiceError):
+    """Raised when attempting to delete an already deleted Student."""
+    pass
+
+
+class StudentNotDeletedError(StudentServiceError):
+    """Raised when attempting to restore a Student that is not deleted."""
+    pass
+
+================
+File: src/centermanager/services/student_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+StudentService - business logic for Student entity.
+
+Owns transactions and business rules.
+"""
+from datetime import date, datetime, timezone
+from typing import List, Optional, Any
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from centermanager.models.student import Student
+from centermanager.repositories.student_repository import StudentRepository
+from centermanager.services.exceptions import (
+    StudentNotFoundError,
+    StudentValidationError,
+    StudentAlreadyDeletedError,
+    StudentNotDeletedError,
+)
+
+# Sentinel for "field not supplied" in update operations.
+UNSET = object()
+
+
+class StudentService:
+    """Application service for Student lifecycle operations."""
+
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    def _utc_now(self) -> datetime:
+        """Return current UTC datetime without timezone (naive-UTC)."""
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _normalize_text(self, value: Optional[str]) -> Optional[str]:
+        """Trim whitespace; empty/whitespace becomes None."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped if stripped else None
+
+    def _validate_full_name(self, full_name: Optional[str]) -> str:
+        """Ensure full_name is non-empty after normalization."""
+        normalized = self._normalize_text(full_name)
+        if not normalized:
+            raise StudentValidationError("full_name is required and cannot be blank.")
+        return normalized
+
+    def _generate_student_code(self, session: Session) -> str:
+        """Generate next HS code based on highest existing valid HS number."""
+        repo = StudentRepository(session)
+        highest = repo.get_highest_hs_number()
+        next_num = (highest or 0) + 1
+        return f"HS{next_num:03d}"
+
+    def create_student(
+        self,
+        full_name: str,
+        preferred_name: Optional[str] = None,
+        date_of_birth: Optional[date] = None,
+        gender: Optional[str] = None,
+        status: Optional[str] = None,
+        current_level: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Student:
+        """
+        Create a new student with auto-generated student_code.
+
+        Args:
+            full_name: Required, will be stripped.
+            preferred_name: Optional, will be stripped.
+            date_of_birth: Optional date object.
+            gender: Optional, will be stripped.
+            status: Optional, defaults to 'ACTIVE'.
+            current_level: Optional, will be stripped.
+            notes: Optional, will be stripped.
+
+        Returns:
+            The created Student ORM object.
+
+        Raises:
+            StudentValidationError: If full_name is blank.
+        """
+        normalized_full_name = self._validate_full_name(full_name)
+        normalized_preferred = self._normalize_text(preferred_name)
+        normalized_gender = self._normalize_text(gender)
+        normalized_level = self._normalize_text(current_level)
+        normalized_notes = self._normalize_text(notes)
+
+        if status is not None:
+            normalized_status = self._normalize_text(status) or "ACTIVE"
+        else:
+            normalized_status = "ACTIVE"
+
+        with self._session_factory() as session:
+            try:
+                student_code = self._generate_student_code(session)
+                student = Student(
+                    student_code=student_code,
+                    full_name=normalized_full_name,
+                    preferred_name=normalized_preferred,
+                    date_of_birth=date_of_birth,
+                    gender=normalized_gender,
+                    status=normalized_status,
+                    current_level=normalized_level,
+                    notes=normalized_notes,
+                )
+                repo = StudentRepository(session)
+                repo.add(student)
+                session.commit()
+                # Refresh to get generated fields (id, timestamps)
+                session.refresh(student)
+                return student
+            except Exception:
+                session.rollback()
+                raise
+
+    def get_student(self, student_id: int) -> Student:
+        """Get active student by id. Excludes soft-deleted."""
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id(student_id)
+            if student is None or student.deleted_at is not None:
+                raise StudentNotFoundError(f"Student id {student_id} not found or deleted.")
+            return student
+
+    def get_student_by_code(self, student_code: str) -> Student:
+        """Get active student by code. Excludes soft-deleted."""
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_code(student_code)
+            if student is None or student.deleted_at is not None:
+                raise StudentNotFoundError(f"Student code {student_code} not found or deleted.")
+            return student
+
+    def get_student_including_deleted(self, student_id: int) -> Optional[Student]:
+        """Get student by id, including soft-deleted. For internal use."""
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            return repo.get_by_id_including_deleted(student_id)
+
+    def list_students(self) -> List[Student]:
+        """List active students (deleted_at IS NULL), sorted by student_code."""
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            return repo.list_active()
+
+    def update_student(
+        self,
+        student_id: int,
+        full_name: Any = UNSET,
+        preferred_name: Any = UNSET,
+        date_of_birth: Any = UNSET,
+        gender: Any = UNSET,
+        status: Any = UNSET,
+        current_level: Any = UNSET,
+        notes: Any = UNSET,
+    ) -> Student:
+        """
+        Update student fields.
+
+        Partial update: only supplied fields are changed.
+        - If value is UNSET, field is NOT modified.
+        - If value is None, field is cleared (set to NULL) - allowed for nullable fields.
+        - Otherwise, field is set to the given value (after normalization for text).
+
+        full_name cannot be cleared (set to None) – will raise ValidationError.
+
+        Raises:
+            StudentNotFoundError: If student not found.
+            StudentValidationError: If full_name is blank.
+        """
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student id {student_id} not found.")
+
+            # Check full_name first
+            if full_name is not UNSET:
+                if full_name is None or self._normalize_text(full_name) is None:
+                    raise StudentValidationError("full_name cannot be cleared.")
+                student.full_name = self._normalize_text(full_name)
+
+            if preferred_name is not UNSET:
+                student.preferred_name = self._normalize_text(preferred_name)
+
+            if date_of_birth is not UNSET:
+                # date_of_birth can be None or date object
+                if date_of_birth is not None and not isinstance(date_of_birth, date):
+                    raise StudentValidationError("date_of_birth must be a date or None.")
+                student.date_of_birth = date_of_birth
+
+            if gender is not UNSET:
+                student.gender = self._normalize_text(gender)
+
+            if status is not UNSET:
+                norm_status = self._normalize_text(status)
+                student.status = norm_status if norm_status is not None else "ACTIVE"
+
+            if current_level is not UNSET:
+                student.current_level = self._normalize_text(current_level)
+
+            if notes is not UNSET:
+                student.notes = self._normalize_text(notes)
+
+            try:
+                session.commit()
+                session.refresh(student)
+                return student
+            except Exception:
+                session.rollback()
+                raise
+
+    def delete_student(self, student_id: int) -> None:
+        """
+        Soft-delete student by setting deleted_at.
+
+        Raises:
+            StudentNotFoundError: If student not found.
+            StudentAlreadyDeletedError: If already soft-deleted.
+        """
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student id {student_id} not found.")
+            if student.deleted_at is not None:
+                raise StudentAlreadyDeletedError(f"Student id {student_id} is already deleted.")
+            student.deleted_at = self._utc_now()
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    def restore_student(self, student_id: int) -> None:
+        """
+        Restore soft-deleted student by clearing deleted_at.
+
+        Raises:
+            StudentNotFoundError: If student not found.
+            StudentNotDeletedError: If student is not deleted.
+        """
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student id {student_id} not found.")
+            if student.deleted_at is None:
+                raise StudentNotDeletedError(f"Student id {student_id} is not deleted.")
+            student.deleted_at = None
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+================
+File: src/centermanager/ui/students/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Student UI components."""
+from .student_list_page import StudentListPage
+from .student_form_dialog import StudentFormDialog
+from .student_profile_dialog import StudentProfileDialog
+
+__all__ = [
+    "StudentListPage",
+    "StudentFormDialog",
+    "StudentProfileDialog",
+]
+
+================
+File: src/centermanager/ui/students/helpers.py
+================
+# -*- coding: utf-8 -*-
+"""
+UI helpers for student display.
+"""
+from datetime import date
+from typing import Optional
+
+
+def calculate_age(birth_date: Optional[date], reference_date: Optional[date] = None) -> Optional[int]:
+    """
+    Calculate age from birth_date.
+    If reference_date is None, use today's date.
+    Returns None if birth_date is None.
+    """
+    if birth_date is None:
+        return None
+    today = reference_date if reference_date is not None else date.today()
+    age = today.year - birth_date.year
+    if (today.month, today.day) < (birth_date.month, birth_date.day):
+        age -= 1
+    return age
+
+
+def format_date_for_display(dt: Optional[date]) -> str:
+    """Format date as dd/mm/yyyy or empty string if None."""
+    if dt is None:
+        return ""
+    return dt.strftime("%d/%m/%Y")
+
+
+def format_status(status: Optional[str]) -> str:
+    """Return status or empty string if None."""
+    return status or ""
+
+
+def format_age_for_display(age: Optional[int]) -> str:
+    """Return age as string or '-' if None."""
+    if age is None:
+        return "-"
+    return str(age)
+
+================
+File: src/centermanager/ui/students/student_form_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+Dialog for adding a new student.
+"""
+import logging
+from datetime import date
+from typing import Optional
+
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QLineEdit,
+    QDateEdit,
+    QComboBox,
+    QPlainTextEdit,
+    QPushButton,
+    QHBoxLayout,
+    QMessageBox,
+    QWidget,
+)
+
+from centermanager.services.student_service import StudentService
+from centermanager.services.exceptions import StudentValidationError
+
+logger = logging.getLogger(__name__)
+
+
+class StudentFormDialog(QDialog):
+    """Dialog for creating a new student."""
+
+    def __init__(self, student_service: StudentService, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = student_service
+        self.setWindowTitle("Add Student")
+        self.setMinimumWidth(450)
+        self.setModal(True)
+
+        self._dob_null = True
+        self._suppress_date_changed = False
+        self._setup_ui()
+        self._connect_signals()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        # Full Name (required)
+        self.full_name_edit = QLineEdit()
+        self.full_name_edit.setPlaceholderText("Enter full name")
+        form.addRow("Full Name *", self.full_name_edit)
+
+        # Preferred Name
+        self.preferred_name_edit = QLineEdit()
+        self.preferred_name_edit.setPlaceholderText("Optional")
+        form.addRow("Preferred Name", self.preferred_name_edit)
+
+        # Date of Birth (nullable)
+        self.dob_edit = QDateEdit()
+        self.dob_edit.setCalendarPopup(True)
+        self.dob_edit.setDisplayFormat("dd/MM/yyyy")
+        self.dob_edit.setSpecialValueText("")  # empty text when null
+        self.dob_edit.setDate(QDate(2000, 1, 1))  # dummy
+        self.dob_edit.setDateTime(QDate(2000, 1, 1).startOfDay())
+        self._update_dob_ui()
+
+        dob_widget = QWidget()
+        dob_layout = QHBoxLayout(dob_widget)
+        dob_layout.setContentsMargins(0, 0, 0, 0)
+        dob_layout.setSpacing(4)
+        dob_layout.addWidget(self.dob_edit)
+        self.clear_dob_btn = QPushButton("Clear")
+        self.clear_dob_btn.setFixedWidth(60)
+        dob_layout.addWidget(self.clear_dob_btn)
+        form.addRow("Date of Birth", dob_widget)
+
+        # Gender
+        self.gender_combo = QComboBox()
+        self.gender_combo.addItems(["", "Male", "Female", "Other"])
+        form.addRow("Gender", self.gender_combo)
+
+        # Current Level
+        self.level_edit = QLineEdit()
+        self.level_edit.setPlaceholderText("e.g. Python Beginner")
+        form.addRow("Current Level", self.level_edit)
+
+        # Notes (multiline)
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setPlaceholderText("Additional notes (optional)")
+        self.notes_edit.setMaximumHeight(100)
+        form.addRow("Notes", self.notes_edit)
+
+        layout.addLayout(form)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setFixedWidth(100)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def _connect_signals(self) -> None:
+        self.dob_edit.dateChanged.connect(self._on_date_changed)
+        self.clear_dob_btn.clicked.connect(self._clear_dob)
+        self.save_btn.clicked.connect(self._save)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def _on_date_changed(self) -> None:
+        if self._suppress_date_changed:
+            return
+        self._dob_null = False
+        self._update_dob_ui()
+
+    def _clear_dob(self) -> None:
+        self._suppress_date_changed = True
+        self._dob_null = True
+        self.dob_edit.setDate(QDate(2000, 1, 1))
+        self._suppress_date_changed = False
+        self._update_dob_ui()
+
+    def _update_dob_ui(self) -> None:
+        if self._dob_null:
+            self.dob_edit.setSpecialValueText("")
+            self.dob_edit.setDate(QDate(2000, 1, 1))
+        else:
+            # Keep current date
+            pass
+
+    def _get_dob(self) -> Optional[date]:
+        if self._dob_null:
+            return None
+        qdate = self.dob_edit.date()
+        if not qdate.isValid():
+            return None
+        return date(qdate.year(), qdate.month(), qdate.day())
+
+    def _save(self) -> None:
+        full_name = self.full_name_edit.text().strip()
+        preferred_name = self.preferred_name_edit.text().strip() or None
+        dob = self._get_dob()
+        gender = self.gender_combo.currentText().strip() or None
+        level = self.level_edit.text().strip() or None
+        notes = self.notes_edit.toPlainText().strip() or None
+
+        try:
+            student = self._service.create_student(
+                full_name=full_name,
+                preferred_name=preferred_name,
+                date_of_birth=dob,
+                gender=gender,
+                status="ACTIVE",
+                current_level=level,
+                notes=notes,
+            )
+            logger.info(f"Created student {student.student_code} - {student.full_name}")
+            self.accept()
+        except StudentValidationError as e:
+            QMessageBox.warning(self, "Validation Error", str(e))
+        except Exception:
+            logger.exception("Unexpected error while creating student")
+            QMessageBox.critical(self, "Error", "An unexpected error occurred. Please check the logs.")
+
+================
+File: src/centermanager/ui/students/student_list_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+Student list page widget.
+"""
+import logging
+from typing import List, Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QLineEdit,
+    QPushButton,
+    QLabel,
+    QHeaderView,
+    QAbstractItemView,
+)
+
+from centermanager.services.student_service import StudentService
+from centermanager.models.student import Student
+from centermanager.ui.students.helpers import calculate_age, format_age_for_display
+from centermanager.ui.students.student_form_dialog import StudentFormDialog
+from centermanager.ui.students.student_profile_dialog import StudentProfileDialog
+
+logger = logging.getLogger(__name__)
+
+
+class StudentListPage(QWidget):
+    """Main page for listing students."""
+
+    def __init__(self, student_service: StudentService, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = student_service
+        self._students: List[Student] = []
+        self._filtered_students: List[Student] = []
+
+        self._setup_ui()
+        self._connect_signals()
+        self.refresh()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(8)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by Code or Name...")
+        top_bar.addWidget(self.search_input)
+
+        top_bar.addStretch()
+
+        self.add_button = QPushButton("+ Add Student")
+        self.add_button.setFixedHeight(30)
+        top_bar.addWidget(self.add_button)
+
+        layout.addLayout(top_bar)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Code", "Name", "Age", "Level", "Status"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+
+        layout.addWidget(self.table)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.status_label)
+
+    def _connect_signals(self) -> None:
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        self.add_button.clicked.connect(self._on_add_clicked)
+        self.table.doubleClicked.connect(self._on_row_double_clicked)
+
+    def _on_search_text_changed(self, text: str) -> None:
+        self._apply_filter(text)
+
+    def _on_add_clicked(self) -> None:
+        dialog = StudentFormDialog(self._service, self)
+        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _on_row_double_clicked(self, index) -> None:
+        row = index.row()
+        if row < 0 or row >= len(self._filtered_students):
+            return
+        student = self._filtered_students[row]
+        dialog = StudentProfileDialog(self._service, student.id, self)
+        dialog.exec()
+
+    def refresh(self) -> None:
+        try:
+            self._students = self._service.list_students()
+            self.status_label.setText(f"Loaded {len(self._students)} students")
+            self._apply_filter(self.search_input.text())
+        except Exception:
+            logger.exception("Failed to refresh student list")
+            self.status_label.setText("Unable to load students.")
+            self._students = []
+            self._filtered_students = []
+            self._update_table()
+
+    def _apply_filter(self, text: str) -> None:
+        if not text.strip():
+            self._filtered_students = self._students[:]
+        else:
+            lower = text.strip().lower()
+            self._filtered_students = [
+                s for s in self._students
+                if lower in s.student_code.lower() or lower in s.full_name.lower()
+            ]
+        self._update_table()
+
+    def _update_table(self) -> None:
+        self.table.setRowCount(len(self._filtered_students))
+        for row, student in enumerate(self._filtered_students):
+            age = calculate_age(student.date_of_birth)
+            age_str = format_age_for_display(age)
+
+            self.table.setItem(row, 0, QTableWidgetItem(student.student_code))
+            self.table.setItem(row, 1, QTableWidgetItem(student.full_name))
+            self.table.setItem(row, 2, QTableWidgetItem(age_str))
+            self.table.setItem(row, 3, QTableWidgetItem(student.current_level or ""))
+            self.table.setItem(row, 4, QTableWidgetItem(student.status or ""))
+
+================
+File: src/centermanager/ui/students/student_profile_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+Basic read-only student profile dialog.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QLabel,
+    QPushButton,
+    QHBoxLayout,
+    QFrame,
+    QMessageBox,
+)
+
+from centermanager.services.student_service import StudentService
+from centermanager.services.exceptions import StudentNotFoundError
+from centermanager.ui.students.helpers import calculate_age, format_date_for_display
+
+logger = logging.getLogger(__name__)
+
+
+class StudentProfileDialog(QDialog):
+    """Read-only profile dialog for a student."""
+
+    def __init__(self, student_service: StudentService, student_id: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = student_service
+        self._student_id = student_id
+        self.setWindowTitle("Student Profile")
+        self.setMinimumSize(400, 350)
+        self.setModal(True)
+
+        self._setup_ui()
+        self._load_student()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        self.form = QFormLayout()
+        self.form.setSpacing(6)
+        self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self.code_label = QLabel()
+        self.name_label = QLabel()
+        self.preferred_label = QLabel()
+        self.dob_label = QLabel()
+        self.age_label = QLabel()
+        self.gender_label = QLabel()
+        self.level_label = QLabel()
+        self.status_label = QLabel()
+        self.notes_label = QLabel()
+        self.notes_label.setWordWrap(True)
+        self.notes_label.setTextFormat(Qt.TextFormat.PlainText)
+
+        self.form.addRow("Student Code:", self.code_label)
+        self.form.addRow("Full Name:", self.name_label)
+        self.form.addRow("Preferred Name:", self.preferred_label)
+        self.form.addRow("Date of Birth:", self.dob_label)
+        self.form.addRow("Age:", self.age_label)
+        self.form.addRow("Gender:", self.gender_label)
+        self.form.addRow("Current Level:", self.level_label)
+        self.form.addRow("Status:", self.status_label)
+        self.form.addRow("Notes:", self.notes_label)
+
+        layout.addLayout(self.form)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setFixedWidth(100)
+        self.close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+
+    def _load_student(self) -> None:
+        try:
+            student = self._service.get_student(self._student_id)
+            self._populate(student)
+        except StudentNotFoundError:
+            self.code_label.setText("Student not found")
+            self.name_label.setText("")
+            QMessageBox.warning(self, "Not Found", "Student not found or deleted.")
+        except Exception:
+            logger.exception("Error loading profile")
+            QMessageBox.critical(self, "Error", "An unexpected error occurred. Please check the logs.")
+
+    def _populate(self, student) -> None:
+        self.code_label.setText(student.student_code)
+        self.name_label.setText(student.full_name)
+        self.preferred_label.setText(student.preferred_name or "-")
+        self.dob_label.setText(format_date_for_display(student.date_of_birth))
+        age = calculate_age(student.date_of_birth)
+        self.age_label.setText(str(age) if age is not None else "-")
+        self.gender_label.setText(student.gender or "-")
+        self.level_label.setText(student.current_level or "-")
+        self.status_label.setText(student.status or "-")
+        self.notes_label.setText(student.notes or "-")
+
+================
+File: src/centermanager/ui/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""User interface components."""
+
+================
+File: src/centermanager/ui/main_window.py
+================
+# -*- coding: utf-8 -*-
+"""
+Main window for CenterManager.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QStatusBar,
+)
+from PySide6.QtCore import Qt
+
+from centermanager.services.student_service import StudentService
+from centermanager.ui.students.student_list_page import StudentListPage
+
+logger = logging.getLogger(__name__)
+
+
+class MainWindow(QMainWindow):
+    """Main application window."""
+
+    def __init__(self, student_service: StudentService, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = student_service
+        self.setWindowTitle("CenterManager")
+        self.setMinimumSize(900, 600)
+
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header (optional, but simple)
+        header = QWidget()
+        header.setStyleSheet("background-color: #f0f0f0; padding: 6px 12px;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("CenterManager")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        layout.addWidget(header)
+
+        # Student list page
+        self.student_list_page = StudentListPage(self._service)
+        layout.addWidget(self.student_list_page)
+
+        # Status bar
+        self.statusBar().showMessage("Ready")
+
+        logger.info("MainWindow initialized")
+
+================
+File: src/centermanager/utils/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Utility functions and helpers."""
+
+================
+File: src/centermanager/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""CenterManager main package."""
+
+__version__ = "0.1.0"
+__app_name__ = "CenterManager"
+
+================
+File: src/centermanager/app.py
+================
+# -*- coding: utf-8 -*-
+"""
+Application bootstrap for CenterManager.
+"""
+import sys
+import logging
+from pathlib import Path
+from sqlalchemy import text
+
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+
+from centermanager.core.paths import get_paths
+from centermanager.core.config import get_config, init_config
+from centermanager.core.logging import setup_logging
+from centermanager.database.engine import create_production_engine, get_database_path
+from centermanager.services.student_service import StudentService
+from centermanager.ui.main_window import MainWindow
+
+logger = logging.getLogger(__name__)
+
+
+def ensure_schema():
+    """
+    Check if students table exists. If not, run Alembic upgrade head.
+    This ensures the database schema is present on first run.
+    """
+    from alembic.config import Config
+    from alembic import command
+
+    db_path = get_database_path()
+    engine = create_production_engine(echo=False)
+
+    # Check if students table exists
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
+        ).fetchone()
+        if result is not None:
+            # Table exists, no need to migrate
+            return
+
+    # Table missing, run migration
+    logger.info("Database schema missing. Running Alembic upgrade head...")
+
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    try:
+        command.upgrade(alembic_cfg, "head")
+        logger.info("Alembic upgrade completed successfully.")
+    except Exception as e:
+        logger.error(f"Failed to run Alembic upgrade: {e}")
+        raise
+
+
+def main() -> int:
+    """Application entry point."""
+    # 1. Resolve paths
+    paths = get_paths()
+
+    # 2. Ensure runtime directories exist
+    paths.ensure_directories()
+
+    # 3. Initialize configuration
+    init_config()
+    config = get_config()
+
+    # 4. Setup logging
+    setup_logging(
+        log_dir=paths.logs_dir,
+        app_name=config.get("application", {}).get("name", "CenterManager"),
+        app_version=config.get("application", {}).get("version", "0.1.0"),
+    )
+
+    logger.info("CenterManager starting")
+    logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
+    logger.info(f"Runtime directories prepared at {paths.runtime_root}")
+
+    # 5. Ensure database schema exists
+    ensure_schema()
+
+    # 6. Create Qt Application
+    qapp = QApplication(sys.argv)
+    qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
+    qapp.setOrganizationName("CenterManager")
+
+    # 7. Create StudentService (with production engine)
+    from sqlalchemy.orm import sessionmaker
+    engine = create_production_engine(echo=False)
+    session_factory = sessionmaker(bind=engine)
+
+    student_service = StudentService(session_factory)
+
+    # 8. Show main window
+    window = MainWindow(student_service)
+    window.show()
+    logger.info("Main window initialized")
+
+    # 9. Execute event loop
+    exit_code = qapp.exec()
+    logger.info(f"Application exiting with code {exit_code}")
+
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+================
+File: tests/__init__.py
+================
+# -*- coding: utf-8 -*-
+"""Test suite for CenterManager."""
+
+================
+File: tests/conftest.py
+================
+# -*- coding: utf-8 -*-
+"""
+Pytest fixtures for CenterManager tests.
+"""
+import pytest
+import shutil
+import logging
+import sys
+from pathlib import Path
+
+# Thêm src/ vào sys.path để pytest tìm thấy centermanager
+src_path = Path(__file__).resolve().parent.parent / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from centermanager.core import paths as paths_module
+from centermanager.core import config as config_module
+from centermanager.core.paths import get_paths
+
+# Lưu đường dẫn runtime thật để kiểm tra bảo vệ
+REAL_RUNTIME_PATH = get_paths().runtime_root
+
+
+@pytest.fixture
+def clean_paths():
+    """Reset path and config state."""
+    old_paths = paths_module._paths
+    old_config = config_module._config
+    paths_module._paths = None
+    config_module._config = None
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    yield
+    paths_module._paths = old_paths
+    config_module._config = old_config
+
+
+@pytest.fixture
+def temp_runtime(tmp_path, clean_paths):
+    """Create temporary runtime directory."""
+    from centermanager.core import paths as pmod
+    from centermanager.core import config as cmod
+
+    class TempPaths:
+        def __init__(self, root):
+            self._root = root
+        @property
+        def project_root(self): return self._root
+        @property
+        def runtime_root(self): return self._root / "runtime"
+        @property
+        def database_dir(self): return self.runtime_root / "Database"
+        @property
+        def export_dir(self): return self.runtime_root / "Export"
+        @property
+        def student_profile_dir(self): return self.export_dir / "StudentProfile"
+        @property
+        def excel_export_dir(self): return self.export_dir / "Excel"
+        @property
+        def attachment_dir(self): return self.runtime_root / "Attachment"
+        @property
+        def config_dir(self): return self.runtime_root / "Config"
+        @property
+        def config_file(self): return self.config_dir / "config.json"
+        @property
+        def backup_dir(self): return self.runtime_root / "Backup"
+        @property
+        def logs_dir(self): return self.runtime_root / "Logs"
+        def ensure_directories(self):
+            for d in [self.database_dir, self.export_dir, self.student_profile_dir,
+                      self.excel_export_dir, self.attachment_dir, self.config_dir,
+                      self.backup_dir, self.logs_dir]:
+                d.mkdir(parents=True, exist_ok=True)
+
+    temp_paths = TempPaths(tmp_path)
+    pmod._paths = temp_paths
+    cmod._config = None
+
+    yield temp_paths
+
+    pmod._paths = None
+    cmod._config = None
+
+
+@pytest.fixture
+def test_db_path(tmp_path):
+    """Create a temporary database path for testing."""
+    db_path = tmp_path / "test.db"
+    return db_path
+
+
+@pytest.fixture
+def test_db(test_db_path):
+    """Create a temporary database with initialized tables."""
+    from centermanager.database.engine import create_engine_for_path
+    from centermanager.database.base import Base
+    from centermanager import models  # noqa
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    yield test_db_path
+
+================
+File: tests/test_config.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for configuration loader.
+"""
+import pytest
+import json
+from pathlib import Path
+
+from centermanager.core.config import (
+    load_config,
+    save_config,
+    init_config,
+    get_config,
+    _DEFAULT_CONFIG,
+)
+from centermanager.core.paths import get_paths
+
+
+def test_config_uses_default_when_missing(temp_runtime):
+    """Test that load_config returns defaults when file is missing."""
+    paths = get_paths()
+    config_file = paths.config_file
+    # ensure file does not exist
+    if config_file.exists():
+        config_file.unlink()
+    data = load_config(config_file)
+    assert data["application"]["name"] == "CenterManager"
+    assert data["application"]["version"] == "0.1.0"
+
+
+def test_config_save_and_load(temp_runtime):
+    """Test that save_config writes a file that load_config can read."""
+    paths = get_paths()
+    config_file = paths.config_file
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    test_data = {"application": {"name": "TestApp", "version": "9.9.9"}}
+    save_config(test_data, config_file)
+    loaded = load_config(config_file)
+    assert loaded["application"]["name"] == "TestApp"
+    assert loaded["application"]["version"] == "9.9.9"
+
+
+def test_init_config_creates_default_if_missing(temp_runtime):
+    """Test that init_config creates default config if missing."""
+    paths = get_paths()
+    config_file = paths.config_file
+    if config_file.exists():
+        config_file.unlink()
+    init_config()
+    assert config_file.exists()
+    loaded = load_config(config_file)
+    assert loaded["application"]["name"] == "CenterManager"
+
+
+# Các test không mutate vẫn dùng clean_paths
+def test_get_config_returns_config(clean_paths):
+    config = get_config()
+    assert config.get("application.name") == "CenterManager"
+    assert config.get("application.version") == "0.1.0"
+
+
+def test_config_get_with_dot_notation(clean_paths):
+    config = get_config()
+    assert config.get("application.name") == "CenterManager"
+    assert config.get("application.nonexistent", "default") == "default"
+    assert config.get("non.existent.key", None) is None
+
+
+def test_config_raw_property(clean_paths):
+    config = get_config()
+    raw = config.raw
+    assert raw is not config._data
+    original_name = raw["application"]["name"]
+    raw["application"]["name"] = "Hacked"
+    assert raw["application"]["name"] == "Hacked"
+    assert config.get("application.name") == original_name
+
+
+# Test bảo vệ production runtime
+def test_production_runtime_unchanged(clean_paths):
+    """Chứng minh runtime thật không bị thay đổi bởi các test."""
+    from tests.conftest import REAL_RUNTIME_PATH
+    assert REAL_RUNTIME_PATH.exists(), "Production runtime bị xóa!"
+    config_file = REAL_RUNTIME_PATH / "Config" / "config.json"
+    assert config_file.exists(), "config.json đã bị xóa!"
+    import json
+    with open(config_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    assert data["application"]["name"] == "CenterManager"
+    assert data["application"]["version"] == "0.1.0"
+
+================
+File: tests/test_database.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for database engine, session, and FK enforcement.
+"""
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from centermanager.database.engine import create_engine_for_path, get_database_path
+from centermanager.database.session import session_scope
+from centermanager.models.student import Student
+from centermanager.models.parent import Parent
+
+
+def test_engine_creates_file(test_db_path):
+    """Test that engine creates database file upon connection."""
+    from centermanager.database.engine import create_engine_for_path
+    assert not test_db_path.exists()
+    engine = create_engine_for_path(test_db_path)
+    # Actually connect to create the file
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        conn.execute(text("SELECT 1"))
+    assert test_db_path.exists()
+
+
+def test_engine_enables_foreign_keys(test_db_path):
+    """Test that foreign key enforcement is enabled."""
+    from centermanager.database.engine import create_engine_for_path
+    from sqlalchemy import text
+
+    engine = create_engine_for_path(test_db_path)
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA foreign_keys;")).scalar()
+        assert result == 1
+
+
+def test_session_scope_commits(test_db_path):
+    """Test that session_scope commits on success."""
+    from centermanager.database.engine import create_engine_for_path
+    from centermanager.database.session import session_scope
+    from centermanager.database.base import Base
+    from centermanager.models.student import Student
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+
+    # Override session_scope to use test engine
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        student = Student(
+            student_code="HS001",
+            full_name="Test Student"
+        )
+        session.add(student)
+        session.commit()
+    finally:
+        session.close()
+
+    with Session() as sess:
+        count = sess.query(Student).count()
+        assert count == 1
+
+
+def test_foreign_key_enforcement(test_db_path):
+    """Test that FK enforcement prevents orphan records."""
+    from centermanager.database.engine import create_engine_for_path
+    from centermanager.database.base import Base
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    # Try to create Parent with non-existent student_id
+    parent = Parent(
+        student_id=99999,  # non-existent
+        name="Test Parent"
+    )
+    session.add(parent)
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_production_db_path_uses_centralized_paths():
+    """Test that database path comes from centralized path system."""
+    from centermanager.database.engine import get_database_path
+    from centermanager.core.paths import get_paths
+
+    paths = get_paths()
+    expected = paths.database_dir / "center.db"
+    actual = get_database_path()
+    assert actual == expected
+
+================
+File: tests/test_migrations.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for Alembic migrations.
+"""
+import pytest
+from pathlib import Path
+
+def _get_migration_files():
+    """Trả về danh sách các file migration (file .py trong migrations/versions)."""
+    versions_dir = Path(__file__).resolve().parent.parent / "migrations" / "versions"
+    if not versions_dir.exists():
+        return []
+    return [f for f in versions_dir.glob("*.py") if f.name != "__init__.py"]
+
+def test_migration_upgrade(test_db_path):
+    """Test that initial migration creates all 8 tables."""
+    migration_files = _get_migration_files()
+    if not migration_files:
+        pytest.fail("No migration files found. Run 'alembic revision --autogenerate -m \"Initial schema\"' first.")
+
+    from sqlalchemy import inspect
+    from centermanager.database.engine import create_engine_for_path
+    from alembic.config import Config
+    from alembic import command
+
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{test_db_path}")
+
+    command.upgrade(alembic_cfg, "head")
+
+    engine = create_engine_for_path(test_db_path)
+    inspector = inspect(engine)
+
+    expected_tables = {
+        "students", "parents", "enrollments", "assessments",
+        "timeline_events", "student_products", "progress", "attachments"
+    }
+    actual_tables = set(inspector.get_table_names())
+    assert expected_tables.issubset(actual_tables)
+
+
+def test_migration_downgrade(test_db_path):
+    """Test that migration downgrade works."""
+    migration_files = _get_migration_files()
+    if not migration_files:
+        pytest.fail("No migration files found. Run 'alembic revision --autogenerate -m \"Initial schema\"' first.")
+
+    from sqlalchemy import inspect
+    from centermanager.database.engine import create_engine_for_path
+    from alembic.config import Config
+    from alembic import command
+
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{test_db_path}")
+
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "base")
+
+    engine = create_engine_for_path(test_db_path)
+    inspector = inspect(engine)
+    domain_tables = {
+        "students", "parents", "enrollments", "assessments",
+        "timeline_events", "student_products", "progress", "attachments"
+    }
+    assert not domain_tables.intersection(set(inspector.get_table_names()))
+
+================
+File: tests/test_models.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for all 8 ORM models and relationships.
+"""
+import pytest
+from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+
+from centermanager.database.engine import create_engine_for_path
+from centermanager.database.base import Base
+from centermanager.models import *
+
+
+def test_student_model(test_db_path):
+    """Test Student model creation and constraints."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(
+        student_code="HS001",
+        full_name="Nguyen Van An"
+    )
+    session.add(student)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert saved.student_code == "HS001"
+    assert saved.full_name == "Nguyen Van An"
+    assert saved.status == "ACTIVE"
+    assert saved.created_at is not None
+    assert saved.updated_at is not None
+
+
+def test_student_unique_code(test_db_path):
+    """Test that student_code must be unique."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    s1 = Student(student_code="HS001", full_name="Student 1")
+    s2 = Student(student_code="HS001", full_name="Student 2")
+
+    session.add(s1)
+    session.commit()
+
+    session.add(s2)
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_parent_relationship(test_db_path):
+    """Test Student-Parent relationship."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+
+    # Tạo Parent và gán student object
+    parent1 = Parent(
+        name="Parent One",
+        is_primary_contact=True,
+        student=student  # Gán student object, SQLAlchemy sẽ tự set student_id
+    )
+    parent2 = Parent(
+        name="Parent Two",
+        is_primary_contact=False,
+        student=student
+    )
+
+    session.add(student)
+    session.add(parent1)
+    session.add(parent2)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.parents) == 2
+    assert saved.parents[0].student_id == student.id
+    assert saved.parents[1].student_id == student.id
+
+
+def test_enrollment_relationship(test_db_path):
+    """Test Student-Enrollment relationship."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    enrollment1 = Enrollment(class_name="Python 101", student=student)
+    enrollment2 = Enrollment(class_name="Robotics", student=student)
+
+    session.add(student)
+    session.add(enrollment1)
+    session.add(enrollment2)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.enrollments) == 2
+
+
+def test_assessment_relationship(test_db_path):
+    """Test multiple assessments per student."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    
+    # Đúng: gán student object qua relationship
+    assessment1 = Assessment(cycle_months=3, level="Beginner", student=student)
+    assessment2 = Assessment(cycle_months=6, level="Intermediate", student=student)
+
+    session.add(student)
+    session.add(assessment1)
+    session.add(assessment2)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.assessments) == 2
+
+
+def test_timeline_event_relationship(test_db_path):
+    """Test Student-TimelineEvent relationship."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    event = TimelineEvent(event_type="ACHIEVEMENT", title="Completed Python Project", student=student)
+    session.add(student)
+    session.add(event)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.timeline_events) == 1
+    assert saved.timeline_events[0].title == "Completed Python Project"
+
+
+def test_student_product_relationship(test_db_path):
+    """Test StudentProduct relationship."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    product = StudentProduct(
+        title="Robot Warehouse",
+        product_type="Scratch",
+        url="https://scratch.mit.edu/projects/123",
+        student=student
+    )
+
+    session.add(student)
+    session.add(product)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.products) == 1
+    assert saved.products[0].url == "https://scratch.mit.edu/projects/123"
+
+
+def test_progress_relationship(test_db_path):
+    """Test Progress relationship."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    
+    # Đúng: gán student object qua relationship
+    progress1 = Progress(category="Python", value=80, student=student)
+    progress2 = Progress(category="Robotics", value=60, student=student)
+
+    session.add(student)
+    session.add(progress1)
+    session.add(progress2)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.progress_records) == 2
+
+
+def test_attachment_model(test_db_path):
+    """Test Attachment model with relative path."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    attachment = Attachment(
+        file_name="portfolio.pdf",
+        file_type="pdf",
+        relative_path="HS001/portfolio.pdf",
+        description="Student portfolio",
+        student=student
+    )
+
+    session.add(student)
+    session.add(attachment)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert len(saved.attachments) == 1
+    assert saved.attachments[0].relative_path == "HS001/portfolio.pdf"
+
+
+def test_soft_delete_field(test_db_path):
+    """Test that Student has deleted_at field."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    student = Student(student_code="HS001", full_name="Test Student")
+    session.add(student)
+    session.commit()
+
+    saved = session.get(Student, student.id)
+    assert saved.deleted_at is None
+
+    saved.deleted_at = datetime.now()
+    session.commit()
+
+    updated = session.get(Student, student.id)
+    assert updated.deleted_at is not None
+
+================
+File: tests/test_paths.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for path resolution.
+"""
+import pytest
+from pathlib import Path
+import shutil
+
+from centermanager.core.paths import (
+    get_paths,
+    project_root,
+    runtime_root,
+    database_dir,
+    export_dir,
+    student_profile_dir,
+    excel_export_dir,
+    attachment_dir,
+    config_dir,
+    config_file,
+    backup_dir,
+    logs_dir,
+)
+
+
+def test_paths_singleton(clean_paths):
+    """Test that get_paths returns a singleton."""
+    p1 = get_paths()
+    p2 = get_paths()
+    assert p1 is p2
+
+
+def test_project_root_resolution(clean_paths):
+    """Test that project_root resolves to the correct directory."""
+    root = project_root()
+    # run.py always exists at project root
+    assert (root / "run.py").exists()
+
+
+def test_runtime_root(clean_paths):
+    """Test that runtime_root is under project_root."""
+    root = runtime_root()
+    assert root == project_root() / "runtime"
+
+
+def test_database_dir(clean_paths):
+    """Test database_dir location."""
+    assert database_dir() == runtime_root() / "Database"
+
+
+def test_export_dir(clean_paths):
+    """Test export_dir location."""
+    assert export_dir() == runtime_root() / "Export"
+
+
+def test_student_profile_dir(clean_paths):
+    """Test student_profile_dir location."""
+    assert student_profile_dir() == export_dir() / "StudentProfile"
+
+
+def test_excel_export_dir(clean_paths):
+    """Test excel_export_dir location."""
+    assert excel_export_dir() == export_dir() / "Excel"
+
+
+def test_attachment_dir(clean_paths):
+    """Test attachment_dir location."""
+    assert attachment_dir() == runtime_root() / "Attachment"
+
+
+def test_config_dir(clean_paths):
+    """Test config_dir location."""
+    assert config_dir() == runtime_root() / "Config"
+
+
+def test_config_file(clean_paths):
+    """Test config_file location."""
+    assert config_file() == config_dir() / "config.json"
+
+
+def test_backup_dir(clean_paths):
+    """Test backup_dir location."""
+    assert backup_dir() == runtime_root() / "Backup"
+
+
+def test_logs_dir(clean_paths):
+    """Test logs_dir location."""
+    assert logs_dir() == runtime_root() / "Logs"
+
+
+# Các test khác giữ nguyên clean_paths, chỉ đổi test này
+def test_ensure_directories_creates_all(temp_runtime):
+    """Test that ensure_directories creates all required directories."""
+    paths = get_paths()
+    # Remove temp runtime dir if exists (safe because it's temp)
+    if paths.runtime_root.exists():
+        shutil.rmtree(paths.runtime_root)
+    assert not paths.runtime_root.exists()
+    paths.ensure_directories()
+    assert paths.database_dir.exists()
+    assert paths.export_dir.exists()
+    assert paths.student_profile_dir.exists()
+    assert paths.excel_export_dir.exists()
+    assert paths.attachment_dir.exists()
+    assert paths.config_dir.exists()
+    assert paths.backup_dir.exists()
+    assert paths.logs_dir.exists()
+
+================
+File: tests/test_repositories.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for StudentRepository.
+"""
+import pytest
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.database.engine import create_engine_for_path
+from centermanager.database.base import Base
+from centermanager.models.student import Student
+from centermanager.repositories.student_repository import StudentRepository
+
+
+def test_add_student(test_db_path):
+    """Test repository add operation."""
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    repo = StudentRepository(session)
+    student = Student(student_code="HS001", full_name="Test Student")
+    repo.add(student)
+    session.commit()
+
+    saved = repo.get_by_id(student.id)
+    assert saved is not None
+    assert saved.student_code == "HS001"
+
+
+def test_get_by_code(test_db_path):
+    """Test repository get_by_code."""
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    repo = StudentRepository(session)
+    student = Student(student_code="HS001", full_name="Test Student")
+    repo.add(student)
+    session.commit()
+
+    found = repo.get_by_code("HS001")
+    assert found is not None
+    assert found.id == student.id
+
+    not_found = repo.get_by_code("HS999")
+    assert not_found is None
+
+
+def test_list_active_excludes_deleted(test_db_path):
+    """Test list_active excludes soft-deleted students."""
+    from datetime import datetime
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    repo = StudentRepository(session)
+
+    active = Student(student_code="HS001", full_name="Active Student")
+    deleted = Student(student_code="HS002", full_name="Deleted Student")
+    deleted.deleted_at = datetime.now()
+
+    repo.add(active)
+    repo.add(deleted)
+    session.commit()
+
+    active_list = repo.list_active()
+    assert len(active_list) == 1
+    assert active_list[0].student_code == "HS001"
+
+
+def test_list_all_including_deleted(test_db_path):
+    """Test list_all_including_deleted returns all students."""
+    from datetime import datetime
+
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    repo = StudentRepository(session)
+
+    active = Student(student_code="HS001", full_name="Active")
+    deleted = Student(student_code="HS002", full_name="Deleted")
+    deleted.deleted_at = datetime.now()
+
+    repo.add(active)
+    repo.add(deleted)
+    session.commit()
+
+    all_students = repo.list_all_including_deleted()
+    assert len(all_students) == 2
+
+================
+File: tests/test_smoke.py
+================
+# -*- coding: utf-8 -*-
+"""
+Smoke tests to verify that all foundation modules can be imported.
+"""
+import pytest
+
+
+def test_import_core_paths():
+    """Test that core.paths can be imported."""
+    from centermanager.core import paths
+    assert hasattr(paths, "get_paths")
+
+
+def test_import_core_config():
+    """Test that core.config can be imported."""
+    from centermanager.core import config
+    assert hasattr(config, "get_config")
+
+
+def test_import_core_logging():
+    """Test that core.logging can be imported."""
+    from centermanager.core import logging
+    assert hasattr(logging, "setup_logging")
+
+
+def test_import_ui_main_window():
+    """Test that ui.main_window can be imported."""
+    from centermanager.ui import main_window
+    assert hasattr(main_window, "MainWindow")
+
+
+def test_import_app():
+    """Test that app can be imported."""
+    from centermanager import app
+    assert hasattr(app, "main")
+
+
+def test_import_all_packages():
+    """Test that all module __init__.py files can be imported."""
+    import centermanager
+    import centermanager.core
+    import centermanager.database
+    import centermanager.models
+    import centermanager.repositories
+    import centermanager.services
+    import centermanager.modules
+    import centermanager.ui
+    import centermanager.export
+    import centermanager.export.pdf
+    import centermanager.export.excel
+    import centermanager.utils
+    
+    assert centermanager.__version__ == "0.1.0"
+
+================
+File: tests/test_student_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for StudentService.
+"""
+import pytest
+from datetime import date, datetime, timezone
+from unittest.mock import patch
+
+from centermanager.database.engine import create_engine_for_path
+from centermanager.database.base import Base
+from centermanager.services.student_service import StudentService
+from centermanager.services.exceptions import (
+    StudentNotFoundError,
+    StudentValidationError,
+    StudentAlreadyDeletedError,
+    StudentNotDeletedError,
+)
+from centermanager.models.student import Student
+from centermanager.models.assessment import Assessment
+from centermanager.repositories.student_repository import StudentRepository
+
+
+def _utc_now():
+    """Return naive UTC datetime (no timezone) for compatibility."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _create_service(test_db_path):
+    """Create StudentService with test database."""
+    from sqlalchemy.orm import sessionmaker
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    return StudentService(session_factory)
+
+
+# --- Code Generation Tests ---
+
+def test_generate_code_empty_db(test_db_path):
+    """Empty DB -> HS001."""
+    service = _create_service(test_db_path)
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS001"
+
+
+def test_generate_code_sequential(test_db_path):
+    """HS001, HS002 -> HS003."""
+    service = _create_service(test_db_path)
+    service.create_student(full_name="Test 1")
+    service.create_student(full_name="Test 2")
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS003"
+
+
+def test_generate_code_skip(test_db_path):
+    """HS001, HS005 -> HS006."""
+    service = _create_service(test_db_path)
+    service.create_student(full_name="Test 1")  # HS001
+    # Manually create student with code HS005
+    with service._session_factory() as session:
+        s = Student(student_code="HS005", full_name="Test 5")
+        session.add(s)
+        session.commit()
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS006"
+
+
+def test_generate_code_include_deleted(test_db_path):
+    """HS001, HS002, HS003(deleted) -> HS004."""
+    service = _create_service(test_db_path)
+    s1 = service.create_student(full_name="Test 1")  # HS001
+    s2 = service.create_student(full_name="Test 2")  # HS002
+    s3 = service.create_student(full_name="Test 3")  # HS003
+    # Soft delete s3
+    with service._session_factory() as session:
+        student = session.get(Student, s3.id)
+        student.deleted_at = _utc_now()
+        session.commit()
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS004"
+
+
+def test_generate_code_legacy(test_db_path):
+    """ABC, HS005, TEMP -> HS006."""
+    service = _create_service(test_db_path)
+    # Create legacy codes
+    with service._session_factory() as session:
+        legacy1 = Student(student_code="ABC", full_name="Legacy 1")
+        legacy2 = Student(student_code="HS005", full_name="Legacy 2")
+        legacy3 = Student(student_code="TEMP", full_name="Legacy 3")
+        session.add_all([legacy1, legacy2, legacy3])
+        session.commit()
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS006"
+
+
+def test_generate_code_hs999_to_hs1000(test_db_path):
+    """HS999 -> HS1000."""
+    service = _create_service(test_db_path)
+    with service._session_factory() as session:
+        s = Student(student_code="HS999", full_name="Test 999")
+        session.add(s)
+        session.commit()
+    with service._session_factory() as session:
+        code = service._generate_student_code(session)
+        assert code == "HS1000"
+
+
+# --- Create Tests ---
+
+def test_create_student(test_db_path):
+    """Create valid student."""
+    service = _create_service(test_db_path)
+    student = service.create_student(
+        full_name="Nguyen Van An",
+        preferred_name="An",
+        date_of_birth=date(2000, 1, 1),
+        gender="MALE",
+        status="ACTIVE",
+        current_level="Beginner",
+        notes="Good student"
+    )
+    assert student.id is not None
+    assert student.student_code == "HS001"
+    assert student.full_name == "Nguyen Van An"
+    assert student.preferred_name == "An"
+    assert student.date_of_birth == date(2000, 1, 1)
+    assert student.gender == "MALE"
+    assert student.status == "ACTIVE"
+    assert student.current_level == "Beginner"
+    assert student.notes == "Good student"
+    assert student.created_at is not None
+    assert student.updated_at is not None
+
+
+def test_create_normalize_name(test_db_path):
+    """full_name gets stripped."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="  Nguyễn Văn A  ")
+    assert student.full_name == "Nguyễn Văn A"
+
+
+def test_create_blank_full_name_fails(test_db_path):
+    """Blank full_name raises validation error."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentValidationError):
+        service.create_student(full_name="")
+
+
+def test_create_whitespace_full_name_fails(test_db_path):
+    """Whitespace-only full_name raises validation error."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentValidationError):
+        service.create_student(full_name="   ")
+
+
+def test_create_preferred_name_normalization(test_db_path):
+    """preferred_name gets stripped; whitespace becomes None."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test", preferred_name="  An  ")
+    assert student.preferred_name == "An"
+
+    student2 = service.create_student(full_name="Test2", preferred_name="   ")
+    assert student2.preferred_name is None
+
+
+def test_create_default_status(test_db_path):
+    """Default status is ACTIVE."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    assert student.status == "ACTIVE"
+
+
+def test_create_explicit_status(test_db_path):
+    """Explicit status is used."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test", status="INACTIVE")
+    assert student.status == "INACTIVE"
+
+
+# --- Get Tests ---
+
+def test_get_student(test_db_path):
+    """Get student by id."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    retrieved = service.get_student(student.id)
+    assert retrieved.id == student.id
+    assert retrieved.student_code == "HS001"
+
+
+def test_get_student_not_found(test_db_path):
+    """Get non-existent student raises NotFound."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentNotFoundError):
+        service.get_student(999)
+
+
+def test_get_student_by_code(test_db_path):
+    """Get student by student_code."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    retrieved = service.get_student_by_code("HS001")
+    assert retrieved.id == student.id
+
+
+def test_get_student_by_code_not_found(test_db_path):
+    """Non-existent code raises NotFound."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentNotFoundError):
+        service.get_student_by_code("HS999")
+
+
+# --- List Tests ---
+
+def test_list_students(test_db_path):
+    """list_students returns active students sorted by code."""
+    service = _create_service(test_db_path)
+    s1 = service.create_student(full_name="B Student")  # HS001
+    s2 = service.create_student(full_name="A Student")  # HS002
+    students = service.list_students()
+    assert len(students) == 2
+    assert students[0].student_code == "HS001"
+    assert students[1].student_code == "HS002"
+
+
+def test_list_excludes_deleted(test_db_path):
+    """list_students excludes soft-deleted students."""
+    service = _create_service(test_db_path)
+    s1 = service.create_student(full_name="Test 1")
+    s2 = service.create_student(full_name="Test 2")
+    service.delete_student(s1.id)
+    students = service.list_students()
+    assert len(students) == 1
+    assert students[0].id == s2.id
+
+
+# --- Update Tests ---
+
+def test_update_student_partial(test_db_path):
+    """Partial update changes only supplied fields."""
+    service = _create_service(test_db_path)
+    student = service.create_student(
+        full_name="Original Name",
+        preferred_name="Nick",
+        current_level="Beginner"
+    )
+    updated = service.update_student(student.id, current_level="Intermediate")
+    assert updated.full_name == "Original Name"
+    assert updated.preferred_name == "Nick"
+    assert updated.current_level == "Intermediate"
+
+
+def test_update_full_name_blank_fails(test_db_path):
+    """Updating full_name to blank raises ValidationError."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    with pytest.raises(StudentValidationError):
+        service.update_student(student.id, full_name="")
+
+
+def test_update_student_code_not_allowed(test_db_path):
+    """student_code cannot be updated."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    updated = service.update_student(student.id, notes="New note")
+    assert updated.student_code == "HS001"
+
+
+def test_update_clear_preferred_name(test_db_path):
+    """Update preferred_name=None should clear the field."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test Student", preferred_name="Nick")
+    updated = service.update_student(student.id, preferred_name=None)
+    assert updated.preferred_name is None
+
+
+def test_update_clear_date_of_birth(test_db_path):
+    """Update date_of_birth=None should clear the field."""
+    service = _create_service(test_db_path)
+    dob = date(2000, 1, 1)
+    student = service.create_student(full_name="Test Student", date_of_birth=dob)
+    updated = service.update_student(student.id, date_of_birth=None)
+    assert updated.date_of_birth is None
+
+
+def test_update_without_date_of_birth_preserves(test_db_path):
+    """Updating another field should not affect date_of_birth."""
+    service = _create_service(test_db_path)
+    dob = date(2000, 1, 1)
+    student = service.create_student(full_name="Test Student", date_of_birth=dob)
+    updated = service.update_student(student.id, notes="New note")
+    assert updated.date_of_birth == dob
+    assert updated.notes == "New note"
+
+
+# --- Delete Tests ---
+
+def test_delete_student(test_db_path):
+    """Soft delete sets deleted_at."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    service.delete_student(student.id)
+
+    # Check deleted_at is set
+    with service._session_factory() as session:
+        s = session.get(Student, student.id)
+        assert s.deleted_at is not None
+
+    # Should not appear in list
+    assert len(service.list_students()) == 0
+
+    # Normal get should raise NotFound
+    with pytest.raises(StudentNotFoundError):
+        service.get_student(student.id)
+
+
+def test_delete_already_deleted_fails(test_db_path):
+    """Deleting already-deleted raises AlreadyDeletedError."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    service.delete_student(student.id)
+    with pytest.raises(StudentAlreadyDeletedError):
+        service.delete_student(student.id)
+
+
+def test_delete_not_found(test_db_path):
+    """Deleting non-existent student raises NotFound."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentNotFoundError):
+        service.delete_student(999)
+
+
+def test_delete_preserves_child_records(test_db_path):
+    """
+    Soft-deleting student should not delete child records (Assessment).
+    This proves history preservation.
+    """
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test Student")
+
+    # Create an Assessment child record
+    with service._session_factory() as session:
+        assessment = Assessment(
+            student_id=student.id,
+            assessment_date=date(2026, 1, 1),
+            cycle_months=3,
+            level="Beginner",
+            strengths="Good progress"
+        )
+        session.add(assessment)
+        session.commit()
+
+    # Delete student
+    service.delete_student(student.id)
+
+    # Check assessment still exists
+    with service._session_factory() as session:
+        assessment_exists = session.query(Assessment).filter(
+            Assessment.student_id == student.id
+        ).first()
+        assert assessment_exists is not None
+        assert assessment_exists.level == "Beginner"
+        assert assessment_exists.strengths == "Good progress"
+
+
+# --- Restore Tests ---
+
+def test_restore_student(test_db_path):
+    """Restore sets deleted_at = None."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    service.delete_student(student.id)
+    service.restore_student(student.id)
+
+    # Check deleted_at is None
+    with service._session_factory() as session:
+        s = session.get(Student, student.id)
+        assert s.deleted_at is None
+
+    # Should appear in list
+    assert len(service.list_students()) == 1
+
+    # Normal get works
+    retrieved = service.get_student(student.id)
+    assert retrieved.id == student.id
+
+
+def test_restore_not_deleted_fails(test_db_path):
+    """Restoring active student raises NotDeletedError."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    with pytest.raises(StudentNotDeletedError):
+        service.restore_student(student.id)
+
+
+def test_restore_not_found(test_db_path):
+    """Restoring non-existent student raises NotFound."""
+    service = _create_service(test_db_path)
+    with pytest.raises(StudentNotFoundError):
+        service.restore_student(999)
+
+
+def test_delete_and_restore_preserves_code(test_db_path):
+    """Restoring preserves original student_code."""
+    service = _create_service(test_db_path)
+    student = service.create_student(full_name="Test")
+    original_code = student.student_code
+    service.delete_student(student.id)
+    service.restore_student(student.id)
+    retrieved = service.get_student(student.id)
+    assert retrieved.student_code == original_code
+
+
+# --- Transaction Rollback Test ---
+
+def test_transaction_rollback(test_db_path):
+    """
+    Prove that if an exception occurs after data is flushed inside a transaction,
+    the transaction is rolled back and no partial data is committed.
+    """
+    service = _create_service(test_db_path)
+
+    # Monkeypatch the repository's add method to simulate failure after flush
+    # We'll patch StudentRepository.add to call original, then flush, then raise.
+    original_add = StudentRepository.add
+
+    def failing_add(repo_self, entity):
+        # Add the entity to session (like original)
+        repo_self.session.add(entity)
+        # Force flush to write to DB (within transaction)
+        repo_self.session.flush()
+        # Now simulate an error after flush, before commit
+        raise RuntimeError("Forced transaction failure")
+
+    with patch.object(StudentRepository, 'add', failing_add):
+        # Attempt to create student, should fail
+        with pytest.raises(RuntimeError, match="Forced transaction failure"):
+            service.create_student(full_name="Rollback Test")
+
+    # Verify no student was created
+    students = service.list_students()
+    assert len(students) == 0, "Student should not exist after rollback"
+
+    # Also verify directly in DB
+    with service._session_factory() as session:
+        count = session.query(Student).filter(Student.full_name == "Rollback Test").count()
+        assert count == 0
+
+================
+File: tests/test_student_ui_helpers.py
+================
+# -*- coding: utf-8 -*-
+"""
+Tests for student UI helpers.
+"""
+from datetime import date
+import pytest
+
+from centermanager.ui.students.helpers import (
+    calculate_age,
+    format_date_for_display,
+    format_age_for_display,
+)
+
+def test_calculate_age_birthday_occurred():
+    dob = date(2015, 6, 15)
+    ref = date(2026, 7, 27)
+    assert calculate_age(dob, ref) == 11
+
+def test_calculate_age_birthday_not_yet():
+    dob = date(2015, 8, 20)
+    ref = date(2026, 7, 27)
+    assert calculate_age(dob, ref) == 10
+
+def test_calculate_age_birthday_today():
+    dob = date(2015, 7, 27)
+    ref = date(2026, 7, 27)
+    assert calculate_age(dob, ref) == 11
+
+def test_calculate_age_none():
+    assert calculate_age(None) is None
+
+def test_format_date_for_display():
+    d = date(2026, 7, 27)
+    assert format_date_for_display(d) == "27/07/2026"
+    assert format_date_for_display(None) == ""
+
+def test_format_age_for_display():
+    assert format_age_for_display(10) == "10"
+    assert format_age_for_display(None) == "-"
+
+================
+File: tests/test_student_ui.py
+================
+# -*- coding: utf-8 -*-
+"""
+Integration UI tests for student list and add student flow.
+"""
+import pytest
+from datetime import date
+
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtTest import QTest
+
+from centermanager.database.engine import create_engine_for_path
+from centermanager.database.base import Base
+from centermanager.services.student_service import StudentService
+from centermanager.ui.students.student_list_page import StudentListPage
+from centermanager.ui.students.student_form_dialog import StudentFormDialog
+from centermanager.ui.students.student_profile_dialog import StudentProfileDialog
+
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+@pytest.fixture
+def service(test_db_path):
+    from sqlalchemy.orm import sessionmaker
+    engine = create_engine_for_path(test_db_path)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    return StudentService(session_factory)
+
+@pytest.fixture
+def list_page(service, qapp):
+    page = StudentListPage(service)
+    page.show()
+    QTest.qWaitForWindowExposed(page)
+    return page
+
+def test_student_list_refresh_empty(list_page):
+    assert list_page.table.rowCount() == 0
+
+def test_student_list_refresh_with_students(service, list_page):
+    service.create_student(full_name="Test A")
+    service.create_student(full_name="Test B")
+    list_page.refresh()
+    assert list_page.table.rowCount() == 2
+    item = list_page.table.item(0, 0)
+    assert item.text() == "HS001"
+
+def test_search_filter(service, list_page):
+    service.create_student(full_name="Nguyen Van An")
+    service.create_student(full_name="Tran Minh Binh")
+    list_page.refresh()
+
+    list_page.search_input.setText("HS001")
+    QTest.qWait(100)
+    assert list_page.table.rowCount() == 1
+    item = list_page.table.item(0, 1)
+    assert "An" in item.text()
+
+    list_page.search_input.setText("binh")
+    QTest.qWait(100)
+    assert list_page.table.rowCount() == 1
+    item = list_page.table.item(0, 1)
+    assert "Binh" in item.text()
+
+    list_page.search_input.setText("nonexistent")
+    QTest.qWait(100)
+    assert list_page.table.rowCount() == 0
+
+def test_add_student_dialog_flow(service, qapp):
+    dialog = StudentFormDialog(service)
+    dialog.full_name_edit.setText("Test Student")
+    dialog.preferred_name_edit.setText("Tester")
+    dialog._clear_dob()
+    dialog.gender_combo.setCurrentText("Male")
+    dialog.level_edit.setText("Intermediate")
+    dialog.notes_edit.setPlainText("Some notes")
+
+    dialog.save_btn.click()
+    assert dialog.result() == StudentFormDialog.DialogCode.Accepted
+
+    students = service.list_students()
+    assert len(students) == 1
+    s = students[0]
+    assert s.full_name == "Test Student"
+    assert s.preferred_name == "Tester"
+    assert s.date_of_birth is None
+    assert s.gender == "Male"
+    assert s.current_level == "Intermediate"
+    assert s.notes == "Some notes"
+
+def test_profile_dialog_opens(service, qapp):
+    student = service.create_student(full_name="Profile Test", preferred_name="P")
+    dialog = StudentProfileDialog(service, student.id)
+    assert dialog.code_label.text() == "HS001"
+    assert dialog.name_label.text() == "Profile Test"
+    assert dialog.preferred_label.text() == "P"
+
+def test_dob_persistence(service, qapp):
+    dialog = StudentFormDialog(service)
+    dialog.dob_edit.setDate(QDate(2015, 6, 15))
+    dialog.full_name_edit.setText("DOB Test")
+    dialog.save_btn.click()
+    assert dialog.result() == StudentFormDialog.DialogCode.Accepted
+
+    students = service.list_students()
+    assert len(students) == 1
+    s = students[0]
+    assert s.date_of_birth == date(2015, 6, 15)
+
+def test_dob_clear(service, qapp):
+    dialog = StudentFormDialog(service)
+    dialog.dob_edit.setDate(QDate(2015, 6, 15))
+    dialog._clear_dob()
+    dialog.full_name_edit.setText("Clear DOB Test")
+    dialog.save_btn.click()
+    assert dialog.result() == StudentFormDialog.DialogCode.Accepted
+
+    students = service.list_students()
+    assert len(students) == 1
+    s = students[0]
+    assert s.date_of_birth is None
+
+def test_dob_clear_then_set(service, qapp):
+    dialog = StudentFormDialog(service)
+    dialog._clear_dob()
+    dialog.dob_edit.setDate(QDate(2010, 5, 20))
+    dialog.full_name_edit.setText("Clear then set")
+    dialog.save_btn.click()
+    assert dialog.result() == StudentFormDialog.DialogCode.Accepted
+
+    students = service.list_students()
+    assert len(students) == 1
+    s = students[0]
+    assert s.date_of_birth == date(2010, 5, 20)
+
+def test_profile_error_for_missing_student(service, qapp, monkeypatch):
+    def mock_warning(*args, **kwargs):
+        pass
+    monkeypatch.setattr(QMessageBox, 'warning', mock_warning)
+    dialog = StudentProfileDialog(service, 9999)
+    assert dialog.code_label.text() == "Student not found"
+
+def test_double_click_opens_profile(service, qapp, monkeypatch):
+    student = service.create_student(full_name="Click Test")
+    page = StudentListPage(service)
+    page.refresh()
+    assert page.table.rowCount() == 1
+
+    captured_id = None
+    class MockDialog:
+        def __init__(self, service, student_id, parent):
+            nonlocal captured_id
+            captured_id = student_id
+            self._service = service
+            self._student_id = student_id
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr('centermanager.ui.students.student_list_page.StudentProfileDialog', MockDialog)
+
+    index = page.table.model().index(0, 0)
+    page._on_row_double_clicked(index)
+    assert captured_id == student.id
+
+def test_add_refresh_flow(service, qapp, monkeypatch):
+    """Test that _on_add_clicked opens dialog, saves, and refreshes."""
+    page = StudentListPage(service)
+    assert page.table.rowCount() == 0
+
+    class MockFormDialog:
+        DialogCode = StudentFormDialog.DialogCode
+        def __init__(self, service, parent):
+            self._service = service
+            self._parent = parent
+        def exec(self):
+            self._service.create_student(full_name="Refresh Test")
+            return MockFormDialog.DialogCode.Accepted
+
+    monkeypatch.setattr('centermanager.ui.students.student_list_page.StudentFormDialog', MockFormDialog)
+
+    page._on_add_clicked()
+    assert page.table.rowCount() == 1
+    item = page.table.item(0, 0)
+    assert item.text() == "HS001"
+
+================
+File: .gitignore
+================
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime generated (logs, DB - keep placeholders if needed)
+runtime/Logs/
+runtime/Database/*.db
+runtime/Database/*.db-journal
+runtime/Export/
+runtime/Attachment/
+runtime/Backup/
+
+# OS
+.DS_Store
+Thumbs.db
+
+================
+File: alembic.ini
+================
+# A generic, single database configuration.
+
+[alembic]
+# path to migration scripts.
+# this is typically a path given in POSIX (e.g. forward slashes)
+# format, relative to the token %(here)s which refers to the location of this
+# ini file
+script_location = %(here)s/migrations
+
+# template used to generate migration file names; The default value is %%(rev)s_%%(slug)s
+# Uncomment the line below if you want the files to be prepended with date and time
+# see https://alembic.sqlalchemy.org/en/latest/tutorial.html#editing-the-ini-file
+# for all available tokens
+# file_template = %%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s
+# Or organize into date-based subdirectories (requires recursive_version_locations = true)
+# file_template = %%(year)d/%%(month).2d/%%(day).2d_%%(hour).2d%%(minute).2d_%%(second).2d_%%(rev)s_%%(slug)s
+
+# sys.path path, will be prepended to sys.path if present.
+# defaults to the current working directory.  for multiple paths, the path separator
+# is defined by "path_separator" below.
+prepend_sys_path = .
+
+
+# timezone to use when rendering the date within the migration file
+# as well as the filename.
+# If specified, requires the tzdata library which can be installed by adding
+# `alembic[tz]` to the pip requirements.
+# string value is passed to ZoneInfo()
+# leave blank for localtime
+# timezone =
+
+# max length of characters to apply to the "slug" field
+# truncate_slug_length = 40
+
+# set to 'true' to run the environment during
+# the 'revision' command, regardless of autogenerate
+# revision_environment = false
+
+# set to 'true' to allow .pyc and .pyo files without
+# a source .py file to be detected as revisions in the
+# versions/ directory
+# sourceless = false
+
+# version location specification; This defaults
+# to <script_location>/versions.  When using multiple version
+# directories, initial revisions must be specified with --version-path.
+# The path separator used here should be the separator specified by "path_separator"
+# below.
+# version_locations = %(here)s/bar:%(here)s/bat:%(here)s/alembic/versions
+
+# path_separator; This indicates what character is used to split lists of file
+# paths, including version_locations and prepend_sys_path within configparser
+# files such as alembic.ini.
+# The default rendered in new alembic.ini files is "os", which uses os.pathsep
+# to provide os-dependent path splitting.
+#
+# Note that in order to support legacy alembic.ini files, this default does NOT
+# take place if path_separator is not present in alembic.ini.  If this
+# option is omitted entirely, fallback logic is as follows:
+#
+# 1. Parsing of the version_locations option falls back to using the legacy
+#    "version_path_separator" key, which if absent then falls back to the legacy
+#    behavior of splitting on spaces and/or commas.
+# 2. Parsing of the prepend_sys_path option falls back to the legacy
+#    behavior of splitting on spaces, commas, or colons.
+#
+# Valid values for path_separator are:
+#
+# path_separator = :
+# path_separator = ;
+# path_separator = space
+# path_separator = newline
+#
+# Use os.pathsep. Default configuration used for new projects.
+path_separator = os
+
+# set to 'true' to search source files recursively
+# in each "version_locations" directory
+# new in Alembic version 1.10
+# recursive_version_locations = false
+
+# the output encoding used when revision files
+# are written from script.py.mako
+# output_encoding = utf-8
+
+# database URL.  This is consumed by the user-maintained env.py script only.
+# other means of configuring database URLs may be customized within the env.py
+# file.
+sqlalchemy.url = sqlite:///runtime/Database/center.db
+
+[post_write_hooks]
+# post_write_hooks defines scripts or Python functions that are run
+# on newly generated revision scripts.  See the documentation for further
+# detail and examples
+
+# format using "black" - use the console_scripts runner, against the "black" entrypoint
+# hooks = black
+# black.type = console_scripts
+# black.entrypoint = black
+# black.options = -l 79 REVISION_SCRIPT_FILENAME
+
+# lint with attempts to fix using "ruff" - use the module runner, against the "ruff" module
+# hooks = ruff
+# ruff.type = module
+# ruff.module = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Alternatively, use the exec runner to execute a binary found on your PATH
+# hooks = ruff
+# ruff.type = exec
+# ruff.executable = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Logging configuration.  This is also consumed by the user-maintained
+# env.py script only.
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARNING
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARNING
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
+================
+File: pytest.ini
+================
+[pytest]
+minversion = 7.0
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = -v --tb=short
+
+================
+File: README.md
+================
+# CenterManager
+
+CenterManager là ứng dụng desktop quản lý học sinh cho các trung tâm giáo dục.
+
+## Yêu cầu hệ thống
+- Python 3.9+
+- pip
+
+## Cài đặt và chạy
+
+1. Tạo virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate   # Linux/Mac
+   .venv\Scripts\activate      # Windows
+Cài đặt dependencies:
+
+bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt   # (nếu phát triển)
+Chạy ứng dụng:
+
+bash
+python run.py
+Chạy tests:
+
+bash
+pytest
+Cấu trúc thư mục chính
+src/centermanager/: Mã nguồn chính
+
+runtime/: Thư mục runtime (tự động tạo)
+
+tests/: Các bài kiểm tra
+
+docs/: Tài liệu dự án
+
+Giấy phép
+Proprietary
+
+
+
+---
+
+## 5. Sửa lỗi Markdown trong `docs/ARCHITECTURE.md`
+
+**Nội dung thay thế** (loại bỏ các dòng `` thừa và sửa code fence):
+
+```markdown
+# ARCHITECTURE – CenterManager
+
+## Layered Architecture
+
+CenterManager follows a strict layered architecture to separate concerns and enable future extensibility.
+┌─────────────────────────────────────────────────────────────┐
+│ UI Layer │
+│ (PySide6 Widgets/Views) │
+│ main_window.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Service Layer │
+│ (Business Logic / Use Cases) │
+│ services/.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Repository Layer │
+│ (Data Access / Query Builders) │
+│ repositories/.py │
+└───────────────────────────┬─────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Database Layer │
+│ (SQLAlchemy ORM / SQLite Connection) │
+│ database/.py, models/.py │
+└─────────────────────────────────────────────────────────────┘
+
+
+
+### Responsibilities
+
+| Layer | Responsibility |
+|-------|----------------|
+| **UI** | Displays data, captures user input, delegates actions to Services. Never touches SQL or business logic directly. |
+| **Services** | Implements use cases (e.g., "register student", "generate PDF", "export to Excel"). Orchestrates repositories. |
+| **Repositories** | Provides a clean data access API. Encapsulates queries and transactions. Returns domain models or DTOs. |
+| **Database / Models** | Defines SQLAlchemy ORM models. Manages connection and session lifecycle. |
+
+## Data Flow – Export/Attachment
+┌─────────────────────┐
+│ SQLite (center.db) │
+└──────────┬──────────┘
+│
+▼
+┌─────────────────────┐
+│ Service generates │
+│ PDF / Excel file │
+└──────────┬──────────┘
+│
+▼
+┌───────────────────────────────────┐
+│ File saved to runtime/Export/ │
+└───────────────────────────────────┘
+│
+▼
+┌───────────────────────────────────┐
+│ Google Drive Desktop syncs to │
+│ cloud (if configured) │
+└───────────────────────────────────┘
+
+
+
+Attachments follow a similar flow but are user‑uploaded files stored in `runtime/Attachment/{student_id}/`.
+
+## Module‑Based Architecture
+
+Business features are organised into **modules** under `src/centermanager/modules/`. Each module encapsulates its own UI, services, and repository dependencies as needed. This allows adding or removing features without impacting the core.
+
+Example module structure (future):
+modules/
+├── student/
+│ ├── init.py
+│ ├── models.py
+│ ├── services.py
+│ ├── repositories.py
+│ └── ui/
+│ ├── list_view.py
+│ └── detail_view.py
+├── attendance/
+│ └── ...
+└── payment/
+└── ...
+
+
+
+## Offline‑First Design
+
+- No external API calls are required for core functionality.
+- All data is stored locally.
+- Google Drive sync is **optional** and handled by an external process (Google Drive Desktop).
+
+## Filesystem vs Database
+
+| Data Type | Storage | Notes |
+|-----------|---------|-------|
+|  fields, numbers, dates | SQLite | All structured data |
+| Images, videos, PDFs, project files | Filesystem (`runtime/Attachment/`) | Database stores relative path only |
+| Exported PDFs, Excel files | Filesystem (`runtime/Export/`) | Derived, can be regenerated |
+
+## Core Foundation (`core/`)
+
+- `paths.py`: Centralised path resolution (pathlib, cross‑platform).
+- `config.py`: JSON configuration loader.
+- `logging.py`: Console + file logging (UTF‑8, rotation).
+
+These are the only modules allowed to touch the filesystem for infrastructure purposes. Business modules must use the `core` APIs.
+
+## Future Packaging
+
+The `src/` structure is designed to be compatible with PyInstaller. The `run.py` script inserts `src/` into `sys.path` for development, but the final executable will bundle all Python code, while runtime paths remain relative to the executable (or a fixed user‑data directory).
+
+## Database Layer
+
+- **Engine**: SQLite with foreign key enforcement
+- **ORM**: SQLAlchemy 2.0 with declarative models
+- **Migration**: Alembic for schema version control
+- **Session**: Con manager pattern (`session_scope`)
+- **Test**: All database tests use isolated temporary databases
+
+### Database Flow
+Service
+↓
+Repository
+↓
+SQLAlchemy ORM
+↓
+SQLite (center.db)
+
+================
+File: requirements-dev.txt
+================
+pytest>=7.0.0
+
+================
+File: requirements.txt
+================
+PySide6>=6.5.0
+SQLAlchemy>=2.0.0
+reportlab>=4.0.0
+openpyxl>=3.1.0
+alembic>=1.13.0
+
+================
+File: run.py
+================
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Application entry point for CenterManager.
+"""
+import sys
+from pathlib import Path
+
+# Add src/ to Python path for development
+src_path = Path(__file__).resolve().parent / "src"
+if src_path.exists() and str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from centermanager.app import main
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+
+
+
+================================================================
+End of Codebase
+================================================================
