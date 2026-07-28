@@ -16,6 +16,9 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.student_summary_service import StudentSummaryService
+from centermanager.services.session_service import SessionService
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.ui.students.navigation_panel import NavigationPanel
 from centermanager.ui.students.student_workspace import StudentWorkspace
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
@@ -32,6 +35,9 @@ class MainWindow(QMainWindow):
         timeline_service: TimelineService,
         assessment_service: AssessmentService,
         summary_service: StudentSummaryService,
+        session_service: SessionService,
+        note_service: SessionNoteService,
+        highlight_service: StudentHighlightService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -40,6 +46,9 @@ class MainWindow(QMainWindow):
         self._timeline_service = timeline_service
         self._assessment_service = assessment_service
         self._summary_service = summary_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(900, 600)
 
@@ -77,6 +86,9 @@ class MainWindow(QMainWindow):
             timeline_service=self._timeline_service,
             assessment_service=self._assessment_service,
             summary_service=self._summary_service,
+            session_service=self._session_service,
+            note_service=self._note_service,
+            highlight_service=self._highlight_service,
         )
 
         splitter.addWidget(self.navigation)

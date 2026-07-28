@@ -156,3 +156,58 @@
 
 ## Known Issues
 - None.
+
+# CHANGELOG – Sprint 1.6
+
+## Added
+- Session Note capability: one note per session (1-1).
+- Migration to create session_notes table.
+- SessionNote model, repository, service.
+- SessionNoteWidget for creating/editing notes.
+- SessionDetailDialog with Overview and Session Note tabs.
+- Validation: note can only be created when session status is COMPLETED.
+- Unit tests for SessionNoteService (create, update, delete, validation).
+
+## Changed
+- SessionList: View opens SessionDetailDialog instead of edit dialog.
+- Updated app, main_window, and workspace to inject SessionNoteService.
+- Session model now has relationship to SessionNote.
+- Updated services, repositories exports.
+
+## Fixed
+- None.
+
+# CHANGELOG – Sprint 1.7
+
+## Added
+- Student Highlight capability (CRUD) with validation.
+- StudentHighlight model, repository, service.
+- Event-driven architecture: EventBus, Event, EventHandler.
+- HighlightTimelineHandler to automatically add highlights to student timeline.
+- UI: StudentHighlightWidget, integrated into SessionDetailDialog as a new tab.
+- Validation: student must be enrolled in the class; session must be COMPLETED.
+- Migration: student_highlights table, and added class_id to enrollments.
+
+## Changed
+- Updated models (Student, Session) with relationship to StudentHighlight.
+- Updated app, main_window, session_list to inject new services.
+- Added EnrollmentRepository for checking student enrollment.
+
+## Fixed
+- None.
+
+# CHANGELOG – Sprint 1.7.1
+
+## Changed
+- Session Detail UI completely redesigned as "Teaching Workspace".
+- Removed tabbed interface; all sections visible on one screen.
+- Teaching Note section now has clear empty state with create button.
+- Student Highlights section now has improved empty state and layout.
+- Auto-refresh after saving note or highlight – no need to reopen dialog.
+- Added quick summary at bottom showing note availability and highlight count.
+- Improved visual hierarchy: Teaching Note is primary, Highlights secondary.
+- Session Information header now includes quick status and stats.
+
+## Fixed
+- Note and highlight widgets now emit signals to refresh parent automatically.
+- Cancel button returns to note summary view.

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from centermanager.models.student_product import StudentProduct
     from centermanager.models.progress import Progress
     from centermanager.models.attachment import Attachment
+    from centermanager.models.student_highlight import StudentHighlight
 
 
 class Student(Base, TimestampMixin):
@@ -37,7 +38,7 @@ class Student(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # Relationships - thêm cascade để khi xóa Student (hard delete) thì xóa Parent theo
+    # Relationships
     parents: Mapped[List[Parent]] = relationship(
         "Parent",
         back_populates="student",
@@ -49,6 +50,7 @@ class Student(Base, TimestampMixin):
     products: Mapped[List[StudentProduct]] = relationship("StudentProduct", back_populates="student")
     progress_records: Mapped[List[Progress]] = relationship("Progress", back_populates="student")
     attachments: Mapped[List[Attachment]] = relationship("Attachment", back_populates="student")
+    highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="student")
 
     def __repr__(self) -> str:
         return f"<Student(id={self.id}, code='{self.student_code}', name='{self.full_name}')>"

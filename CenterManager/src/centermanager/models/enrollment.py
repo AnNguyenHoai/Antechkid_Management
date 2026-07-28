@@ -32,6 +32,6 @@ class Enrollment(Base, TimestampMixin):
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
-
+    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
     def __repr__(self) -> str:
         return f"<Enrollment(id={self.id}, student_id={self.student_id}, class='{self.class_name}')>"

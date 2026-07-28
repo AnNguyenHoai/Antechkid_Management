@@ -14,7 +14,8 @@ from centermanager.services.exceptions import (
     StudentAlreadyDeletedError,
     StudentNotDeletedError,
 )
-
+from .session_service import SessionService
+from .session_note_service import SessionNoteService
 __all__ = [
     "StudentService",
     "ParentService",

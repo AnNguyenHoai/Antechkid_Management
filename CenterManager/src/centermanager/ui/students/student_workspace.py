@@ -17,8 +17,12 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.student_summary_service import StudentSummaryService
+from centermanager.services.session_service import SessionService
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.exceptions import StudentNotFoundError
 from centermanager.models.student import Student
+from centermanager.dto import StudentSummaryDTO
 from centermanager.ui.students.helpers import calculate_age, format_date_for_display
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.parents.parent_card import ParentCard
@@ -26,7 +30,7 @@ from centermanager.ui.parents.parent_dialog import ParentDialog
 from centermanager.ui.assessment import AssessmentSection
 from centermanager.ui.timeline import TimelineWidget
 from centermanager.ui.summary import SummaryWidget
-from centermanager.dto.student_summary_dto import StudentSummaryDTO
+from centermanager.ui.session import SessionList
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,9 @@ class StudentWorkspace(QWidget):
         timeline_service: TimelineService,
         assessment_service: AssessmentService,
         summary_service: StudentSummaryService,
+        session_service: SessionService,
+        note_service: SessionNoteService,
+        highlight_service: StudentHighlightService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -49,6 +56,9 @@ class StudentWorkspace(QWidget):
         self._timeline_service = timeline_service
         self._assessment_service = assessment_service
         self._summary_service = summary_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
 
@@ -143,7 +153,7 @@ class StudentWorkspace(QWidget):
         self.edit_btn.clicked.connect(self._on_edit_clicked)
 
     def _build_sections(self) -> None:
-        # Summary (new)
+        # Summary
         self.summary_section = self._create_section_widget("📋 Summary")
         self.summary_widget = SummaryWidget()
         self.summary_section.layout().addWidget(self.summary_widget)
@@ -438,7 +448,6 @@ class StudentWorkspace(QWidget):
             self.summary_widget.set_summary(summary)
         except Exception as e:
             logger.exception("Error loading summary")
-            # Tạo DTO rỗng nếu lỗi
             self.summary_widget.set_summary(StudentSummaryDTO())
 
     # ----- Data Changed -----

@@ -16,6 +16,12 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.student_summary_service import StudentSummaryService
+from centermanager.services.session_service import SessionService
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.events.event_bus import EventBus
+from centermanager.events.highlight_events import StudentHighlightCreated
+from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -69,6 +75,16 @@ def main() -> int:
         assessment_service=assessment_service,
         timeline_service=timeline_service,
     )
+    session_service = SessionService(session_factory)
+    note_service = SessionNoteService(session_factory, session_service)
+
+    # Event Bus
+    event_bus = EventBus()
+    highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
+
+    # Register timeline handler
+    timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
+    event_bus.register(StudentHighlightCreated, timeline_handler)
 
     window = MainWindow(
         student_service=student_service,
@@ -76,6 +92,9 @@ def main() -> int:
         timeline_service=timeline_service,
         assessment_service=assessment_service,
         summary_service=summary_service,
+        session_service=session_service,
+        note_service=note_service,
+        highlight_service=highlight_service,
     )
     window.show()
     logger.info("Main window initialized")
