@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-StudentDetailPage - displays full student profile with all sections.
+"""StudentDetailPage - displays full student profile with all sections.
 Now includes Profile, Quick Actions, Parents, Assessment, Timeline, Notes, Documents.
 """
 import logging
@@ -9,7 +8,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSplitter
+    QScrollArea, QFrame, QSizePolicy
 )
 
 from centermanager.services.student_service import StudentService
@@ -39,7 +38,6 @@ from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
 )
-# THÊM IMPORT TOKENS
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
 
@@ -106,7 +104,8 @@ class StudentDetailPage(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['xl'], SPACING['lg'], SPACING['xl'], SPACING['lg'])
+        # Sử dụng margin nhỏ hơn để tăng diện tích hiển thị
+        container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
         # Quick Actions
@@ -141,17 +140,20 @@ class StudentDetailPage(QWidget):
         self.timeline_section.layout().addWidget(self.timeline_widget)
         container_layout.addWidget(self.timeline_section)
 
-        # Notes (structured)
+        # Notes (structured) - mở rộng chiều rộng
         self.notes_section = self._create_vertical_section("📝 Notes")
         self.notes_widget = NotesWidget(self._student_note_service)
         self.notes_widget.note_changed.connect(self._on_data_changed)
+        # Chiếm toàn bộ chiều rộng
+        self.notes_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.notes_section.layout().addWidget(self.notes_widget)
         container_layout.addWidget(self.notes_section)
 
-        # Documents
+        # Documents - mở rộng chiều rộng
         self.documents_section = self._create_vertical_section("📎 Documents")
         self.documents_widget = DocumentsWidget(self._document_service)
         self.documents_widget.document_changed.connect(self._on_data_changed)
+        self.documents_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.documents_section.layout().addWidget(self.documents_widget)
         container_layout.addWidget(self.documents_section)
 
@@ -168,7 +170,6 @@ class StudentDetailPage(QWidget):
             on_upload_doc=self._on_upload_doc
         )
 
-    # Trong _create_vertical_section, cập nhật font size
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
         layout = QVBoxLayout(section)
@@ -179,7 +180,7 @@ class StudentDetailPage(QWidget):
             font-size: 16px;
             font-weight: 600;
             color: {COLORS['text_primary']};
-        """)  # Giảm từ 18px xuống 16px
+        """)
         layout.addWidget(title_label)
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -353,7 +354,6 @@ class StudentDetailPage(QWidget):
 
     def _on_data_changed(self) -> None:
         if self._current_student_id is not None:
-            # Reload everything
             try:
                 student = self._student_service.get_student(self._current_student_id)
                 self._populate_all(student)
