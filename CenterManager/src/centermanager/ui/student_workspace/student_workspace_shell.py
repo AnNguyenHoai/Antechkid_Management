@@ -1,4 +1,4 @@
-# src/centermanager/ui/student_workspace/student_workspace_shell.py
+# -*- coding: utf-8 -*-
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -12,6 +12,7 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
 from centermanager.ui.student_workspace.student_list_page import StudentListPage
 from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
+from centermanager.ui.student_workspace.student_analytics_page import StudentAnalyticsPage
 
 
 class StudentWorkspaceShell(QWidget):
@@ -31,6 +32,10 @@ class StudentWorkspaceShell(QWidget):
         dashboard_service,
         student_note_service,
         document_service,
+        analytics_service,
+        filter_service,
+        export_service,
+        import_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -45,6 +50,10 @@ class StudentWorkspaceShell(QWidget):
         self._dashboard_service = dashboard_service
         self._student_note_service = student_note_service
         self._document_service = document_service
+        self._analytics_service = analytics_service
+        self._filter_service = filter_service
+        self._export_service = export_service
+        self._import_service = import_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
@@ -65,10 +74,10 @@ class StudentWorkspaceShell(QWidget):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Sidebar chỉ còn Dashboard và Students
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
+            {"id": "analytics", "icon": "📈", "label": "Analytics"},
         ]
         self.nav = WorkspaceNavigation("Student Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -77,8 +86,10 @@ class StudentWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        # Các page: Dashboard, Student List, Student Detail
-        self.dashboard_page = StudentDashboardPage(self._dashboard_service)
+        self.dashboard_page = StudentDashboardPage(
+            self._dashboard_service,
+            self._analytics_service
+        )
         self.dashboard_page.add_student_clicked.connect(self._on_add_action)
         self.dashboard_page.import_students_clicked.connect(self._on_import_action)
         self.dashboard_page.export_students_clicked.connect(self._on_export_action)
@@ -88,7 +99,10 @@ class StudentWorkspaceShell(QWidget):
         self.list_page = StudentListPage(
             self._student_service,
             self._parent_service,
-            self._assessment_service
+            self._assessment_service,
+            self._filter_service,
+            self._import_service,
+            self._export_service,
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
@@ -111,7 +125,8 @@ class StudentWorkspaceShell(QWidget):
         self.detail_page.student_updated.connect(self._on_student_updated)
         self.content_stack.addWidget(self.detail_page)
 
-        # ĐÃ XÓA: assessment_page, timeline_page, reports_page
+        self.analytics_page = StudentAnalyticsPage(self._analytics_service)
+        self.content_stack.addWidget(self.analytics_page)
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
@@ -121,7 +136,6 @@ class StudentWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        # Chỉ xử lý dashboard và students
         if page_id == "dashboard":
             self.content_stack.setCurrentWidget(self.dashboard_page)
             self.nav.set_active_page("dashboard")
@@ -132,11 +146,14 @@ class StudentWorkspaceShell(QWidget):
             self.nav.set_active_page("students")
             self.header.set_context("Student Workspace", "Students")
             self.list_page.refresh()
+        elif page_id == "analytics":
+            self.content_stack.setCurrentWidget(self.analytics_page)
+            self.nav.set_active_page("analytics")
+            self.header.set_context("Student Workspace", "Analytics")
+            self.analytics_page.refresh()
         else:
-            # Fallback
             self.content_stack.setCurrentWidget(self.dashboard_page)
 
-    # Các phương thức xử lý sự kiện giữ nguyên
     def _on_student_selected(self, student_id: int) -> None:
         self._current_student_id = student_id
         self.detail_page.load_student(student_id)

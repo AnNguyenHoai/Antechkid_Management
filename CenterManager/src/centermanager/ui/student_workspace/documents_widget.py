@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 DocumentsWidget - display and manage student documents.
-Removed duplicate title.
 """
 import os
 import sys
@@ -21,8 +20,9 @@ from centermanager.services.student_document_service import StudentDocumentServi
 from centermanager.core.paths import get_paths
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
+
 class DocumentCard(QFrame):
-    def __init__(self, doc: Document, parent: Optional[QWidget] = None):
+    def __init__(self, doc: Document, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._doc = doc
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
@@ -55,6 +55,13 @@ class DocumentCard(QFrame):
         time_label = QLabel(doc.created_at.strftime("%d/%m/%Y"))
         time_label.setStyleSheet("color: #888; font-size: 11px;")
         header.addWidget(time_label)
+
+        self.delete_btn = QPushButton("✕")
+        self.delete_btn.setStyleSheet("background: transparent; border: none; color: red; font-size: 14px;")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.clicked.connect(self._delete)
+        header.addWidget(self.delete_btn)
+
         layout.addLayout(header)
 
         if doc.description:
@@ -63,18 +70,28 @@ class DocumentCard(QFrame):
             desc.setStyleSheet("font-size: 12px; color: #555;")
             layout.addWidget(desc)
 
-    def mouseDoubleClickEvent(self, event):
+    def _delete(self) -> None:
+        parent = self.parent()
+        while parent and not isinstance(parent, DocumentsWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_delete_document'):
+            parent._delete_document(self._doc.id)
+
+    def mouseDoubleClickEvent(self, event) -> None:
         from centermanager.core.paths import get_paths
         file_path = get_paths().attachment_dir / self._doc.file_path
         if file_path.exists():
-            if sys.platform == 'win32':
-                os.startfile(str(file_path))
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', str(file_path)])
-            else:
-                subprocess.run(['xdg-open', str(file_path)])
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(str(file_path))
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', str(file_path)])
+                else:
+                    subprocess.run(['xdg-open', str(file_path)])
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Could not open file: {e}")
         else:
-            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found at {file_path}.")
+            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found.")
 
 
 class DocumentsWidget(QWidget):
@@ -92,7 +109,6 @@ class DocumentsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['sm'])
 
-        # No title - title is in parent section
         header = QHBoxLayout()
         header.addStretch()
         self.upload_btn = QPushButton("+ Upload")
@@ -155,7 +171,6 @@ class DocumentsWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc_type, description = dialog.get_data()
             try:
-                # Need student_code; get from service
                 from centermanager.services.student_service import StudentService
                 from centermanager.database.engine import create_production_engine
                 from sqlalchemy.orm import sessionmaker
@@ -175,6 +190,21 @@ class DocumentsWidget(QWidget):
                 self.document_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Upload Error", str(e))
+
+    def _delete_document(self, document_id: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Delete this document?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._service.delete_document(document_id)
+                self._load_documents()
+                self.document_changed.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
 
 class UploadDocumentDialog(QDialog):

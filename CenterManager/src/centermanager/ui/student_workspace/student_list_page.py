@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""
-StudentListPage - page that displays student list with search, filter, add.
-"""
+"""StudentListPage - page that displays student list with search, filter, add."""
 import logging
 from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QListWidget, QListWidgetItem, QSizePolicy, QScrollArea
+    QFrame, QListWidget, QListWidgetItem, QSizePolicy, QScrollArea,
+    QMessageBox
 )
 
 from centermanager.models.student import Student
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
+from centermanager.services.student_filter_service import StudentFilterService
+from centermanager.services.student_import_service import StudentImportService
+from centermanager.services.student_export_service import StudentExportService
 from centermanager.ui.design_system import (
     Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
     FilterBar
@@ -22,15 +24,13 @@ from centermanager.ui.design_system import (
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
-from centermanager.services.student_import_service import StudentImportService
-from centermanager.services.student_export_service import StudentExportService
+from centermanager.ui.students.student_import_dialog import StudentImportDialog
 
 logger = logging.getLogger(__name__)
 
 
 class StudentListItem(QFrame):
     """Student list item with avatar, name, code, status."""
-    
     def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._student = student
@@ -48,7 +48,6 @@ class StudentListItem(QFrame):
                 background: {COLORS['surface_hover']};
             }}
         """)
-        # Tăng 50%: từ 90 lên 135
         self.setFixedHeight(135)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -56,49 +55,31 @@ class StudentListItem(QFrame):
         layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
         layout.setSpacing(SPACING['md'])
 
-        # Avatar - tăng từ 40 lên 52
         avatar = Avatar(self._student.full_name, size=52, font_size=18)
         avatar.setFixedSize(52, 52)
         layout.addWidget(avatar)
 
-        # Info: Name + Code (font nhỏ hơn)
         info_layout = QVBoxLayout()
         info_layout.setSpacing(SPACING['xs'])
         info_layout.setContentsMargins(0, 0, 0, 0)
-        
         name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet(f"""
-            font-size: 13px;
-            font-weight: 600;
-            color: {COLORS['text_primary']};
-        """)  # Giảm từ 16px xuống 13px
+        name_label.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLORS['text_primary']};")
         name_label.setWordWrap(False)
         info_layout.addWidget(name_label)
-        
         code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet(f"""
-            font-size: 11px;
-            color: {COLORS['text_muted']};
-            font-weight: 500;
-        """)  # Giảm từ 14px xuống 11px
+        code_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']}; font-weight: 500;")
         info_layout.addWidget(code_label)
-        
         layout.addLayout(info_layout, 1)
 
-        # Status badge
         status = self._student.status or "ACTIVE"
         from centermanager.ui.design_system.components import StatusBadge
         badge = StatusBadge(status)
         badge.setFixedHeight(24)
         layout.addWidget(badge)
 
-        # Last updated
         if self._student.updated_at:
             time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y %H:%M"))
-            time_label.setStyleSheet(f"""
-                font-size: 11px;
-                color: {COLORS['text_muted']};
-            """)  # Giảm từ 13px xuống 11px
+            time_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']};")
             layout.addWidget(time_label)
 
     @property
@@ -116,16 +97,20 @@ class StudentListPage(QWidget):
         student_service: StudentService,
         parent_service: ParentService,
         assessment_service: AssessmentService,
+        filter_service: StudentFilterService,
+        import_service: StudentImportService,
+        export_service: StudentExportService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._student_service = student_service
         self._parent_service = parent_service
         self._assessment_service = assessment_service
+        self._filter_service = filter_service
+        self._import_service = import_service
+        self._export_service = export_service
         self._students: List[Student] = []
         self._filtered: List[Student] = []
-        self._import_service = StudentImportService(student_service)
-        self._export_service = StudentExportService(student_service)
         self._setup_ui()
         self.refresh()
 
@@ -134,7 +119,6 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -147,7 +131,6 @@ class StudentListPage(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(SPACING['sm'])
-        
         self.search_bar = SearchBar()
         self.search_bar.setPlaceholderText("Search...")
         self.search_bar.text_changed.connect(self._filter)
@@ -162,6 +145,16 @@ class StudentListPage(QWidget):
         self.add_btn.setFixedHeight(34)
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
+
+        self.import_btn = SecondaryButton("📥 Import")
+        self.import_btn.setFixedHeight(34)
+        self.import_btn.clicked.connect(self.show_import_dialog)
+        top_row.addWidget(self.import_btn)
+
+        self.export_btn = SecondaryButton("📤 Export")
+        self.export_btn.setFixedHeight(34)
+        self.export_btn.clicked.connect(self.export_students)
+        top_row.addWidget(self.export_btn)
 
         toolbar_layout.addLayout(top_row)
 
@@ -216,7 +209,6 @@ class StudentListPage(QWidget):
         self.empty_widget.setVisible(False)
         layout.addWidget(self.empty_widget)
 
-    # ============ Các phương thức giữ nguyên ============
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         widget = self.list_widget.itemWidget(item)
         if widget and hasattr(widget, 'student'):
@@ -279,13 +271,17 @@ class StudentListPage(QWidget):
             self.refresh()
             self.data_updated.emit()
 
+    def show_import_dialog(self) -> None:
+        dialog = StudentImportDialog(self._import_service, parent=self)
+        if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
+            self.refresh()
+            self.data_updated.emit()
+
     def export_students(self) -> None:
         try:
             file_path = self._export_service.export_all_active()
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Export", f"Exported to: {file_path}")
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", str(e))
 
     def show_filter_dialog(self) -> None:
@@ -293,15 +289,8 @@ class StudentListPage(QWidget):
         if dialog.exec() == StudentFilterDialog.DialogCode.Accepted:
             filter_criteria = dialog.get_filter()
             if filter_criteria:
-                from centermanager.services.student_filter_service import StudentFilterService
-                from centermanager.database.engine import create_production_engine
-                from sqlalchemy.orm import sessionmaker
-                engine = create_production_engine()
-                session_factory = sessionmaker(bind=engine)
-                filter_service = StudentFilterService(session_factory)
                 try:
-                    self._filtered = filter_service.filter_students(filter_criteria)
+                    self._filtered = self._filter_service.filter_students(filter_criteria)
                     self._populate_list()
                 except Exception as e:
-                    from PySide6.QtWidgets import QMessageBox
                     QMessageBox.critical(self, "Filter Error", str(e))

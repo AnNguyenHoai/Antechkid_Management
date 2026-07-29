@@ -4,16 +4,12 @@ from .student_workspace_shell import StudentWorkspaceShell
 from .student_dashboard_page import StudentDashboardPage
 from .student_list_page import StudentListPage
 from .student_detail_page import StudentDetailPage
-from .assessment_page import AssessmentPage
-from .timeline_page import TimelinePage
-from .reports_page import ReportsPage
+from .student_analytics_page import StudentAnalyticsPage
 
 __all__ = [
     "StudentWorkspaceShell",
     "StudentDashboardPage",
     "StudentListPage",
     "StudentDetailPage",
-    "AssessmentPage",
-    "TimelinePage",
-    "ReportsPage",
+    "StudentAnalyticsPage",
 ]

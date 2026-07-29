@@ -23,10 +23,9 @@ from centermanager.services.student_dashboard_service import StudentDashboardSer
 from centermanager.services.student_filter_service import StudentFilterService
 from centermanager.services.student_export_service import StudentExportService
 from centermanager.services.student_import_service import StudentImportService
-# === THÊM IMPORT MỚI ===
 from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
-# ========================
+from centermanager.services.student_analytics_service import StudentAnalyticsService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
@@ -40,12 +39,10 @@ logger = logging.getLogger(__name__)
 def ensure_schema():
     from alembic.config import Config
     from alembic import command
-
     from centermanager.database.engine import get_database_path
     db_path = get_database_path()
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    # Đảm bảo upgrade lên head
     command.upgrade(alembic_cfg, "head")
 
 
@@ -83,17 +80,15 @@ def main() -> int:
     session_service = SessionService(session_factory)
     note_service = SessionNoteService(session_factory, session_service)
 
-    # === THÊM SERVICE MỚI ===
     student_note_service = StudentNoteService(session_factory, timeline_service)
     document_service = StudentDocumentService(session_factory, timeline_service)
-    # ========================
 
     summary_service = StudentSummaryService(
         student_service=student_service,
         parent_service=parent_service,
         assessment_service=assessment_service,
         timeline_service=timeline_service,
-        session_factory=session_factory,  # thêm session_factory
+        session_factory=session_factory,
     )
 
     # Event Bus
@@ -104,14 +99,17 @@ def main() -> int:
     timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
     event_bus.register(StudentHighlightCreated, timeline_handler)
 
-    # Dashboard, Filter, Export, Import services
+    # Dashboard, Analytics, Home, Filter, Export, Import
     dashboard_service = StudentDashboardService(session_factory)
     filter_service = StudentFilterService(session_factory)
     export_service = StudentExportService(student_service)
     import_service = StudentImportService(student_service)
     home_service = HomeDashboardService(session_factory)
+    analytics_service = StudentAnalyticsService(session_factory)
+
     logger.info("All services initialized")
 
+    # Tạo MainWindow với tất cả dịch vụ cần thiết
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -123,8 +121,12 @@ def main() -> int:
         highlight_service=highlight_service,
         dashboard_service=dashboard_service,
         home_service=home_service,
-        student_note_service=student_note_service,   # thêm
-        document_service=document_service,           # thêm
+        student_note_service=student_note_service,
+        document_service=document_service,
+        analytics_service=analytics_service,
+        filter_service=filter_service,
+        export_service=export_service,
+        import_service=import_service,
     )
     window.show()
     logger.info("Main window initialized")
