@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Student Workspace – complete with Summary, Basic, Parents, Learning,
+Student Workspace – complete with Dashboard, Summary, Basic, Parents, Learning,
 Assessment, Products, Attachments, Timeline, Notes.
 """
 import logging
@@ -20,6 +20,7 @@ from centermanager.services.student_summary_service import StudentSummaryService
 from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_dashboard_service import StudentDashboardService
 from centermanager.services.exceptions import StudentNotFoundError
 from centermanager.models.student import Student
 from centermanager.dto import StudentSummaryDTO
@@ -31,6 +32,7 @@ from centermanager.ui.assessment import AssessmentSection
 from centermanager.ui.timeline import TimelineWidget
 from centermanager.ui.summary import SummaryWidget
 from centermanager.ui.session import SessionList
+from centermanager.ui.students.student_dashboard import StudentDashboard
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,7 @@ class StudentWorkspace(QWidget):
         session_service: SessionService,
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
+        dashboard_service: StudentDashboardService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -59,6 +62,7 @@ class StudentWorkspace(QWidget):
         self._session_service = session_service
         self._note_service = note_service
         self._highlight_service = highlight_service
+        self._dashboard_service = dashboard_service
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
 
@@ -73,28 +77,19 @@ class StudentWorkspace(QWidget):
         self.stacked = QStackedWidget()
         main_layout.addWidget(self.stacked)
 
-        # ----- Empty page -----
-        empty_widget = QWidget()
-        empty_layout = QVBoxLayout(empty_widget)
-        empty_layout.setContentsMargins(0, 40, 0, 40)
-        empty_layout.setSpacing(8)
-        empty_layout.addStretch()
-        icon_label = QLabel("👤")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet("font-size: 40px;")
-        empty_layout.addWidget(icon_label)
-        empty_label = QLabel("No student selected.\nSelect a student from the list.")
-        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_label.setStyleSheet("font-size: 16px; color: #999;")
-        empty_layout.addWidget(empty_label)
-        empty_layout.addStretch()
-        self.stacked.addWidget(empty_widget)
+        # ----- Dashboard page (index 0) -----
+        self.dashboard = StudentDashboard(self._dashboard_service)
+        self.dashboard.add_student_clicked.connect(self._on_add_clicked)
+        self.dashboard.import_students_clicked.connect(self._on_import_clicked)
+        self.dashboard.export_students_clicked.connect(self._on_export_clicked)
+        self.dashboard.student_selected.connect(self.load_student)
+        self.stacked.addWidget(self.dashboard)
 
-        # ----- Workspace page -----
-        workspace_widget = QWidget()
-        workspace_layout = QVBoxLayout(workspace_widget)
-        workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(0)
+        # ----- Detail page (index 1) -----
+        self.detail_page = QWidget()
+        detail_layout = QVBoxLayout(self.detail_page)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
 
         # Header
         self.header_widget = QWidget()
@@ -131,7 +126,7 @@ class StudentWorkspace(QWidget):
         header_layout.addWidget(self.edit_btn)
         header_layout.addWidget(self.export_btn)
 
-        workspace_layout.addWidget(self.header_widget)
+        detail_layout.addWidget(self.header_widget)
 
         # Scroll area
         self.scroll_area = QScrollArea()
@@ -142,9 +137,9 @@ class StudentWorkspace(QWidget):
         self.content_layout.setContentsMargins(24, 16, 24, 16)
         self.content_layout.setSpacing(20)
         self.scroll_area.setWidget(self.content_widget)
-        workspace_layout.addWidget(self.scroll_area)
+        detail_layout.addWidget(self.scroll_area)
 
-        self.stacked.addWidget(workspace_widget)
+        self.stacked.addWidget(self.detail_page)
 
         # Build all sections
         self._build_sections()
@@ -284,11 +279,12 @@ class StudentWorkspace(QWidget):
 
     # ----- UI State -----
     def _show_empty(self) -> None:
-        self.stacked.setCurrentIndex(0)
+        self.stacked.setCurrentIndex(0)  # show dashboard
+        self.dashboard.refresh()
         self._current_student_id = None
         self._current_student = None
 
-    def _show_workspace(self) -> None:
+    def _show_detail(self) -> None:
         self.stacked.setCurrentIndex(1)
 
     # ----- Load student -----
@@ -314,7 +310,7 @@ class StudentWorkspace(QWidget):
         self._load_assessment()
         self._load_timeline()
         self._load_summary()
-        self._show_workspace()
+        self._show_detail()
 
         # Scroll to top
         self.scroll_area.verticalScrollBar().setValue(0)
@@ -477,6 +473,23 @@ class StudentWorkspace(QWidget):
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self._on_data_changed()
             self.student_updated.emit()
+
+    # ----- Dashboard actions -----
+    def _on_add_clicked(self) -> None:
+        dialog = StudentFormDialog(self._student_service, parent=self)
+        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
+            self.dashboard.refresh()
+            self.student_updated.emit()
+
+    def _on_import_clicked(self) -> None:
+        # TODO: implement import dialog
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Import", "Import functionality will be added.")
+
+    def _on_export_clicked(self) -> None:
+        # TODO: implement export
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Export", "Export functionality will be added.")
 
     def refresh(self) -> None:
         if self._current_student_id is not None:

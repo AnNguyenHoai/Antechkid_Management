@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from centermanager.models.student import Student
 from centermanager.repositories.base import BaseRepository
-
+from centermanager.models.parent import Parent
 
 class StudentRepository(BaseRepository[Student]):
     """Repository for Student entity with domain-specific methods."""
@@ -67,3 +67,18 @@ class StudentRepository(BaseRepository[Student]):
                 if max_num is None or num > max_num:
                     max_num = num
         return max_num
+    def search_students(self, query: str) -> List[Student]:
+        """Search active students by code, name, parent phone, parent name."""
+        from sqlalchemy import or_
+        q = self._session.query(Student).filter(Student.deleted_at.is_(None))
+        if query:
+            q = q.outerjoin(Student.parents)
+            q = q.filter(
+                or_(
+                    Student.student_code.ilike(f"%{query}%"),
+                    Student.full_name.ilike(f"%{query}%"),
+                    Parent.phone.ilike(f"%{query}%"),
+                    Parent.name.ilike(f"%{query}%")
+                )
+            ).distinct()
+        return q.all()

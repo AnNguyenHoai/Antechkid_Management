@@ -19,6 +19,10 @@ from centermanager.services.student_summary_service import StudentSummaryService
 from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_dashboard_service import StudentDashboardService
+from centermanager.services.student_filter_service import StudentFilterService
+from centermanager.services.student_export_service import StudentExportService
+from centermanager.services.student_import_service import StudentImportService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
@@ -86,6 +90,12 @@ def main() -> int:
     timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
     event_bus.register(StudentHighlightCreated, timeline_handler)
 
+    # Dashboard, Filter, Export, Import services
+    dashboard_service = StudentDashboardService(session_factory)
+    filter_service = StudentFilterService(session_factory)      # có thể dùng sau
+    export_service = StudentExportService(student_service)      # có thể dùng sau
+    import_service = StudentImportService(student_service)      # có thể dùng sau
+
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -95,6 +105,7 @@ def main() -> int:
         session_service=session_service,
         note_service=note_service,
         highlight_service=highlight_service,
+        dashboard_service=dashboard_service,
     )
     window.show()
     logger.info("Main window initialized")

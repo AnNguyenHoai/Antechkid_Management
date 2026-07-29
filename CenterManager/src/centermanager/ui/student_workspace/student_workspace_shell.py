@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""
+StudentWorkspaceShell - the root container for Student Workspace.
+Contains sidebar navigation and content area.
+"""
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QFrame, QSizePolicy
+)
+
+from centermanager.ui.workspace_navigation import WorkspaceNavigation
+from centermanager.ui.workspace_header import WorkspaceHeader
+from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
+from centermanager.ui.student_workspace.student_list_page import StudentListPage
+from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
+from centermanager.ui.student_workspace.assessment_page import AssessmentPage
+from centermanager.ui.student_workspace.timeline_page import TimelinePage
+from centermanager.ui.student_workspace.reports_page import ReportsPage
+
+
+class StudentWorkspaceShell(QWidget):
+    """Shell for Student Workspace with navigation and pages."""
+
+    go_home = Signal()
+    student_selected = Signal(int)
+
+    def __init__(
+        self,
+        student_service,
+        parent_service,
+        timeline_service,
+        assessment_service,
+        summary_service,
+        session_service,
+        note_service,
+        highlight_service,
+        dashboard_service,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._student_service = student_service
+        self._parent_service = parent_service
+        self._timeline_service = timeline_service
+        self._assessment_service = assessment_service
+        self._summary_service = summary_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._dashboard_service = dashboard_service
+
+        self._current_student_id: Optional[int] = None
+        self._setup_ui()
+        self._connect_signals()
+        # Refresh dashboard and navigate to dashboard
+        self.dashboard_page.refresh()
+        self.navigate_to("dashboard")
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header (without Add button)
+        self.header = WorkspaceHeader("Student Workspace", "Dashboard")
+        self.header.back_home_clicked.connect(self.go_home.emit)
+        layout.addWidget(self.header)
+
+        # Body: sidebar + content
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        # Navigation sidebar
+        pages = [
+            {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
+            {"id": "students", "icon": "👨‍🎓", "label": "Students"},
+            {"id": "assessment", "icon": "📋", "label": "Assessment"},
+            {"id": "timeline", "icon": "📅", "label": "Timeline"},
+            {"id": "reports", "icon": "📈", "label": "Reports"},
+        ]
+        self.nav = WorkspaceNavigation("Student Workspace", pages)
+        self.nav.page_selected.connect(self.navigate_to)
+        body.addWidget(self.nav)
+
+        # Content area
+        self.content_stack = QStackedWidget()
+        self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Create pages
+        self.dashboard_page = StudentDashboardPage(self._dashboard_service)
+        self.dashboard_page.add_student_clicked.connect(self._on_add_action)
+        self.dashboard_page.import_students_clicked.connect(self._on_import_action)
+        self.dashboard_page.export_students_clicked.connect(self._on_export_action)
+        self.dashboard_page.student_selected.connect(self._on_student_selected_from_dashboard)
+        self.content_stack.addWidget(self.dashboard_page)
+
+        self.list_page = StudentListPage(
+            self._student_service,
+            self._parent_service,
+            self._assessment_service
+        )
+        self.list_page.student_selected.connect(self._on_student_selected)
+        self.list_page.filter_clicked.connect(self._on_filter_clicked)
+        self.content_stack.addWidget(self.list_page)
+
+        self.detail_page = StudentDetailPage(
+            self._student_service,
+            self._parent_service,
+            self._timeline_service,
+            self._assessment_service,
+            self._summary_service,
+            self._session_service,
+            self._note_service,
+            self._highlight_service,
+        )
+        self.detail_page.back_clicked.connect(self._on_back_from_detail)
+        self.detail_page.student_updated.connect(self._on_student_updated)
+        self.content_stack.addWidget(self.detail_page)
+
+        self.assessment_page = AssessmentPage(self._assessment_service)
+        self.content_stack.addWidget(self.assessment_page)
+
+        self.timeline_page = TimelinePage(self._timeline_service, self._student_service)
+        self.content_stack.addWidget(self.timeline_page)
+
+        self.reports_page = ReportsPage()
+        self.content_stack.addWidget(self.reports_page)
+
+        body.addWidget(self.content_stack, 1)
+        layout.addLayout(body)
+
+    def _connect_signals(self) -> None:
+        self.nav.page_selected.connect(self.navigate_to)
+        self.header.back_home_clicked.connect(self.go_home.emit)
+
+    def navigate_to(self, page_id: str) -> None:
+        page_map = {
+            "dashboard": 0,
+            "students": 1,
+            "detail": 2,
+            "assessment": 3,
+            "timeline": 4,
+            "reports": 5,
+        }
+        if page_id == "detail":
+            return
+        idx = page_map.get(page_id, 0)
+        self.content_stack.setCurrentIndex(idx)
+        self.nav.set_active_page(page_id)
+        page_labels = {
+            "dashboard": "Dashboard",
+            "students": "Students",
+            "assessment": "Assessment",
+            "timeline": "Timeline",
+            "reports": "Reports",
+        }
+        self.header.set_context("Student Workspace", page_labels.get(page_id, ""))
+        if page_id == "students":
+            self.list_page.refresh()
+        elif page_id == "dashboard":
+            self.dashboard_page.refresh()
+
+    def _on_student_selected(self, student_id: int) -> None:
+        self._current_student_id = student_id
+        self.detail_page.load_student(student_id)
+        self.content_stack.setCurrentIndex(2)
+        self.nav.set_active_page("students")
+        self.header.set_context("Student Workspace", "Student Detail")
+        self.student_selected.emit(student_id)
+
+    def _on_student_selected_from_dashboard(self, student_id: int) -> None:
+        self._on_student_selected(student_id)
+
+    def _on_back_from_detail(self) -> None:
+        self.navigate_to("students")
+        self.list_page.refresh()
+
+    def _on_student_updated(self) -> None:
+        self.list_page.refresh()
+        self.dashboard_page.refresh()
+
+    def _on_add_action(self) -> None:
+        self.list_page.show_add_dialog()
+
+    def _on_import_action(self) -> None:
+        self.list_page.show_import_dialog()
+
+    def _on_export_action(self) -> None:
+        self.list_page.export_students()
+
+    def _on_filter_clicked(self) -> None:
+        self.list_page.show_filter_dialog()

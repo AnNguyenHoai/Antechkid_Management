@@ -266,3 +266,8 @@ class StudentService:
             except Exception:
                 session.rollback()
                 raise
+    def search_students(self, query: str) -> List[Student]:
+        """Search active students by multiple fields."""
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            return repo.search_students(query)

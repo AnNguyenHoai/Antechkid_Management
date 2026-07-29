@@ -1,43 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-Main window – two-column layout.
+MainWindow – container for Home page and Workspaces.
 """
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QStatusBar, QSplitter, QPushButton
-)
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QStatusBar
 from PySide6.QtCore import Qt
 
-from centermanager.services.student_service import StudentService
-from centermanager.services.parent_service import ParentService
-from centermanager.services.timeline_service import TimelineService
-from centermanager.services.assessment_service import AssessmentService
-from centermanager.services.student_summary_service import StudentSummaryService
-from centermanager.services.session_service import SessionService
-from centermanager.services.session_note_service import SessionNoteService
-from centermanager.services.student_highlight_service import StudentHighlightService
-from centermanager.ui.students.navigation_panel import NavigationPanel
-from centermanager.ui.students.student_workspace import StudentWorkspace
-from centermanager.ui.students.student_form_dialog import StudentFormDialog
+from centermanager.ui.home_page import HomePage
+from centermanager.ui.student_workspace import StudentWorkspaceShell
 
 logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-
     def __init__(
         self,
-        student_service: StudentService,
-        parent_service: ParentService,
-        timeline_service: TimelineService,
-        assessment_service: AssessmentService,
-        summary_service: StudentSummaryService,
-        session_service: SessionService,
-        note_service: SessionNoteService,
-        highlight_service: StudentHighlightService,
+        student_service,
+        parent_service,
+        timeline_service,
+        assessment_service,
+        summary_service,
+        session_service,
+        note_service,
+        highlight_service,
+        dashboard_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -49,38 +37,22 @@ class MainWindow(QMainWindow):
         self._session_service = session_service
         self._note_service = note_service
         self._highlight_service = highlight_service
+        self._dashboard_service = dashboard_service
+
         self.setWindowTitle("CenterManager")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(1000, 700)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # Central stacked widget to switch between Home and Workspaces
+        self.central_stack = QStackedWidget()
+        self.setCentralWidget(self.central_stack)
 
-        # Toolbar
-        toolbar = QWidget()
-        toolbar.setStyleSheet("background-color: #f0f0f0; padding: 2px 12px;")
-        toolbar.setFixedHeight(40)
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        title = QLabel("CenterManager")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        toolbar_layout.addWidget(title)
-        toolbar_layout.addStretch()
+        # Home Page
+        self.home_page = HomePage()
+        self.home_page.workspace_selected.connect(self._on_workspace_selected)
+        self.central_stack.addWidget(self.home_page)
 
-        self.add_btn = QPushButton("+ Add Student")
-        self.add_btn.setFixedHeight(28)
-        toolbar_layout.addWidget(self.add_btn)
-
-        main_layout.addWidget(toolbar)
-
-        # Splitter: Navigation | Workspace
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-
-        self.navigation = NavigationPanel()
-        self.workspace = StudentWorkspace(
+        # Student Workspace Shell
+        self.student_workspace = StudentWorkspaceShell(
             student_service=self._student_service,
             parent_service=self._parent_service,
             timeline_service=self._timeline_service,
@@ -89,37 +61,41 @@ class MainWindow(QMainWindow):
             session_service=self._session_service,
             note_service=self._note_service,
             highlight_service=self._highlight_service,
+            dashboard_service=self._dashboard_service,
         )
+        self.student_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.student_workspace)
 
-        splitter.addWidget(self.navigation)
-        splitter.addWidget(self.workspace)
-        splitter.setSizes([280, 620])
-
-        main_layout.addWidget(splitter)
+        # By default show Home
+        self.central_stack.setCurrentWidget(self.home_page)
 
         # Status bar
         self.statusBar().showMessage("Ready")
 
-        # Signals
-        self.navigation.student_selected.connect(self._on_student_selected)
-        self.workspace.student_updated.connect(self.refresh_navigation)
-        self.add_btn.clicked.connect(self._on_add_clicked)
+        # Load initial data
+        self._refresh_student_list()
 
-        self.refresh_navigation()
+    def _on_workspace_selected(self, workspace_id: str) -> None:
+        if workspace_id == "student":
+            self.central_stack.setCurrentWidget(self.student_workspace)
+            self.statusBar().showMessage("Student Workspace")
+            # Refresh list and dashboard
+            self._refresh_student_list()
+            self.student_workspace.dashboard_page.refresh()
+        elif workspace_id == "teacher":
+            self.statusBar().showMessage("Teacher Workspace coming soon")
+        else:
+            self.statusBar().showMessage(f"Workspace {workspace_id} not available yet")
 
-    def _on_student_selected(self, student_id: int) -> None:
-        self.workspace.load_student(student_id)
+    def _go_home(self) -> None:
+        self.central_stack.setCurrentWidget(self.home_page)
+        self.statusBar().showMessage("Home")
 
-    def _on_add_clicked(self) -> None:
-        dialog = StudentFormDialog(self._student_service, parent=self)
-        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
-            self.refresh_navigation()
-
-    def refresh_navigation(self) -> None:
+    def _refresh_student_list(self) -> None:
         try:
             students = self._student_service.list_students()
-            self.navigation.set_students(students)
-            self.statusBar().showMessage(f"Loaded {len(students)} students")
+            # Pass to student workspace's list page
+            self.student_workspace.list_page._students = students
+            self.student_workspace.list_page.refresh()
         except Exception as e:
             logger.exception("Failed to refresh student list")
-            self.statusBar().showMessage("Unable to load students.")
