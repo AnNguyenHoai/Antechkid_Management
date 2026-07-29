@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 SummaryCard - mini card for summary widget.
+Redesigned: smaller, better hierarchy.
 """
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
+
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 
 class SummaryCard(QFrame):
     """Mini card displaying one summary item."""
+    
     def __init__(
         self,
         icon: str,
@@ -20,41 +24,56 @@ class SummaryCard(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                background: white;
-                padding: 6px 10px;
-            }
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {COLORS['border_light']};
+                border-radius: {BORDER_RADIUS['md']}px;
+                background: {COLORS['surface']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
+            }}
         """)
-        # Fix: use QSizePolicy.Minimum constant
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        self.setFixedHeight(72)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
+        layout.setSpacing(SPACING['xs'])
 
-        # Icon
+        # Top row: Icon + Title (small, muted)
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(SPACING['xs'])
+        
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 18px;")
-        layout.addWidget(icon_label)
-
-        # Title
+        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_small']}px;")
+        top_layout.addWidget(icon_label)
+        
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 11px; color: #666; font-weight: 500;")
-        layout.addWidget(title_label)
+        title_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['text_muted']};
+            font-weight: 500;
+            letter-spacing: 0.2px;
+        """)
+        top_layout.addWidget(title_label)
+        top_layout.addStretch()
+        layout.addLayout(top_layout)
 
-        # Value
+        # Value (large, bold)
         value_label = QLabel(value or "-")
-        value_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #222;")
-        value_label.setWordWrap(True)
+        value_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['stat_value']}px;
+            font-weight: 700;
+            color: {COLORS['text_primary']};
+            line-height: 1.2;
+        """)
+        value_label.setWordWrap(False)
         layout.addWidget(value_label)
 
-        # Sub value
+        # Sub value (small, muted)
         if sub_value:
             sub_label = QLabel(sub_value)
-            sub_label.setStyleSheet("font-size: 11px; color: #888;")
+            sub_label.setStyleSheet(f"""
+                font-size: {TYPOGRAPHY['caption']}px;
+                color: {COLORS['text_muted']};
+            """)
             layout.addWidget(sub_label)
-
-        layout.addStretch()

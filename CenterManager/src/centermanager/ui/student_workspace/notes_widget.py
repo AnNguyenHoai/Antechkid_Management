@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 NotesWidget - display and manage student notes.
+Removed duplicate title (title is now in parent section).
 """
 from typing import Optional, List
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.note import Note, NoteType
 from centermanager.services.student_note_service import StudentNoteService
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 
 class NoteDetailDialog(QDialog):
@@ -116,14 +118,14 @@ class NotesWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(SPACING['sm'])
 
+        # No title here - title is in parent section
+        # Only Add button
         header = QHBoxLayout()
-        title = QLabel("📝 Notes")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        header.addWidget(title)
         header.addStretch()
         self.add_btn = QPushButton("+ Add Note")
+        self.add_btn.setFixedHeight(32)
         self.add_btn.clicked.connect(self._on_add)
         header.addWidget(self.add_btn)
         layout.addLayout(header)
@@ -133,8 +135,8 @@ class NotesWidget(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(0, 4, 0, 0)
-        self.container_layout.setSpacing(4)
+        self.container_layout.setContentsMargins(0, SPACING['xs'], 0, 0)
+        self.container_layout.setSpacing(SPACING['xs'])
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 

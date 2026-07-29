@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 StudentListPage - page that displays student list with search, filter, add.
+Polished with professional CRM look.
 """
 import logging
 from typing import Optional, List
@@ -19,6 +20,7 @@ from centermanager.ui.design_system import (
     Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
     FilterBar, Breadcrumb
 )
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
 from centermanager.ui.students.student_import_dialog import StudentImportDialog
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 class StudentListItem(QFrame):
+    """Professional student list item with avatar, name, code, status, updated."""
+    
     def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._student = student
@@ -37,59 +41,67 @@ class StudentListItem(QFrame):
 
     def _setup_ui(self) -> None:
         self.setFrameStyle(QFrame.Shape.NoFrame)
-        self.setStyleSheet("""
-            QFrame {
-                background: white;
-                border-bottom: 1px solid #f0f0f0;
-                padding: 2px 6px;
-            }
-            QFrame:hover {
-                background: #f8f9fa;
-            }
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: {COLORS['surface']};
+                border-bottom: 1px solid {COLORS['border_light']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
+            }}
+            QFrame:hover {{
+                background: {COLORS['surface_hover']};
+            }}
         """)
-        self.setFixedHeight(48)
+        self.setFixedHeight(52)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
+        layout.setSpacing(SPACING['md'])
 
-        avatar = Avatar(self._student.full_name, size=28)
-        avatar.setFixedSize(28, 28)
+        # Avatar
+        avatar = Avatar(self._student.full_name, size=32)
+        avatar.setFixedSize(32, 32)
         layout.addWidget(avatar)
 
+        # Info: Name + Code
         info_layout = QVBoxLayout()
         info_layout.setSpacing(0)
         info_layout.setContentsMargins(0, 0, 0, 0)
-
+        
         name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet("font-size: 13px; font-weight: 500;")
+        name_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['body']}px;
+            font-weight: 500;
+            color: {COLORS['text_primary']};
+        """)
         name_label.setWordWrap(False)
         info_layout.addWidget(name_label)
-
+        
         code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet("font-size: 11px; color: #888;")
+        code_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['text_muted']};
+        """)
         info_layout.addWidget(code_label)
-
+        
         layout.addLayout(info_layout, 1)
 
+        # Status badge
         status = self._student.status or "ACTIVE"
-        color = "#4caf50" if status == "ACTIVE" else "#ff9800"
-        status_label = QLabel(status)
-        status_label.setStyleSheet(f"""
-            background: {color}22;
-            color: {color};
-            padding: 0px 6px;
-            border-radius: 8px;
-            font-size: 10px;
-            font-weight: 500;
-        """)
-        status_label.setFixedHeight(18)
-        layout.addWidget(status_label)
+        from centermanager.ui.design_system.components import StatusBadge
+        badge = StatusBadge(status)
+        layout.addWidget(badge)
 
+        # Last updated
         if self._student.updated_at:
             time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y"))
-            time_label.setStyleSheet("font-size: 10px; color: #aaa;")
+            time_label.setStyleSheet(f"""
+                font-size: {TYPOGRAPHY['caption']}px;
+                color: {COLORS['text_muted']};
+            """)
             layout.addWidget(time_label)
+
+        # Selection indicator (left border) - will be handled by list selection
+        self.setProperty("selected", False)
 
     @property
     def student(self) -> Student:
@@ -124,28 +136,38 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
+        # Toolbar with search, filter, add
         toolbar = QWidget()
-        toolbar.setStyleSheet("background: white; padding: 6px 10px; border-bottom: 1px solid #e8e8e8;")
+        toolbar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(4)
+        toolbar_layout.setSpacing(SPACING['xs'])
 
         top_row = QHBoxLayout()
+        top_row.setSpacing(SPACING['sm'])
+        
         self.search_bar = SearchBar()
+        self.search_bar.setPlaceholderText("Search by code, name, phone, parent...")
         self.search_bar.text_changed.connect(self._filter)
         top_row.addWidget(self.search_bar)
 
         self.filter_btn = SecondaryButton("🔍 Filter")
+        self.filter_btn.setFixedHeight(34)
         self.filter_btn.clicked.connect(self.filter_clicked.emit)
         top_row.addWidget(self.filter_btn)
 
         self.add_btn = PrimaryButton("+ Add")
+        self.add_btn.setFixedHeight(34)
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
 
         toolbar_layout.addLayout(top_row)
 
+        # Filter bar (collapsible, but we keep it visible)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -156,29 +178,42 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
+        # Count label
         self.count_label = QLabel("0 students")
-        self.count_label.setStyleSheet("padding: 2px 10px; font-size: 12px; color: #888;")
+        self.count_label.setStyleSheet(f"""
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['text_muted']};
+            background: {COLORS['gray_50']};
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
         layout.addWidget(self.count_label)
 
+        # List
         self.list_widget = QListWidget()
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        self.list_widget.setStyleSheet("""
-            QListWidget {
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
                 border: none;
                 outline: none;
-                background: white;
-            }
-            QListWidget::item {
+                background: {COLORS['surface']};
+            }}
+            QListWidget::item {{
                 padding: 0px;
-            }
-            QListWidget::item:selected {
-                background: #e3f2fd;
-            }
+            }}
+            QListWidget::item:selected {{
+                background: transparent;
+            }}
+            QListWidget::item:selected QFrame {{
+                background: {COLORS['primary_hover']};
+                border-left: 3px solid {COLORS['primary']};
+            }}
         """)
         self.list_widget.setSpacing(0)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
 
+        # Empty state (overlay, hidden initially)
         self.empty_widget = EmptyState(
             icon="👤",
             title="No students found",

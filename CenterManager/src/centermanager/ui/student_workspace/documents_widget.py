@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 DocumentsWidget - display and manage student documents.
+Removed duplicate title.
 """
 import os
 import sys
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
 from centermanager.models.document import Document
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.core.paths import get_paths
-
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 class DocumentCard(QFrame):
     def __init__(self, doc: Document, parent: Optional[QWidget] = None):
@@ -89,14 +90,13 @@ class DocumentsWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(SPACING['sm'])
 
+        # No title - title is in parent section
         header = QHBoxLayout()
-        title = QLabel("📎 Documents")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        header.addWidget(title)
         header.addStretch()
         self.upload_btn = QPushButton("+ Upload")
+        self.upload_btn.setFixedHeight(32)
         self.upload_btn.clicked.connect(self._on_upload)
         header.addWidget(self.upload_btn)
         layout.addLayout(header)
@@ -106,8 +106,8 @@ class DocumentsWidget(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(0, 4, 0, 0)
-        self.container_layout.setSpacing(4)
+        self.container_layout.setContentsMargins(0, SPACING['xs'], 0, 0)
+        self.container_layout.setSpacing(SPACING['xs'])
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 

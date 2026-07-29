@@ -7,6 +7,7 @@ from typing import Optional, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QSizePolicy
 
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
 
 
@@ -18,13 +19,20 @@ class QuickActionsWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(SPACING['sm'])
 
+        # All buttons with consistent styling
         self.edit_btn = PrimaryButton("✏️ Edit")
         self.add_parent_btn = SecondaryButton("👨‍👩‍👧 Add Parent")
         self.add_assessment_btn = SecondaryButton("📊 Add Assessment")
         self.add_note_btn = SecondaryButton("📝 Add Note")
         self.upload_doc_btn = SecondaryButton("📎 Upload Doc")
+
+        # Ensure consistent height
+        for btn in [self.edit_btn, self.add_parent_btn, self.add_assessment_btn, 
+                    self.add_note_btn, self.upload_doc_btn]:
+            btn.setFixedHeight(34)
+            btn.setMinimumWidth(120)
 
         layout.addWidget(self.edit_btn)
         layout.addWidget(self.add_parent_btn)

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 EmptyState - Standard empty state for all workspaces.
+Now with optional action button.
 """
 from typing import Optional
 
@@ -48,7 +49,7 @@ class EmptyState(QWidget):
             desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             desc_label.setStyleSheet(f"""
                 font-size: {TYPOGRAPHY['body']}px;
-                color: {COLORS['muted']};
+                color: {COLORS['text_muted']};
             """)
             desc_label.setWordWrap(True)
             layout.addWidget(desc_label)
@@ -56,5 +57,6 @@ class EmptyState(QWidget):
         if action_text and action_callback:
             from centermanager.ui.design_system.components import PrimaryButton
             btn = PrimaryButton(action_text)
+            btn.setFixedHeight(36)
             btn.clicked.connect(action_callback)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)

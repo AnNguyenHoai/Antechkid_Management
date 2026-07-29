@@ -39,6 +39,8 @@ from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
 )
+# THÊM IMPORT TOKENS
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,11 @@ class StudentDetailPage(QWidget):
 
         # Top bar with back button
         top_bar = QWidget()
-        top_bar.setStyleSheet("background: white; border-bottom: 1px solid #e8e8e8; padding: 4px 12px;")
+        top_bar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            border-bottom: 1px solid {COLORS['border_light']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+        """)
         top_bar_layout = QHBoxLayout(top_bar)
         self.back_btn = SecondaryButton("← Back")
         self.back_btn.clicked.connect(self.back_clicked.emit)
@@ -100,8 +106,8 @@ class StudentDetailPage(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(24, 16, 24, 16)
-        container_layout.setSpacing(20)
+        container_layout.setContentsMargins(SPACING['xl'], SPACING['lg'], SPACING['xl'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
 
         # Quick Actions
         self.quick_actions = QuickActionsWidget()
@@ -119,7 +125,7 @@ class StudentDetailPage(QWidget):
         self.parents_section = self._create_vertical_section("👨‍👩‍👦 Parents")
         self.parents_container = QWidget()
         self.parents_layout = QVBoxLayout(self.parents_container)
-        self.parents_layout.setSpacing(8)
+        self.parents_layout.setSpacing(SPACING['sm'])
         self.parents_layout.setContentsMargins(0, 0, 0, 0)
         self.parents_section.layout().addWidget(self.parents_container)
         container_layout.addWidget(self.parents_section)
@@ -166,13 +172,18 @@ class StudentDetailPage(QWidget):
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(SPACING['xs'])
         title_label = QLabel(title)
-        title_label.setStyleSheet(styles.SECTION_TITLE)
+        title_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['section_title']}px;
+            font-weight: 600;
+            color: {COLORS['text_primary']};
+        """)
         layout.addWidget(title_label)
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
         layout.addWidget(line)
         return section
 
@@ -253,18 +264,22 @@ class StudentDetailPage(QWidget):
         if not parents:
             empty_widget = QWidget()
             empty_layout = QVBoxLayout(empty_widget)
-            empty_layout.setContentsMargins(0, 8, 0, 8)
-            empty_layout.setSpacing(4)
+            empty_layout.setContentsMargins(0, SPACING['sm'], 0, SPACING['sm'])
+            empty_layout.setSpacing(SPACING['xs'])
             icon = QLabel("👨‍👩‍👧")
             icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon.setStyleSheet("font-size: 28px;")
+            icon.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
+            empty_layout.addWidget(icon)
             msg = QLabel("No parent information.\nAdd a guardian to this student.")
             msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setStyleSheet("color: #999; font-size: 14px;")
-            empty_layout.addWidget(icon)
+            msg.setStyleSheet(f"""
+                color: {COLORS['text_muted']};
+                font-size: {TYPOGRAPHY['body']}px;
+            """)
             empty_layout.addWidget(msg)
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
+            add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
             empty_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self.parents_layout.addWidget(empty_widget)
@@ -276,6 +291,7 @@ class StudentDetailPage(QWidget):
                 self.parents_layout.addWidget(card)
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
+            add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
             self.parents_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 

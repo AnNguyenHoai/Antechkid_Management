@@ -284,40 +284,37 @@ class SectionHeader(QWidget):
             action_btn.clicked.connect(action_callback)
             layout.addWidget(action_btn)
 
-
 # ===== StatusBadge =====
 class StatusBadge(QLabel):
     """Status badge with color coding."""
-
+    
     def __init__(self, status: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._setup_ui(status)
-
+    
     def _setup_ui(self, status: str) -> None:
+        from centermanager.ui.design_system.tokens import BADGE_COLORS, TYPOGRAPHY, SPACING
+        
         status_upper = status.upper()
-        color_map = {
-            "ACTIVE": COLORS['success'],
-            "ARCHIVED": COLORS['warning'],
-            "INACTIVE": COLORS['danger'],
-            "COMPLETED": COLORS['success'],
-            "SCHEDULED": COLORS['primary'],
-            "CANCELLED": COLORS['danger'],
-            "POSTPONED": COLORS['warning'],
-            "EXCELLENT": COLORS['success'],
-            "GOOD": COLORS['primary'],
-            "NORMAL": COLORS['warning'],
-            "NEED_IMPROVEMENT": COLORS['danger'],
-        }
-        color = color_map.get(status_upper, COLORS['muted'])
+        colors = BADGE_COLORS.get(status_upper, {"bg": "#f5f5f5", "text": "#616161"})
+        
         self.setText(status_upper.capitalize())
         self.setStyleSheet(f"""
-            background: {color}22;
-            color: {color};
-            padding: 2px {SPACING['sm']}px;
-            border-radius: 12px;
-            font-size: {TYPOGRAPHY['caption']}px;
-            font-weight: 500;
+            QLabel {{
+                background: {colors['bg']};
+                color: {colors['text']};
+                padding: 2px {SPACING['sm']}px;
+                border-radius: 12px;
+                font-size: {TYPOGRAPHY['badge']}px;
+                font-weight: 600;
+                letter-spacing: 0.3px;
+            }}
         """)
+        self.setFixedHeight(22)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    
+    def set_status(self, status: str) -> None:
+        self._setup_ui(status)
 
 
 # ===== Avatar =====
