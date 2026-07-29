@@ -66,10 +66,7 @@ docs/
 migrations/
   versions/
     __init__.py
-    6_create_session_notes_table.py
-    7_create_student_highlights_table.py
-    8_add_class_id_to_enrollments.py
-    e17aaa0fba11_initial_schema.py
+    28f685d19841_initial_schema.py
   env.py
   README
   script.py.mako
@@ -7464,145 +7461,13 @@ File: migrations/versions/__init__.py
 
 
 ================
-File: migrations/versions/6_create_session_notes_table.py
-================
-"""create session_notes table
-
-Revision ID: 6_create_session_notes
-Revises: e17aaa0fba11
-Create Date: 2026-07-28 00:00:00.000000
-
-"""
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
-
-# revision identifiers, used by Alembic.
-revision: str = '6_create_session_notes'
-down_revision: Union[str, Sequence[str], None] = 'e17aaa0fba11'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
-
-def upgrade() -> None:
-    # Create session_notes table
-    op.create_table(
-        'session_notes',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('session_id', sa.Integer(), nullable=False),
-        sa.Column('teaching_progress', sa.String(50), nullable=False),
-        sa.Column('class_atmosphere', sa.String(50), nullable=False),
-        sa.Column('difficulties', sa.Text(), nullable=True),
-        sa.Column('next_plan', sa.Text(), nullable=True),
-        sa.Column('remark', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-        sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('session_id', name='uq_session_note_session')
-    )
-    op.create_index('idx_session_notes_session_id', 'session_notes', ['session_id'])
-
-
-def downgrade() -> None:
-    op.drop_index('idx_session_notes_session_id')
-    op.drop_table('session_notes')
-
-================
-File: migrations/versions/7_create_student_highlights_table.py
-================
-"""create student_highlights table
-
-Revision ID: 7_create_student_highlights
-Revises: 6_create_session_notes
-Create Date: 2026-07-28 00:00:00.000000
-
-"""
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
-
-# revision identifiers, used by Alembic.
-revision: str = '7_create_student_highlights'
-down_revision: Union[str, Sequence[str], None] = '6_create_session_notes'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
-
-def upgrade() -> None:
-    # Create student_highlights table
-    op.create_table(
-        'student_highlights',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('session_id', sa.Integer(), nullable=False),
-        sa.Column('student_id', sa.Integer(), nullable=False),
-        sa.Column('type', sa.String(50), nullable=False),
-        sa.Column('title', sa.String(200), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-        sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['student_id'], ['students.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('idx_student_highlights_session_id', 'student_highlights', ['session_id'])
-    op.create_index('idx_student_highlights_student_id', 'student_highlights', ['student_id'])
-    op.create_index('idx_student_highlights_type', 'student_highlights', ['type'])
-
-
-def downgrade() -> None:
-    op.drop_index('idx_student_highlights_type')
-    op.drop_index('idx_student_highlights_student_id')
-    op.drop_index('idx_student_highlights_session_id')
-    op.drop_table('student_highlights')
-
-================
-File: migrations/versions/8_add_class_id_to_enrollments.py
-================
-"""add class_id to enrollments
-
-Revision ID: 8_add_class_id_to_enrollments
-Revises: 7_create_student_highlights
-Create Date: 2026-07-28 00:00:00.000000
-
-"""
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
-
-# revision identifiers, used by Alembic.
-revision: str = '8_add_class_id_to_enrollments'
-down_revision: Union[str, Sequence[str], None] = '7_create_student_highlights'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
-
-def upgrade() -> None:
-    # Thêm cột class_id (nullable)
-    op.add_column('enrollments', sa.Column('class_id', sa.Integer(), nullable=True))
-    # Tạo index cho truy vấn
-    op.create_index('idx_enrollments_class_id', 'enrollments', ['class_id'])
-    # Không thêm foreign key constraint vì SQLite không hỗ trợ ALTER TABLE thêm constraint.
-
-
-def downgrade() -> None:
-    op.drop_index('idx_enrollments_class_id')
-    op.drop_column('enrollments', 'class_id')
-
-================
-File: migrations/versions/e17aaa0fba11_initial_schema.py
+File: migrations/versions/28f685d19841_initial_schema.py
 ================
 """initial_schema
 
-Revision ID: e17aaa0fba11
+Revision ID: 28f685d19841
 Revises: 
-Create Date: 2026-07-28 17:31:11.777859
+Create Date: 2026-07-29 11:32:31.526254
 
 """
 from typing import Sequence, Union
@@ -7612,7 +7477,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e17aaa0fba11'
+revision: str = '28f685d19841'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -7621,6 +7486,17 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.create_table('classes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('course', sa.String(length=100), nullable=True),
+    sa.Column('teacher', sa.String(length=100), nullable=True),
+    sa.Column('start_date', sa.Date(), nullable=True),
+    sa.Column('end_date', sa.Date(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('students',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_code', sa.String(length=20), nullable=False),
@@ -7681,8 +7557,10 @@ def upgrade() -> None:
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('class_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -7712,6 +7590,22 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('sessions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('session_number', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('lesson_topic', sa.String(length=200), nullable=True),
+    sa.Column('scheduled_date', sa.Date(), nullable=False),
+    sa.Column('actual_date', sa.Date(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('class_id', 'session_number', name='uq_session_number_per_class')
+    )
     op.create_table('student_products',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
@@ -7739,22 +7633,54 @@ def upgrade() -> None:
     )
     op.create_index('idx_timeline_events_created_at', 'timeline_events', ['created_at'], unique=False)
     op.create_index('idx_timeline_events_student_id', 'timeline_events', ['student_id'], unique=False)
+    op.create_table('session_notes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('session_id', sa.Integer(), nullable=False),
+    sa.Column('teaching_progress', sa.String(length=50), nullable=False),
+    sa.Column('class_atmosphere', sa.String(length=50), nullable=False),
+    sa.Column('difficulties', sa.Text(), nullable=True),
+    sa.Column('next_plan', sa.Text(), nullable=True),
+    sa.Column('remark', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('session_id'),
+    sa.UniqueConstraint('session_id', name='uq_session_note_session')
+    )
+    op.create_table('student_highlights',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('session_id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('type', sa.String(length=50), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_table('student_highlights')
+    op.drop_table('session_notes')
     op.drop_index('idx_timeline_events_student_id', table_name='timeline_events')
     op.drop_index('idx_timeline_events_created_at', table_name='timeline_events')
     op.drop_table('timeline_events')
     op.drop_table('student_products')
+    op.drop_table('sessions')
     op.drop_table('progress')
     op.drop_table('parents')
     op.drop_table('enrollments')
     op.drop_table('attachments')
     op.drop_table('assessments')
     op.drop_table('students')
+    op.drop_table('classes')
     # ### end Alembic commands ###
 
 ================
@@ -10659,6 +10585,7 @@ File: src/centermanager/services/student_dashboard_service.py
 """
 StudentDashboardService - provides aggregated data for the Student Workspace dashboard.
 """
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
@@ -10674,10 +10601,11 @@ from centermanager.repositories.timeline_repository import TimelineRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.parent_repository import ParentRepository
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DashboardStats:
-    """Statistics for dashboard."""
     total: int
     active: int
     archived: int
@@ -10686,7 +10614,6 @@ class DashboardStats:
 
 @dataclass
 class RecentActivity:
-    """A recent timeline activity."""
     student_name: str
     student_code: str
     title: str
@@ -10695,7 +10622,6 @@ class RecentActivity:
 
 @dataclass
 class AttentionStudent:
-    """A student requiring attention."""
     student_id: int
     student_code: str
     full_name: str
@@ -10703,13 +10629,10 @@ class AttentionStudent:
 
 
 class StudentDashboardService:
-    """Service to provide dashboard data."""
-
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
 
     def get_stats(self) -> DashboardStats:
-        """Get student statistics."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             all_students = repo.list_all_including_deleted()
@@ -10720,6 +10643,8 @@ class StudentDashboardService:
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             new_this_month = sum(1 for s in all_students
                                  if s.created_at >= month_start and s.deleted_at is None)
+            logger.info(f"Dashboard stats: total={total}, active={active}, archived={archived}, new={new_this_month}")
+            # Sửa lỗi: trả về đúng tham số
             return DashboardStats(
                 total=total,
                 active=active,
@@ -10728,7 +10653,6 @@ class StudentDashboardService:
             )
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
-        """Get most recent timeline activities across all students."""
         with self._session_factory() as session:
             events = session.query(TimelineEvent).order_by(
                 TimelineEvent.created_at.desc()
@@ -10745,7 +10669,6 @@ class StudentDashboardService:
             return result
 
     def get_students_requiring_attention(self) -> List[AttentionStudent]:
-        """Identify students with missing data or issues."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             active_students = repo.list_active()
@@ -10771,7 +10694,6 @@ class StudentDashboardService:
                         reason="No assessment recorded"
                     ))
                     continue
-                # Can add other conditions later
             return result
 
 ================
@@ -12391,7 +12313,7 @@ class Avatar(QLabel):
     def __init__(
         self,
         name: str,
-        size: int = 36,
+        size: int = 32,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -12404,11 +12326,12 @@ class Avatar(QLabel):
         self.setText(initials)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedSize(self._size, self._size)
+        font_size = max(10, self._size // 2)
         self.setStyleSheet(f"""
             QLabel {{
                 background: #1976d2;
                 color: white;
-                font-size: {self._size // 2}px;
+                font-size: {font_size}px;
                 font-weight: 600;
                 border-radius: {self._size // 2}px;
             }}
@@ -12421,8 +12344,7 @@ class Avatar(QLabel):
             return "?"
         if len(parts) == 1:
             return parts[0][0].upper()
-        else:
-            return (parts[0][0] + parts[-1][0]).upper()
+        return (parts[0][0] + parts[-1][0]).upper()
 
     def set_name(self, name: str) -> None:
         self._name = name
@@ -12727,7 +12649,6 @@ from centermanager.ui.design_system.tokens import (
     COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS, SHADOWS
 )
 
-
 # ===== StatisticCard =====
 class StatisticCard(QFrame):
     """Statistic card with icon, label, and value."""
@@ -12749,21 +12670,22 @@ class StatisticCard(QFrame):
                 background: white;
                 border-radius: {BORDER_RADIUS}px;
                 border: 1px solid {COLORS['border']};
-                padding: {SPACING['md']}px;
+                padding: {SPACING['xs']}px {SPACING['sm']}px;
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(100)
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(72)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
-        layout.setSpacing(SPACING['xs'])
+        layout.setContentsMargins(SPACING['xs'], SPACING['xs'], SPACING['xs'], SPACING['xs'])
+        layout.setSpacing(2)
 
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(SPACING['sm'])
+        top_layout.setSpacing(SPACING['xs'])
 
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
+        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
         top_layout.addWidget(icon_label)
 
         label_label = QLabel(label)
@@ -12771,7 +12693,7 @@ class StatisticCard(QFrame):
             font-size: {TYPOGRAPHY['caption']}px;
             color: {COLORS['muted']};
             font-weight: 500;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
             text-transform: uppercase;
         """)
         top_layout.addWidget(label_label)
@@ -12781,7 +12703,7 @@ class StatisticCard(QFrame):
 
         self.value_label = QLabel(value)
         self.value_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['stat_value']}px;
+            font-size: 20px;
             font-weight: 700;
             color: {COLORS['text_primary']};
         """)
@@ -12884,7 +12806,7 @@ class ActivityCard(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background: transparent;
-                padding: {SPACING['sm']}px 0;
+                padding: {SPACING['xs']}px 0;
                 border-bottom: 1px solid {COLORS['border_light']};
             }}
             QFrame:hover {{
@@ -12892,12 +12814,12 @@ class ActivityCard(QFrame):
             }}
         """)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
-        layout.setSpacing(SPACING['md'])
+        layout.setContentsMargins(SPACING['xs'], SPACING['xs'], SPACING['xs'], SPACING['xs'])
+        layout.setSpacing(SPACING['sm'])
 
         icon_label = QLabel(icon)
         icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
-        icon_label.setFixedWidth(32)
+        icon_label.setFixedWidth(24)
         layout.addWidget(icon_label)
 
         content_layout = QVBoxLayout()
@@ -12913,7 +12835,7 @@ class ActivityCard(QFrame):
 
         sub_label = QLabel(f"{student_name} ({student_code})")
         sub_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['body_small']}px;
+            font-size: {TYPOGRAPHY['caption']}px;
             color: {COLORS['muted']};
         """)
         content_layout.addWidget(sub_label)
@@ -13464,12 +13386,13 @@ class InfoPanel(QWidget):
     ) -> None:
         super().__init__(parent)
         self._items = items
+        self._layout = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QFormLayout(self)
-        layout.setSpacing(SPACING['sm'])
-        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self._layout = QFormLayout(self)
+        self._layout.setSpacing(SPACING['sm'])
+        self._layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         for item in self._items:
             label = QLabel(item.get('label', ''))
@@ -13483,13 +13406,13 @@ class InfoPanel(QWidget):
                 font-size: {TYPOGRAPHY['body']}px;
                 color: {COLORS['text_primary']};
             """)
-            layout.addRow(label, value)
+            self._layout.addRow(label, value)
 
     def update_value(self, label: str, new_value: str) -> None:
-        for i in range(self.layout.rowCount()):
-            item = self.layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
+        for i in range(self._layout.rowCount()):
+            item = self._layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
             if item and item.widget() and item.widget().text() == label:
-                value_widget = self.layout.itemAt(i, QFormLayout.ItemRole.FieldRole).widget()
+                value_widget = self._layout.itemAt(i, QFormLayout.ItemRole.FieldRole).widget()
                 if value_widget and isinstance(value_widget, QLabel):
                     value_widget.setText(new_value)
                     break
@@ -15283,9 +15206,10 @@ File: src/centermanager/ui/student_workspace/student_dashboard_page.py
 """
 StudentDashboardPage - redesigned dashboard using design system components.
 """
+import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
     QGridLayout
@@ -15297,6 +15221,8 @@ from centermanager.ui.design_system import (
     PrimaryButton, SecondaryButton
 )
 from centermanager.ui.design_system.tokens import SPACING, COLORS
+
+logger = logging.getLogger(__name__)
 
 
 class StudentDashboardPage(QWidget):
@@ -15313,7 +15239,7 @@ class StudentDashboardPage(QWidget):
         super().__init__(parent)
         self._service = dashboard_service
         self._setup_ui()
-        self.refresh()
+        QTimer.singleShot(100, self.refresh)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -15328,12 +15254,13 @@ class StudentDashboardPage(QWidget):
         container = QWidget()
         container.setStyleSheet(f"background: {COLORS['background']};")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['xl'], SPACING['xl'], SPACING['xl'], SPACING['xl'])
-        container_layout.setSpacing(SPACING['xl'])
+        # Giảm padding từ xl (24) xuống md (12)
+        container_layout.setContentsMargins(SPACING['md'], SPACING['md'], SPACING['md'], SPACING['md'])
+        container_layout.setSpacing(SPACING['lg'])
 
-        # ---- Statistics grid ----
+        # Stats grid
         self.stats_grid = QGridLayout()
-        self.stats_grid.setSpacing(SPACING['md'])
+        self.stats_grid.setSpacing(SPACING['sm'])
         self.stats_grid.setContentsMargins(0, 0, 0, 0)
 
         self.stat_cards = []
@@ -15345,11 +15272,13 @@ class StudentDashboardPage(QWidget):
         ]
         for i, (icon, label, default) in enumerate(stat_data):
             card = StatisticCard(icon, label, default)
+            # Đảm bảo card có kích thước đủ lớn
+            card.setMinimumHeight(80)
             self.stat_cards.append(card)
             self.stats_grid.addWidget(card, i // 2, i % 2)
         container_layout.addLayout(self.stats_grid)
 
-        # ---- Recent Activities ----
+        # Recent Activities
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -15370,7 +15299,7 @@ class StudentDashboardPage(QWidget):
         recent_layout.addWidget(self.recent_container)
         container_layout.addWidget(self.recent_section)
 
-        # ---- Students Requiring Attention ----
+        # Students Requiring Attention
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -15389,7 +15318,7 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Quick Actions ----
+        # Quick Actions
         actions_section = QWidget()
         actions_layout = QHBoxLayout(actions_section)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -15414,63 +15343,72 @@ class StudentDashboardPage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        stats = self._service.get_stats()
-        self.stat_cards[0].set_value(str(stats.total))
-        self.stat_cards[1].set_value(str(stats.active))
-        self.stat_cards[2].set_value(str(stats.archived))
-        self.stat_cards[3].set_value(str(stats.new_this_month))
+        logger.debug("Refreshing dashboard...")
+        try:
+            stats = self._service.get_stats()
+            logger.info(f"Dashboard stats: total={stats.total}, active={stats.active}, archived={stats.archived}, new={stats.new_this_month}")
+            self.stat_cards[0].set_value(str(stats.total))
+            self.stat_cards[1].set_value(str(stats.active))
+            self.stat_cards[2].set_value(str(stats.archived))
+            self.stat_cards[3].set_value(str(stats.new_this_month))
+        except Exception as e:
+            logger.exception("Failed to get dashboard stats")
 
-        # Recent activities
         self._clear_layout(self.recent_container_layout)
-        activities = self._service.get_recent_activities(limit=8)
-        if activities:
-            for act in activities:
-                card = ActivityCard(
-                    icon="📌",
-                    title=act.title,
-                    student_name=act.student_name,
-                    student_code=act.student_code,
-                    time=act.time
+        try:
+            activities = self._service.get_recent_activities(limit=8)
+            if activities:
+                for act in activities:
+                    card = ActivityCard(
+                        icon="📌",
+                        title=act.title,
+                        student_name=act.student_name,
+                        student_code=act.student_code,
+                        time=act.time
+                    )
+                    self.recent_container_layout.addWidget(card)
+            else:
+                empty = EmptyState(
+                    icon="📭",
+                    title="No recent activities",
+                    description="Activities will appear here when students are updated."
                 )
-                self.recent_container_layout.addWidget(card)
-        else:
-            empty = EmptyState(
-                icon="📭",
-                title="No recent activities",
-                description="Activities will appear here when students are updated."
-            )
-            self.recent_container_layout.addWidget(empty)
+                self.recent_container_layout.addWidget(empty)
+        except Exception as e:
+            logger.exception("Failed to load recent activities")
 
-        # Attention students
         self._clear_layout(self.attention_container_layout)
-        attention = self._service.get_students_requiring_attention()
-        if attention:
-            for item in attention:
-                btn = SecondaryButton(
-                    f"⚠️ {item.full_name} ({item.student_code}) – {item.reason}"
+        try:
+            attention = self._service.get_students_requiring_attention()
+            if attention:
+                for item in attention:
+                    btn = SecondaryButton(
+                        f"⚠️ {item.full_name} ({item.student_code}) – {item.reason}"
+                    )
+                    btn.setStyleSheet(btn.styleSheet() + """
+                        QPushButton {
+                            text-align: left;
+                            padding: 8px 12px;
+                            background: #fff3e0;
+                            border-color: #ffe0b2;
+                        }
+                        QPushButton:hover {
+                            background: #ffe0b2;
+                        }
+                    """)
+                    btn.clicked.connect(
+                        lambda checked, sid=item.student_id: self.student_selected.emit(sid)
+                    )
+                    self.attention_container_layout.addWidget(btn)
+            else:
+                empty = EmptyState(
+                    icon="✅",
+                    title="All good!",
+                    description="No students require attention."
                 )
-                btn.setStyleSheet(btn.styleSheet() + """
-                    QPushButton {
-                        text-align: left;
-                        padding: 8px 12px;
-                        background: #fff3e0;
-                        border-color: #ffe0b2;
-                    }
-                    QPushButton:hover {
-                        background: #ffe0b2;
-                    }
-                """)
-                btn.clicked.connect(
-                    lambda checked, sid=item.student_id: self.student_selected.emit(sid)
-                )
-                self.attention_container_layout.addWidget(btn)
-        else:
-            empty = EmptyState(
-                icon="✅",
-                title="All good!",
-                description="No students require attention."
-            )
-            self.attention_container_layout.addWidget(empty)
+                self.attention_container_layout.addWidget(empty)
+        except Exception as e:
+            logger.exception("Failed to load attention students")
 
     def _clear_layout(self, layout) -> None:
         while layout.count():
@@ -15888,30 +15826,36 @@ class StudentListItem(QFrame):
             QFrame {
                 background: white;
                 border-bottom: 1px solid #f0f0f0;
-                padding: 6px 12px;
+                padding: 2px 6px;
             }
             QFrame:hover {
                 background: #f8f9fa;
             }
         """)
-        self.setFixedHeight(56)
+        self.setFixedHeight(48)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(10)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(6)
 
-        avatar = Avatar(self._student.full_name, size=32)
+        avatar = Avatar(self._student.full_name, size=28)
+        avatar.setFixedSize(28, 28)
         layout.addWidget(avatar)
 
         info_layout = QVBoxLayout()
         info_layout.setSpacing(0)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+
         name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet("font-size: 14px; font-weight: 500;")
+        name_label.setStyleSheet("font-size: 13px; font-weight: 500;")
+        name_label.setWordWrap(False)
         info_layout.addWidget(name_label)
+
         code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet("font-size: 12px; color: #888;")
+        code_label.setStyleSheet("font-size: 11px; color: #888;")
         info_layout.addWidget(code_label)
-        layout.addLayout(info_layout)
+
+        layout.addLayout(info_layout, 1)
 
         status = self._student.status or "ACTIVE"
         color = "#4caf50" if status == "ACTIVE" else "#ff9800"
@@ -15919,18 +15863,17 @@ class StudentListItem(QFrame):
         status_label.setStyleSheet(f"""
             background: {color}22;
             color: {color};
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 11px;
+            padding: 0px 6px;
+            border-radius: 8px;
+            font-size: 10px;
             font-weight: 500;
         """)
+        status_label.setFixedHeight(18)
         layout.addWidget(status_label)
-
-        layout.addStretch()
 
         if self._student.updated_at:
             time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y"))
-            time_label.setStyleSheet("font-size: 11px; color: #aaa;")
+            time_label.setStyleSheet("font-size: 10px; color: #aaa;")
             layout.addWidget(time_label)
 
     @property
@@ -15941,6 +15884,7 @@ class StudentListItem(QFrame):
 class StudentListPage(QWidget):
     student_selected = Signal(int)
     filter_clicked = Signal()
+    data_updated = Signal()
 
     def __init__(
         self,
@@ -15967,12 +15911,11 @@ class StudentListPage(QWidget):
 
         # Toolbar
         toolbar = QWidget()
-        toolbar.setStyleSheet("background: white; padding: 8px 12px; border-bottom: 1px solid #e8e8e8;")
+        toolbar.setStyleSheet("background: white; padding: 6px 10px; border-bottom: 1px solid #e8e8e8;")
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(6)
+        toolbar_layout.setSpacing(4)
 
-        # Search and actions
         top_row = QHBoxLayout()
         self.search_bar = SearchBar()
         self.search_bar.text_changed.connect(self._filter)
@@ -15988,7 +15931,6 @@ class StudentListPage(QWidget):
 
         toolbar_layout.addLayout(top_row)
 
-        # Filter bar
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -15999,12 +15941,10 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        # Count
         self.count_label = QLabel("0 students")
-        self.count_label.setStyleSheet("padding: 4px 12px; font-size: 12px; color: #888;")
+        self.count_label.setStyleSheet("padding: 2px 10px; font-size: 12px; color: #888;")
         layout.addWidget(self.count_label)
 
-        # List
         self.list_widget = QListWidget()
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.list_widget.setStyleSheet("""
@@ -16038,11 +15978,9 @@ class StudentListPage(QWidget):
             self.student_selected.emit(widget.student.id)
 
     def _on_filter_changed(self, filters: dict) -> None:
-        # Apply filters (simplified - can be extended)
         self._apply_filters(filters)
 
     def _apply_filters(self, filters: dict) -> None:
-        # Simple filtering for demo
         self._filter(self.search_bar.text())
 
     def refresh(self) -> None:
@@ -16094,11 +16032,7 @@ class StudentListPage(QWidget):
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-
-    def show_import_dialog(self) -> None:
-        dialog = StudentImportDialog(self._import_service, parent=self)
-        if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
-            self.refresh()
+            self.data_updated.emit()  # instead of student_selected.emit(-1)
 
     def export_students(self) -> None:
         try:
@@ -16154,8 +16088,6 @@ from centermanager.ui.student_workspace.reports_page import ReportsPage
 
 
 class StudentWorkspaceShell(QWidget):
-    """Shell for Student Workspace with navigation and pages."""
-
     go_home = Signal()
     student_selected = Signal(int)
 
@@ -16186,6 +16118,8 @@ class StudentWorkspaceShell(QWidget):
         self._current_student_id: Optional[int] = None
         self._setup_ui()
         self._connect_signals()
+        # Refresh dashboard and navigate to dashboard
+        self.dashboard_page.refresh()
         self.navigate_to("dashboard")
 
     def _setup_ui(self) -> None:
@@ -16193,18 +16127,14 @@ class StudentWorkspaceShell(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
         self.header = WorkspaceHeader("Student Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
-        self.header.add_action_clicked.connect(self._on_add_action)
         layout.addWidget(self.header)
 
-        # Body: sidebar + content
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Navigation sidebar
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
@@ -16216,7 +16146,6 @@ class StudentWorkspaceShell(QWidget):
         self.nav.page_selected.connect(self.navigate_to)
         body.addWidget(self.nav)
 
-        # Content area
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
@@ -16235,6 +16164,7 @@ class StudentWorkspaceShell(QWidget):
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
+        self.list_page.data_updated.connect(self.dashboard_page.refresh)
         self.content_stack.addWidget(self.list_page)
 
         self.detail_page = StudentDetailPage(
@@ -16291,6 +16221,8 @@ class StudentWorkspaceShell(QWidget):
         self.header.set_context("Student Workspace", page_labels.get(page_id, ""))
         if page_id == "students":
             self.list_page.refresh()
+        elif page_id == "dashboard":
+            self.dashboard_page.refresh()
 
     def _on_student_selected(self, student_id: int) -> None:
         self._current_student_id = student_id
@@ -18520,22 +18452,24 @@ class WorkspaceButton(QFrame):
     def _setup_ui(self, name: str, icon: str, description: str) -> None:
         self.setFrameStyle(QFrame.Shape.NoFrame)
         opacity = "0.5" if self._disabled else "1"
-        background = "#f5f5f5" if self._disabled else "white"
+        background = "#f5f5f5" if self._disabled else "#fafafa"  # đổi thành xám nhạt
+        hover_bg = COLORS['gray_200']  # tăng độ tương phản khi hover
         self.setStyleSheet(f"""
             QFrame {{
                 background: {background};
                 border-radius: 12px;
-                border: 1px solid {COLORS['gray_200']};
+                border: 2px solid {COLORS['gray_300']};
                 padding: 16px;
                 opacity: {opacity};
+                min-height: 100px;
+                min-width: 200px;
             }}
             QFrame:hover {{
-                background: {COLORS['gray_50']};
+                background: {hover_bg};
                 border-color: {COLORS['primary']};
                 cursor: pointer;
             }}
         """)
-        self.setFixedHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)
@@ -18587,6 +18521,7 @@ class HomePage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        self.setStyleSheet("background-color: #e8ecf1;")  # nền xám nhạt hơn
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
@@ -18613,13 +18548,14 @@ class HomePage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        scroll.setStyleSheet("background: transparent; border: none;")
 
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         grid_layout = QGridLayout(container)
         grid_layout.setSpacing(16)
         grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         workspaces = [
             ("student", "👨‍🎓 Student Workspace", "Manage students, parents, assessments", False),
@@ -18632,9 +18568,8 @@ class HomePage(QWidget):
 
         row, col = 0, 0
         for ws_id, name, desc, disabled in workspaces:
-            icon = desc.split()[0]  # Take first word as icon? Actually name has emoji
-            # Use the first character of name for icon or just use as is
-            btn = WorkspaceButton(ws_id, name, name.split()[0], desc, disabled)
+            icon = name.split()[0] if name.split() else "📌"
+            btn = WorkspaceButton(ws_id, name, icon, desc, disabled)
             if not disabled:
                 btn.clicked.connect(self._on_workspace_clicked)
             grid_layout.addWidget(btn, row, col)
@@ -18642,6 +18577,10 @@ class HomePage(QWidget):
             if col >= 2:
                 col = 0
                 row += 1
+
+        # Đẩy các button lên trên
+        grid_layout.setRowStretch(row + 1, 1)
+        grid_layout.setColumnStretch(2, 1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
@@ -18741,7 +18680,6 @@ class MainWindow(QMainWindow):
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
             self.statusBar().showMessage("Student Workspace")
-            # Refresh list and dashboard
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
@@ -18756,7 +18694,6 @@ class MainWindow(QMainWindow):
     def _refresh_student_list(self) -> None:
         try:
             students = self._student_service.list_students()
-            # Pass to student workspace's list page
             self.student_workspace.list_page._students = students
             self.student_workspace.list_page.refresh()
         except Exception as e:
@@ -19013,14 +18950,13 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.ui.design_system.tokens import COLORS
-from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
+from centermanager.ui.design_system.components import SecondaryButton
 
 
 class WorkspaceHeader(QWidget):
     """Header displaying workspace name, current page, and actions."""
 
     back_home_clicked = Signal()
-    add_action_clicked = Signal()
 
     def __init__(
         self,
@@ -19070,11 +19006,7 @@ class WorkspaceHeader(QWidget):
 
         layout.addStretch()
 
-        # Add action
-        self.add_btn = PrimaryButton("+ Add")
-        self.add_btn.setFixedHeight(32)
-        self.add_btn.clicked.connect(self.add_action_clicked.emit)
-        layout.addWidget(self.add_btn)
+        # Không thêm nút Add ở header nữa
 
     def set_context(self, workspace_name: str, page_label: str) -> None:
         self._workspace_name = workspace_name
@@ -19172,7 +19104,7 @@ class WorkspaceNavigation(QWidget):
         # Workspace header
         header = QWidget()
         header.setStyleSheet(f"""
-            background: {COLORS['gray_50']};
+            background: {COLORS['gray_100']};
             padding: 12px 16px;
             border-bottom: 1px solid {COLORS['gray_200']};
         """)
@@ -19385,9 +19317,11 @@ def main() -> int:
 
     # Dashboard, Filter, Export, Import services
     dashboard_service = StudentDashboardService(session_factory)
-    filter_service = StudentFilterService(session_factory)      # có thể dùng sau
-    export_service = StudentExportService(student_service)      # có thể dùng sau
-    import_service = StudentImportService(student_service)      # có thể dùng sau
+    filter_service = StudentFilterService(session_factory)
+    export_service = StudentExportService(student_service)
+    import_service = StudentImportService(student_service)
+
+    logger.info("All services initialized")
 
     window = MainWindow(
         student_service=student_service,

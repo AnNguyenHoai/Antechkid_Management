@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from centermanager.ui.design_system.tokens import (
     COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS, SHADOWS
 )
+
 # ===== StatisticCard =====
 class StatisticCard(QFrame):
     """Statistic card with icon, label, and value."""
@@ -36,21 +37,22 @@ class StatisticCard(QFrame):
                 background: white;
                 border-radius: {BORDER_RADIUS}px;
                 border: 1px solid {COLORS['border']};
-                padding: {SPACING['sm']}px {SPACING['md']}px;
+                padding: {SPACING['xs']}px {SPACING['sm']}px;
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(72)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
-        layout.setSpacing(SPACING['xs'])
+        layout.setContentsMargins(SPACING['xs'], SPACING['xs'], SPACING['xs'], SPACING['xs'])
+        layout.setSpacing(2)
 
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(SPACING['sm'])
+        top_layout.setSpacing(SPACING['xs'])
 
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
+        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
         top_layout.addWidget(icon_label)
 
         label_label = QLabel(label)
@@ -58,7 +60,7 @@ class StatisticCard(QFrame):
             font-size: {TYPOGRAPHY['caption']}px;
             color: {COLORS['muted']};
             font-weight: 500;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
             text-transform: uppercase;
         """)
         top_layout.addWidget(label_label)
@@ -68,7 +70,7 @@ class StatisticCard(QFrame):
 
         self.value_label = QLabel(value)
         self.value_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['stat_value']}px;
+            font-size: 20px;
             font-weight: 700;
             color: {COLORS['text_primary']};
         """)
@@ -77,6 +79,7 @@ class StatisticCard(QFrame):
 
     def set_value(self, value: str) -> None:
         self.value_label.setText(value)
+
 
 # ===== InfoCard =====
 class InfoCard(QFrame):
@@ -170,7 +173,7 @@ class ActivityCard(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background: transparent;
-                padding: {SPACING['sm']}px 0;
+                padding: {SPACING['xs']}px 0;
                 border-bottom: 1px solid {COLORS['border_light']};
             }}
             QFrame:hover {{
@@ -178,12 +181,12 @@ class ActivityCard(QFrame):
             }}
         """)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
-        layout.setSpacing(SPACING['md'])
+        layout.setContentsMargins(SPACING['xs'], SPACING['xs'], SPACING['xs'], SPACING['xs'])
+        layout.setSpacing(SPACING['sm'])
 
         icon_label = QLabel(icon)
         icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
-        icon_label.setFixedWidth(32)
+        icon_label.setFixedWidth(24)
         layout.addWidget(icon_label)
 
         content_layout = QVBoxLayout()
@@ -199,7 +202,7 @@ class ActivityCard(QFrame):
 
         sub_label = QLabel(f"{student_name} ({student_code})")
         sub_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['body_small']}px;
+            font-size: {TYPOGRAPHY['caption']}px;
             color: {COLORS['muted']};
         """)
         content_layout.addWidget(sub_label)

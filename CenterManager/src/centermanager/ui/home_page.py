@@ -34,15 +34,17 @@ class WorkspaceButton(QFrame):
     def _setup_ui(self, name: str, icon: str, description: str) -> None:
         self.setFrameStyle(QFrame.Shape.NoFrame)
         opacity = "0.5" if self._disabled else "1"
-        background = "#f5f5f5" if self._disabled else "white"
-        hover_bg = COLORS['gray_100']
+        background = "#f5f5f5" if self._disabled else "#fafafa"  # đổi thành xám nhạt
+        hover_bg = COLORS['gray_200']  # tăng độ tương phản khi hover
         self.setStyleSheet(f"""
             QFrame {{
                 background: {background};
                 border-radius: 12px;
-                border: 1px solid {COLORS['gray_200']};
+                border: 2px solid {COLORS['gray_300']};
                 padding: 16px;
                 opacity: {opacity};
+                min-height: 100px;
+                min-width: 200px;
             }}
             QFrame:hover {{
                 background: {hover_bg};
@@ -50,7 +52,6 @@ class WorkspaceButton(QFrame):
                 cursor: pointer;
             }}
         """)
-        self.setFixedHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)
@@ -102,7 +103,7 @@ class HomePage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setStyleSheet("background-color: #f5f5f5;")
+        self.setStyleSheet("background-color: #e8ecf1;")  # nền xám nhạt hơn
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
@@ -129,13 +130,14 @@ class HomePage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        scroll.setStyleSheet("background: transparent; border: none;")
 
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         grid_layout = QGridLayout(container)
         grid_layout.setSpacing(16)
         grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         workspaces = [
             ("student", "👨‍🎓 Student Workspace", "Manage students, parents, assessments", False),
@@ -157,6 +159,10 @@ class HomePage(QWidget):
             if col >= 2:
                 col = 0
                 row += 1
+
+        # Đẩy các button lên trên
+        grid_layout.setRowStretch(row + 1, 1)
+        grid_layout.setColumnStretch(2, 1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
