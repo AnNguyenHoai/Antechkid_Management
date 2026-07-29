@@ -8,7 +8,8 @@ from typing import Optional
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QStatusBar
 from PySide6.QtCore import Qt
 
-from centermanager.ui.home_page import HomePage
+from centermanager.ui.home import HomePage  # nếu bạn đã tạo ui/home/HomePage
+# hoặc nếu vẫn dùng file cũ: from centermanager.ui.home_page import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         note_service,
         highlight_service,
         dashboard_service,
+        home_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -38,16 +40,17 @@ class MainWindow(QMainWindow):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._dashboard_service = dashboard_service
+        self._home_service = home_service
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
 
-        # Central stacked widget to switch between Home and Workspaces
+        # Central stacked widget
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
 
-        # Home Page
-        self.home_page = HomePage()
+        # Home Page (Command Center)
+        self.home_page = HomePage(home_service=self._home_service, parent=self)
         self.home_page.workspace_selected.connect(self._on_workspace_selected)
         self.central_stack.addWidget(self.home_page)
 
@@ -66,13 +69,10 @@ class MainWindow(QMainWindow):
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
 
-        # By default show Home
+        # Default: Home
         self.central_stack.setCurrentWidget(self.home_page)
 
-        # Status bar
         self.statusBar().showMessage("Ready")
-
-        # Load initial data
         self._refresh_student_list()
 
     def _on_workspace_selected(self, workspace_id: str) -> None:
@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
 
     def _go_home(self) -> None:
         self.central_stack.setCurrentWidget(self.home_page)
+        self.home_page.refresh()
         self.statusBar().showMessage("Home")
 
     def _refresh_student_list(self) -> None:

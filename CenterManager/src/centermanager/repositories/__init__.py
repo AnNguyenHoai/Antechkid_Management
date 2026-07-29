@@ -8,6 +8,7 @@ from .session_repository import SessionRepository
 from .session_note_repository import SessionNoteRepository
 from .student_highlight_repository import StudentHighlightRepository
 from .enrollment_repository import EnrollmentRepository
+from .class_repository import ClassRepository
 
 __all__ = [
     "BaseRepository",

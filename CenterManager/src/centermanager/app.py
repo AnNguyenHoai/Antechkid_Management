@@ -27,6 +27,8 @@ from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.ui.main_window import MainWindow
+from centermanager.services.home_dashboard_service import HomeDashboardService
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,7 @@ def main() -> int:
     filter_service = StudentFilterService(session_factory)
     export_service = StudentExportService(student_service)
     import_service = StudentImportService(student_service)
-
+    home_service = HomeDashboardService(session_factory)
     logger.info("All services initialized")
 
     window = MainWindow(
@@ -108,6 +110,7 @@ def main() -> int:
         note_service=note_service,
         highlight_service=highlight_service,
         dashboard_service=dashboard_service,
+        home_service=home_service,
     )
     window.show()
     logger.info("Main window initialized")
