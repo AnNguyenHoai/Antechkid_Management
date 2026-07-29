@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
 from centermanager.ui.design_system.tokens import (
     COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS, SHADOWS
 )
-
 # ===== StatisticCard =====
 class StatisticCard(QFrame):
     """Statistic card with icon, label, and value."""

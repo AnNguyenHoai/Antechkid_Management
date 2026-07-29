@@ -99,6 +99,7 @@ class StudentListItem(QFrame):
 class StudentListPage(QWidget):
     student_selected = Signal(int)
     filter_clicked = Signal()
+    data_updated = Signal()
 
     def __init__(
         self,
@@ -246,13 +247,7 @@ class StudentListPage(QWidget):
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-            # Emit signal để refresh dashboard
-            self.student_selected.emit(-1)  # placeholder
-
-    def show_import_dialog(self) -> None:
-        dialog = StudentImportDialog(self._import_service, parent=self)
-        if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
-            self.refresh()
+            self.data_updated.emit()  # instead of student_selected.emit(-1)
 
     def export_students(self) -> None:
         try:

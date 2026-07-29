@@ -35,7 +35,6 @@ class WorkspaceButton(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         opacity = "0.5" if self._disabled else "1"
         background = "#f5f5f5" if self._disabled else "white"
-        # Sử dụng màu gray_100 thay vì gray_50 (không tồn tại)
         hover_bg = COLORS['gray_100']
         self.setStyleSheet(f"""
             QFrame {{
@@ -103,6 +102,7 @@ class HomePage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        self.setStyleSheet("background-color: #f5f5f5;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
@@ -148,7 +148,6 @@ class HomePage(QWidget):
 
         row, col = 0, 0
         for ws_id, name, desc, disabled in workspaces:
-            # Lấy icon từ tên (phần emoji trước khoảng trắng)
             icon = name.split()[0] if name.split() else "📌"
             btn = WorkspaceButton(ws_id, name, icon, desc, disabled)
             if not disabled:

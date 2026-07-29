@@ -79,7 +79,6 @@ class MainWindow(QMainWindow):
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
             self.statusBar().showMessage("Student Workspace")
-            # Refresh list and dashboard
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
@@ -94,7 +93,6 @@ class MainWindow(QMainWindow):
     def _refresh_student_list(self) -> None:
         try:
             students = self._student_service.list_students()
-            # Pass to student workspace's list page
             self.student_workspace.list_page._students = students
             self.student_workspace.list_page.refresh()
         except Exception as e:

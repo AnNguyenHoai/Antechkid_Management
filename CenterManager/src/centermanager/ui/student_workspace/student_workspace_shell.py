@@ -22,8 +22,6 @@ from centermanager.ui.student_workspace.reports_page import ReportsPage
 
 
 class StudentWorkspaceShell(QWidget):
-    """Shell for Student Workspace with navigation and pages."""
-
     go_home = Signal()
     student_selected = Signal(int)
 
@@ -63,17 +61,14 @@ class StudentWorkspaceShell(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header (without Add button)
         self.header = WorkspaceHeader("Student Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
         layout.addWidget(self.header)
 
-        # Body: sidebar + content
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Navigation sidebar
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
@@ -85,7 +80,6 @@ class StudentWorkspaceShell(QWidget):
         self.nav.page_selected.connect(self.navigate_to)
         body.addWidget(self.nav)
 
-        # Content area
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
@@ -104,6 +98,7 @@ class StudentWorkspaceShell(QWidget):
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
+        self.list_page.data_updated.connect(self.dashboard_page.refresh)
         self.content_stack.addWidget(self.list_page)
 
         self.detail_page = StudentDetailPage(

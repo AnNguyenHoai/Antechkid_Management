@@ -59,9 +59,15 @@ class StudentDashboardService:
             now = datetime.now()
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             new_this_month = sum(1 for s in all_students
-                                if s.created_at >= month_start and s.deleted_at is None)
+                                 if s.created_at >= month_start and s.deleted_at is None)
             logger.info(f"Dashboard stats: total={total}, active={active}, archived={archived}, new={new_this_month}")
-            return DashboardStats(...)
+            # Sửa lỗi: trả về đúng tham số
+            return DashboardStats(
+                total=total,
+                active=active,
+                archived=archived,
+                new_this_month=new_this_month
+            )
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
         with self._session_factory() as session:

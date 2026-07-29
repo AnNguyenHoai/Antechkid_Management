@@ -92,9 +92,11 @@ def main() -> int:
 
     # Dashboard, Filter, Export, Import services
     dashboard_service = StudentDashboardService(session_factory)
-    filter_service = StudentFilterService(session_factory)      # có thể dùng sau
-    export_service = StudentExportService(student_service)      # có thể dùng sau
-    import_service = StudentImportService(student_service)      # có thể dùng sau
+    filter_service = StudentFilterService(session_factory)
+    export_service = StudentExportService(student_service)
+    import_service = StudentImportService(student_service)
+
+    logger.info("All services initialized")
 
     window = MainWindow(
         student_service=student_service,
