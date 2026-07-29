@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-MainWindow – container for Home page and Workspaces.
-"""
+# src/centermanager/ui/main_window.py
 import logging
 from typing import Optional
 
@@ -11,13 +8,8 @@ from PySide6.QtCore import Qt
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
 
-from centermanager.ui.assessment.assessment_workspace import AssessmentWorkspace
-from centermanager.ui.timeline.timeline_workspace import TimelineWorkspace
-from centermanager.ui.reports.reports_workspace import ReportsWorkspace
-
 
 logger = logging.getLogger(__name__)
-
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -32,8 +24,8 @@ class MainWindow(QMainWindow):
         highlight_service,
         dashboard_service,
         home_service,
-        student_note_service,   # thêm
-        document_service,       # thêm
+        student_note_service,
+        document_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -78,17 +70,9 @@ class MainWindow(QMainWindow):
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
-        self.assessment_workspace = AssessmentWorkspace(assessment_service)
-        self.assessment_workspace.go_home.connect(self._go_home)
-        self.central_stack.addWidget(self.assessment_workspace)
 
-        self.timeline_workspace = TimelineWorkspace(timeline_service, student_service)
-        self.timeline_workspace.go_home.connect(self._go_home)
-        self.central_stack.addWidget(self.timeline_workspace)
+        # ĐÃ XÓA: assessment_workspace, timeline_workspace, reports_workspace
 
-        self.reports_workspace = ReportsWorkspace(student_service, assessment_service)
-        self.reports_workspace.go_home.connect(self._go_home)
-        self.central_stack.addWidget(self.reports_workspace)
         # Default: Home
         self.central_stack.setCurrentWidget(self.home_page)
 
@@ -102,18 +86,13 @@ class MainWindow(QMainWindow):
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
+            # Placeholder – sẽ triển khai sau
             self.statusBar().showMessage("Teacher Workspace coming soon")
-        elif workspace_id == "assessment":
-            self.central_stack.setCurrentWidget(self.assessment_workspace)
-            self.statusBar().showMessage("Assessment Workspace")
-        elif workspace_id == "timeline":
-            self.central_stack.setCurrentWidget(self.timeline_workspace)
-            self.statusBar().showMessage("Timeline Workspace")
-        elif workspace_id == "reports":
-            self.central_stack.setCurrentWidget(self.reports_workspace)
-            self.statusBar().showMessage("Reports Workspace")
+        elif workspace_id == "finance":
+            # Placeholder – sẽ triển khai sau
+            self.statusBar().showMessage("Finance Workspace coming soon")
         else:
-            self.statusBar().showMessage(f"Workspace {workspace_id} not available yet")
+            self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
     def _go_home(self) -> None:
         self.central_stack.setCurrentWidget(self.home_page)

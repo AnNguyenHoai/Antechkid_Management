@@ -76,7 +76,6 @@ class HomeDashboardService:
         self._session_factory = session_factory
 
     def get_workspace_summaries(self) -> List[WorkspaceSummary]:
-        """Get summaries for all workspaces."""
         with self._session_factory() as session:
             student_repo = StudentRepository(session)
             parent_repo = ParentRepository(session)
@@ -86,7 +85,6 @@ class HomeDashboardService:
             total_students = len(student_repo.list_active())
             parent_count = session.query(Parent).count()
             assessment_count = session.query(Assessment).count()
-            # Need attention: students without parents or without assessment
             students_without_parent = 0
             students_without_assessment = 0
             active_students = student_repo.list_active()
@@ -118,7 +116,7 @@ class HomeDashboardService:
                 quick_action_target="student"
             )
 
-            # Teacher workspace summary (placeholder, using available data)
+            # Teacher workspace summary
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
             teacher_ws = WorkspaceSummary(
@@ -146,40 +144,8 @@ class HomeDashboardService:
                 quick_action_target="finance"
             )
 
-            assessment_ws = WorkspaceSummary(
-                workspace_id="assessment",
-                name="Assessment Workspace",
-                icon="📊",
-                description="Manage student assessments",
-                summary_text="View all assessments",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="assessment"
-            )
-            timeline_ws = WorkspaceSummary(
-                workspace_id="timeline",
-                name="Timeline Workspace",
-                icon="📅",
-                description="Student activity timeline",
-                summary_text="View all events",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="timeline"
-            )
-            reports_ws = WorkspaceSummary(
-                workspace_id="reports",
-                name="Reports Workspace",
-                icon="📈",
-                description="Analytics and reports",
-                summary_text="Student insights",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="reports"
-            )
-            return [student_ws, teacher_ws, finance_ws, assessment_ws, timeline_ws, reports_ws]
+            # Chỉ trả về các Workspace Business Domain
+            return [student_ws, teacher_ws, finance_ws]
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
         """Get recent activities across all workspaces."""

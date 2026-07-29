@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-StudentWorkspaceShell - the root container for Student Workspace.
-"""
+# src/centermanager/ui/student_workspace/student_workspace_shell.py
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -15,9 +12,6 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
 from centermanager.ui.student_workspace.student_list_page import StudentListPage
 from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
-from centermanager.ui.student_workspace.assessment_page import AssessmentPage
-from centermanager.ui.student_workspace.timeline_page import TimelinePage
-from centermanager.ui.student_workspace.reports_page import ReportsPage
 
 
 class StudentWorkspaceShell(QWidget):
@@ -35,8 +29,8 @@ class StudentWorkspaceShell(QWidget):
         note_service,
         highlight_service,
         dashboard_service,
-        student_note_service,   # thêm
-        document_service,       # thêm
+        student_note_service,
+        document_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -71,12 +65,10 @@ class StudentWorkspaceShell(QWidget):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
+        # Sidebar chỉ còn Dashboard và Students
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
-            {"id": "assessment", "icon": "📋", "label": "Assessment"},
-            {"id": "timeline", "icon": "📅", "label": "Timeline"},
-            {"id": "reports", "icon": "📈", "label": "Reports"},
         ]
         self.nav = WorkspaceNavigation("Student Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -85,7 +77,7 @@ class StudentWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        # Create pages
+        # Các page: Dashboard, Student List, Student Detail
         self.dashboard_page = StudentDashboardPage(self._dashboard_service)
         self.dashboard_page.add_student_clicked.connect(self._on_add_action)
         self.dashboard_page.import_students_clicked.connect(self._on_import_action)
@@ -119,54 +111,36 @@ class StudentWorkspaceShell(QWidget):
         self.detail_page.student_updated.connect(self._on_student_updated)
         self.content_stack.addWidget(self.detail_page)
 
-        self.assessment_page = AssessmentPage(self._assessment_service)
-        self.content_stack.addWidget(self.assessment_page)
-
-        self.timeline_page = TimelinePage(self._timeline_service, self._student_service)
-        self.content_stack.addWidget(self.timeline_page)
-
-        self.reports_page = ReportsPage()
-        self.content_stack.addWidget(self.reports_page)
+        # ĐÃ XÓA: assessment_page, timeline_page, reports_page
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
-
 
     def _connect_signals(self) -> None:
         self.nav.page_selected.connect(self.navigate_to)
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        page_map = {
-            "dashboard": 0,
-            "students": 1,
-            "detail": 2,
-            "assessment": 3,
-            "timeline": 4,
-            "reports": 5,
-        }
-        if page_id == "detail":
-            return
-        idx = page_map.get(page_id, 0)
-        self.content_stack.setCurrentIndex(idx)
-        self.nav.set_active_page(page_id)
-        page_labels = {
-            "dashboard": "Dashboard",
-            "students": "Students",
-            "assessment": "Assessment",
-            "timeline": "Timeline",
-            "reports": "Reports",
-        }
-        self.header.set_context("Student Workspace", page_labels.get(page_id, ""))
-        if page_id == "students":
-            self.list_page.refresh()
-        elif page_id == "dashboard":
+        # Chỉ xử lý dashboard và students
+        if page_id == "dashboard":
+            self.content_stack.setCurrentWidget(self.dashboard_page)
+            self.nav.set_active_page("dashboard")
+            self.header.set_context("Student Workspace", "Dashboard")
             self.dashboard_page.refresh()
+        elif page_id == "students":
+            self.content_stack.setCurrentWidget(self.list_page)
+            self.nav.set_active_page("students")
+            self.header.set_context("Student Workspace", "Students")
+            self.list_page.refresh()
+        else:
+            # Fallback
+            self.content_stack.setCurrentWidget(self.dashboard_page)
 
+    # Các phương thức xử lý sự kiện giữ nguyên
     def _on_student_selected(self, student_id: int) -> None:
         self._current_student_id = student_id
         self.detail_page.load_student(student_id)
-        self.content_stack.setCurrentIndex(2)
+        self.content_stack.setCurrentWidget(self.detail_page)
         self.nav.set_active_page("students")
         self.header.set_context("Student Workspace", "Student Detail")
         self.student_selected.emit(student_id)

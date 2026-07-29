@@ -272,6 +272,7 @@ tests/
   test_student_ui.py
 .gitignore
 alembic.ini
+docs.zip
 pytest.ini
 README.md
 requirements-dev.txt
@@ -14222,55 +14223,55 @@ class SectionHeader(QWidget):
             action_btn.clicked.connect(action_callback)
             layout.addWidget(action_btn)
 
-
 # ===== StatusBadge =====
 class StatusBadge(QLabel):
     """Status badge with color coding."""
-
+    
     def __init__(self, status: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._setup_ui(status)
-
+    
     def _setup_ui(self, status: str) -> None:
+        from centermanager.ui.design_system.tokens import BADGE_COLORS, TYPOGRAPHY, SPACING
+        
         status_upper = status.upper()
-        color_map = {
-            "ACTIVE": COLORS['success'],
-            "ARCHIVED": COLORS['warning'],
-            "INACTIVE": COLORS['danger'],
-            "COMPLETED": COLORS['success'],
-            "SCHEDULED": COLORS['primary'],
-            "CANCELLED": COLORS['danger'],
-            "POSTPONED": COLORS['warning'],
-            "EXCELLENT": COLORS['success'],
-            "GOOD": COLORS['primary'],
-            "NORMAL": COLORS['warning'],
-            "NEED_IMPROVEMENT": COLORS['danger'],
-        }
-        color = color_map.get(status_upper, COLORS['muted'])
+        colors = BADGE_COLORS.get(status_upper, {"bg": "#f5f5f5", "text": "#616161"})
+        
         self.setText(status_upper.capitalize())
         self.setStyleSheet(f"""
-            background: {color}22;
-            color: {color};
-            padding: 2px {SPACING['sm']}px;
-            border-radius: 12px;
-            font-size: {TYPOGRAPHY['caption']}px;
-            font-weight: 500;
+            QLabel {{
+                background: {colors['bg']};
+                color: {colors['text']};
+                padding: 2px {SPACING['sm']}px;
+                border-radius: 12px;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.3px;
+            }}
         """)
+        self.setFixedHeight(22)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    
+    def set_status(self, status: str) -> None:
+        self._setup_ui(status)
 
 
 # ===== Avatar =====
 class Avatar(QLabel):
     """Circular avatar displaying initials."""
-
+    
     def __init__(
         self,
         name: str,
         size: int = 36,
+        font_size: Optional[int] = None,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._name = name
         self._size = size
+        # Nếu không truyền font_size, tự động tính = size // 2
+        self._font_size = font_size if font_size is not None else size // 2
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -14282,7 +14283,7 @@ class Avatar(QLabel):
             QLabel {{
                 background: {COLORS['primary']};
                 color: white;
-                font-size: {self._size // 2}px;
+                font-size: {self._font_size}px;
                 font-weight: 600;
                 border-radius: {self._size // 2}px;
             }}
@@ -14731,24 +14732,53 @@ Design Tokens - Colors, Typography, Spacing, etc.
 """
 # ===== Colors =====
 COLORS = {
+    # Primary
     "primary": "#1976d2",
     "primary_light": "#42a5f5",
     "primary_dark": "#1565c0",
-    "success": "#4caf50",
-    "warning": "#ff9800",
+    "primary_hover": "#e3f2fd",
+    "primary_selected": "#bbdefb",
+    
+    # Status
+    "success": "#2e7d32",
+    "success_bg": "#e8f5e9",
+    "warning": "#ed6c02",
+    "warning_bg": "#fff3e0",
     "danger": "#d32f2f",
-    "background": "#f4f6f8",
+    "danger_bg": "#ffebee",
+    "info": "#0288d1",
+    "info_bg": "#e1f5fe",
+    
+    # Grays
+    "gray_50": "#fafafa",
+    "gray_100": "#f5f5f5",
+    "gray_200": "#eeeeee",
+    "gray_300": "#e0e0e0",
+    "gray_400": "#bdbdbd",
+    "gray_500": "#9e9e9e",
+    "gray_600": "#757575",
+    "gray_700": "#616161",
+    "gray_800": "#424242",
+    "gray_900": "#212121",
+    
+    # Surfaces
+    "background": "#f5f7fa",
     "surface": "#ffffff",
+    "surface_hover": "#f8f9fa",
+    "surface_pressed": "#f0f0f0",
     "border": "#e0e0e0",
     "border_light": "#f0f0f0",
-    "muted": "#9e9e9e",
-    "muted_light": "#bdbdbd",
-    "text_primary": "#212121",
+    
+    # Text
+    "text_primary": "#1a1a1a",
     "text_secondary": "#424242",
-    "surface_hover": "#f5f5f5",
-    "surface_pressed": "#eeeeee",
-    # Thêm các màu xám cho style sheets
-    "gray_100": "#f5f5f5",
+    "text_muted": "#9e9e9e",
+    "text_white": "#ffffff",
+    
+    # === ALIASES for backward compatibility (keep old keys) ===
+    "muted": "#9e9e9e",           # alias for text_muted
+    "muted_light": "#bdbdbd",      # alias for gray_400
+    "gray_100": "#f5f5f5",         # already defined, but keep explicit
     "gray_200": "#eeeeee",
     "gray_300": "#e0e0e0",
     "gray_400": "#bdbdbd",
@@ -14761,14 +14791,19 @@ COLORS = {
 
 # ===== Typography =====
 TYPOGRAPHY = {
+    "page_title": 26,
     "section_title": 18,
     "card_title": 16,
+    "body_large": 15,
     "body": 14,
     "body_small": 13,
     "caption": 12,
-    "stat_value": 28,
+    "badge": 11,
+    "stat_value": 24,
+    "stat_value_large": 32,
     "icon": 18,
     "icon_large": 40,
+    "icon_small": 16,
 }
 
 # ===== Spacing =====
@@ -14779,16 +14814,39 @@ SPACING = {
     "lg": 16,
     "xl": 24,
     "xxl": 32,
+    "xxxl": 48,
 }
 
 # ===== Border Radius =====
-BORDER_RADIUS = 8
+BORDER_RADIUS = {
+    "sm": 4,
+    "md": 8,
+    "lg": 12,
+    "xl": 16,
+    "circle": 999,
+}
 
 # ===== Shadows =====
 SHADOWS = {
-    "sm": "0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)",
-    "md": "0 3px 6px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12)",
-    "lg": "0 10px 20px rgba(0,0,0,0.15), 0 3px 6px rgba(0,0,0,0.10)",
+    "sm": "0 1px 3px rgba(0,0,0,0.08)",
+    "md": "0 2px 8px rgba(0,0,0,0.10)",
+    "lg": "0 4px 16px rgba(0,0,0,0.12)",
+}
+
+# ===== Badge Colors =====
+BADGE_COLORS = {
+    "ACTIVE": {"bg": "#e8f5e9", "text": "#2e7d32"},
+    "INACTIVE": {"bg": "#ffebee", "text": "#c62828"},
+    "ARCHIVED": {"bg": "#f5f5f5", "text": "#616161"},
+    "SCHEDULED": {"bg": "#e3f2fd", "text": "#0d47a1"},
+    "COMPLETED": {"bg": "#e8f5e9", "text": "#2e7d32"},
+    "CANCELLED": {"bg": "#ffebee", "text": "#c62828"},
+    "POSTPONED": {"bg": "#fff3e0", "text": "#e65100"},
+    "EXCELLENT": {"bg": "#e8f5e9", "text": "#2e7d32"},
+    "GOOD": {"bg": "#e3f2fd", "text": "#0d47a1"},
+    "NORMAL": {"bg": "#fff3e0", "text": "#e65100"},
+    "NEED_IMPROVEMENT": {"bg": "#ffebee", "text": "#c62828"},
+    "WARNING": {"bg": "#fff3e0", "text": "#e65100"},
 }
 
 ================
@@ -17194,6 +17252,7 @@ File: src/centermanager/ui/shared/empty_state.py
 # -*- coding: utf-8 -*-
 """
 EmptyState - Standard empty state for all workspaces.
+Now with optional action button.
 """
 from typing import Optional
 
@@ -17241,7 +17300,7 @@ class EmptyState(QWidget):
             desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             desc_label.setStyleSheet(f"""
                 font-size: {TYPOGRAPHY['body']}px;
-                color: {COLORS['muted']};
+                color: {COLORS['text_muted']};
             """)
             desc_label.setWordWrap(True)
             layout.addWidget(desc_label)
@@ -17249,6 +17308,7 @@ class EmptyState(QWidget):
         if action_text and action_callback:
             from centermanager.ui.design_system.components import PrimaryButton
             btn = PrimaryButton(action_text)
+            btn.setFixedHeight(36)
             btn.clicked.connect(action_callback)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -17257,14 +17317,14 @@ File: src/centermanager/ui/shared/metric_card.py
 ================
 # -*- coding: utf-8 -*-
 """
-MetricCard - Reusable card for displaying a single metric with icon, label, and value.
+MetricCard - Reusable card for displaying a single metric.
 """
 from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
 
-from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING
+from centermanager.ui.design_system.tokens import COLORS, SPACING, BORDER_RADIUS
 
 
 class MetricCard(QFrame):
@@ -17283,53 +17343,57 @@ class MetricCard(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border-radius: 8px;
-                border: 1px solid {COLORS['border']};
+                background: {COLORS['surface']};
+                border-radius: {BORDER_RADIUS['md']}px;
+                border: 1px solid {COLORS['border_light']};
                 padding: {SPACING['sm']}px {SPACING['md']}px;
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(70)
-        self.setMaximumHeight(80)
+        # Tăng 30%: từ 104-124 lên 135-161
+        self.setMinimumHeight(135)
+        self.setMaximumHeight(161)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
+        layout.setContentsMargins(SPACING['md'], SPACING['sm']+2, SPACING['md'], SPACING['sm']+2)
         layout.setSpacing(SPACING['xs'])
 
+        # Top: Icon + Label
         top_layout = QHBoxLayout()
         top_layout.setSpacing(SPACING['xs'])
-
+        
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
+        icon_label.setStyleSheet("font-size: 16px;")  # Giảm từ 18px
         top_layout.addWidget(icon_label)
-
+        
         label_label = QLabel(label)
         label_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['caption']}px;
-            color: {COLORS['muted']};
+            font-size: 10px;
+            color: {COLORS['text_muted']};
             font-weight: 500;
+            letter-spacing: 0.3px;
             text-transform: uppercase;
-        """)
+        """)  # Giảm từ 12px xuống 10px (≈30%)
         top_layout.addWidget(label_label)
         top_layout.addStretch()
-
         layout.addLayout(top_layout)
 
+        # Value - giảm từ 28px xuống 20px (≈30%)
         self.value_label = QLabel(value)
         self.value_label.setStyleSheet(f"""
             font-size: 20px;
             font-weight: 700;
             color: {COLORS['text_primary']};
+            line-height: 1.2;
         """)
         layout.addWidget(self.value_label)
 
         if sub_value:
             sub_label = QLabel(sub_value)
             sub_label.setStyleSheet(f"""
-                font-size: {TYPOGRAPHY['caption']}px;
-                color: {COLORS['muted_light']};
-            """)
+                font-size: 10px;
+                color: {COLORS['text_muted']};
+            """)  # Giảm từ 12px xuống 10px
             layout.addWidget(sub_label)
 
     def set_value(self, value: str) -> None:
@@ -17515,13 +17579,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QGridLayout, QSizePolicy
 
 from centermanager.ui.shared.metric_card import MetricCard
+from centermanager.ui.design_system.tokens import SPACING
 
 
 class StatisticGrid(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._layout = QGridLayout(self)
-        self._layout.setSpacing(12)
+        self._layout.setSpacing(SPACING['md'])  # Tăng từ 12 lên 16
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._cards = []
 
@@ -17675,62 +17740,103 @@ File: src/centermanager/ui/shared/warning_banner.py
 ================
 # -*- coding: utf-8 -*-
 """
-WarningBanner - Displays a warning or attention message.
+WarningBanner - Displays a warning or attention message as a clickable card.
 """
-from typing import Optional
+from typing import Optional, Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget, QSizePolicy
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget, QSizePolicy, QPushButton
 
-from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 
 class WarningBanner(QFrame):
+    clicked = Signal(object)  # Can emit associated data
+    
     def __init__(
         self,
         message: str,
         icon: str = "⚠️",
-        severity: str = "warning",  # "warning", "critical", "info"
+        severity: str = "warning",
+        action_text: Optional[str] = "Open →",
+        action_data: Optional[object] = None,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
-        self._setup_ui(message, icon, severity)
+        self._action_data = action_data
+        self._setup_ui(message, icon, severity, action_text)
 
-    def _setup_ui(self, message: str, icon: str, severity: str) -> None:
+    def _setup_ui(self, message: str, icon: str, severity: str, action_text: Optional[str]) -> None:
         colors = {
-            "warning": {"bg": "#fff3e0", "border": "#ffb74d", "text": "#e65100"},
-            "critical": {"bg": "#ffebee", "border": "#ef9a9a", "text": "#b71c1c"},
-            "info": {"bg": "#e3f2fd", "border": "#64b5f6", "text": "#0d47a1"},
+            "warning": {"bg": "#fff8e1", "border": "#ffcc02", "text": "#e65100", "icon": "⚠️"},
+            "critical": {"bg": "#ffebee", "border": "#ef9a9a", "text": "#b71c1c", "icon": "🚨"},
+            "info": {"bg": "#e3f2fd", "border": "#64b5f6", "text": "#0d47a1", "icon": "ℹ️"},
         }
         style = colors.get(severity, colors["info"])
-
+        
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
         self.setStyleSheet(f"""
             QFrame {{
                 background: {style['bg']};
                 border: 1px solid {style['border']};
-                border-radius: 6px;
+                border-radius: {BORDER_RADIUS['md']}px;
                 padding: {SPACING['sm']}px {SPACING['md']}px;
+            }}
+            QFrame:hover {{
+                background: {style['bg']};
+                border-color: {style['border']};
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
+        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
         layout.setSpacing(SPACING['sm'])
 
+        # Icon
         icon_label = QLabel(icon)
         icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon']}px;")
         layout.addWidget(icon_label)
 
+        # Message (with bold first part)
         msg_label = QLabel(message)
         msg_label.setStyleSheet(f"""
             font-size: {TYPOGRAPHY['body']}px;
             color: {style['text']};
+            font-weight: 500;
         """)
         msg_label.setWordWrap(True)
         layout.addWidget(msg_label)
+
         layout.addStretch()
+
+        # Action button
+        if action_text:
+            action_btn = QPushButton(action_text)
+            action_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {COLORS['primary']};
+                    border: none;
+                    font-size: {TYPOGRAPHY['body_small']}px;
+                    font-weight: 600;
+                    padding: {SPACING['xs']}px {SPACING['sm']}px;
+                }}
+                QPushButton:hover {{
+                    text-decoration: underline;
+                    background: transparent;
+                }}
+            """)
+            action_btn.clicked.connect(self._on_click)
+            layout.addWidget(action_btn)
+
+    def _on_click(self) -> None:
+        self.clicked.emit(self._action_data)
+    
+    def mousePressEvent(self, event) -> None:
+        self._on_click()
+        super().mousePressEvent(event)
 
 ================
 File: src/centermanager/ui/student_workspace/__init__.py
@@ -17787,6 +17893,7 @@ File: src/centermanager/ui/student_workspace/documents_widget.py
 # -*- coding: utf-8 -*-
 """
 DocumentsWidget - display and manage student documents.
+Removed duplicate title.
 """
 import os
 import sys
@@ -17804,7 +17911,7 @@ from PySide6.QtWidgets import (
 from centermanager.models.document import Document
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.core.paths import get_paths
-
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 class DocumentCard(QFrame):
     def __init__(self, doc: Document, parent: Optional[QWidget] = None):
@@ -17875,14 +17982,13 @@ class DocumentsWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(SPACING['sm'])
 
+        # No title - title is in parent section
         header = QHBoxLayout()
-        title = QLabel("📎 Documents")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        header.addWidget(title)
         header.addStretch()
         self.upload_btn = QPushButton("+ Upload")
+        self.upload_btn.setFixedHeight(32)
         self.upload_btn.clicked.connect(self._on_upload)
         header.addWidget(self.upload_btn)
         layout.addLayout(header)
@@ -17892,8 +17998,8 @@ class DocumentsWidget(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(0, 4, 0, 0)
-        self.container_layout.setSpacing(4)
+        self.container_layout.setContentsMargins(0, SPACING['xs'], 0, 0)
+        self.container_layout.setSpacing(SPACING['xs'])
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 
@@ -17997,6 +18103,7 @@ File: src/centermanager/ui/student_workspace/notes_widget.py
 # -*- coding: utf-8 -*-
 """
 NotesWidget - display and manage student notes.
+Removed duplicate title (title is now in parent section).
 """
 from typing import Optional, List
 
@@ -18009,6 +18116,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.note import Note, NoteType
 from centermanager.services.student_note_service import StudentNoteService
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 
 class NoteDetailDialog(QDialog):
@@ -18112,14 +18220,14 @@ class NotesWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(SPACING['sm'])
 
+        # No title here - title is in parent section
+        # Only Add button
         header = QHBoxLayout()
-        title = QLabel("📝 Notes")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        header.addWidget(title)
         header.addStretch()
         self.add_btn = QPushButton("+ Add Note")
+        self.add_btn.setFixedHeight(32)
         self.add_btn.clicked.connect(self._on_add)
         header.addWidget(self.add_btn)
         layout.addLayout(header)
@@ -18129,8 +18237,8 @@ class NotesWidget(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(0, 4, 0, 0)
-        self.container_layout.setSpacing(4)
+        self.container_layout.setContentsMargins(0, SPACING['xs'], 0, 0)
+        self.container_layout.setSpacing(SPACING['xs'])
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 
@@ -18232,7 +18340,9 @@ ProfileWidget - unified student profile display.
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout, QFrame, QSizePolicy
+)
 
 from centermanager.models.student import Student
 from centermanager.ui.students.helpers import calculate_age, format_date_for_display
@@ -18249,36 +18359,59 @@ class ProfileWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACING['sm'])
+        layout.setSpacing(SPACING['md'])
 
-        # Header: Avatar, Name, Code, Status
+        # Header
         header = QHBoxLayout()
-        self.avatar = Avatar("", size=48)
+        header.setSpacing(SPACING['lg'])
+        
+        self.avatar = Avatar("", size=56)
+        self.avatar.setFixedSize(56, 56)
         header.addWidget(self.avatar)
 
         info = QVBoxLayout()
+        info.setSpacing(SPACING['xs'])
+        
         self.name_label = QLabel()
-        self.name_label.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {COLORS['text_primary']};")
+        self.name_label.setStyleSheet(f"""
+            font-size: 22px;
+            font-weight: 700;
+            color: {COLORS['text_primary']};
+        """)  # Giảm từ 26px xuống 22px
         info.addWidget(self.name_label)
-
+        
         code_status = QHBoxLayout()
+        code_status.setSpacing(SPACING['sm'])
         self.code_label = QLabel()
-        self.code_label.setStyleSheet(f"font-size: 13px; color: {COLORS['muted']};")
+        self.code_label.setStyleSheet(f"""
+            font-size: 13px;
+            color: {COLORS['text_muted']};
+            font-weight: 500;
+        """)  # Giảm từ 14px xuống 13px
         code_status.addWidget(self.code_label)
-        code_status.addSpacing(8)
+        
         self.status_badge = StatusBadge("")
         code_status.addWidget(self.status_badge)
         code_status.addStretch()
         info.addLayout(code_status)
-
+        
         header.addLayout(info)
         header.addStretch()
         layout.addLayout(header)
 
-        # Details grid
+        # Separator
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        layout.addWidget(line)
+
+        # Details grid - tăng spacing
         self.details_grid = QGridLayout()
-        self.details_grid.setSpacing(SPACING['sm'])
-        self.details_grid.setContentsMargins(0, SPACING['sm'], 0, 0)
+        self.details_grid.setSpacing(SPACING['md'] + 4)
+        self.details_grid.setContentsMargins(0, SPACING['sm'] + 4, 0, 0)
+        self.details_grid.setColumnStretch(1, 1)
+        self.details_grid.setColumnStretch(3, 1)
         layout.addLayout(self.details_grid)
 
     def set_student(self, student: Student, primary_parent_name: str = "", primary_parent_phone: str = "") -> None:
@@ -18289,7 +18422,7 @@ class ProfileWidget(QWidget):
         self.avatar.set_name(student.full_name)
         self.name_label.setText(student.full_name)
         self.code_label.setText(student.student_code)
-        self.status_badge.setText(student.status or "")
+        self.status_badge.set_status(student.status or "")
 
         details = [
             ("Preferred Name", student.preferred_name or "-"),
@@ -18297,7 +18430,7 @@ class ProfileWidget(QWidget):
             ("Age", str(calculate_age(student.date_of_birth)) if student.date_of_birth else "-"),
             ("Gender", student.gender or "-"),
             ("Current Level", student.current_level or "-"),
-            ("Enrollment Date", format_date_for_display(student.enrollment_date)),
+            ("Enrollment Date", format_date_for_display(student.enrollment_date) or "-"),
             ("Primary Parent", primary_parent_name if primary_parent_name else "-"),
             ("Contact", primary_parent_phone if primary_parent_phone else "-"),
         ]
@@ -18306,18 +18439,29 @@ class ProfileWidget(QWidget):
         col = 0
         for label, value in details:
             lbl = QLabel(label + ":")
-            lbl.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']}; font-weight: 500;")
-            self.details_grid.addWidget(lbl, row, col*2, 1, 1)
+            lbl.setStyleSheet(f"""
+                font-size: 11px;
+                color: {COLORS['text_muted']};
+                font-weight: 500;
+                letter-spacing: 0.2px;
+            """)  # Giảm từ 13px xuống 11px
+            self.details_grid.addWidget(lbl, row, col * 2, 1, 1)
 
             val = QLabel(value)
-            val.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']};")
+            val.setStyleSheet(f"""
+                font-size: 13px;
+                color: {COLORS['text_primary']};
+                font-weight: 500;
+            """)  # Giảm từ 15px xuống 13px
             val.setWordWrap(True)
-            self.details_grid.addWidget(val, row, col*2+1, 1, 1)
+            self.details_grid.addWidget(val, row, col * 2 + 1, 1, 1)
 
             col += 1
             if col >= 2:
                 col = 0
                 row += 1
+
+        self.details_grid.setRowStretch(row, 1)
 
     def clear(self) -> None:
         while self.details_grid.count():
@@ -18327,7 +18471,7 @@ class ProfileWidget(QWidget):
         self.avatar.set_name("")
         self.name_label.setText("")
         self.code_label.setText("")
-        self.status_badge.setText("")
+        self.status_badge.set_status("")
 
 ================
 File: src/centermanager/ui/student_workspace/quick_actions_widget.py
@@ -18341,6 +18485,7 @@ from typing import Optional, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QSizePolicy
 
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
 
 
@@ -18352,13 +18497,20 @@ class QuickActionsWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(SPACING['sm'])
 
+        # All buttons with consistent styling
         self.edit_btn = PrimaryButton("✏️ Edit")
         self.add_parent_btn = SecondaryButton("👨‍👩‍👧 Add Parent")
         self.add_assessment_btn = SecondaryButton("📊 Add Assessment")
         self.add_note_btn = SecondaryButton("📝 Add Note")
         self.upload_doc_btn = SecondaryButton("📎 Upload Doc")
+
+        # Ensure consistent height
+        for btn in [self.edit_btn, self.add_parent_btn, self.add_assessment_btn, 
+                    self.add_note_btn, self.upload_doc_btn]:
+            btn.setFixedHeight(34)
+            btn.setMinimumWidth(120)
 
         layout.addWidget(self.edit_btn)
         layout.addWidget(self.add_parent_btn)
@@ -18413,6 +18565,7 @@ File: src/centermanager/ui/student_workspace/student_dashboard_page.py
 # -*- coding: utf-8 -*-
 """
 StudentDashboardPage - Complete dashboard for Student Workspace.
+Properly sized for better visibility.
 """
 import logging
 from typing import Optional
@@ -18430,6 +18583,7 @@ from centermanager.ui.shared import (
     EmptyState, SectionHeader, SearchToolbar
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
 
 logger = logging.getLogger(__name__)
 
@@ -18463,8 +18617,8 @@ class StudentDashboardPage(QWidget):
         container = QWidget()
         container.setStyleSheet(f"background: {COLORS['background']};")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['md'], SPACING['md'], SPACING['md'], SPACING['md'])
-        container_layout.setSpacing(SPACING['lg'])
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
 
         # ---- Stats Grid ----
         self.stats_grid = StatisticGrid()
@@ -18491,7 +18645,7 @@ class StudentDashboardPage(QWidget):
         self.attention_container = QWidget()
         self.attention_container_layout = QVBoxLayout(self.attention_container)
         self.attention_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.attention_container_layout.setSpacing(SPACING['xs'])
+        self.attention_container_layout.setSpacing(SPACING['sm'])
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
@@ -18529,12 +18683,14 @@ class StudentDashboardPage(QWidget):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(SPACING['sm'])
 
-        from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
         add_btn = PrimaryButton("➕ Add Student")
+        add_btn.setFixedHeight(38)
         add_btn.clicked.connect(self.add_student_clicked.emit)
         import_btn = SecondaryButton("📥 Import")
+        import_btn.setFixedHeight(38)
         import_btn.clicked.connect(self.import_students_clicked.emit)
         export_btn = SecondaryButton("📤 Export")
+        export_btn.setFixedHeight(38)
         export_btn.clicked.connect(self.export_students_clicked.emit)
 
         actions_layout.addWidget(add_btn)
@@ -18586,11 +18742,11 @@ class StudentDashboardPage(QWidget):
                     banner = WarningBanner(
                         message=f"{item.full_name} ({item.student_code}) – {item.reason}",
                         icon="⚠️",
-                        severity="warning"
+                        severity="warning",
+                        action_text="Open →",
+                        action_data=item.student_id
                     )
-                    # Make clickable
-                    banner.setCursor(Qt.CursorShape.PointingHandCursor)
-                    banner.mousePressEvent = lambda e, sid=item.student_id: self.student_selected.emit(sid)
+                    banner.clicked.connect(lambda sid: self.student_selected.emit(sid))
                     self.attention_container_layout.addWidget(banner)
             else:
                 empty = EmptyState(
@@ -18614,7 +18770,11 @@ class StudentDashboardPage(QWidget):
                     if ev.student_name:
                         label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     label = QLabel(label_text)
-                    label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
+                    label.setStyleSheet(f"""
+                        font-size: 14px;
+                        color: {COLORS['text_secondary']};
+                        padding: 4px 0;
+                    """)
                     self.events_container_layout.addWidget(label)
             else:
                 empty = EmptyState(
@@ -18699,6 +18859,8 @@ from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
 )
+# THÊM IMPORT TOKENS
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
 
 logger = logging.getLogger(__name__)
@@ -18746,7 +18908,11 @@ class StudentDetailPage(QWidget):
 
         # Top bar with back button
         top_bar = QWidget()
-        top_bar.setStyleSheet("background: white; border-bottom: 1px solid #e8e8e8; padding: 4px 12px;")
+        top_bar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            border-bottom: 1px solid {COLORS['border_light']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+        """)
         top_bar_layout = QHBoxLayout(top_bar)
         self.back_btn = SecondaryButton("← Back")
         self.back_btn.clicked.connect(self.back_clicked.emit)
@@ -18760,8 +18926,8 @@ class StudentDetailPage(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(24, 16, 24, 16)
-        container_layout.setSpacing(20)
+        container_layout.setContentsMargins(SPACING['xl'], SPACING['lg'], SPACING['xl'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
 
         # Quick Actions
         self.quick_actions = QuickActionsWidget()
@@ -18779,7 +18945,7 @@ class StudentDetailPage(QWidget):
         self.parents_section = self._create_vertical_section("👨‍👩‍👦 Parents")
         self.parents_container = QWidget()
         self.parents_layout = QVBoxLayout(self.parents_container)
-        self.parents_layout.setSpacing(8)
+        self.parents_layout.setSpacing(SPACING['sm'])
         self.parents_layout.setContentsMargins(0, 0, 0, 0)
         self.parents_section.layout().addWidget(self.parents_container)
         container_layout.addWidget(self.parents_section)
@@ -18822,17 +18988,23 @@ class StudentDetailPage(QWidget):
             on_upload_doc=self._on_upload_doc
         )
 
+    # Trong _create_vertical_section, cập nhật font size
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(SPACING['xs'])
         title_label = QLabel(title)
-        title_label.setStyleSheet(styles.SECTION_TITLE)
+        title_label.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: 600;
+            color: {COLORS['text_primary']};
+        """)  # Giảm từ 18px xuống 16px
         layout.addWidget(title_label)
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
         layout.addWidget(line)
         return section
 
@@ -18913,18 +19085,22 @@ class StudentDetailPage(QWidget):
         if not parents:
             empty_widget = QWidget()
             empty_layout = QVBoxLayout(empty_widget)
-            empty_layout.setContentsMargins(0, 8, 0, 8)
-            empty_layout.setSpacing(4)
+            empty_layout.setContentsMargins(0, SPACING['sm'], 0, SPACING['sm'])
+            empty_layout.setSpacing(SPACING['xs'])
             icon = QLabel("👨‍👩‍👧")
             icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon.setStyleSheet("font-size: 28px;")
+            icon.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
+            empty_layout.addWidget(icon)
             msg = QLabel("No parent information.\nAdd a guardian to this student.")
             msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setStyleSheet("color: #999; font-size: 14px;")
-            empty_layout.addWidget(icon)
+            msg.setStyleSheet(f"""
+                color: {COLORS['text_muted']};
+                font-size: {TYPOGRAPHY['body']}px;
+            """)
             empty_layout.addWidget(msg)
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
+            add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
             empty_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self.parents_layout.addWidget(empty_widget)
@@ -18936,6 +19112,7 @@ class StudentDetailPage(QWidget):
                 self.parents_layout.addWidget(card)
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
+            add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
             self.parents_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
@@ -19026,19 +19203,20 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.ui.design_system import (
     Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
-    FilterBar, Breadcrumb
+    FilterBar
 )
+from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
-from centermanager.ui.students.student_import_dialog import StudentImportDialog
 from centermanager.services.student_import_service import StudentImportService
 from centermanager.services.student_export_service import StudentExportService
-from centermanager.ui import styles
 
 logger = logging.getLogger(__name__)
 
 
 class StudentListItem(QFrame):
+    """Student list item with avatar, name, code, status."""
+    
     def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._student = student
@@ -19046,58 +19224,67 @@ class StudentListItem(QFrame):
 
     def _setup_ui(self) -> None:
         self.setFrameStyle(QFrame.Shape.NoFrame)
-        self.setStyleSheet("""
-            QFrame {
-                background: white;
-                border-bottom: 1px solid #f0f0f0;
-                padding: 2px 6px;
-            }
-            QFrame:hover {
-                background: #f8f9fa;
-            }
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: {COLORS['surface']};
+                border-bottom: 1px solid {COLORS['border_light']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
+            }}
+            QFrame:hover {{
+                background: {COLORS['surface_hover']};
+            }}
         """)
-        self.setFixedHeight(48)
+        # Tăng 50%: từ 90 lên 135
+        self.setFixedHeight(135)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
+        layout.setSpacing(SPACING['md'])
 
-        avatar = Avatar(self._student.full_name, size=28)
-        avatar.setFixedSize(28, 28)
+        # Avatar - tăng từ 40 lên 52
+        avatar = Avatar(self._student.full_name, size=52, font_size=18)
+        avatar.setFixedSize(52, 52)
         layout.addWidget(avatar)
 
+        # Info: Name + Code (font nhỏ hơn)
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(0)
+        info_layout.setSpacing(SPACING['xs'])
         info_layout.setContentsMargins(0, 0, 0, 0)
-
+        
         name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet("font-size: 13px; font-weight: 500;")
+        name_label.setStyleSheet(f"""
+            font-size: 13px;
+            font-weight: 600;
+            color: {COLORS['text_primary']};
+        """)  # Giảm từ 16px xuống 13px
         name_label.setWordWrap(False)
         info_layout.addWidget(name_label)
-
+        
         code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet("font-size: 11px; color: #888;")
+        code_label.setStyleSheet(f"""
+            font-size: 11px;
+            color: {COLORS['text_muted']};
+            font-weight: 500;
+        """)  # Giảm từ 14px xuống 11px
         info_layout.addWidget(code_label)
-
+        
         layout.addLayout(info_layout, 1)
 
+        # Status badge
         status = self._student.status or "ACTIVE"
-        color = "#4caf50" if status == "ACTIVE" else "#ff9800"
-        status_label = QLabel(status)
-        status_label.setStyleSheet(f"""
-            background: {color}22;
-            color: {color};
-            padding: 0px 6px;
-            border-radius: 8px;
-            font-size: 10px;
-            font-weight: 500;
-        """)
-        status_label.setFixedHeight(18)
-        layout.addWidget(status_label)
+        from centermanager.ui.design_system.components import StatusBadge
+        badge = StatusBadge(status)
+        badge.setFixedHeight(24)
+        layout.addWidget(badge)
 
+        # Last updated
         if self._student.updated_at:
-            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y"))
-            time_label.setStyleSheet("font-size: 10px; color: #aaa;")
+            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y %H:%M"))
+            time_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {COLORS['text_muted']};
+            """)  # Giảm từ 13px xuống 11px
             layout.addWidget(time_label)
 
     @property
@@ -19135,21 +19322,30 @@ class StudentListPage(QWidget):
 
         # Toolbar
         toolbar = QWidget()
-        toolbar.setStyleSheet("background: white; padding: 6px 10px; border-bottom: 1px solid #e8e8e8;")
+        toolbar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(4)
+        toolbar_layout.setSpacing(SPACING['xs'])
 
         top_row = QHBoxLayout()
+        top_row.setSpacing(SPACING['sm'])
+        
         self.search_bar = SearchBar()
+        self.search_bar.setPlaceholderText("Search...")
         self.search_bar.text_changed.connect(self._filter)
         top_row.addWidget(self.search_bar)
 
         self.filter_btn = SecondaryButton("🔍 Filter")
+        self.filter_btn.setFixedHeight(34)
         self.filter_btn.clicked.connect(self.filter_clicked.emit)
         top_row.addWidget(self.filter_btn)
 
         self.add_btn = PrimaryButton("+ Add")
+        self.add_btn.setFixedHeight(34)
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
 
@@ -19166,23 +19362,33 @@ class StudentListPage(QWidget):
         layout.addWidget(toolbar)
 
         self.count_label = QLabel("0 students")
-        self.count_label.setStyleSheet("padding: 2px 10px; font-size: 12px; color: #888;")
+        self.count_label.setStyleSheet(f"""
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+            font-size: 11px;
+            color: {COLORS['text_muted']};
+            background: {COLORS['gray_50']};
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
         layout.addWidget(self.count_label)
 
         self.list_widget = QListWidget()
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        self.list_widget.setStyleSheet("""
-            QListWidget {
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
                 border: none;
                 outline: none;
-                background: white;
-            }
-            QListWidget::item {
+                background: {COLORS['surface']};
+            }}
+            QListWidget::item {{
                 padding: 0px;
-            }
-            QListWidget::item:selected {
-                background: #e3f2fd;
-            }
+            }}
+            QListWidget::item:selected {{
+                background: transparent;
+            }}
+            QListWidget::item:selected QFrame {{
+                background: {COLORS['primary_hover']};
+                border-left: 3px solid {COLORS['primary']};
+            }}
         """)
         self.list_widget.setSpacing(0)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
@@ -19196,6 +19402,7 @@ class StudentListPage(QWidget):
         self.empty_widget.setVisible(False)
         layout.addWidget(self.empty_widget)
 
+    # ============ Các phương thức giữ nguyên ============
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         widget = self.list_widget.itemWidget(item)
         if widget and hasattr(widget, 'student'):
@@ -19256,7 +19463,7 @@ class StudentListPage(QWidget):
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-            self.data_updated.emit()  # instead of student_selected.emit(-1)
+            self.data_updated.emit()
 
     def export_students(self) -> None:
         try:
@@ -21297,11 +21504,14 @@ SummaryCard - mini card for summary widget.
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
+
+from centermanager.ui.design_system.tokens import COLORS, SPACING, BORDER_RADIUS
 
 
 class SummaryCard(QFrame):
     """Mini card displaying one summary item."""
+    
     def __init__(
         self,
         icon: str,
@@ -21312,44 +21522,61 @@ class SummaryCard(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                background: white;
-                padding: 6px 10px;
-            }
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {COLORS['border_light']};
+                border-radius: {BORDER_RADIUS['md']}px;
+                background: {COLORS['surface']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
+            }}
         """)
-        # Fix: use QSizePolicy.Minimum constant
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        # Tăng 30%: từ 104-130 lên 135-169
+        self.setMinimumHeight(135)
+        self.setMaximumHeight(169)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(SPACING['md'], SPACING['sm']+2, SPACING['md'], SPACING['sm']+2)
+        layout.setSpacing(SPACING['xs'])
 
-        # Icon
+        # Top: Icon + Title
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(SPACING['xs'])
+        
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 18px;")
-        layout.addWidget(icon_label)
-
-        # Title
+        icon_label.setStyleSheet("font-size: 14px;")  # Giảm từ 18px
+        top_layout.addWidget(icon_label)
+        
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 11px; color: #666; font-weight: 500;")
-        layout.addWidget(title_label)
+        title_label.setStyleSheet(f"""
+            font-size: 10px;
+            color: {COLORS['text_muted']};
+            font-weight: 500;
+            letter-spacing: 0.2px;
+        """)  # Giảm từ 12px xuống 10px
+        top_layout.addWidget(title_label)
+        top_layout.addStretch()
+        layout.addLayout(top_layout)
 
-        # Value
+        # Value - giảm từ 24px xuống 17px (≈30%)
         value_label = QLabel(value or "-")
-        value_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #222;")
-        value_label.setWordWrap(True)
+        value_label.setStyleSheet(f"""
+            font-size: 17px;
+            font-weight: 700;
+            color: {COLORS['text_primary']};
+            line-height: 1.2;
+        """)
+        value_label.setWordWrap(False)
         layout.addWidget(value_label)
 
         # Sub value
         if sub_value:
             sub_label = QLabel(sub_value)
-            sub_label.setStyleSheet("font-size: 11px; color: #888;")
+            sub_label.setStyleSheet(f"""
+                font-size: 10px;
+                color: {COLORS['text_muted']};
+            """)  # Giảm từ 12px xuống 10px
             layout.addWidget(sub_label)
-
-        layout.addStretch()
 
 ================
 File: src/centermanager/ui/summary/summary_widget.py
@@ -21365,25 +21592,26 @@ from PySide6.QtWidgets import QWidget, QGridLayout
 
 from centermanager.dto.student_summary_dto import StudentSummaryDTO
 from centermanager.ui.summary.summary_card import SummaryCard
+from centermanager.ui.design_system.tokens import SPACING
 
 
 class SummaryWidget(QWidget):
     """Widget displaying summary cards in a grid layout."""
+    
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._layout = QGridLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(6)
+        self._layout.setSpacing(SPACING['sm'])
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
     def set_summary(self, dto: StudentSummaryDTO) -> None:
-        """Clear and populate cards from DTO."""
         self._clear()
 
         cards = []
 
         # Current Level
-        cards.append(SummaryCard("📚", "Current Level", dto.current_level or "-"))
+        cards.append(SummaryCard("📚", "Level", dto.current_level or "-"))
 
         # Latest Assessment
         if dto.latest_assessment_title:
@@ -21404,35 +21632,29 @@ class SummaryWidget(QWidget):
         else:
             cards.append(SummaryCard("⏱️", "Last Activity", "No activity"))
 
-        # Learning Status
+        # Status
         cards.append(SummaryCard("🔵", "Status", dto.learning_status or "-"))
 
         # Age
         age_str = str(dto.age) if dto.age is not None else "-"
         cards.append(SummaryCard("🎂", "Age", age_str))
 
-        # Assessment Count
+        # Counts
         cards.append(SummaryCard("📊", "Assessments", str(dto.assessment_count)))
-
-        # Timeline Count
-        cards.append(SummaryCard("📅", "Timeline Events", str(dto.timeline_count)))
-        
+        cards.append(SummaryCard("📅", "Timeline", str(dto.timeline_count)))
         cards.append(SummaryCard("📁", "Documents", str(dto.document_count)))
-        # Parent Count
         cards.append(SummaryCard("👨‍👩‍👧", "Parents", str(dto.parent_count)))
 
-        # Add cards to grid (3 columns)
-        cols = 3
+        # Add to grid (4 columns for better density)
+        cols = 4
         for idx, card in enumerate(cards):
             row = idx // cols
             col = idx % cols
             self._layout.addWidget(card, row, col)
 
-        # Stretch at bottom
         self._layout.setRowStretch(row + 1, 1)
 
     def _clear(self) -> None:
-        """Remove all cards."""
         while self._layout.count():
             item = self._layout.takeAt(0)
             if item.widget():
@@ -21454,6 +21676,7 @@ File: src/centermanager/ui/timeline/timeline_card.py
 # -*- coding: utf-8 -*-
 """
 TimelineCard widget - displays a single timeline event.
+Redesigned: smaller, cleaner, better hierarchy.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -21462,47 +21685,59 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 
 from centermanager.models.timeline_event import TimelineEvent
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
 
 class TimelineCard(QFrame):
     """Card displaying a single timeline event (read-only)."""
-
+    
     def __init__(self, event: TimelineEvent, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._event = event
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
-                background: #fafafa;
-                padding: 6px 10px;
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {COLORS['border_light']};
+                border-radius: {BORDER_RADIUS['sm']}px;
+                background: {COLORS['surface']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
                 margin: 2px 0;
-            }
+            }}
+            QFrame:hover {{
+                background: {COLORS['surface_hover']};
+            }}
         """)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(2)
+        layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
+        layout.setSpacing(SPACING['xs'])
 
         # Header: Icon + Title + Time
         header = QHBoxLayout()
+        header.setSpacing(SPACING['sm'])
+        
         icon_label = QLabel(self._get_icon())
-        icon_label.setStyleSheet("font-size: 16px;")
+        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_small']}px;")
         header.addWidget(icon_label)
 
         title_label = QLabel(self._event.title)
-        title_label.setStyleSheet("font-size: 14px; font-weight: 500;")
+        title_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['body']}px;
+            font-weight: 500;
+            color: {COLORS['text_primary']};
+        """)
         header.addWidget(title_label)
 
         header.addStretch()
 
-        # Format time (convert UTC to local)
         time_str = self._format_time(self._event.created_at)
         time_label = QLabel(time_str)
-        time_label.setStyleSheet("color: #888; font-size: 11px;")
+        time_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['text_muted']};
+        """)
         header.addWidget(time_label)
 
         layout.addLayout(header)
@@ -21511,18 +21746,23 @@ class TimelineCard(QFrame):
         if self._event.description:
             desc_label = QLabel(self._event.description)
             desc_label.setWordWrap(True)
-            desc_label.setStyleSheet("color: #555; font-size: 13px;")
+            desc_label.setStyleSheet(f"""
+                font-size: {TYPOGRAPHY['body_small']}px;
+                color: {COLORS['text_secondary']};
+                padding-left: {SPACING['sm']}px;
+            """)
             layout.addWidget(desc_label)
 
-        # Event type tag
+        # Event type tag (small, inline)
         type_label = QLabel(self._event.event_type)
-        type_label.setStyleSheet("""
-            color: #666;
-            font-size: 11px;
-            background-color: #e8e8e8;
-            padding: 0px 6px;
-            border-radius: 3px;
+        type_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['text_muted']};
+            background: {COLORS['gray_100']};
+            padding: 0px {SPACING['sm']}px;
+            border-radius: {BORDER_RADIUS['sm']}px;
         """)
+        type_label.setFixedHeight(20)
         layout.addWidget(type_label)
 
     def _get_icon(self) -> str:
@@ -21537,23 +21777,20 @@ class TimelineCard(QFrame):
             "AssessmentDeleted": "🗑️",
             "ProductAdded": "📁",
             "AttachmentAdded": "📎",
+            "NoteAdded": "📝",
+            "DocumentUploaded": "📎",
             "System": "⚙️",
         }
         return icons.get(self._event.event_type, "📅")
 
     def _format_time(self, dt: datetime) -> str:
-        """Format datetime for display, converting UTC to local time."""
-        # Convert UTC to local time (naive -> aware -> local)
-        # SQLite stores naive UTC, so we assume dt is UTC
         if dt.tzinfo is None:
             dt_utc = dt.replace(tzinfo=timezone.utc)
         else:
             dt_utc = dt.astimezone(timezone.utc)
-        # Convert to local timezone
         dt_local = dt_utc.astimezone()
         now_local = datetime.now().astimezone()
 
-        # Compare dates in local timezone
         if dt_local.date() == now_local.date():
             return f"Today {dt_local.strftime('%H:%M')}"
         elif (now_local - dt_local).days == 1:
