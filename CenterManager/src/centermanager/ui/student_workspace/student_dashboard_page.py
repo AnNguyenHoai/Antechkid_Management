@@ -156,12 +156,16 @@ class StudentDashboardPage(QWidget):
     def _populate_charts(self) -> None:
         try:
             data = self._analytics_service.get_dashboard_analytics()
-            self.avg_score_widget.set_value(f"{data['average_score']:.1f}/5")
-            self.enrollment_chart.set_data(data['enrollment_trend'])
-            self.assessment_chart.set_data(data['assessment_distribution'])
-            self.age_chart.set_data(data['age_distribution'])
+            # Enrollment trend: list of (month, count)
+            enrollment_data = data.get('enrollment_trend', [])
+            if enrollment_data:
+                self.enrollment_chart.set_data(enrollment_data)
+            # Assessment distribution: list of (type, count)
+            assessment_data = data.get('assessment_distribution', [])
+            if assessment_data:
+                self.assessment_chart.set_data(assessment_data)
         except Exception as e:
-            logger.exception("Failed to load analytics data")
+            logger.exception("Failed to load chart data")
 
     def _populate_attention(self) -> None:
         self._clear_layout(self.attention_container_layout)
