@@ -51,15 +51,16 @@ class StudentListItem(QFrame):
                 background: {COLORS['surface_hover']};
             }}
         """)
-        self.setFixedHeight(52)
+        self.setMinimumHeight(60)  # thay vì fixed height 52
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
         layout.setSpacing(SPACING['md'])
 
         # Avatar
-        avatar = Avatar(self._student.full_name, size=32)
-        avatar.setFixedSize(32, 32)
+        avatar = Avatar(self._student.full_name, size=36)  # tăng size lên 36
+        avatar.setFixedSize(36, 36)
         layout.addWidget(avatar)
 
         # Info: Name + Code
@@ -100,14 +101,12 @@ class StudentListItem(QFrame):
             """)
             layout.addWidget(time_label)
 
-        # Selection indicator (left border) - will be handled by list selection
-        self.setProperty("selected", False)
-
     @property
     def student(self) -> Student:
         return self._student
 
 
+# Phần còn lại của class StudentListPage giữ nguyên
 class StudentListPage(QWidget):
     student_selected = Signal(int)
     filter_clicked = Signal()
@@ -136,7 +135,7 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar with search, filter, add
+        # Toolbar
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -167,7 +166,6 @@ class StudentListPage(QWidget):
 
         toolbar_layout.addLayout(top_row)
 
-        # Filter bar (collapsible, but we keep it visible)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -213,7 +211,6 @@ class StudentListPage(QWidget):
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
 
-        # Empty state (overlay, hidden initially)
         self.empty_widget = EmptyState(
             icon="👤",
             title="No students found",
@@ -282,7 +279,7 @@ class StudentListPage(QWidget):
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-            self.data_updated.emit()  # instead of student_selected.emit(-1)
+            self.data_updated.emit()
 
     def export_students(self) -> None:
         try:

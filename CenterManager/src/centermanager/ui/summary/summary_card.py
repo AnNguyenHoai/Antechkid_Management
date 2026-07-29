@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 SummaryCard - mini card for summary widget.
-Redesigned: smaller, better hierarchy.
 """
 from typing import Optional
 
@@ -32,14 +31,14 @@ class SummaryCard(QFrame):
                 padding: {SPACING['sm']}px {SPACING['md']}px;
             }}
         """)
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
-        self.setFixedHeight(72)
+        self.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumHeight(80)  # tăng lên 80 để đủ chỗ
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
         layout.setSpacing(SPACING['xs'])
 
-        # Top row: Icon + Title (small, muted)
+        # Top row: Icon + Title
         top_layout = QHBoxLayout()
         top_layout.setSpacing(SPACING['xs'])
         
@@ -58,7 +57,7 @@ class SummaryCard(QFrame):
         top_layout.addStretch()
         layout.addLayout(top_layout)
 
-        # Value (large, bold)
+        # Value
         value_label = QLabel(value or "-")
         value_label.setStyleSheet(f"""
             font-size: {TYPOGRAPHY['stat_value']}px;
@@ -69,7 +68,6 @@ class SummaryCard(QFrame):
         value_label.setWordWrap(False)
         layout.addWidget(value_label)
 
-        # Sub value (small, muted)
         if sub_value:
             sub_label = QLabel(sub_value)
             sub_label.setStyleSheet(f"""

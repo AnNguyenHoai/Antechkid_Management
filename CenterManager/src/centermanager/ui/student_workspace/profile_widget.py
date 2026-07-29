@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 ProfileWidget - unified student profile display.
-Redesigned with better visual hierarchy and layout.
 """
 from typing import Optional
 
@@ -23,11 +22,13 @@ class ProfileWidget(QWidget):
         self.clear()
 
     def _setup_ui(self) -> None:
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['md'])
 
-        # --- Header row: Avatar + Name/Code/Status ---
+        # Header
         header = QHBoxLayout()
         header.setSpacing(SPACING['lg'])
         
@@ -38,7 +39,6 @@ class ProfileWidget(QWidget):
         info = QVBoxLayout()
         info.setSpacing(SPACING['xs'])
         
-        # Name
         self.name_label = QLabel()
         self.name_label.setStyleSheet(f"""
             font-size: {TYPOGRAPHY['page_title']}px;
@@ -47,7 +47,6 @@ class ProfileWidget(QWidget):
         """)
         info.addWidget(self.name_label)
         
-        # Code + Status
         code_status = QHBoxLayout()
         code_status.setSpacing(SPACING['sm'])
         self.code_label = QLabel()
@@ -67,14 +66,14 @@ class ProfileWidget(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
-        # --- Separator ---
+        # Separator
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
         layout.addWidget(line)
 
-        # --- Details grid (2 columns) ---
+        # Details grid
         self.details_grid = QGridLayout()
         self.details_grid.setSpacing(SPACING['sm'])
         self.details_grid.setContentsMargins(0, SPACING['sm'], 0, 0)
@@ -92,7 +91,6 @@ class ProfileWidget(QWidget):
         self.code_label.setText(student.student_code)
         self.status_badge.set_status(student.status or "")
 
-        # Build details
         details = [
             ("Preferred Name", student.preferred_name or "-"),
             ("Date of Birth", format_date_for_display(student.date_of_birth)),
@@ -104,11 +102,9 @@ class ProfileWidget(QWidget):
             ("Contact", primary_parent_phone if primary_parent_phone else "-"),
         ]
 
-        # Add to grid with label-value pairs
         row = 0
         col = 0
         for label, value in details:
-            # Label
             lbl = QLabel(label + ":")
             lbl.setStyleSheet(f"""
                 font-size: {TYPOGRAPHY['caption']}px;
@@ -118,7 +114,6 @@ class ProfileWidget(QWidget):
             """)
             self.details_grid.addWidget(lbl, row, col * 2, 1, 1)
 
-            # Value
             val = QLabel(value)
             val.setStyleSheet(f"""
                 font-size: {TYPOGRAPHY['body']}px;
@@ -132,6 +127,9 @@ class ProfileWidget(QWidget):
             if col >= 2:
                 col = 0
                 row += 1
+
+        # Stretch để đẩy các dòng lên trên
+        self.details_grid.setRowStretch(row + 1, 1)
 
     def clear(self) -> None:
         while self.details_grid.count():

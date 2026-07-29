@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 MetricCard - Reusable card for displaying a single metric.
-Redesigned: Value as primary, label as secondary.
 """
 from typing import Optional
 
@@ -33,15 +32,14 @@ class MetricCard(QFrame):
                 padding: {SPACING['md']}px {SPACING['lg']}px;
             }}
         """)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(72)
-        self.setMaximumHeight(88)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumHeight(80)  # tăng từ 72 lên 80 để đủ chỗ cho content
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
         layout.setSpacing(SPACING['xs'])
 
-        # Top: Icon + Label (small, muted)
+        # Top: Icon + Label
         top_layout = QHBoxLayout()
         top_layout.setSpacing(SPACING['xs'])
         
@@ -61,7 +59,7 @@ class MetricCard(QFrame):
         top_layout.addStretch()
         layout.addLayout(top_layout)
 
-        # Value (large, bold) - primary visual
+        # Value (large, bold)
         self.value_label = QLabel(value)
         self.value_label.setStyleSheet(f"""
             font-size: {TYPOGRAPHY['stat_value_large']}px;
