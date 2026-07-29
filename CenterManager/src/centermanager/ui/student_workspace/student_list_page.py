@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 StudentListPage - page that displays student list with search, filter, add.
-Polished with professional CRM look.
 """
 import logging
 from typing import Optional, List
@@ -18,21 +17,19 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.ui.design_system import (
     Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
-    FilterBar, Breadcrumb
+    FilterBar
 )
-from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
+from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
-from centermanager.ui.students.student_import_dialog import StudentImportDialog
 from centermanager.services.student_import_service import StudentImportService
 from centermanager.services.student_export_service import StudentExportService
-from centermanager.ui import styles
 
 logger = logging.getLogger(__name__)
 
 
 class StudentListItem(QFrame):
-    """Professional student list item with avatar, name, code, status, updated."""
+    """Student list item with avatar, name, code, status."""
     
     def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -51,37 +48,39 @@ class StudentListItem(QFrame):
                 background: {COLORS['surface_hover']};
             }}
         """)
-        self.setMinimumHeight(60)  # thay vì fixed height 52
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        # Tăng 50%: từ 90 lên 135
+        self.setFixedHeight(135)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['sm'], SPACING['xs'], SPACING['sm'], SPACING['xs'])
+        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
         layout.setSpacing(SPACING['md'])
 
-        # Avatar
-        avatar = Avatar(self._student.full_name, size=36)  # tăng size lên 36
-        avatar.setFixedSize(36, 36)
+        # Avatar - tăng từ 40 lên 52
+        avatar = Avatar(self._student.full_name, size=52, font_size=18)
+        avatar.setFixedSize(52, 52)
         layout.addWidget(avatar)
 
-        # Info: Name + Code
+        # Info: Name + Code (font nhỏ hơn)
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(0)
+        info_layout.setSpacing(SPACING['xs'])
         info_layout.setContentsMargins(0, 0, 0, 0)
         
         name_label = QLabel(self._student.full_name)
         name_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['body']}px;
-            font-weight: 500;
+            font-size: 13px;
+            font-weight: 600;
             color: {COLORS['text_primary']};
-        """)
+        """)  # Giảm từ 16px xuống 13px
         name_label.setWordWrap(False)
         info_layout.addWidget(name_label)
         
         code_label = QLabel(self._student.student_code)
         code_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['caption']}px;
+            font-size: 11px;
             color: {COLORS['text_muted']};
-        """)
+            font-weight: 500;
+        """)  # Giảm từ 14px xuống 11px
         info_layout.addWidget(code_label)
         
         layout.addLayout(info_layout, 1)
@@ -90,15 +89,16 @@ class StudentListItem(QFrame):
         status = self._student.status or "ACTIVE"
         from centermanager.ui.design_system.components import StatusBadge
         badge = StatusBadge(status)
+        badge.setFixedHeight(24)
         layout.addWidget(badge)
 
         # Last updated
         if self._student.updated_at:
-            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y"))
+            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y %H:%M"))
             time_label.setStyleSheet(f"""
-                font-size: {TYPOGRAPHY['caption']}px;
+                font-size: 11px;
                 color: {COLORS['text_muted']};
-            """)
+            """)  # Giảm từ 13px xuống 11px
             layout.addWidget(time_label)
 
     @property
@@ -106,7 +106,6 @@ class StudentListItem(QFrame):
         return self._student
 
 
-# Phần còn lại của class StudentListPage giữ nguyên
 class StudentListPage(QWidget):
     student_selected = Signal(int)
     filter_clicked = Signal()
@@ -150,7 +149,7 @@ class StudentListPage(QWidget):
         top_row.setSpacing(SPACING['sm'])
         
         self.search_bar = SearchBar()
-        self.search_bar.setPlaceholderText("Search by code, name, phone, parent...")
+        self.search_bar.setPlaceholderText("Search...")
         self.search_bar.text_changed.connect(self._filter)
         top_row.addWidget(self.search_bar)
 
@@ -176,18 +175,16 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        # Count label
         self.count_label = QLabel("0 students")
         self.count_label.setStyleSheet(f"""
             padding: {SPACING['xs']}px {SPACING['md']}px;
-            font-size: {TYPOGRAPHY['caption']}px;
+            font-size: 11px;
             color: {COLORS['text_muted']};
             background: {COLORS['gray_50']};
             border-bottom: 1px solid {COLORS['border_light']};
         """)
         layout.addWidget(self.count_label)
 
-        # List
         self.list_widget = QListWidget()
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.list_widget.setStyleSheet(f"""
@@ -219,6 +216,7 @@ class StudentListPage(QWidget):
         self.empty_widget.setVisible(False)
         layout.addWidget(self.empty_widget)
 
+    # ============ Các phương thức giữ nguyên ============
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         widget = self.list_widget.itemWidget(item)
         if widget and hasattr(widget, 'student'):

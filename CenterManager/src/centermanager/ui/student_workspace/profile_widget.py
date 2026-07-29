@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.student import Student
 from centermanager.ui.students.helpers import calculate_age, format_date_for_display
-from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
+from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.design_system.components import Avatar, StatusBadge
 
 
@@ -22,8 +22,6 @@ class ProfileWidget(QWidget):
         self.clear()
 
     def _setup_ui(self) -> None:
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['md'])
@@ -41,20 +39,20 @@ class ProfileWidget(QWidget):
         
         self.name_label = QLabel()
         self.name_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['page_title']}px;
+            font-size: 22px;
             font-weight: 700;
             color: {COLORS['text_primary']};
-        """)
+        """)  # Giảm từ 26px xuống 22px
         info.addWidget(self.name_label)
         
         code_status = QHBoxLayout()
         code_status.setSpacing(SPACING['sm'])
         self.code_label = QLabel()
         self.code_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['body']}px;
+            font-size: 13px;
             color: {COLORS['text_muted']};
             font-weight: 500;
-        """)
+        """)  # Giảm từ 14px xuống 13px
         code_status.addWidget(self.code_label)
         
         self.status_badge = StatusBadge("")
@@ -73,10 +71,10 @@ class ProfileWidget(QWidget):
         line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
         layout.addWidget(line)
 
-        # Details grid
+        # Details grid - tăng spacing
         self.details_grid = QGridLayout()
-        self.details_grid.setSpacing(SPACING['sm'])
-        self.details_grid.setContentsMargins(0, SPACING['sm'], 0, 0)
+        self.details_grid.setSpacing(SPACING['md'] + 4)
+        self.details_grid.setContentsMargins(0, SPACING['sm'] + 4, 0, 0)
         self.details_grid.setColumnStretch(1, 1)
         self.details_grid.setColumnStretch(3, 1)
         layout.addLayout(self.details_grid)
@@ -107,19 +105,19 @@ class ProfileWidget(QWidget):
         for label, value in details:
             lbl = QLabel(label + ":")
             lbl.setStyleSheet(f"""
-                font-size: {TYPOGRAPHY['caption']}px;
+                font-size: 11px;
                 color: {COLORS['text_muted']};
                 font-weight: 500;
                 letter-spacing: 0.2px;
-            """)
+            """)  # Giảm từ 13px xuống 11px
             self.details_grid.addWidget(lbl, row, col * 2, 1, 1)
 
             val = QLabel(value)
             val.setStyleSheet(f"""
-                font-size: {TYPOGRAPHY['body']}px;
+                font-size: 13px;
                 color: {COLORS['text_primary']};
                 font-weight: 500;
-            """)
+            """)  # Giảm từ 15px xuống 13px
             val.setWordWrap(True)
             self.details_grid.addWidget(val, row, col * 2 + 1, 1, 1)
 
@@ -128,8 +126,7 @@ class ProfileWidget(QWidget):
                 col = 0
                 row += 1
 
-        # Stretch để đẩy các dòng lên trên
-        self.details_grid.setRowStretch(row + 1, 1)
+        self.details_grid.setRowStretch(row, 1)
 
     def clear(self) -> None:
         while self.details_grid.count():

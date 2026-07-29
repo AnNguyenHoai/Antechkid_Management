@@ -168,6 +168,7 @@ class StudentDetailPage(QWidget):
             on_upload_doc=self._on_upload_doc
         )
 
+    # Trong _create_vertical_section, cập nhật font size
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
         layout = QVBoxLayout(section)
@@ -175,10 +176,10 @@ class StudentDetailPage(QWidget):
         layout.setSpacing(SPACING['xs'])
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
-            font-size: {TYPOGRAPHY['section_title']}px;
+            font-size: 16px;
             font-weight: 600;
             color: {COLORS['text_primary']};
-        """)
+        """)  # Giảm từ 18px xuống 16px
         layout.addWidget(title_label)
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)

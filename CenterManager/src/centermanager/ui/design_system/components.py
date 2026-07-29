@@ -305,7 +305,7 @@ class StatusBadge(QLabel):
                 color: {colors['text']};
                 padding: 2px {SPACING['sm']}px;
                 border-radius: 12px;
-                font-size: {TYPOGRAPHY['badge']}px;
+                font-size: 10px;
                 font-weight: 600;
                 letter-spacing: 0.3px;
             }}
@@ -320,16 +320,19 @@ class StatusBadge(QLabel):
 # ===== Avatar =====
 class Avatar(QLabel):
     """Circular avatar displaying initials."""
-
+    
     def __init__(
         self,
         name: str,
         size: int = 36,
+        font_size: Optional[int] = None,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._name = name
         self._size = size
+        # Nếu không truyền font_size, tự động tính = size // 2
+        self._font_size = font_size if font_size is not None else size // 2
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -341,7 +344,7 @@ class Avatar(QLabel):
             QLabel {{
                 background: {COLORS['primary']};
                 color: white;
-                font-size: {self._size // 2}px;
+                font-size: {self._font_size}px;
                 font-weight: 600;
                 border-radius: {self._size // 2}px;
             }}

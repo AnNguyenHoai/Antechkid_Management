@@ -8,13 +8,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QGridLayout, QSizePolicy
 
 from centermanager.ui.shared.metric_card import MetricCard
+from centermanager.ui.design_system.tokens import SPACING
 
 
 class StatisticGrid(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._layout = QGridLayout(self)
-        self._layout.setSpacing(12)
+        self._layout.setSpacing(SPACING['md'])  # Tăng từ 12 lên 16
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._cards = []
 

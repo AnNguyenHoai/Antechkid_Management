@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 StudentDashboardPage - Complete dashboard for Student Workspace.
+Properly sized for better visibility.
 """
 import logging
 from typing import Optional
@@ -18,6 +19,7 @@ from centermanager.ui.shared import (
     EmptyState, SectionHeader, SearchToolbar
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,8 @@ class StudentDashboardPage(QWidget):
         container = QWidget()
         container.setStyleSheet(f"background: {COLORS['background']};")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['md'], SPACING['md'], SPACING['md'], SPACING['md'])
-        container_layout.setSpacing(SPACING['lg'])
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
 
         # ---- Stats Grid ----
         self.stats_grid = StatisticGrid()
@@ -79,7 +81,7 @@ class StudentDashboardPage(QWidget):
         self.attention_container = QWidget()
         self.attention_container_layout = QVBoxLayout(self.attention_container)
         self.attention_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.attention_container_layout.setSpacing(SPACING['xs'])
+        self.attention_container_layout.setSpacing(SPACING['sm'])
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
@@ -117,12 +119,14 @@ class StudentDashboardPage(QWidget):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(SPACING['sm'])
 
-        from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
         add_btn = PrimaryButton("➕ Add Student")
+        add_btn.setFixedHeight(38)
         add_btn.clicked.connect(self.add_student_clicked.emit)
         import_btn = SecondaryButton("📥 Import")
+        import_btn.setFixedHeight(38)
         import_btn.clicked.connect(self.import_students_clicked.emit)
         export_btn = SecondaryButton("📤 Export")
+        export_btn.setFixedHeight(38)
         export_btn.clicked.connect(self.export_students_clicked.emit)
 
         actions_layout.addWidget(add_btn)
@@ -174,11 +178,11 @@ class StudentDashboardPage(QWidget):
                     banner = WarningBanner(
                         message=f"{item.full_name} ({item.student_code}) – {item.reason}",
                         icon="⚠️",
-                        severity="warning"
+                        severity="warning",
+                        action_text="Open →",
+                        action_data=item.student_id
                     )
-                    # Make clickable
-                    banner.setCursor(Qt.CursorShape.PointingHandCursor)
-                    banner.mousePressEvent = lambda e, sid=item.student_id: self.student_selected.emit(sid)
+                    banner.clicked.connect(lambda sid: self.student_selected.emit(sid))
                     self.attention_container_layout.addWidget(banner)
             else:
                 empty = EmptyState(
@@ -202,7 +206,11 @@ class StudentDashboardPage(QWidget):
                     if ev.student_name:
                         label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     label = QLabel(label_text)
-                    label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
+                    label.setStyleSheet(f"""
+                        font-size: 14px;
+                        color: {COLORS['text_secondary']};
+                        padding: 4px 0;
+                    """)
                     self.events_container_layout.addWidget(label)
             else:
                 empty = EmptyState(
