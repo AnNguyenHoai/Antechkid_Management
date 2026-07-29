@@ -66,6 +66,11 @@ class StudentNoteService:
             repo = NoteRepository(session)
             return repo.get_by_student(student_id)
 
+    def get_note_by_id(self, note_id: int) -> Optional[Note]:   # NEW
+        with self._session_factory() as session:
+            repo = NoteRepository(session)
+            return repo.get_by_id(note_id)
+
     def update_note(
         self,
         note_id: int,

@@ -146,7 +146,40 @@ class HomeDashboardService:
                 quick_action_target="finance"
             )
 
-            return [student_ws, teacher_ws, finance_ws]
+            assessment_ws = WorkspaceSummary(
+                workspace_id="assessment",
+                name="Assessment Workspace",
+                icon="📊",
+                description="Manage student assessments",
+                summary_text="View all assessments",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="assessment"
+            )
+            timeline_ws = WorkspaceSummary(
+                workspace_id="timeline",
+                name="Timeline Workspace",
+                icon="📅",
+                description="Student activity timeline",
+                summary_text="View all events",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="timeline"
+            )
+            reports_ws = WorkspaceSummary(
+                workspace_id="reports",
+                name="Reports Workspace",
+                icon="📈",
+                description="Analytics and reports",
+                summary_text="Student insights",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="reports"
+            )
+            return [student_ws, teacher_ws, finance_ws, assessment_ws, timeline_ws, reports_ws]
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
         """Get recent activities across all workspaces."""

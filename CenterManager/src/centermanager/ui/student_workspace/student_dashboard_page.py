@@ -51,8 +51,8 @@ class StudentDashboardPage(QWidget):
         container = QWidget()
         container.setStyleSheet(f"background: {COLORS['background']};")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
-        container_layout.setSpacing(SPACING['xl'])
+        container_layout.setContentsMargins(SPACING['md'], SPACING['md'], SPACING['md'], SPACING['md'])
+        container_layout.setSpacing(SPACING['lg'])
 
         # ---- Stats Grid ----
         self.stats_grid = StatisticGrid()

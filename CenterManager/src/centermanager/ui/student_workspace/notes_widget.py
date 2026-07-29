@@ -15,6 +15,49 @@ from centermanager.models.note import Note, NoteType
 from centermanager.services.student_note_service import StudentNoteService
 
 
+class NoteDetailDialog(QDialog):
+    def __init__(self, note_service: StudentNoteService, note_id: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = note_service
+        self._note_id = note_id
+        self._note: Optional[Note] = None
+        self.setWindowTitle("Note Details")
+        self.setMinimumWidth(450)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.type_label = QLabel()
+        self.content_label = QLabel()
+        self.content_label.setWordWrap(True)
+        self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow("Type:", self.type_label)
+        form.addRow("Content:", self.content_label)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._load_note()
+
+    def _load_note(self):
+        try:
+            self._note = self._service.get_note_by_id(self._note_id)
+            if self._note:
+                self.type_label.setText(self._note.note_type)
+                self.content_label.setText(self._note.content)
+            else:
+                self.type_label.setText("Not found")
+                self.content_label.setText("")
+        except Exception as e:
+            self.type_label.setText("Error")
+            self.content_label.setText(str(e))
+
+
 class NoteCard(QFrame):
     def __init__(self, note: Note, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -28,7 +71,11 @@ class NoteCard(QFrame):
                 padding: 6px 10px;
                 margin: 2px 0;
             }
+            QFrame:hover {
+                background: #f5f5f5;
+            }
         """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(2)
@@ -47,6 +94,13 @@ class NoteCard(QFrame):
         content_label.setWordWrap(True)
         content_label.setStyleSheet("font-size: 13px; color: #333;")
         layout.addWidget(content_label)
+
+    def mouseDoubleClickEvent(self, event):
+        parent = self.parent()
+        while parent and not isinstance(parent, NotesWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_on_view_note'):
+            parent._on_view_note(self._note.id)
 
 
 class NotesWidget(QWidget):
@@ -125,6 +179,10 @@ class NotesWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._load_notes()
             self.note_changed.emit()
+
+    def _on_view_note(self, note_id: int) -> None:
+        dialog = NoteDetailDialog(self._service, note_id, parent=self)
+        dialog.exec()
 
 
 class NoteDialog(QDialog):

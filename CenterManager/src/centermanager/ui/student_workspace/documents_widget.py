@@ -2,6 +2,9 @@
 """
 DocumentsWidget - display and manage student documents.
 """
+import os
+import sys
+import subprocess
 from typing import Optional, List
 from pathlib import Path
 
@@ -14,10 +17,11 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.document import Document
 from centermanager.services.student_document_service import StudentDocumentService
+from centermanager.core.paths import get_paths
 
 
 class DocumentCard(QFrame):
-    def __init__(self, doc: Document, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, doc: Document, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._doc = doc
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
@@ -29,7 +33,11 @@ class DocumentCard(QFrame):
                 padding: 6px 10px;
                 margin: 2px 0;
             }
+            QFrame:hover {
+                background: #f5f5f5;
+            }
         """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(2)
@@ -53,6 +61,19 @@ class DocumentCard(QFrame):
             desc.setWordWrap(True)
             desc.setStyleSheet("font-size: 12px; color: #555;")
             layout.addWidget(desc)
+
+    def mouseDoubleClickEvent(self, event):
+        from centermanager.core.paths import get_paths
+        file_path = get_paths().attachment_dir / self._doc.file_path
+        if file_path.exists():
+            if sys.platform == 'win32':
+                os.startfile(str(file_path))
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', str(file_path)])
+            else:
+                subprocess.run(['xdg-open', str(file_path)])
+        else:
+            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found at {file_path}.")
 
 
 class DocumentsWidget(QWidget):

@@ -170,7 +170,7 @@ class HomePage(QWidget):
             card.clicked.connect(self._on_workspace_clicked)
             self.workspace_grid.addWidget(card, row, col)
             col += 1
-            if col >= 2:
+            if col >= 3:
                 col = 0
                 row += 1
 
