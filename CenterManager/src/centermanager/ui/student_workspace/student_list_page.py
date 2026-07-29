@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""StudentListPage - page that displays student list with search, filter, add."""
+"""StudentListPage - Enterprise data management screen."""
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QListWidget, QListWidgetItem, QSizePolicy, QScrollArea,
-    QMessageBox
+    QFrame, QMessageBox, QMenu, QSizePolicy
 )
+from PySide6.QtGui import QAction
 
 from centermanager.models.student import Student
 from centermanager.services.student_service import StudentService
@@ -22,6 +22,7 @@ from centermanager.ui.design_system import (
     FilterBar
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
 from centermanager.ui.students.student_import_dialog import StudentImportDialog
@@ -29,68 +30,10 @@ from centermanager.ui.students.student_import_dialog import StudentImportDialog
 logger = logging.getLogger(__name__)
 
 
-class StudentListItem(QFrame):
-    """Student list item with avatar, name, code, status."""
-    def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._student = student
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        self.setFrameStyle(QFrame.Shape.NoFrame)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: {COLORS['surface']};
-                border-bottom: 1px solid {COLORS['border_light']};
-                padding: {SPACING['sm']}px {SPACING['md']}px;
-            }}
-            QFrame:hover {{
-                background: {COLORS['surface_hover']};
-            }}
-        """)
-        self.setFixedHeight(135)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
-        layout.setSpacing(SPACING['md'])
-
-        avatar = Avatar(self._student.full_name, size=52, font_size=18)
-        avatar.setFixedSize(52, 52)
-        layout.addWidget(avatar)
-
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(SPACING['xs'])
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLORS['text_primary']};")
-        name_label.setWordWrap(False)
-        info_layout.addWidget(name_label)
-        code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']}; font-weight: 500;")
-        info_layout.addWidget(code_label)
-        layout.addLayout(info_layout, 1)
-
-        status = self._student.status or "ACTIVE"
-        from centermanager.ui.design_system.components import StatusBadge
-        badge = StatusBadge(status)
-        badge.setFixedHeight(24)
-        layout.addWidget(badge)
-
-        if self._student.updated_at:
-            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y %H:%M"))
-            time_label.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']};")
-            layout.addWidget(time_label)
-
-    @property
-    def student(self) -> Student:
-        return self._student
-
-
 class StudentListPage(QWidget):
     student_selected = Signal(int)
-    filter_clicked = Signal()
     data_updated = Signal()
+    filter_clicked = Signal()
 
     def __init__(
         self,
@@ -111,6 +54,9 @@ class StudentListPage(QWidget):
         self._export_service = export_service
         self._students: List[Student] = []
         self._filtered: List[Student] = []
+        self._sort_key: Optional[str] = None
+        self._sort_asc: bool = True
+        self._selected_ids: List[int] = []
         self._setup_ui()
         self.refresh()
 
@@ -119,6 +65,7 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # ---- Toolbar ----
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -131,15 +78,21 @@ class StudentListPage(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(SPACING['sm'])
+
         self.search_bar = SearchBar()
-        self.search_bar.setPlaceholderText("Search...")
-        self.search_bar.text_changed.connect(self._filter)
+        self.search_bar.setPlaceholderText("Search by code, name, parent phone, parent name...")
+        self.search_bar.text_changed.connect(self._on_search)
         top_row.addWidget(self.search_bar)
 
         self.filter_btn = SecondaryButton("🔍 Filter")
         self.filter_btn.setFixedHeight(34)
         self.filter_btn.clicked.connect(self.filter_clicked.emit)
         top_row.addWidget(self.filter_btn)
+
+        self.refresh_btn = SecondaryButton("🔄 Refresh")
+        self.refresh_btn.setFixedHeight(34)
+        self.refresh_btn.clicked.connect(self.refresh)
+        top_row.addWidget(self.refresh_btn)
 
         self.add_btn = PrimaryButton("+ Add")
         self.add_btn.setFixedHeight(34)
@@ -158,6 +111,7 @@ class StudentListPage(QWidget):
 
         toolbar_layout.addLayout(top_row)
 
+        # Filter bar (quick filters)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -168,120 +122,227 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        self.count_label = QLabel("0 students")
-        self.count_label.setStyleSheet(f"""
+        # ---- Bulk actions bar ----
+        self.bulk_bar = QWidget()
+        self.bulk_bar.setStyleSheet(f"""
+            background: {COLORS['primary_hover']};
             padding: {SPACING['xs']}px {SPACING['md']}px;
-            font-size: 11px;
-            color: {COLORS['text_muted']};
-            background: {COLORS['gray_50']};
             border-bottom: 1px solid {COLORS['border_light']};
         """)
-        layout.addWidget(self.count_label)
+        self.bulk_bar.setVisible(False)
+        bulk_layout = QHBoxLayout(self.bulk_bar)
+        bulk_layout.setContentsMargins(0, 0, 0, 0)
+        self.bulk_count_label = QLabel("0 selected")
+        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
+        bulk_layout.addWidget(self.bulk_count_label)
+        bulk_layout.addStretch()
+        self.bulk_delete_btn = QPushButton("Delete Selected")
+        self.bulk_delete_btn.setStyleSheet(f"color: {COLORS['danger']};")
+        self.bulk_delete_btn.clicked.connect(self._bulk_delete)
+        bulk_layout.addWidget(self.bulk_delete_btn)
+        self.bulk_export_btn = QPushButton("Export Selected")
+        self.bulk_export_btn.clicked.connect(self._bulk_export)
+        bulk_layout.addWidget(self.bulk_export_btn)
+        self.bulk_clear_btn = QPushButton("Clear")
+        self.bulk_clear_btn.clicked.connect(self._clear_selection)
+        bulk_layout.addWidget(self.bulk_clear_btn)
+        layout.addWidget(self.bulk_bar)
 
-        self.list_widget = QListWidget()
-        self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        self.list_widget.setStyleSheet(f"""
-            QListWidget {{
-                border: none;
-                outline: none;
-                background: {COLORS['surface']};
-            }}
-            QListWidget::item {{
-                padding: 0px;
-            }}
-            QListWidget::item:selected {{
-                background: transparent;
-            }}
-            QListWidget::item:selected QFrame {{
-                background: {COLORS['primary_hover']};
-                border-left: 3px solid {COLORS['primary']};
-            }}
-        """)
-        self.list_widget.setSpacing(0)
-        self.list_widget.itemClicked.connect(self._on_item_clicked)
-        layout.addWidget(self.list_widget)
+        # ---- Data Table ----
+        columns = [
+            {"key": "student_code", "label": "Code", "sortable": True},
+            {"key": "full_name", "label": "Name", "sortable": True},
+            {"key": "status", "label": "Status", "sortable": True},
+            {"key": "current_level", "label": "Level", "sortable": True},
+            {"key": "created_at", "label": "Created", "sortable": True},
+        ]
+        self.data_table = DataTable(columns, page_size=20)
+        self.data_table.sort_requested.connect(self._on_sort)
+        self.data_table.selection_changed.connect(self._on_selection_changed)
+        self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
+        self.data_table.context_menu_requested.connect(self._on_context_menu)
+        layout.addWidget(self.data_table)
 
-        self.empty_widget = EmptyState(
-            icon="👤",
-            title="No students found",
-            description="Try adjusting your search or filter."
-        )
-        self.empty_widget.setVisible(False)
-        layout.addWidget(self.empty_widget)
-
-    def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        widget = self.list_widget.itemWidget(item)
-        if widget and hasattr(widget, 'student'):
-            self.student_selected.emit(widget.student.id)
-
-    def _on_filter_changed(self, filters: dict) -> None:
-        self._apply_filters(filters)
-
-    def _apply_filters(self, filters: dict) -> None:
-        self._filter(self.search_bar.text())
+        # ---- Loading overlay ----
+        self.loading = LoadingWidget()
+        self.loading.setVisible(False)
+        layout.addWidget(self.loading)
 
     def refresh(self) -> None:
+        self.loading.setVisible(True)
         try:
             self._students = self._student_service.list_students()
+            self._apply_filters_and_sort()
         except Exception as e:
-            logger.exception("Failed to load students")
-            self._students = []
-        self._filter(self.search_bar.text())
+            logger.exception("Failed to refresh student list")
+            QMessageBox.critical(self, "Error", "Failed to load students.")
+        finally:
+            self.loading.setVisible(False)
 
-    def _filter(self, text: str) -> None:
+    def _apply_filters_and_sort(self) -> None:
+        filtered = self._filter_students(self.search_bar.text())
+        if self._sort_key:
+            filtered.sort(key=lambda s: getattr(s, self._sort_key, ""), reverse=not self._sort_asc)
+        self._filtered = filtered
+        self._populate_table()
+
+    def _filter_students(self, text: str) -> List[Student]:
         if not text.strip():
-            self._filtered = self._students[:]
-        else:
-            if len(text.strip()) > 2:
-                try:
-                    self._filtered = self._student_service.search_students(text.strip())
-                except Exception as e:
-                    logger.exception("Search failed")
-                    self._filtered = self._students[:]
-            else:
-                lower = text.strip().lower()
-                self._filtered = [
-                    s for s in self._students
-                    if lower in s.student_code.lower() or lower in s.full_name.lower()
-                ]
-        self._populate_list()
+            return self._students[:]
+        try:
+            return self._student_service.search_students(text.strip())
+        except Exception:
+            lower = text.strip().lower()
+            return [s for s in self._students
+                    if lower in s.student_code.lower() or lower in s.full_name.lower()]
 
-    def _populate_list(self) -> None:
-        self.list_widget.clear()
-        self.count_label.setText(f"{len(self._filtered)} students")
+    def _populate_table(self) -> None:
+        data = []
+        for s in self._filtered:
+            data.append({
+                "student_code": s.student_code,
+                "full_name": s.full_name,
+                "status": s.status or "",
+                "current_level": s.current_level or "",
+                "created_at": s.created_at.strftime("%d/%m/%Y"),
+                "_id": s.id,
+            })
+        self.data_table.set_data(data, len(data))
+        self.data_updated.emit()
 
-        if not self._filtered:
-            self.list_widget.setVisible(False)
-            self.empty_widget.setVisible(True)
+    def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_filter_changed(self, filters: Dict[str, str]) -> None:
+        # Convert filters to StudentFilter DTO
+        from centermanager.dto.student_filter_dto import StudentFilter
+        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
+        enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
+        assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
+
+        filter_dto = StudentFilter(
+            status=status_map.get(filters.get("status", ""), None),
+            enrollment_status=enrollment_map.get(filters.get("enrollment", ""), None),
+            assessment_status=assessment_map.get(filters.get("assessment", ""), None),
+        )
+        try:
+            self._filtered = self._filter_service.filter_students(filter_dto)
+            # Re-apply search if any
+            self._apply_filters_and_sort()
+        except Exception as e:
+            logger.exception("Filter failed")
+            QMessageBox.critical(self, "Filter Error", str(e))
+
+    def _on_sort(self, key: str, ascending: bool) -> None:
+        self._sort_key = key
+        self._sort_asc = ascending
+        self._apply_filters_and_sort()
+
+    def _on_selection_changed(self, indices: List[int]) -> None:
+        self._selected_ids = []
+        for idx in indices:
+            if idx < len(self._filtered):
+                self._selected_ids.append(self._filtered[idx].id)
+        self._update_bulk_bar()
+
+    def _update_bulk_bar(self) -> None:
+        count = len(self._selected_ids)
+        self.bulk_bar.setVisible(count > 0)
+        self.bulk_count_label.setText(f"{count} selected")
+
+    def _clear_selection(self) -> None:
+        self.data_table.clear_selection()
+        self._selected_ids = []
+        self._update_bulk_bar()
+
+    def _bulk_delete(self) -> None:
+        if not self._selected_ids:
             return
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete {len(self._selected_ids)} students?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                for sid in self._selected_ids:
+                    self._student_service.delete_student(sid)
+                self._clear_selection()
+                self.refresh()
+            except Exception as e:
+                logger.exception("Bulk delete failed")
+                QMessageBox.critical(self, "Error", "Failed to delete students.")
 
-        self.list_widget.setVisible(True)
-        self.empty_widget.setVisible(False)
+    def _bulk_export(self) -> None:
+        if not self._selected_ids:
+            return
+        try:
+            students = [self._student_service.get_student(sid) for sid in self._selected_ids]
+            file_path = self._export_service.export_csv(students)
+            QMessageBox.information(self, "Export", f"Exported {len(students)} students to {file_path}")
+        except Exception as e:
+            logger.exception("Bulk export failed")
+            QMessageBox.critical(self, "Error", "Failed to export students.")
 
-        for student in self._filtered:
-            item = QListWidgetItem()
-            widget = StudentListItem(student)
-            item.setSizeHint(widget.sizeHint())
-            self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, widget)
+    def _on_row_double_clicked(self, row: int) -> None:
+        if row < len(self._filtered):
+            self.student_selected.emit(self._filtered[row].id)
+
+    def _on_context_menu(self, pos, row: int) -> None:
+        if row < 0 or row >= len(self._filtered):
+            return
+        student = self._filtered[row]
+        menu = QMenu(self)
+        view_action = QAction("View Student", self)
+        view_action.triggered.connect(lambda: self.student_selected.emit(student.id))
+        menu.addAction(view_action)
+
+        edit_action = QAction("Edit Student", self)
+        edit_action.triggered.connect(lambda: self._edit_student(student.id))
+        menu.addAction(edit_action)
+
+        menu.addSeparator()
+        delete_action = QAction("Delete Student", self)
+        delete_action.triggered.connect(lambda: self._delete_student(student.id))
+        menu.addAction(delete_action)
+
+        menu.exec(pos)
+
+    def _edit_student(self, student_id: int) -> None:
+        dialog = StudentFormDialog(self._student_service, student_id=student_id, parent=self)
+        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _delete_student(self, student_id: int) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            "Delete this student?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._student_service.delete_student(student_id)
+                self.refresh()
+            except Exception as e:
+                logger.exception("Delete failed")
+                QMessageBox.critical(self, "Error", "Failed to delete student.")
 
     def show_add_dialog(self) -> None:
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-            self.data_updated.emit()
 
     def show_import_dialog(self) -> None:
         dialog = StudentImportDialog(self._import_service, parent=self)
         if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
             self.refresh()
-            self.data_updated.emit()
 
     def export_students(self) -> None:
         try:
             file_path = self._export_service.export_all_active()
             QMessageBox.information(self, "Export", f"Exported to: {file_path}")
         except Exception as e:
+            logger.exception("Export failed")
             QMessageBox.critical(self, "Export Error", str(e))
 
     def show_filter_dialog(self) -> None:
@@ -291,6 +352,6 @@ class StudentListPage(QWidget):
             if filter_criteria:
                 try:
                     self._filtered = self._filter_service.filter_students(filter_criteria)
-                    self._populate_list()
+                    self._populate_table()
                 except Exception as e:
                     QMessageBox.critical(self, "Filter Error", str(e))

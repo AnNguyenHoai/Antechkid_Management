@@ -14,6 +14,9 @@ class StudentAnalyticsService:
 
     def get_dashboard_analytics(self) -> Dict[str, Any]:
         with self._session_factory() as session:
+            # Total students
+            total_students = session.query(Student).count()
+
             # Enrollment trend (last 6 months)
             six_months_ago = datetime.now() - timedelta(days=180)
             students = session.query(Student).filter(
@@ -42,15 +45,46 @@ class StudentAnalyticsService:
                     age_counts[age_group] += 1
             age_distribution = list(age_counts.items())
 
+            # Score distribution
+            score_counts = Counter()
+            scores = []
+            for a in assessments:
+                if a.overall_score is not None:
+                    scores.append(a.overall_score)
+                    score_counts[a.overall_score] += 1
+            score_distribution = sorted(score_counts.items())
+
             # Average score
-            scores = [a.overall_score for a in assessments if a.overall_score is not None]
             avg_score = sum(scores) / len(scores) if scores else 0
 
+            # Monthly growth
+            last_month = datetime.now().replace(day=1) - timedelta(days=1)
+            two_months_ago = last_month.replace(day=1) - timedelta(days=1)
+            last_month_start = last_month.replace(day=1)
+            two_months_ago_start = two_months_ago.replace(day=1)
+
+            last_month_count = session.query(Student).filter(
+                Student.created_at >= last_month_start,
+                Student.created_at < last_month_start + timedelta(days=32)
+            ).count()
+            two_months_ago_count = session.query(Student).filter(
+                Student.created_at >= two_months_ago_start,
+                Student.created_at < two_months_ago_start + timedelta(days=32)
+            ).count()
+
+            if two_months_ago_count > 0:
+                growth = ((last_month_count - two_months_ago_count) / two_months_ago_count) * 100
+            else:
+                growth = 0
+
             return {
+                "total_students": total_students,
                 "enrollment_trend": enrollment_trend,
                 "assessment_distribution": assessment_distribution,
                 "age_distribution": age_distribution,
+                "score_distribution": score_distribution,
                 "average_score": avg_score,
+                "monthly_growth": growth,
             }
 
     def get_recent_students(self, limit: int = 5) -> List[Student]:

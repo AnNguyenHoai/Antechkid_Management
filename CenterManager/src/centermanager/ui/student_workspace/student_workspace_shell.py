@@ -86,16 +86,15 @@ class StudentWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        self.dashboard_page = StudentDashboardPage(
-            self._dashboard_service,
-            self._analytics_service
-        )
+        # Dashboard (không cần analytics_service)
+        self.dashboard_page = StudentDashboardPage(self._dashboard_service)
         self.dashboard_page.add_student_clicked.connect(self._on_add_action)
         self.dashboard_page.import_students_clicked.connect(self._on_import_action)
         self.dashboard_page.export_students_clicked.connect(self._on_export_action)
         self.dashboard_page.student_selected.connect(self._on_student_selected_from_dashboard)
         self.content_stack.addWidget(self.dashboard_page)
 
+        # Student List
         self.list_page = StudentListPage(
             self._student_service,
             self._parent_service,
@@ -109,6 +108,7 @@ class StudentWorkspaceShell(QWidget):
         self.list_page.data_updated.connect(self.dashboard_page.refresh)
         self.content_stack.addWidget(self.list_page)
 
+        # Student Detail
         self.detail_page = StudentDetailPage(
             self._student_service,
             self._parent_service,
@@ -125,6 +125,7 @@ class StudentWorkspaceShell(QWidget):
         self.detail_page.student_updated.connect(self._on_student_updated)
         self.content_stack.addWidget(self.detail_page)
 
+        # Analytics
         self.analytics_page = StudentAnalyticsPage(self._analytics_service)
         self.content_stack.addWidget(self.analytics_page)
 

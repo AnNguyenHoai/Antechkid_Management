@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from typing import Optional, List, Dict, Any
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QPushButton, QLabel, QComboBox, QAbstractItemView,
@@ -11,13 +11,14 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 
 
 class DataTable(QWidget):
-    """Reusable data table with sorting, pagination, bulk selection."""
     selection_changed = Signal(list)  # list of selected row indices
     sort_requested = Signal(str, bool)  # column, ascending
+    row_double_clicked = Signal(int)  # row index
+    context_menu_requested = Signal(QPoint, int)  # global position, row
 
     def __init__(
         self,
-        columns: List[Dict[str, str]],  # [{"key": "id", "label": "ID", "sortable": True}]
+        columns: List[Dict[str, str]],
         parent: Optional[QWidget] = None,
         page_size: int = 20,
     ) -> None:
@@ -26,7 +27,7 @@ class DataTable(QWidget):
         self._page_size = page_size
         self._current_page = 0
         self._total_rows = 0
-        self._data = []  # list of dicts
+        self._data = []
         self._selected_rows = set()
         self._sort_column = None
         self._sort_ascending = True
@@ -39,7 +40,6 @@ class DataTable(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['sm'])
 
-        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(len(self._columns))
         self.table.setHorizontalHeaderLabels([c['label'] for c in self._columns])
@@ -49,10 +49,10 @@ class DataTable(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setSortingEnabled(False)  # manual sorting
+        self.table.setSortingEnabled(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.table)
 
-        # Pagination bar
         pagination = QHBoxLayout()
         pagination.setSpacing(SPACING['sm'])
         self.prev_btn = QPushButton("◀")
@@ -70,12 +70,6 @@ class DataTable(QWidget):
         pagination.addStretch()
         pagination.addWidget(QLabel("Rows per page:"))
         pagination.addWidget(self.page_size_combo)
-
-        self.bulk_delete_btn = QPushButton("Delete Selected")
-        self.bulk_delete_btn.setStyleSheet(f"color: {COLORS['danger']};")
-        self.bulk_delete_btn.setVisible(False)
-        pagination.addWidget(self.bulk_delete_btn)
-
         layout.addLayout(pagination)
 
     def _connect_signals(self) -> None:
@@ -84,7 +78,8 @@ class DataTable(QWidget):
         self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
         self.table.horizontalHeader().sectionClicked.connect(self._on_sort)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        self.bulk_delete_btn.clicked.connect(lambda: self.selection_changed.emit(list(self._selected_rows)))
+        self.table.doubleClicked.connect(lambda idx: self.row_double_clicked.emit(idx.row()))
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
 
     def set_data(self, data: List[Dict[str, Any]], total: int) -> None:
         self._data = data
@@ -107,12 +102,10 @@ class DataTable(QWidget):
                 cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(row, col, cell)
 
-        # Update pagination
         total_pages = (self._total_rows + self._page_size - 1) // self._page_size
         self.page_label.setText(f"Page {self._current_page + 1} of {max(1, total_pages)}")
         self.prev_btn.setEnabled(self._current_page > 0)
         self.next_btn.setEnabled(self._current_page < total_pages - 1)
-        self.bulk_delete_btn.setVisible(len(self._selected_rows) > 0)
 
     def _prev_page(self) -> None:
         if self._current_page > 0:
@@ -145,13 +138,13 @@ class DataTable(QWidget):
         for item in self.table.selectedItems():
             selected.add(item.row())
         self._selected_rows = selected
-        self.bulk_delete_btn.setVisible(len(selected) > 0)
         self.selection_changed.emit(list(selected))
 
-    def get_selected_indices(self) -> List[int]:
-        return list(self._selected_rows)
+    def _on_context_menu(self, pos) -> None:
+        index = self.table.indexAt(pos)
+        if index.isValid():
+            self.context_menu_requested.emit(self.table.mapToGlobal(pos), index.row())
 
     def clear_selection(self) -> None:
         self.table.clearSelection()
         self._selected_rows.clear()
-        self.bulk_delete_btn.setVisible(False)

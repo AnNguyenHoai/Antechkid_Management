@@ -1,21 +1,18 @@
 # -*- coding: utf-8 -*-
-"""
-StudentDashboardPage - Complete dashboard for Student Workspace.
-"""
+"""StudentDashboardPage - Dashboard focuses on 'What requires my attention today?'"""
 import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView
+    QLabel, QPushButton, QSizePolicy
 )
 
 from centermanager.services.student_dashboard_service import StudentDashboardService
-from centermanager.services.student_analytics_service import StudentAnalyticsService
 from centermanager.ui.shared import (
-    StatisticGrid, ActivityCard, WarningBanner,
-    EmptyState, SectionHeader, ChartCard, MetricCard
+    MetricCard, StatisticGrid, ActivityCard, WarningBanner,
+    EmptyState, SectionHeader
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
@@ -32,12 +29,10 @@ class StudentDashboardPage(QWidget):
     def __init__(
         self,
         dashboard_service: StudentDashboardService,
-        analytics_service: StudentAnalyticsService,  # NEW
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._service = dashboard_service
-        self._analytics_service = analytics_service
         self._setup_ui()
         QTimer.singleShot(100, self.refresh)
 
@@ -57,30 +52,11 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # ---- Stats Grid ----
+        # ---- KPI Cards (4 columns) ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
-        # ---- Charts: Enrollment & Assessment ----
-        charts_layout = QHBoxLayout()
-        charts_layout.setSpacing(SPACING['md'])
-        self.enrollment_chart = ChartCard("Enrollment Trend", "bar")
-        self.assessment_chart = ChartCard("Assessment Distribution", "pie")
-        charts_layout.addWidget(self.enrollment_chart, 1)
-        charts_layout.addWidget(self.assessment_chart, 1)
-        container_layout.addLayout(charts_layout)
-
-        # ---- Average Score (Metric) ----
-        self.avg_score_widget = MetricCard("⭐", "Average Score", "0", "")
-        container_layout.addWidget(self.avg_score_widget)
-
-        # ---- Quick Insights (Age Distribution) ----
-        insights_header = SectionHeader("Quick Insights")
-        container_layout.addWidget(insights_header)
-        self.age_chart = ChartCard("Age Distribution", "bar")
-        container_layout.addWidget(self.age_chart)
-
-        # ---- Need Attention ----
+        # ---- Need Attention (Warning banners) ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -94,21 +70,33 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Recent Students ----
-        recent_section = QWidget()
-        recent_layout = QVBoxLayout(recent_section)
+        # ---- Upcoming Events ----
+        self.events_section = QWidget()
+        events_layout = QVBoxLayout(self.events_section)
+        events_layout.setContentsMargins(0, 0, 0, 0)
+        events_layout.setSpacing(SPACING['sm'])
+        events_header = SectionHeader("Upcoming Events")
+        events_layout.addWidget(events_header)
+        self.events_container = QWidget()
+        self.events_container_layout = QVBoxLayout(self.events_container)
+        self.events_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.events_container_layout.setSpacing(SPACING['xs'])
+        events_layout.addWidget(self.events_container)
+        container_layout.addWidget(self.events_section)
+
+        # ---- Recent Activities ----
+        self.recent_section = QWidget()
+        recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
-        recent_header = SectionHeader("Recent Students")
+        recent_layout.setSpacing(SPACING['sm'])
+        recent_header = SectionHeader("Recent Activities")
         recent_layout.addWidget(recent_header)
-        self.recent_table = QTableWidget()
-        self.recent_table.setColumnCount(3)
-        self.recent_table.setHorizontalHeaderLabels(["Code", "Name", "Enrolled"])
-        self.recent_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.recent_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.recent_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.recent_table.doubleClicked.connect(self._on_recent_student_double_click)
-        recent_layout.addWidget(self.recent_table)
-        container_layout.addWidget(recent_section)
+        self.recent_container = QWidget()
+        self.recent_container_layout = QVBoxLayout(self.recent_container)
+        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.recent_container_layout.setSpacing(SPACING['xs'])
+        recent_layout.addWidget(self.recent_container)
+        container_layout.addWidget(self.recent_section)
 
         # ---- Quick Actions ----
         actions_section = QWidget()
@@ -119,9 +107,11 @@ class StudentDashboardPage(QWidget):
         add_btn = PrimaryButton("➕ Add Student")
         add_btn.setFixedHeight(38)
         add_btn.clicked.connect(self.add_student_clicked.emit)
+
         import_btn = SecondaryButton("📥 Import")
         import_btn.setFixedHeight(38)
         import_btn.clicked.connect(self.import_students_clicked.emit)
+
         export_btn = SecondaryButton("📤 Export")
         export_btn.setFixedHeight(38)
         export_btn.clicked.connect(self.export_students_clicked.emit)
@@ -138,6 +128,12 @@ class StudentDashboardPage(QWidget):
 
     def refresh(self) -> None:
         logger.debug("Refreshing dashboard...")
+        self._populate_kpis()
+        self._populate_attention()
+        self._populate_events()
+        self._populate_recent_activities()
+
+    def _populate_kpis(self) -> None:
         try:
             stats = self._service.get_stats()
             self.stats_grid.set_metrics([
@@ -148,24 +144,6 @@ class StudentDashboardPage(QWidget):
             ])
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
-
-        self._populate_charts()
-        self._populate_attention()
-        self._populate_recent_students()
-
-    def _populate_charts(self) -> None:
-        try:
-            data = self._analytics_service.get_dashboard_analytics()
-            # Enrollment trend: list of (month, count)
-            enrollment_data = data.get('enrollment_trend', [])
-            if enrollment_data:
-                self.enrollment_chart.set_data(enrollment_data)
-            # Assessment distribution: list of (type, count)
-            assessment_data = data.get('assessment_distribution', [])
-            if assessment_data:
-                self.assessment_chart.set_data(assessment_data)
-        except Exception as e:
-            logger.exception("Failed to load chart data")
 
     def _populate_attention(self) -> None:
         self._clear_layout(self.attention_container_layout)
@@ -192,26 +170,56 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to load attention students")
 
-    def _populate_recent_students(self) -> None:
+    def _populate_events(self) -> None:
+        self._clear_layout(self.events_container_layout)
         try:
-            recent = self._analytics_service.get_recent_students(limit=5)
-            self.recent_table.setRowCount(len(recent))
-            for row, s in enumerate(recent):
-                self.recent_table.setItem(row, 0, QTableWidgetItem(s.student_code))
-                self.recent_table.setItem(row, 1, QTableWidgetItem(s.full_name))
-                self.recent_table.setItem(row, 2, QTableWidgetItem(s.created_at.strftime("%d/%m/%Y")))
-            self.recent_table.resizeColumnsToContents()
+            events = self._service.get_upcoming_events()
+            if events:
+                for ev in events:
+                    icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
+                    icon = icon_map.get(ev.event_type, "📌")
+                    label_text = f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
+                    if ev.student_name:
+                        label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
+                    label = QLabel(label_text)
+                    label.setStyleSheet(f"""
+                        font-size: 14px;
+                        color: {COLORS['text_secondary']};
+                        padding: 4px 0;
+                    """)
+                    self.events_container_layout.addWidget(label)
+            else:
+                empty = EmptyState(
+                    icon="📅",
+                    title="No upcoming events",
+                    description="Events will appear here when scheduled."
+                )
+                self.events_container_layout.addWidget(empty)
         except Exception as e:
-            logger.exception("Failed to load recent students")
+            logger.exception("Failed to load upcoming events")
 
-    def _on_recent_student_double_click(self, index) -> None:
-        row = index.row()
+    def _populate_recent_activities(self) -> None:
+        self._clear_layout(self.recent_container_layout)
         try:
-            recent = self._analytics_service.get_recent_students(limit=5)
-            if row < len(recent):
-                self.student_selected.emit(recent[row].id)
+            activities = self._service.get_recent_activities(limit=20)
+            if activities:
+                for act in activities:
+                    card = ActivityCard(
+                        icon="📌",
+                        title=act.title,
+                        subtitle=f"{act.student_name} ({act.student_code})",
+                        time=act.time
+                    )
+                    self.recent_container_layout.addWidget(card)
+            else:
+                empty = EmptyState(
+                    icon="📭",
+                    title="No recent activities",
+                    description="Activities will appear here when students are updated."
+                )
+                self.recent_container_layout.addWidget(empty)
         except Exception as e:
-            logger.exception("Error opening student detail")
+            logger.exception("Failed to load recent activities")
 
     def _clear_layout(self, layout) -> None:
         while layout.count():
