@@ -5,12 +5,16 @@ MainWindow – container for Home page and Workspaces.
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QStatusBar
+from PySide6.QtWidgets import QMainWindow, QStackedWidget
 from PySide6.QtCore import Qt
 
-from centermanager.ui.home import HomePage  # nếu bạn đã tạo ui/home/HomePage
-# hoặc nếu vẫn dùng file cũ: from centermanager.ui.home_page import HomePage
+from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
+
+from centermanager.ui.assessment.assessment_workspace import AssessmentWorkspace
+from centermanager.ui.timeline.timeline_workspace import TimelineWorkspace
+from centermanager.ui.reports.reports_workspace import ReportsWorkspace
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,8 @@ class MainWindow(QMainWindow):
         highlight_service,
         dashboard_service,
         home_service,
+        student_note_service,   # thêm
+        document_service,       # thêm
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -41,6 +47,8 @@ class MainWindow(QMainWindow):
         self._highlight_service = highlight_service
         self._dashboard_service = dashboard_service
         self._home_service = home_service
+        self._student_note_service = student_note_service
+        self._document_service = document_service
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
@@ -65,10 +73,22 @@ class MainWindow(QMainWindow):
             note_service=self._note_service,
             highlight_service=self._highlight_service,
             dashboard_service=self._dashboard_service,
+            student_note_service=self._student_note_service,
+            document_service=self._document_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
+        self.assessment_workspace = AssessmentWorkspace(assessment_service)
+        self.assessment_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.assessment_workspace)
 
+        self.timeline_workspace = TimelineWorkspace(timeline_service, student_service)
+        self.timeline_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.timeline_workspace)
+
+        self.reports_workspace = ReportsWorkspace(student_service, assessment_service)
+        self.reports_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.reports_workspace)
         # Default: Home
         self.central_stack.setCurrentWidget(self.home_page)
 
@@ -83,6 +103,15 @@ class MainWindow(QMainWindow):
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
             self.statusBar().showMessage("Teacher Workspace coming soon")
+        elif workspace_id == "assessment":
+            self.central_stack.setCurrentWidget(self.assessment_workspace)
+            self.statusBar().showMessage("Assessment Workspace")
+        elif workspace_id == "timeline":
+            self.central_stack.setCurrentWidget(self.timeline_workspace)
+            self.statusBar().showMessage("Timeline Workspace")
+        elif workspace_id == "reports":
+            self.central_stack.setCurrentWidget(self.reports_workspace)
+            self.statusBar().showMessage("Reports Workspace")
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available yet")
 

@@ -63,17 +63,18 @@ class ParentService:
         phone: Optional[str] = None,
         email: Optional[str] = None,
         occupation: Optional[str] = None,
+        address: Optional[str] = None,
         notes: Optional[str] = None,
         is_primary_contact: bool = False,
     ) -> Parent:
         norm_name = self._normalize_text(name)
         if not norm_name:
             raise ParentValidationError("Parent name is required.")
-
         norm_relationship = self._validate_relationship(relationship)
         norm_phone = self._normalize_text(phone)
         norm_email = self._normalize_text(email)
         norm_occupation = self._normalize_text(occupation)
+        norm_address = self._normalize_text(address)
         norm_notes = self._normalize_text(notes)
 
         with self._session_factory() as session:
@@ -84,6 +85,7 @@ class ParentService:
                 phone=norm_phone,
                 email=norm_email,
                 occupation=norm_occupation,
+                address=norm_address,
                 notes=norm_notes,
                 is_primary_contact=is_primary_contact,
             )
@@ -112,6 +114,7 @@ class ParentService:
         phone: Optional[str] = None,
         email: Optional[str] = None,
         occupation: Optional[str] = None,
+        address: Optional[str] = None,
         notes: Optional[str] = None,
         is_primary_contact: Optional[bool] = None,
     ) -> Parent:
@@ -159,6 +162,13 @@ class ParentService:
                 if old_val != new_val:
                     changes.append(f"occupation: '{old_val}' -> '{new_val}'")
                 parent.occupation = new_val if new_val != "(none)" else None
+
+            if address is not None:
+                new_val = self._normalize_text(address) or "(none)"
+                old_val = parent.address or "(none)"
+                if old_val != new_val:
+                    changes.append(f"address: '{old_val}' -> '{new_val}'")
+                parent.address = new_val if new_val != "(none)" else None
 
             if notes is not None:
                 new_val = self._normalize_text(notes) or "(none)"

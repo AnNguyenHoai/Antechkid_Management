@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 StudentWorkspaceShell - the root container for Student Workspace.
-Contains sidebar navigation and content area.
 """
 from typing import Optional
 
@@ -36,6 +35,8 @@ class StudentWorkspaceShell(QWidget):
         note_service,
         highlight_service,
         dashboard_service,
+        student_note_service,   # thêm
+        document_service,       # thêm
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -48,11 +49,12 @@ class StudentWorkspaceShell(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._dashboard_service = dashboard_service
+        self._student_note_service = student_note_service
+        self._document_service = document_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
         self._connect_signals()
-        # Refresh dashboard and navigate to dashboard
         self.dashboard_page.refresh()
         self.navigate_to("dashboard")
 
@@ -110,6 +112,8 @@ class StudentWorkspaceShell(QWidget):
             self._session_service,
             self._note_service,
             self._highlight_service,
+            self._student_note_service,
+            self._document_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
@@ -126,6 +130,7 @@ class StudentWorkspaceShell(QWidget):
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
+
 
     def _connect_signals(self) -> None:
         self.nav.page_selected.connect(self.navigate_to)

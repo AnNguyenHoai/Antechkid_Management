@@ -23,6 +23,10 @@ from centermanager.services.student_dashboard_service import StudentDashboardSer
 from centermanager.services.student_filter_service import StudentFilterService
 from centermanager.services.student_export_service import StudentExportService
 from centermanager.services.student_import_service import StudentImportService
+# === THÊM IMPORT MỚI ===
+from centermanager.services.student_note_service import StudentNoteService
+from centermanager.services.student_document_service import StudentDocumentService
+# ========================
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
@@ -41,6 +45,7 @@ def ensure_schema():
     db_path = get_database_path()
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    # Đảm bảo upgrade lên head
     command.upgrade(alembic_cfg, "head")
 
 
@@ -75,14 +80,21 @@ def main() -> int:
     student_service = StudentService(session_factory, timeline_service)
     parent_service = ParentService(session_factory, timeline_service)
     assessment_service = AssessmentService(session_factory, timeline_service)
+    session_service = SessionService(session_factory)
+    note_service = SessionNoteService(session_factory, session_service)
+
+    # === THÊM SERVICE MỚI ===
+    student_note_service = StudentNoteService(session_factory, timeline_service)
+    document_service = StudentDocumentService(session_factory, timeline_service)
+    # ========================
+
     summary_service = StudentSummaryService(
         student_service=student_service,
         parent_service=parent_service,
         assessment_service=assessment_service,
         timeline_service=timeline_service,
+        session_factory=session_factory,  # thêm session_factory
     )
-    session_service = SessionService(session_factory)
-    note_service = SessionNoteService(session_factory, session_service)
 
     # Event Bus
     event_bus = EventBus()
@@ -111,6 +123,8 @@ def main() -> int:
         highlight_service=highlight_service,
         dashboard_service=dashboard_service,
         home_service=home_service,
+        student_note_service=student_note_service,   # thêm
+        document_service=document_service,           # thêm
     )
     window.show()
     logger.info("Main window initialized")

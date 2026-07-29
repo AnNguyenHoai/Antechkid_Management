@@ -8,7 +8,6 @@ from typing import Optional
 
 @dataclass
 class StudentSummaryDTO:
-    """Summary data for a student."""
     student_name: str = ""
     current_level: str = ""
     learning_status: str = ""
@@ -27,3 +26,4 @@ class StudentSummaryDTO:
     assessment_count: int = 0
     timeline_count: int = 0
     parent_count: int = 0
+    document_count: int = 0   # NEW

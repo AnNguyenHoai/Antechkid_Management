@@ -75,6 +75,10 @@ class ParentDialog(QDialog):
         self.occupation_edit.setPlaceholderText("Occupation")
         form.addRow("Occupation", self.occupation_edit)
 
+        self.address_edit = QLineEdit()
+        self.address_edit.setPlaceholderText("Address")
+        form.addRow("Address", self.address_edit)
+
         # Notes (multiline)
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setPlaceholderText("Additional notes (optional)")
@@ -118,6 +122,7 @@ class ParentDialog(QDialog):
             self.phone_edit.setText(parent.phone or "")
             self.email_edit.setText(parent.email or "")
             self.occupation_edit.setText(parent.occupation or "")
+            self.address_edit.setText(parent.address or "")
             self.notes_edit.setPlainText(parent.notes or "")
             self.primary_check.setChecked(parent.is_primary_contact)
         except Exception as e:

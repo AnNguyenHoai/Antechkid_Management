@@ -13,6 +13,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from centermanager.database.base import Base
 from centermanager.models.mixins import TimestampMixin
 
+from centermanager.models.note import Note
+from centermanager.models.document import Document
+
 if TYPE_CHECKING:
     from centermanager.models.parent import Parent
     from centermanager.models.enrollment import Enrollment
@@ -22,6 +25,8 @@ if TYPE_CHECKING:
     from centermanager.models.progress import Progress
     from centermanager.models.attachment import Attachment
     from centermanager.models.student_highlight import StudentHighlight
+    from centermanager.models.note import Note
+    from centermanager.models.document import Document
 
 
 class Student(Base, TimestampMixin):
@@ -35,7 +40,8 @@ class Student(Base, TimestampMixin):
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     current_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enrollment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)   # NEW
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)              # legacy free-text notes
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
@@ -51,6 +57,8 @@ class Student(Base, TimestampMixin):
     progress_records: Mapped[List[Progress]] = relationship("Progress", back_populates="student")
     attachments: Mapped[List[Attachment]] = relationship("Attachment", back_populates="student")
     highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="student")
+    notes_structured: Mapped[List[Note]] = relationship("Note", back_populates="student", cascade="all, delete-orphan")   # NEW
+    documents: Mapped[List[Document]] = relationship("Document", back_populates="student", cascade="all, delete-orphan") # NEW
 
     def __repr__(self) -> str:
         return f"<Student(id={self.id}, code='{self.student_code}', name='{self.full_name}')>"

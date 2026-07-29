@@ -234,3 +234,14 @@ class AssessmentService:
                     description=f"Assessment on {assessment.assessment_date.strftime('%d/%m/%Y')} was removed.",
                     metadata={"assessment_id": assessment_id},
                 )
+    def get_all_assessments_with_student(self) -> List[Assessment]:
+        """Get all assessments with student info loaded for UI display."""
+        with self._session_factory() as session:
+            repo = AssessmentRepository(session)
+            return repo.get_all_with_student()
+
+    def get_assessments_for_student_with_student(self, student_id: int) -> List[Assessment]:
+        """Get assessments for a student with student info loaded."""
+        with self._session_factory() as session:
+            repo = AssessmentRepository(session)
+            return repo.get_by_student_with_student(student_id)

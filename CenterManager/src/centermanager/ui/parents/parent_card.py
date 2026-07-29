@@ -68,6 +68,8 @@ class ParentCard(QFrame):
             fields.addWidget(self._create_field("Email", self._parent.email))
         if self._parent.occupation:
             fields.addWidget(self._create_field("Occupation", self._parent.occupation))
+        if self._parent.address:
+            fields.addWidget(self._create_field("Address", self._parent.address))
         if self._parent.notes:
             fields.addWidget(self._create_field("Notes", self._parent.notes))
 

@@ -14,6 +14,8 @@ from centermanager.models.class_ import Class
 from centermanager.models.session import Session
 from centermanager.models.session_note import SessionNote
 from centermanager.models.student_highlight import StudentHighlight, HighlightType
+from centermanager.models.note import Note, NoteType
+from centermanager.models.document import Document
 
 __all__ = [
     "Student",
@@ -29,4 +31,7 @@ __all__ = [
     "SessionNote",
     "StudentHighlight",
     "HighlightType",
+    "Note",
+    "NoteType",
+    "Document",
 ]

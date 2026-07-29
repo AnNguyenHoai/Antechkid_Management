@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 
 class TimelineEventType(str, Enum):
-    """Enum for all possible event types."""
     STUDENT_CREATED = "StudentCreated"
     STUDENT_UPDATED = "StudentUpdated"
     PARENT_ADDED = "ParentAdded"
@@ -30,6 +29,8 @@ class TimelineEventType(str, Enum):
     ASSESSMENT_DELETED = "AssessmentDeleted"
     PRODUCT_ADDED = "ProductAdded"
     ATTACHMENT_ADDED = "AttachmentAdded"
+    NOTE_ADDED = "NoteAdded"
+    DOCUMENT_UPLOADED = "DocumentUploaded"
     SYSTEM = "System"
 
     @classmethod

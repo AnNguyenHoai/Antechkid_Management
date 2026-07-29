@@ -59,6 +59,7 @@ class StudentService:
         gender: Optional[str] = None,
         status: Optional[str] = None,
         current_level: Optional[str] = None,
+        enrollment_date: Optional[date] = None,
         notes: Optional[str] = None,
     ) -> Student:
         normalized_full_name = self._validate_full_name(full_name)
@@ -79,6 +80,7 @@ class StudentService:
                     gender=normalized_gender,
                     status=normalized_status,
                     current_level=normalized_level,
+                    enrollment_date=enrollment_date,
                     notes=normalized_notes,
                 )
                 repo = StudentRepository(session)
@@ -136,6 +138,7 @@ class StudentService:
         gender: Any = UNSET,
         status: Any = UNSET,
         current_level: Any = UNSET,
+        enrollment_date: Any = UNSET,
         notes: Any = UNSET,
     ) -> Student:
         with self._session_factory() as session:
@@ -191,6 +194,13 @@ class StudentService:
                     changes.append(f"current_level: '{old_val}' -> '{new_val or '(none)'}'")
                 student.current_level = new_val
 
+            if enrollment_date is not UNSET:
+                old = student.enrollment_date.strftime("%d/%m/%Y") if student.enrollment_date else "(none)"
+                new = enrollment_date.strftime("%d/%m/%Y") if enrollment_date else "(none)"
+                if old != new:
+                    changes.append(f"enrollment_date: '{old}' -> '{new}'")
+                student.enrollment_date = enrollment_date
+                
             if notes is not UNSET:
                 new_val = self._normalize_text(notes)
                 old_val = student.notes or "(none)"

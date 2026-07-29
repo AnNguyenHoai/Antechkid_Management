@@ -13,7 +13,7 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.exceptions import StudentNotFoundError
-
+from centermanager.repositories.document_repository import DocumentRepository
 
 class StudentSummaryService:
     def __init__(
@@ -22,11 +22,13 @@ class StudentSummaryService:
         parent_service: ParentService,
         assessment_service: AssessmentService,
         timeline_service: TimelineService,
+        session_factory,  # thêm
     ) -> None:
         self._student_service = student_service
         self._parent_service = parent_service
         self._assessment_service = assessment_service
         self._timeline_service = timeline_service
+        self._session_factory = session_factory
 
     def get_summary(self, student_id: int) -> StudentSummaryDTO:
         """Build summary DTO for a student."""
@@ -89,5 +91,12 @@ class StudentSummaryService:
             else:
                 time_str = dt_local.strftime("%d/%m/%Y %H:%M")
             dto.last_activity_time = time_str
+
+
+        with self._session_factory() as session:
+            from centermanager.repositories.document_repository import DocumentRepository
+            doc_repo = DocumentRepository(session)
+            documents = doc_repo.get_by_student(student_id)
+            dto.document_count = len(documents)
 
         return dto

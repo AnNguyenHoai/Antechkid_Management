@@ -60,7 +60,8 @@ class SummaryWidget(QWidget):
 
         # Timeline Count
         cards.append(SummaryCard("📅", "Timeline Events", str(dto.timeline_count)))
-
+        
+        cards.append(SummaryCard("📁", "Documents", str(dto.document_count)))
         # Parent Count
         cards.append(SummaryCard("👨‍👩‍👧", "Parents", str(dto.parent_count)))
 

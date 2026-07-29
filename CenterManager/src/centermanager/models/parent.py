@@ -23,6 +23,7 @@ class RelationshipType(str, Enum):
     MOTHER = "Mother"
     GUARDIAN = "Guardian"
     GRANDPARENT = "Grandparent"
+    EMERGENCY_CONTACT = "Emergency Contact"
     OTHER = "Other"
 
     @classmethod
@@ -42,6 +43,7 @@ class Parent(Base, TimestampMixin):
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     occupation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)   # NEW
     is_primary_contact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

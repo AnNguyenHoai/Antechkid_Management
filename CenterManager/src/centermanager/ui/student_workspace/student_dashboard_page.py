@@ -1,25 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-StudentDashboardPage - redesigned dashboard using design system components.
-Now with Need Attention, Upcoming Events, Quick Insights, and grouped recent activities.
+StudentDashboardPage - Complete dashboard for Student Workspace.
 """
 import logging
 from typing import Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QGridLayout, QLabel, QPushButton, QSizePolicy
+    QLabel, QPushButton, QSizePolicy
 )
 
 from centermanager.services.student_dashboard_service import StudentDashboardService
-from centermanager.ui.design_system import (
-    StatisticCard, ActivityCard, SectionHeader, EmptyState,
-    PrimaryButton, SecondaryButton
+from centermanager.ui.shared import (
+    MetricCard, StatisticGrid, ActivityCard, WarningBanner,
+    EmptyState, SectionHeader, SearchToolbar
 )
-from centermanager.ui.design_system.tokens import SPACING, COLORS
-from centermanager.ui.common.activity_item import ActivityItem
+from centermanager.ui.design_system.tokens import COLORS, SPACING
 
 logger = logging.getLogger(__name__)
 
@@ -53,38 +51,22 @@ class StudentDashboardPage(QWidget):
         container = QWidget()
         container.setStyleSheet(f"background: {COLORS['background']};")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
-        container_layout.setSpacing(SPACING['lg'])
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
 
-        # ---- Stats grid ----
-        self.stats_grid = QGridLayout()
-        self.stats_grid.setSpacing(SPACING['xs'])
-        self.stats_grid.setContentsMargins(0, 0, 0, 0)
-
-        self.stat_cards = []
-        stat_data = [
-            ("👥", "Total Students", "0"),
-            ("✅", "Active", "0"),
-            ("📦", "Archived", "0"),
-            ("🌟", "New This Month", "0"),
-        ]
-        for i, (icon, label, default) in enumerate(stat_data):
-            card = StatisticCard(icon, label, default)
-            self.stat_cards.append(card)
-            self.stats_grid.addWidget(card, i // 2, i % 2)
-        container_layout.addLayout(self.stats_grid)
+        # ---- Stats Grid ----
+        self.stats_grid = StatisticGrid()
+        container_layout.addWidget(self.stats_grid)
 
         # ---- Quick Insights ----
         self.insights_section = QWidget()
         insights_layout = QVBoxLayout(self.insights_section)
         insights_layout.setContentsMargins(0, 0, 0, 0)
         insights_layout.setSpacing(SPACING['sm'])
-        insights_header = SectionHeader("Quick Insights", subtitle="Key metrics at a glance")
+        insights_header = SectionHeader("Quick Insights")
         insights_layout.addWidget(insights_header)
-        self.insights_container = QWidget()
-        self.insights_container_layout = QGridLayout(self.insights_container)
-        self.insights_container_layout.setSpacing(SPACING['sm'])
-        insights_layout.addWidget(self.insights_container)
+        self.insights_grid = StatisticGrid()
+        insights_layout.addWidget(self.insights_grid)
         container_layout.addWidget(self.insights_section)
 
         # ---- Need Attention ----
@@ -92,10 +74,7 @@ class StudentDashboardPage(QWidget):
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
         attention_layout.setSpacing(SPACING['sm'])
-        att_header = SectionHeader(
-            "Need Attention",
-            subtitle="Students requiring follow-up"
-        )
+        att_header = SectionHeader("Need Attention", subtitle="Students requiring follow-up")
         attention_layout.addWidget(att_header)
         self.attention_container = QWidget()
         self.attention_container_layout = QVBoxLayout(self.attention_container)
@@ -118,7 +97,7 @@ class StudentDashboardPage(QWidget):
         events_layout.addWidget(self.events_container)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities (grouped) ----
+        # ---- Recent Activities ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -138,6 +117,7 @@ class StudentDashboardPage(QWidget):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(SPACING['sm'])
 
+        from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
         add_btn = PrimaryButton("➕ Add Student")
         add_btn.clicked.connect(self.add_student_clicked.emit)
         import_btn = SecondaryButton("📥 Import")
@@ -152,7 +132,6 @@ class StudentDashboardPage(QWidget):
         container_layout.addWidget(actions_section)
 
         container_layout.addStretch()
-
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
@@ -160,10 +139,12 @@ class StudentDashboardPage(QWidget):
         logger.debug("Refreshing dashboard...")
         try:
             stats = self._service.get_stats()
-            self.stat_cards[0].set_value(str(stats.total))
-            self.stat_cards[1].set_value(str(stats.active))
-            self.stat_cards[2].set_value(str(stats.archived))
-            self.stat_cards[3].set_value(str(stats.new_this_month))
+            self.stats_grid.set_metrics([
+                {"icon": "👥", "label": "Total Students", "value": str(stats.total)},
+                {"icon": "✅", "label": "Active", "value": str(stats.active)},
+                {"icon": "📦", "label": "Archived", "value": str(stats.archived)},
+                {"icon": "🌟", "label": "New This Month", "value": str(stats.new_this_month)},
+            ])
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
 
@@ -173,31 +154,14 @@ class StudentDashboardPage(QWidget):
         self._populate_recent_activities()
 
     def _populate_insights(self) -> None:
-        self._clear_layout(self.insights_container_layout)
         try:
             insights = self._service.get_quick_insights()
-            items = [
-                (f"📊 {insights.avg_assessment_score}/5", "Avg Assessment Score"),
-                (f"🎂 {insights.avg_age}", "Avg Age"),
-                (f"👨‍👩‍👧 {insights.total_parents}", "Total Parents"),
-                (f"✅ {insights.assessment_completion_rate}%", "Assessment Completion"),
-            ]
-            row, col = 0, 0
-            for label, detail in items:
-                widget = QWidget()
-                layout = QVBoxLayout(widget)
-                layout.setContentsMargins(8, 4, 8, 4)
-                label_w = QLabel(label)
-                label_w.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
-                detail_w = QLabel(detail)
-                detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
-                layout.addWidget(label_w)
-                layout.addWidget(detail_w)
-                self.insights_container_layout.addWidget(widget, row, col)
-                col += 1
-                if col >= 2:
-                    col = 0
-                    row += 1
+            self.insights_grid.set_metrics([
+                {"icon": "📊", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5"},
+                {"icon": "🎂", "label": "Avg Age", "value": str(insights.avg_age)},
+                {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.assessment_completion_rate}%"},
+                {"icon": "📝", "label": "With Assessment", "value": f"{insights.assessment_completion_rate}%"},
+            ], columns=4)
         except Exception as e:
             logger.exception("Failed to load insights")
 
@@ -207,24 +171,15 @@ class StudentDashboardPage(QWidget):
             attention = self._service.get_students_requiring_attention(limit=10)
             if attention:
                 for item in attention:
-                    btn = SecondaryButton(
-                        f"⚠️ {item.full_name} ({item.student_code}) – {item.reason}"
+                    banner = WarningBanner(
+                        message=f"{item.full_name} ({item.student_code}) – {item.reason}",
+                        icon="⚠️",
+                        severity="warning"
                     )
-                    btn.setStyleSheet(btn.styleSheet() + """
-                        QPushButton {
-                            text-align: left;
-                            padding: 8px 12px;
-                            background: #fff3e0;
-                            border-color: #ffe0b2;
-                        }
-                        QPushButton:hover {
-                            background: #ffe0b2;
-                        }
-                    """)
-                    btn.clicked.connect(
-                        lambda checked, sid=item.student_id: self.student_selected.emit(sid)
-                    )
-                    self.attention_container_layout.addWidget(btn)
+                    # Make clickable
+                    banner.setCursor(Qt.CursorShape.PointingHandCursor)
+                    banner.mousePressEvent = lambda e, sid=item.student_id: self.student_selected.emit(sid)
+                    self.attention_container_layout.addWidget(banner)
             else:
                 empty = EmptyState(
                     icon="✅",
@@ -241,15 +196,12 @@ class StudentDashboardPage(QWidget):
             events = self._service.get_upcoming_events()
             if events:
                 for ev in events:
-                    icon_map = {
-                        "birthday": "🎂",
-                        "assessment": "📊",
-                        "session": "📚",
-                    }
+                    icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
                     icon = icon_map.get(ev.event_type, "📌")
-                    label = QLabel(f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}")
+                    label_text = f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     if ev.student_name:
-                        label.setText(f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}")
+                        label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
+                    label = QLabel(label_text)
                     label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
                     self.events_container_layout.addWidget(label)
             else:
@@ -265,34 +217,16 @@ class StudentDashboardPage(QWidget):
     def _populate_recent_activities(self) -> None:
         self._clear_layout(self.recent_container_layout)
         try:
-            activities = self._service.get_recent_activities(limit=12)
+            activities = self._service.get_recent_activities(limit=20)
             if activities:
-                # Group by day
-                today = date.today()
-                yesterday = today - timedelta(days=1)
-                groups = {"Today": [], "Yesterday": [], "Older": []}
                 for act in activities:
-                    dt = act.time.date()
-                    if dt == today:
-                        groups["Today"].append(act)
-                    elif dt == yesterday:
-                        groups["Yesterday"].append(act)
-                    else:
-                        groups["Older"].append(act)
-                for group_name, acts in groups.items():
-                    if acts:
-                        header = QLabel(group_name)
-                        header.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLORS['muted']}; padding: 4px 0;")
-                        self.recent_container_layout.addWidget(header)
-                        for act in acts:
-                            item = ActivityItem(
-                                icon=act.icon,
-                                title=act.title,
-                                student_name=act.student_name,
-                                student_code=act.student_code,
-                                time=act.time
-                            )
-                            self.recent_container_layout.addWidget(item)
+                    card = ActivityCard(
+                        icon="📌",
+                        title=act.title,
+                        subtitle=f"{act.student_name} ({act.student_code})",
+                        time=act.time
+                    )
+                    self.recent_container_layout.addWidget(card)
             else:
                 empty = EmptyState(
                     icon="📭",

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 StudentDetailPage - displays full student profile with all sections.
-This is the main detail view for a student.
+Now includes Profile, Quick Actions, Parents, Assessment, Timeline, Notes, Documents.
 """
 import logging
 from typing import Optional
@@ -20,6 +20,8 @@ from centermanager.services.student_summary_service import StudentSummaryService
 from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_note_service import StudentNoteService
+from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.services.exceptions import StudentNotFoundError
 from centermanager.models.student import Student
 from centermanager.dto import StudentSummaryDTO
@@ -29,7 +31,10 @@ from centermanager.ui.parents import ParentCard, ParentDialog
 from centermanager.ui.assessment import AssessmentSection
 from centermanager.ui.timeline import TimelineWidget
 from centermanager.ui.summary import SummaryWidget
-from centermanager.ui.session import SessionList
+from centermanager.ui.student_workspace.profile_widget import ProfileWidget
+from centermanager.ui.student_workspace.quick_actions_widget import QuickActionsWidget
+from centermanager.ui.student_workspace.notes_widget import NotesWidget
+from centermanager.ui.student_workspace.documents_widget import DocumentsWidget
 from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
@@ -40,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 
 class StudentDetailPage(QWidget):
-    """Full student detail view."""
     back_clicked = Signal()
     student_updated = Signal()
 
@@ -54,6 +58,8 @@ class StudentDetailPage(QWidget):
         session_service: SessionService,
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
+        student_note_service: StudentNoteService,
+        document_service: StudentDocumentService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -65,6 +71,8 @@ class StudentDetailPage(QWidget):
         self._session_service = session_service
         self._note_service = note_service
         self._highlight_service = highlight_service
+        self._student_note_service = student_note_service
+        self._document_service = document_service
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
 
@@ -86,103 +94,73 @@ class StudentDetailPage(QWidget):
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
 
-        # Splitter for two-column layout
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
+        # Scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(24, 16, 24, 16)
+        container_layout.setSpacing(20)
 
-        # Left panel (profile + summary)
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(12, 12, 12, 12)
-        left_layout.setSpacing(16)
+        # Quick Actions
+        self.quick_actions = QuickActionsWidget()
+        container_layout.addWidget(self.quick_actions)
 
-        # Header with avatar and name
-        self.header_widget = QWidget()
-        header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setSpacing(12)
-
-        self.avatar_label = Avatar("", size=48)
-        header_layout.addWidget(self.avatar_label)
-
-        name_code_layout = QVBoxLayout()
-        name_code_layout.setSpacing(0)
-        self.name_label = QLabel()
-        self.name_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        self.code_label = QLabel()
-        self.code_label.setStyleSheet("color: #666; font-size: 13px;")
-        name_code_layout.addWidget(self.name_label)
-        name_code_layout.addWidget(self.code_label)
-        header_layout.addLayout(name_code_layout)
-
-        header_layout.addStretch()
-
-        self.edit_btn = PrimaryButton("Edit")
-        self.edit_btn.clicked.connect(self._on_edit_clicked)
-        header_layout.addWidget(self.edit_btn)
-
-        left_layout.addWidget(self.header_widget)
-
-        # Quick Info panel
-        self.info_panel = InfoPanel([
-            {"label": "Age", "value": "-"},
-            {"label": "Gender", "value": "-"},
-            {"label": "Status", "value": "-"},
-            {"label": "Level", "value": "-"},
-        ])
-        left_layout.addWidget(self.info_panel)
+        # Profile
+        self.profile_widget = ProfileWidget()
+        container_layout.addWidget(self.profile_widget)
 
         # Summary
         self.summary_widget = SummaryWidget()
-        left_layout.addWidget(self.summary_widget)
+        container_layout.addWidget(self.summary_widget)
 
         # Parents
-        self.parents_section = self._create_vertical_section("Parents")
+        self.parents_section = self._create_vertical_section("👨‍👩‍👦 Parents")
         self.parents_container = QWidget()
         self.parents_layout = QVBoxLayout(self.parents_container)
         self.parents_layout.setSpacing(8)
         self.parents_layout.setContentsMargins(0, 0, 0, 0)
         self.parents_section.layout().addWidget(self.parents_container)
-        left_layout.addWidget(self.parents_section)
-
-        # Notes
-        self.notes_section = self._create_vertical_section("Notes")
-        self.notes_text_label = QLabel()
-        self.notes_text_label.setWordWrap(True)
-        self.notes_text_label.setStyleSheet(styles.FIELD_VALUE)
-        self.notes_section.layout().addWidget(self.notes_text_label)
-        left_layout.addWidget(self.notes_section)
-
-        left_layout.addStretch()
-
-        # Right panel (timeline, assessments, etc.)
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(12, 12, 12, 12)
-        right_layout.setSpacing(16)
+        container_layout.addWidget(self.parents_section)
 
         # Assessment
         self.assessment_section = AssessmentSection(self._assessment_service)
         self.assessment_section.assessment_changed.connect(self._on_data_changed)
-        right_layout.addWidget(self.assessment_section)
+        container_layout.addWidget(self.assessment_section)
 
         # Timeline
-        self.timeline_section = self._create_vertical_section("Timeline")
+        self.timeline_section = self._create_vertical_section("📅 Timeline")
         self.timeline_widget = TimelineWidget()
         self.timeline_section.layout().addWidget(self.timeline_widget)
-        right_layout.addWidget(self.timeline_section)
+        container_layout.addWidget(self.timeline_section)
 
-        right_layout.addStretch()
+        # Notes (structured)
+        self.notes_section = self._create_vertical_section("📝 Notes")
+        self.notes_widget = NotesWidget(self._student_note_service)
+        self.notes_widget.note_changed.connect(self._on_data_changed)
+        self.notes_section.layout().addWidget(self.notes_widget)
+        container_layout.addWidget(self.notes_section)
 
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([400, 600])
+        # Documents
+        self.documents_section = self._create_vertical_section("📎 Documents")
+        self.documents_widget = DocumentsWidget(self._document_service)
+        self.documents_widget.document_changed.connect(self._on_data_changed)
+        self.documents_section.layout().addWidget(self.documents_widget)
+        container_layout.addWidget(self.documents_section)
 
-        # Scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(splitter)
+        container_layout.addStretch()
+        scroll.setWidget(container)
         main_layout.addWidget(scroll)
+
+        # Connect quick actions
+        self.quick_actions.set_actions(
+            on_edit=self._on_edit_clicked,
+            on_add_parent=self._on_add_parent,
+            on_add_assessment=self._on_add_assessment,
+            on_add_note=self._on_add_note,
+            on_upload_doc=self._on_upload_doc
+        )
 
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
@@ -199,22 +177,25 @@ class StudentDetailPage(QWidget):
         return section
 
     def _show_empty(self) -> None:
-        self.header_widget.setVisible(False)
-        self.info_panel.setVisible(False)
+        # Hide all sections
+        self.quick_actions.setVisible(False)
+        self.profile_widget.setVisible(False)
         self.summary_widget.setVisible(False)
         self.parents_section.setVisible(False)
-        self.notes_section.setVisible(False)
         self.assessment_section.setVisible(False)
         self.timeline_section.setVisible(False)
+        self.notes_section.setVisible(False)
+        self.documents_section.setVisible(False)
 
     def _show_detail(self) -> None:
-        self.header_widget.setVisible(True)
-        self.info_panel.setVisible(True)
+        self.quick_actions.setVisible(True)
+        self.profile_widget.setVisible(True)
         self.summary_widget.setVisible(True)
         self.parents_section.setVisible(True)
-        self.notes_section.setVisible(True)
         self.assessment_section.setVisible(True)
         self.timeline_section.setVisible(True)
+        self.notes_section.setVisible(True)
+        self.documents_section.setVisible(True)
 
     def load_student(self, student_id: int) -> None:
         try:
@@ -230,53 +211,73 @@ class StudentDetailPage(QWidget):
 
         self._current_student_id = student.id
         self._current_student = student
-        self._populate_header(student)
-        self._populate_info_panel(student)
-        self._load_summary()
-        self._load_parents()
-        self._load_notes(student)
-        self._load_assessment()
-        self._load_timeline()
+        self._populate_all(student)
         self._show_detail()
 
-    def _populate_header(self, student: Student) -> None:
-        self.avatar_label.set_name(student.full_name)
-        self.name_label.setText(student.full_name)
-        self.code_label.setText(student.student_code)
+    def _populate_all(self, student: Student) -> None:
+        # Profile
+        parents = self._parent_service.get_parents_for_student(student.id)
+        primary = next((p for p in parents if p.is_primary_contact), parents[0] if parents else None)
+        primary_name = primary.name if primary else ""
+        primary_phone = primary.phone if primary else ""
+        self.profile_widget.set_student(student, primary_name, primary_phone)
 
-    def _populate_info_panel(self, student: Student) -> None:
-        age = calculate_age(student.date_of_birth)
-        self.info_panel.update_value("Age", str(age) if age is not None else "-")
-        self.info_panel.update_value("Gender", student.gender or "-")
-        self.info_panel.update_value("Status", student.status or "-")
-        self.info_panel.update_value("Level", student.current_level or "-")
+        # Summary
+        summary = self._summary_service.get_summary(student.id)
+        self.summary_widget.set_summary(summary)
 
-    def _load_notes(self, student: Student) -> None:
-        self.notes_text_label.setText(student.notes or "No notes.")
+        # Parents
+        self._load_parents(student.id)
 
-    def _load_parents(self) -> None:
-        if self._current_student_id is None:
-            return
+        # Assessment
+        self.assessment_section.set_student(student.id)
+
+        # Timeline
+        events = self._timeline_service.get_student_timeline(student.id)
+        self.timeline_widget.set_events(events)
+
+        # Notes
+        self.notes_widget.set_student(student.id)
+
+        # Documents
+        self.documents_widget.set_student(student.id)
+
+    def _load_parents(self, student_id: int) -> None:
         self._clear_parents()
         try:
-            parents = self._parent_service.get_parents_for_student(self._current_student_id)
+            parents = self._parent_service.get_parents_for_student(student_id)
         except Exception as e:
             logger.exception("Error loading parents")
             parents = []
 
         if not parents:
-            from centermanager.ui.design_system import EmptyState
-            empty = EmptyState(icon="👨‍👩‍👧", title="No parents", description="Add a guardian for this student.")
-            self.parents_layout.addWidget(empty)
+            empty_widget = QWidget()
+            empty_layout = QVBoxLayout(empty_widget)
+            empty_layout.setContentsMargins(0, 8, 0, 8)
+            empty_layout.setSpacing(4)
+            icon = QLabel("👨‍👩‍👧")
+            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon.setStyleSheet("font-size: 28px;")
+            msg = QLabel("No parent information.\nAdd a guardian to this student.")
+            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            msg.setStyleSheet("color: #999; font-size: 14px;")
+            empty_layout.addWidget(icon)
+            empty_layout.addWidget(msg)
+            add_btn = QPushButton("+ Add Parent")
+            add_btn.setFixedWidth(120)
+            add_btn.clicked.connect(self._on_add_parent)
+            empty_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            self.parents_layout.addWidget(empty_widget)
         else:
             for parent in parents:
                 card = ParentCard(parent)
                 card.edit_clicked.connect(self._on_edit_parent)
                 card.delete_clicked.connect(self._on_delete_parent)
                 self.parents_layout.addWidget(card)
-        add_btn = SecondaryButton("+ Add Parent")
-        add_btn.clicked.connect(self._on_add_parent)
-        self.parents_layout.addWidget(add_btn)
+            add_btn = QPushButton("+ Add Parent")
+            add_btn.setFixedWidth(120)
+            add_btn.clicked.connect(self._on_add_parent)
+            self.parents_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
     def _clear_parents(self) -> None:
         while self.parents_layout.count():
@@ -289,7 +290,6 @@ class StudentDetailPage(QWidget):
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_widget=self)
         if dialog.exec() == ParentDialog.DialogCode.Accepted:
-            self._load_parents()
             self._on_data_changed()
 
     def _on_edit_parent(self, parent_id: int) -> None:
@@ -297,7 +297,6 @@ class StudentDetailPage(QWidget):
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_id=parent_id, parent_widget=self)
         if dialog.exec() == ParentDialog.DialogCode.Accepted:
-            self._load_parents()
             self._on_data_changed()
 
     def _on_delete_parent(self, parent_id: int) -> None:
@@ -306,50 +305,27 @@ class StudentDetailPage(QWidget):
         if reply == QMessageBox.Yes:
             try:
                 self._parent_service.delete_parent(parent_id)
-                self._load_parents()
                 self._on_data_changed()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
 
-    def _load_assessment(self) -> None:
-        if self._current_student_id is not None:
-            self.assessment_section.set_student(self._current_student_id)
-
-    def _load_timeline(self) -> None:
+    def _on_add_assessment(self) -> None:
         if self._current_student_id is None:
             return
-        try:
-            events = self._timeline_service.get_student_timeline(self._current_student_id)
-            self.timeline_widget.set_events(events)
-        except Exception as e:
-            logger.exception("Error loading timeline")
-            self.timeline_widget.set_events([])
+        from centermanager.ui.assessment.assessment_dialog import AssessmentDialog
+        dialog = AssessmentDialog(self._assessment_service, self._current_student_id, parent=self)
+        if dialog.exec() == AssessmentDialog.DialogCode.Accepted:
+            self._on_data_changed()
 
-    def _load_summary(self) -> None:
+    def _on_add_note(self) -> None:
         if self._current_student_id is None:
             return
-        try:
-            summary = self._summary_service.get_summary(self._current_student_id)
-            self.summary_widget.set_summary(summary)
-        except Exception as e:
-            logger.exception("Error loading summary")
-            self.summary_widget.set_summary(StudentSummaryDTO())
+        self.notes_widget._on_add()
 
-    def _on_data_changed(self) -> None:
+    def _on_upload_doc(self) -> None:
         if self._current_student_id is None:
             return
-        self._load_parents()
-        self._load_assessment()
-        self._load_timeline()
-        self._load_summary()
-        try:
-            student = self._student_service.get_student(self._current_student_id)
-            self._populate_header(student)
-            self._populate_info_panel(student)
-            self._load_notes(student)
-        except Exception:
-            pass
-        self.student_updated.emit()
+        self.documents_widget._on_upload()
 
     def _on_edit_clicked(self) -> None:
         if self._current_student_id is None:
@@ -357,4 +333,13 @@ class StudentDetailPage(QWidget):
         dialog = StudentFormDialog(self._student_service, student_id=self._current_student_id, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self._on_data_changed()
+
+    def _on_data_changed(self) -> None:
+        if self._current_student_id is not None:
+            # Reload everything
+            try:
+                student = self._student_service.get_student(self._current_student_id)
+                self._populate_all(student)
+            except Exception as e:
+                logger.exception("Error refreshing student data")
             self.student_updated.emit()
