@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
-"""
-HomePage - Command Center / Workspace Launcher for CenterManager.
-Now with workspace summaries, recent activities, today's summary, and system status.
-"""
+"""HomePage - Command Center / Workspace Launcher for CenterManager."""
 import logging
 from typing import Optional
+from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
-    QLabel, QFrame, QSizePolicy, QPushButton
+    QLabel, QFrame, QSizePolicy, QPushButton, QListWidget, QListWidgetItem
 )
 
 from centermanager.services.home_dashboard_service import HomeDashboardService
@@ -40,10 +38,11 @@ class HomePage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent; border: none;")
+        # Main scroll (cho toàn bộ HomePage)
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        main_scroll.setStyleSheet("background: transparent; border: none;")
 
         container = QWidget()
         container.setStyleSheet("background: transparent;")
@@ -71,32 +70,65 @@ class HomePage(QWidget):
 
         container_layout.addSpacing(8)
 
-        # Workspace cards grid
+        # Workspace cards
         self.workspace_grid = QGridLayout()
         self.workspace_grid.setSpacing(16)
         self.workspace_grid.setContentsMargins(0, 0, 0, 0)
         container_layout.addLayout(self.workspace_grid)
 
-        # Two-column layout for main content
+        # Two-column layout
         main_content = QHBoxLayout()
         main_content.setSpacing(24)
 
-        # Left column: Recent Activities + Today Summary
+        # Left column
         left_col = QVBoxLayout()
         left_col.setSpacing(24)
 
-        # Recent Activities
+        # ---- Recent Activities using QListWidget ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
         recent_layout.setSpacing(8)
         recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
         recent_layout.addWidget(recent_header)
-        self.recent_container = QWidget()
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(0)
-        recent_layout.addWidget(self.recent_container)
+
+        # Tạo QListWidget với style rõ ràng và hỗ trợ scroll
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setUniformItemSizes(True)
+        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Nhận sự kiện cuộn chuột
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                background: #ffffff;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 0px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #f1f1f1;
+                width: 8px;
+                margin: 0px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c1c1c1;
+                min-height: 20px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a8a8a8;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.recent_list.setFixedHeight(400)
+        self.recent_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        recent_layout.addWidget(self.recent_list)
+
         left_col.addWidget(self.recent_section)
 
         # Today Summary
@@ -137,18 +169,16 @@ class HomePage(QWidget):
         container_layout.addLayout(main_content)
         container_layout.addStretch()
 
-        scroll.setWidget(container)
-        layout.addWidget(scroll)
+        main_scroll.setWidget(container)
+        layout.addWidget(main_scroll)
 
     def refresh(self) -> None:
-        """Refresh all dashboard data."""
         self._populate_workspace_cards()
         self._populate_recent_activities()
         self._populate_today_summary()
         self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
-        # Clear grid
         while self.workspace_grid.count():
             item = self.workspace_grid.takeAt(0)
             if item.widget():
@@ -170,35 +200,77 @@ class HomePage(QWidget):
             card.clicked.connect(self._on_workspace_clicked)
             self.workspace_grid.addWidget(card, row, col)
             col += 1
-            if col >= 3:
+            if col >= 2:
                 col = 0
                 row += 1
 
     def _populate_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
-        activities = self._service.get_recent_activities(limit=8)
+        self.recent_list.clear()
+        activities = self._service.get_recent_activities(limit=30)
+
+        # Nếu ít hơn 10, thêm dữ liệu giả để test scroll
+        if len(activities) < 10:
+            now = datetime.now()
+            for i in range(15):
+                class Dummy:
+                    def __init__(self, icon, title, student_name, student_code, time):
+                        self.icon = icon
+                        self.title = title
+                        self.student_name = student_name
+                        self.student_code = student_code
+                        self.time = time
+                act = Dummy(
+                    '📌', f'Dummy Activity {i+1}',
+                    f'Student {i+1}', f'HS{i+1:03d}',
+                    now - timedelta(minutes=i*5)
+                )
+                activities.append(act)
+
+        logger.info(f"HomePage: Total activities: {len(activities)}")
+
         if activities:
             for act in activities:
-                item = ActivityItem(
+                item_widget = ActivityItem(
                     icon=act.icon,
                     title=act.title,
                     student_name=act.student_name,
                     student_code=act.student_code,
                     time=act.time
                 )
-                self.recent_container_layout.addWidget(item)
+                # FIX: Đặt chiều cao cố định cho widget
+                item_widget.setFixedHeight(70)
+                # FIX: Dùng QSize(0,70) thay vì sizeHint()
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(QSize(0, 70))
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, item_widget)
         else:
+            # Empty state
             empty = EmptyState(
                 icon="📭",
                 title="No recent activities",
                 description="Activities will appear here as you use the system."
             )
-            self.recent_container_layout.addWidget(empty)
+            empty.setFixedHeight(200)
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(QSize(0, 200))
+            self.recent_list.addItem(list_item)
+            self.recent_list.setItemWidget(list_item, empty)
+
+        # Debug: in số lượng item
+        logger.info(f"HomePage: QListWidget item count = {self.recent_list.count()}")
+        if self.recent_list.verticalScrollBar():
+            logger.info("Scroll bar exists")
+        else:
+            logger.warning("Scroll bar is None")
+
+        # Cập nhật
+        self.recent_list.updateGeometry()
+        self.recent_list.repaint()
 
     def _populate_today_summary(self) -> None:
         self._clear_layout(self.today_container_layout)
         summary = self._service.get_today_summary()
-        # Show as small info cards
         items = [
             (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
             (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),

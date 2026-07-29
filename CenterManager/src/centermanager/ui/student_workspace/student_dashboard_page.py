@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """StudentDashboardPage - Dashboard focuses on 'What requires my attention today?'"""
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QLabel, QPushButton, QSizePolicy
+    QLabel, QPushButton, QSizePolicy, QListWidget, QListWidgetItem
 )
 
 from centermanager.services.student_dashboard_service import StudentDashboardService
@@ -52,11 +52,22 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # ---- KPI Cards (4 columns) ----
+        # ---- KPI Cards ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
-        # ---- Need Attention (Warning banners) ----
+        # ---- Quick Insights ----
+        self.insights_section = QWidget()
+        insights_layout = QVBoxLayout(self.insights_section)
+        insights_layout.setContentsMargins(0, 0, 0, 0)
+        insights_layout.setSpacing(SPACING['sm'])
+        insights_header = SectionHeader("Quick Insights")
+        insights_layout.addWidget(insights_header)
+        self.insights_grid = StatisticGrid()
+        insights_layout.addWidget(self.insights_grid)
+        container_layout.addWidget(self.insights_section)
+
+        # ---- Need Attention ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -70,32 +81,54 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Upcoming Events ----
+        # ---- Upcoming Events (with QListWidget) ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
         events_layout.setSpacing(SPACING['sm'])
         events_header = SectionHeader("Upcoming Events")
         events_layout.addWidget(events_header)
-        self.events_container = QWidget()
-        self.events_container_layout = QVBoxLayout(self.events_container)
-        self.events_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.events_container_layout.setSpacing(SPACING['xs'])
-        events_layout.addWidget(self.events_container)
+
+        self.events_list = QListWidget()
+        self.events_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.events_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.events_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.events_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.events_list.setMaximumHeight(220)
+        events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities ----
+        # ---- Recent Activities (with QListWidget) ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
         recent_layout.setSpacing(SPACING['sm'])
         recent_header = SectionHeader("Recent Activities")
         recent_layout.addWidget(recent_header)
-        self.recent_container = QWidget()
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(SPACING['xs'])
-        recent_layout.addWidget(self.recent_container)
+
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.recent_list.setMaximumHeight(340)
+        recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
         # ---- Quick Actions ----
@@ -107,11 +140,9 @@ class StudentDashboardPage(QWidget):
         add_btn = PrimaryButton("➕ Add Student")
         add_btn.setFixedHeight(38)
         add_btn.clicked.connect(self.add_student_clicked.emit)
-
         import_btn = SecondaryButton("📥 Import")
         import_btn.setFixedHeight(38)
         import_btn.clicked.connect(self.import_students_clicked.emit)
-
         export_btn = SecondaryButton("📤 Export")
         export_btn.setFixedHeight(38)
         export_btn.clicked.connect(self.export_students_clicked.emit)
@@ -127,13 +158,13 @@ class StudentDashboardPage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        logger.debug("Refreshing dashboard...")
-        self._populate_kpis()
-        self._populate_attention()
-        self._populate_events()
-        self._populate_recent_activities()
+        self._refresh_kpis()
+        self._refresh_insights()
+        self._refresh_attention()
+        self._refresh_events()
+        self._refresh_recent_activities()
 
-    def _populate_kpis(self) -> None:
+    def _refresh_kpis(self) -> None:
         try:
             stats = self._service.get_stats()
             self.stats_grid.set_metrics([
@@ -145,7 +176,18 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
 
-    def _populate_attention(self) -> None:
+    def _refresh_insights(self) -> None:
+        try:
+            insights = self._service.get_quick_insights()
+            self.insights_grid.set_metrics([
+                {"icon": "📊", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5"},
+                {"icon": "🎂", "label": "Avg Age", "value": str(insights.avg_age)},
+                {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.assessment_completion_rate}%"},
+            ], columns=3)
+        except Exception as e:
+            logger.exception("Failed to load insights")
+
+    def _refresh_attention(self) -> None:
         self._clear_layout(self.attention_container_layout)
         try:
             attention = self._service.get_students_requiring_attention(limit=10)
@@ -170,12 +212,12 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to load attention students")
 
-    def _populate_events(self) -> None:
-        self._clear_layout(self.events_container_layout)
+    def _refresh_events(self) -> None:
+        self.events_list.clear()
         try:
             events = self._service.get_upcoming_events()
             if events:
-                for ev in events:
+                for ev in events[:10]:
                     icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
                     icon = icon_map.get(ev.event_type, "📌")
                     label_text = f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
@@ -183,25 +225,31 @@ class StudentDashboardPage(QWidget):
                         label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     label = QLabel(label_text)
                     label.setStyleSheet(f"""
-                        font-size: 14px;
+                        font-size: 13px;
                         color: {COLORS['text_secondary']};
                         padding: 4px 0;
                     """)
-                    self.events_container_layout.addWidget(label)
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(label.sizeHint())
+                    self.events_list.addItem(list_item)
+                    self.events_list.setItemWidget(list_item, label)
             else:
                 empty = EmptyState(
                     icon="📅",
                     title="No upcoming events",
                     description="Events will appear here when scheduled."
                 )
-                self.events_container_layout.addWidget(empty)
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.events_list.addItem(list_item)
+                self.events_list.setItemWidget(list_item, empty)
         except Exception as e:
             logger.exception("Failed to load upcoming events")
 
-    def _populate_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
+    def _refresh_recent_activities(self) -> None:
+        self.recent_list.clear()
         try:
-            activities = self._service.get_recent_activities(limit=20)
+            activities = self._service.get_recent_activities(limit=10)
             if activities:
                 for act in activities:
                     card = ActivityCard(
@@ -210,14 +258,20 @@ class StudentDashboardPage(QWidget):
                         subtitle=f"{act.student_name} ({act.student_code})",
                         time=act.time
                     )
-                    self.recent_container_layout.addWidget(card)
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(card.sizeHint())
+                    self.recent_list.addItem(list_item)
+                    self.recent_list.setItemWidget(list_item, card)
             else:
                 empty = EmptyState(
                     icon="📭",
                     title="No recent activities",
                     description="Activities will appear here when students are updated."
                 )
-                self.recent_container_layout.addWidget(empty)
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, empty)
         except Exception as e:
             logger.exception("Failed to load recent activities")
 

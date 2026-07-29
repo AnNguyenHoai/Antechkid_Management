@@ -1,6 +1,7 @@
+# src/centermanager/ui/shared/chart_card.py
 # -*- coding: utf-8 -*-
 from typing import Optional, List, Tuple
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QFontMetrics
 
@@ -133,7 +134,8 @@ class ChartWidget(QWidget):
             painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
             painter.setFont(QFont("Arial", 8))
             fm = QFontMetrics(painter.font())
-            label_text = label if len(label) <= 10 else label[:10] + "…"
+            label_str = str(label)
+            label_text = label_str if len(label_str) <= 10 else label_str[:10] + "…"
             label_width = fm.horizontalAdvance(label_text)
             painter.drawText(QRectF(x + (bar_width - label_width) / 2, rect.y() + rect.height() + 4, label_width, 16),
                              Qt.AlignmentFlag.AlignCenter, label_text)
@@ -160,7 +162,10 @@ class ChartWidget(QWidget):
         pie_rect = QRectF(rect.x(), rect.y(),
                           min(rect.width() * 0.6, rect.height()),
                           min(rect.width() * 0.6, rect.height()))
-        pie_rect.moveCenter(rect.center() - QPointF(rect.width() * 0.1, 0))
+        # Sửa lỗi: tính lại center bằng setX
+        center = rect.center()
+        center.setX(center.x() - rect.width() * 0.1)
+        pie_rect.moveCenter(center)
 
         for i, (label, value) in enumerate(self._data):
             angle = (value / total) * 360 * 16  # 1/16 degree
@@ -181,7 +186,8 @@ class ChartWidget(QWidget):
             painter.setPen(QPen(QColor(COLORS['text_secondary']), 1))
             painter.setFont(QFont("Arial", 8))
             percent = (value / total) * 100
-            legend_text = f"{label} ({percent:.1f}%)"
+            label_str = str(label)
+            legend_text = f"{label_str} ({percent:.1f}%)"
             painter.drawText(QRectF(legend_rect.x() + 16, legend_y - 2, legend_rect.width() - 16, 16),
                              Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, legend_text)
             legend_y += 20

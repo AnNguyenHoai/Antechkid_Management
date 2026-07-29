@@ -145,6 +145,7 @@ src/
       parent_service.py
       session_note_service.py
       session_service.py
+      student_analytics_service.py
       student_dashboard_service.py
       student_document_service.py
       student_export_service.py
@@ -194,7 +195,10 @@ src/
       shared/
         __init__.py
         activity_card.py
+        chart_card.py
+        data_table.py
         empty_state.py
+        loading_widget.py
         metric_card.py
         search_toolbar.py
         section_header.py
@@ -207,6 +211,7 @@ src/
         notes_widget.py
         profile_widget.py
         quick_actions_widget.py
+        student_analytics_page.py
         student_dashboard_page.py
         student_detail_page.py
         student_list_page.py
@@ -9994,6 +9999,7 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.student_summary_service import StudentSummaryService
+from centermanager.services.student_analytics_service import StudentAnalyticsService
 from centermanager.services.exceptions import (
     StudentServiceError,
     StudentNotFoundError,
@@ -10003,12 +10009,14 @@ from centermanager.services.exceptions import (
 )
 from .session_service import SessionService
 from .session_note_service import SessionNoteService
+
 __all__ = [
     "StudentService",
     "ParentService",
     "TimelineService",
     "AssessmentService",
     "StudentSummaryService",
+    "StudentAnalyticsService",
     "StudentServiceError",
     "StudentNotFoundError",
     "StudentValidationError",
@@ -11116,6 +11124,104 @@ class SessionService:
             session.commit()
 
 ================
+File: src/centermanager/services/student_analytics_service.py
+================
+# -*- coding: utf-8 -*-
+from typing import List, Tuple, Dict, Any
+from datetime import datetime, timedelta
+from sqlalchemy.orm import sessionmaker
+from collections import Counter
+
+from centermanager.models.student import Student
+from centermanager.models.assessment import Assessment
+
+
+class StudentAnalyticsService:
+    def __init__(self, session_factory: sessionmaker):
+        self._session_factory = session_factory
+
+    def get_dashboard_analytics(self) -> Dict[str, Any]:
+        with self._session_factory() as session:
+            # Total students
+            total_students = session.query(Student).count()
+
+            # Enrollment trend (last 6 months)
+            six_months_ago = datetime.now() - timedelta(days=180)
+            students = session.query(Student).filter(
+                Student.created_at >= six_months_ago
+            ).all()
+            month_counts = Counter()
+            for s in students:
+                month_key = s.created_at.strftime("%Y-%m")
+                month_counts[month_key] += 1
+            enrollment_trend = sorted(month_counts.items())
+
+            # Assessment distribution
+            assessments = session.query(Assessment).all()
+            type_counts = Counter(a.assessment_type for a in assessments if a.assessment_type)
+            assessment_distribution = list(type_counts.items())
+
+            # Age distribution
+            age_counts = Counter()
+            today = datetime.now().date()
+            for s in session.query(Student).all():
+                if s.date_of_birth:
+                    age = today.year - s.date_of_birth.year - (
+                        (today.month, today.day) < (s.date_of_birth.month, s.date_of_birth.day)
+                    )
+                    age_group = f"{age//10*10}-{age//10*10+9}"
+                    age_counts[age_group] += 1
+            age_distribution = list(age_counts.items())
+
+            # Score distribution
+            score_counts = Counter()
+            scores = []
+            for a in assessments:
+                if a.overall_score is not None:
+                    scores.append(a.overall_score)
+                    score_counts[a.overall_score] += 1
+            score_distribution = sorted(score_counts.items())
+
+            # Average score
+            avg_score = sum(scores) / len(scores) if scores else 0
+
+            # Monthly growth
+            last_month = datetime.now().replace(day=1) - timedelta(days=1)
+            two_months_ago = last_month.replace(day=1) - timedelta(days=1)
+            last_month_start = last_month.replace(day=1)
+            two_months_ago_start = two_months_ago.replace(day=1)
+
+            last_month_count = session.query(Student).filter(
+                Student.created_at >= last_month_start,
+                Student.created_at < last_month_start + timedelta(days=32)
+            ).count()
+            two_months_ago_count = session.query(Student).filter(
+                Student.created_at >= two_months_ago_start,
+                Student.created_at < two_months_ago_start + timedelta(days=32)
+            ).count()
+
+            if two_months_ago_count > 0:
+                growth = ((last_month_count - two_months_ago_count) / two_months_ago_count) * 100
+            else:
+                growth = 0
+
+            return {
+                "total_students": total_students,
+                "enrollment_trend": enrollment_trend,
+                "assessment_distribution": assessment_distribution,
+                "age_distribution": age_distribution,
+                "score_distribution": score_distribution,
+                "average_score": avg_score,
+                "monthly_growth": growth,
+            }
+
+    def get_recent_students(self, limit: int = 5) -> List[Student]:
+        with self._session_factory() as session:
+            return session.query(Student).order_by(
+                Student.created_at.desc()
+            ).limit(limit).all()
+
+================
 File: src/centermanager/services/student_dashboard_service.py
 ================
 # -*- coding: utf-8 -*-
@@ -11457,11 +11563,12 @@ File: src/centermanager/services/student_export_service.py
 ================
 # -*- coding: utf-8 -*-
 """
-StudentExportService - exports student data to Excel.
+StudentExportService - exports student data to Excel and CSV.
 """
+import csv
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import openpyxl
 from openpyxl.styles import Font, Alignment
@@ -11472,39 +11579,43 @@ from centermanager.services.student_service import StudentService
 
 
 class StudentExportService:
-    """Service to export student list to Excel."""
+    """Service to export student list to Excel and CSV."""
 
     def __init__(self, student_service: StudentService) -> None:
         self._student_service = student_service
 
-    def export_all_active(self, file_path: Path = None) -> Path:
-        """Export all active students to an Excel file."""
+    def export_excel(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
+        """Export students to Excel."""
         if file_path is None:
             export_dir = get_paths().excel_export_dir
             export_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_path = export_dir / f"students_{timestamp}.xlsx"
-
-        students = self._student_service.list_students()
         return self._write_excel(students, file_path)
+
+    def export_csv(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
+        """Export students to CSV."""
+        if file_path is None:
+            export_dir = get_paths().excel_export_dir
+            export_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = export_dir / f"students_{timestamp}.csv"
+        return self._write_csv(students, file_path)
 
     def _write_excel(self, students: List[Student], file_path: Path) -> Path:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Students"
 
-        # Headers
         headers = [
             "Code", "Full Name", "Preferred Name", "Date of Birth",
             "Gender", "Status", "Level", "Notes"
         ]
         ws.append(headers)
-        # Style header
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
 
-        # Data rows
         for s in students:
             ws.append([
                 s.student_code,
@@ -11517,7 +11628,6 @@ class StudentExportService:
                 s.notes or ""
             ])
 
-        # Auto adjust column widths (simple)
         for col in ws.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -11531,6 +11641,26 @@ class StudentExportService:
             ws.column_dimensions[col_letter].width = adjusted_width
 
         wb.save(file_path)
+        return file_path
+
+    def _write_csv(self, students: List[Student], file_path: Path) -> Path:
+        with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "Code", "Full Name", "Preferred Name", "Date of Birth",
+                "Gender", "Status", "Level", "Notes"
+            ])
+            for s in students:
+                writer.writerow([
+                    s.student_code,
+                    s.full_name,
+                    s.preferred_name or "",
+                    s.date_of_birth.strftime("%Y-%m-%d") if s.date_of_birth else "",
+                    s.gender or "",
+                    s.status or "",
+                    s.current_level or "",
+                    s.notes or ""
+                ])
         return file_path
 
 ================
@@ -16545,6 +16675,9 @@ from .warning_banner import WarningBanner
 from .empty_state import EmptyState
 from .section_header import SectionHeader
 from .search_toolbar import SearchToolbar
+from .loading_widget import LoadingWidget, LoadingSkeleton
+from .data_table import DataTable
+from .chart_card import ChartCard
 
 __all__ = [
     "MetricCard",
@@ -16555,6 +16688,10 @@ __all__ = [
     "EmptyState",
     "SectionHeader",
     "SearchToolbar",
+    "LoadingWidget",
+    "LoadingSkeleton",
+    "DataTable",
+    "ChartCard",
 ]
 
 ================
@@ -16647,6 +16784,359 @@ class ActivityCard(QFrame):
             return dt.strftime("%d/%m/%Y %H:%M")
 
 ================
+File: src/centermanager/ui/shared/chart_card.py
+================
+# -*- coding: utf-8 -*-
+from typing import Optional, List, Tuple
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QFontMetrics
+
+from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING
+
+
+class ChartCard(QFrame):
+    """A card that displays a bar chart or pie chart with improved styling."""
+    def __init__(
+        self,
+        title: str,
+        chart_type: str = "bar",  # "bar" or "pie"
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._chart_type = chart_type
+        self._data: List[Tuple[str, float]] = []
+        self._colors = [
+            "#1976d2", "#42a5f5", "#66bb6a", "#ffa726", "#ef5350",
+            "#ab47bc", "#26a69a", "#78909c"
+        ]
+        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {COLORS['border_light']};
+                border-radius: 8px;
+                background: {COLORS['surface']};
+                padding: {SPACING['sm']}px;
+            }}
+        """)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(220)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(SPACING['sm'], SPACING['sm'], SPACING['sm'], SPACING['sm'])
+        layout.setSpacing(SPACING['xs'])
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['card_title']}px;
+            font-weight: 600;
+            color: {COLORS['text_primary']};
+        """)
+        layout.addWidget(title_label)
+
+        self.chart_widget = ChartWidget(self._chart_type)
+        self.chart_widget.setData(self._data, self._colors)
+        layout.addWidget(self.chart_widget)
+
+    def set_data(self, data: List[Tuple[str, float]]) -> None:
+        self._data = data
+        self.chart_widget.setData(data, self._colors)
+        self.chart_widget.update()
+
+
+class ChartWidget(QWidget):
+    def __init__(self, chart_type: str = "bar", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._chart_type = chart_type
+        self._data: List[Tuple[str, float]] = []
+        self._colors: List[str] = []
+        self.setMinimumHeight(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def setData(self, data: List[Tuple[str, float]], colors: List[str]) -> None:
+        self._data = data
+        self._colors = colors
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect()
+        margin = 30
+        chart_rect = rect.adjusted(margin, margin, -margin, -margin)
+
+        if not self._data:
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data")
+            return
+
+        if self._chart_type == "bar":
+            self._draw_bar_chart(painter, chart_rect)
+        elif self._chart_type == "pie":
+            self._draw_pie_chart(painter, chart_rect)
+
+    def _draw_bar_chart(self, painter: QPainter, rect: QRectF) -> None:
+        if not self._data:
+            return
+
+        # Sort data by value descending for better visual
+        sorted_data = sorted(self._data, key=lambda x: x[1], reverse=True)
+        n = len(sorted_data)
+        if n == 0:
+            return
+
+        max_val = max(v for _, v in sorted_data) * 1.2
+        if max_val == 0:
+            max_val = 1
+
+        # Bar width with spacing
+        bar_spacing = rect.width() / (n * 1.8)
+        bar_width = bar_spacing * 0.7
+        if bar_width < 10:
+            bar_width = 10
+
+        # Draw axes
+        painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
+        painter.drawLine(rect.x(), rect.y() + rect.height(), rect.x() + rect.width(), rect.y() + rect.height())
+        painter.drawLine(rect.x(), rect.y(), rect.x(), rect.y() + rect.height())
+
+        # Draw bars
+        for i, (label, value) in enumerate(sorted_data):
+            x = rect.x() + i * bar_spacing + (bar_spacing - bar_width) / 2
+            height = (value / max_val) * rect.height()
+            y = rect.y() + rect.height() - height
+            color = QColor(self._colors[i % len(self._colors)])
+            painter.fillRect(QRectF(x, y, bar_width, height), color)
+
+            # Draw value on top of bar
+            painter.setPen(QPen(QColor(COLORS['text_primary']), 1))
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            value_text = f"{value:.1f}" if value % 1 != 0 else str(int(value))
+            fm = QFontMetrics(painter.font())
+            text_width = fm.horizontalAdvance(value_text)
+            painter.drawText(QRectF(x + (bar_width - text_width) / 2, y - 18, text_width, 16),
+                             Qt.AlignmentFlag.AlignCenter, value_text)
+
+            # Draw label below x-axis
+            painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
+            painter.setFont(QFont("Arial", 8))
+            fm = QFontMetrics(painter.font())
+            # Đảm bảo label là string trước khi lấy len()
+            label_str = str(label)
+            label_text = label_str if len(label_str) <= 10 else label_str[:10] + "…"
+            label_width = fm.horizontalAdvance(label_text)
+            painter.drawText(QRectF(x + (bar_width - label_width) / 2, rect.y() + rect.height() + 4, label_width, 16),
+                             Qt.AlignmentFlag.AlignCenter, label_text)
+
+        # Draw y-axis labels
+        painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
+        painter.setFont(QFont("Arial", 8))
+        for y_val in range(0, int(max_val) + 1, max(1, int(max_val // 4))):
+            y_pos = rect.y() + rect.height() - (y_val / max_val) * rect.height()
+            painter.drawText(QRectF(rect.x() - 30, y_pos - 8, 25, 16),
+                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(y_val))
+            painter.drawLine(rect.x() - 4, y_pos, rect.x(), y_pos)
+
+    def _draw_pie_chart(self, painter: QPainter, rect: QRectF) -> None:
+        total = sum(v for _, v in self._data)
+        if total == 0:
+            return
+
+        start_angle = 0
+        legend_rect = QRectF(rect.x() + rect.width() * 0.65, rect.y(),
+                             rect.width() * 0.3, rect.height())
+
+        # Draw pie
+        pie_rect = QRectF(rect.x(), rect.y(),
+                          min(rect.width() * 0.6, rect.height()),
+                          min(rect.width() * 0.6, rect.height()))
+        pie_rect.moveCenter(rect.center() - QPointF(rect.width() * 0.1, 0))
+
+        for i, (label, value) in enumerate(self._data):
+            angle = (value / total) * 360 * 16  # 1/16 degree
+            color = QColor(self._colors[i % len(self._colors)])
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
+            painter.drawPie(pie_rect, int(start_angle), int(angle))
+            start_angle += angle
+
+        # Draw legend
+        legend_y = legend_rect.y()
+        for i, (label, value) in enumerate(self._data):
+            color = QColor(self._colors[i % len(self._colors)])
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
+            painter.drawRect(QRectF(legend_rect.x(), legend_y, 12, 12))
+
+            painter.setPen(QPen(QColor(COLORS['text_secondary']), 1))
+            painter.setFont(QFont("Arial", 8))
+            percent = (value / total) * 100
+            label_str = str(label)
+            legend_text = f"{label_str} ({percent:.1f}%)"
+            painter.drawText(QRectF(legend_rect.x() + 16, legend_y - 2, legend_rect.width() - 16, 16),
+                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, legend_text)
+            legend_y += 20
+
+        # Draw total value in center
+        painter.setPen(QPen(QColor(COLORS['text_primary']), 1))
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        painter.drawText(pie_rect, Qt.AlignmentFlag.AlignCenter, f"Total\n{int(total)}")
+
+================
+File: src/centermanager/ui/shared/data_table.py
+================
+# -*- coding: utf-8 -*-
+from typing import Optional, List, Dict, Any
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QHeaderView, QPushButton, QLabel, QComboBox, QAbstractItemView,
+    QFrame
+)
+
+from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
+
+
+class DataTable(QWidget):
+    selection_changed = Signal(list)  # list of selected row indices
+    sort_requested = Signal(str, bool)  # column, ascending
+    row_double_clicked = Signal(int)  # row index
+    context_menu_requested = Signal(QPoint, int)  # global position, row
+
+    def __init__(
+        self,
+        columns: List[Dict[str, str]],
+        parent: Optional[QWidget] = None,
+        page_size: int = 20,
+    ) -> None:
+        super().__init__(parent)
+        self._columns = columns
+        self._page_size = page_size
+        self._current_page = 0
+        self._total_rows = 0
+        self._data = []
+        self._selected_rows = set()
+        self._sort_column = None
+        self._sort_ascending = True
+
+        self._setup_ui()
+        self._connect_signals()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING['sm'])
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(self._columns))
+        self.table.setHorizontalHeaderLabels([c['label'] for c in self._columns])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSortingEnabled(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        layout.addWidget(self.table)
+
+        pagination = QHBoxLayout()
+        pagination.setSpacing(SPACING['sm'])
+        self.prev_btn = QPushButton("◀")
+        self.prev_btn.setFixedWidth(60)
+        self.next_btn = QPushButton("▶")
+        self.next_btn.setFixedWidth(60)
+        self.page_label = QLabel("Page 1")
+        self.page_label.setStyleSheet(f"font-size: {TYPOGRAPHY['body']}px;")
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["10", "20", "50", "100"])
+        self.page_size_combo.setCurrentText(str(self._page_size))
+        pagination.addWidget(self.prev_btn)
+        pagination.addWidget(self.page_label)
+        pagination.addWidget(self.next_btn)
+        pagination.addStretch()
+        pagination.addWidget(QLabel("Rows per page:"))
+        pagination.addWidget(self.page_size_combo)
+        layout.addLayout(pagination)
+
+    def _connect_signals(self) -> None:
+        self.prev_btn.clicked.connect(self._prev_page)
+        self.next_btn.clicked.connect(self._next_page)
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+        self.table.horizontalHeader().sectionClicked.connect(self._on_sort)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.doubleClicked.connect(lambda idx: self.row_double_clicked.emit(idx.row()))
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
+
+    def set_data(self, data: List[Dict[str, Any]], total: int) -> None:
+        self._data = data
+        self._total_rows = total
+        self._current_page = 0
+        self._update_table()
+
+    def _update_table(self) -> None:
+        start = self._current_page * self._page_size
+        end = min(start + self._page_size, len(self._data))
+        page_data = self._data[start:end]
+        self.table.setRowCount(len(page_data))
+        self.table.setColumnCount(len(self._columns))
+
+        for row, item in enumerate(page_data):
+            for col, col_def in enumerate(self._columns):
+                key = col_def['key']
+                value = item.get(key, "")
+                cell = QTableWidgetItem(str(value))
+                cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, col, cell)
+
+        total_pages = (self._total_rows + self._page_size - 1) // self._page_size
+        self.page_label.setText(f"Page {self._current_page + 1} of {max(1, total_pages)}")
+        self.prev_btn.setEnabled(self._current_page > 0)
+        self.next_btn.setEnabled(self._current_page < total_pages - 1)
+
+    def _prev_page(self) -> None:
+        if self._current_page > 0:
+            self._current_page -= 1
+            self._update_table()
+
+    def _next_page(self) -> None:
+        total_pages = (self._total_rows + self._page_size - 1) // self._page_size
+        if self._current_page < total_pages - 1:
+            self._current_page += 1
+            self._update_table()
+
+    def _on_page_size_changed(self, size: str) -> None:
+        self._page_size = int(size)
+        self._current_page = 0
+        self._update_table()
+
+    def _on_sort(self, col: int) -> None:
+        if col < len(self._columns) and self._columns[col].get('sortable', False):
+            if self._sort_column == col:
+                self._sort_ascending = not self._sort_ascending
+            else:
+                self._sort_column = col
+                self._sort_ascending = True
+            key = self._columns[col]['key']
+            self.sort_requested.emit(key, self._sort_ascending)
+
+    def _on_selection_changed(self) -> None:
+        selected = set()
+        for item in self.table.selectedItems():
+            selected.add(item.row())
+        self._selected_rows = selected
+        self.selection_changed.emit(list(selected))
+
+    def _on_context_menu(self, pos) -> None:
+        index = self.table.indexAt(pos)
+        if index.isValid():
+            self.context_menu_requested.emit(self.table.mapToGlobal(pos), index.row())
+
+    def clear_selection(self) -> None:
+        self.table.clearSelection()
+        self._selected_rows.clear()
+
+================
 File: src/centermanager/ui/shared/empty_state.py
 ================
 # -*- coding: utf-8 -*-
@@ -16711,6 +17201,45 @@ class EmptyState(QWidget):
             btn.setFixedHeight(36)
             btn.clicked.connect(action_callback)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+================
+File: src/centermanager/ui/shared/loading_widget.py
+================
+# -*- coding: utf-8 -*-
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QFrame, QSizePolicy
+
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+
+
+class LoadingSkeleton(QFrame):
+    """A simple skeleton loading card."""
+    def __init__(self, height: int = 60, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: {COLORS['gray_100']};
+                border-radius: 4px;
+                margin: {SPACING['xs']}px 0;
+            }}
+        """)
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+class LoadingWidget(QWidget):
+    """Widget with multiple skeleton lines."""
+    def __init__(self, count: int = 5, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING['xs'])
+        for _ in range(count):
+            layout.addWidget(LoadingSkeleton())
+        self.setVisible(True)
 
 ================
 File: src/centermanager/ui/shared/metric_card.py
@@ -17247,12 +17776,14 @@ from .student_workspace_shell import StudentWorkspaceShell
 from .student_dashboard_page import StudentDashboardPage
 from .student_list_page import StudentListPage
 from .student_detail_page import StudentDetailPage
+from .student_analytics_page import StudentAnalyticsPage
 
 __all__ = [
     "StudentWorkspaceShell",
     "StudentDashboardPage",
     "StudentListPage",
     "StudentDetailPage",
+    "StudentAnalyticsPage",
 ]
 
 ================
@@ -17261,7 +17792,6 @@ File: src/centermanager/ui/student_workspace/documents_widget.py
 # -*- coding: utf-8 -*-
 """
 DocumentsWidget - display and manage student documents.
-Removed duplicate title.
 """
 import os
 import sys
@@ -17281,8 +17811,9 @@ from centermanager.services.student_document_service import StudentDocumentServi
 from centermanager.core.paths import get_paths
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 
+
 class DocumentCard(QFrame):
-    def __init__(self, doc: Document, parent: Optional[QWidget] = None):
+    def __init__(self, doc: Document, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._doc = doc
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
@@ -17315,6 +17846,13 @@ class DocumentCard(QFrame):
         time_label = QLabel(doc.created_at.strftime("%d/%m/%Y"))
         time_label.setStyleSheet("color: #888; font-size: 11px;")
         header.addWidget(time_label)
+
+        self.delete_btn = QPushButton("✕")
+        self.delete_btn.setStyleSheet("background: transparent; border: none; color: red; font-size: 14px;")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.clicked.connect(self._delete)
+        header.addWidget(self.delete_btn)
+
         layout.addLayout(header)
 
         if doc.description:
@@ -17323,18 +17861,28 @@ class DocumentCard(QFrame):
             desc.setStyleSheet("font-size: 12px; color: #555;")
             layout.addWidget(desc)
 
-    def mouseDoubleClickEvent(self, event):
+    def _delete(self) -> None:
+        parent = self.parent()
+        while parent and not isinstance(parent, DocumentsWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_delete_document'):
+            parent._delete_document(self._doc.id)
+
+    def mouseDoubleClickEvent(self, event) -> None:
         from centermanager.core.paths import get_paths
         file_path = get_paths().attachment_dir / self._doc.file_path
         if file_path.exists():
-            if sys.platform == 'win32':
-                os.startfile(str(file_path))
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', str(file_path)])
-            else:
-                subprocess.run(['xdg-open', str(file_path)])
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(str(file_path))
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', str(file_path)])
+                else:
+                    subprocess.run(['xdg-open', str(file_path)])
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Could not open file: {e}")
         else:
-            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found at {file_path}.")
+            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found.")
 
 
 class DocumentsWidget(QWidget):
@@ -17352,7 +17900,6 @@ class DocumentsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['sm'])
 
-        # No title - title is in parent section
         header = QHBoxLayout()
         header.addStretch()
         self.upload_btn = QPushButton("+ Upload")
@@ -17415,7 +17962,6 @@ class DocumentsWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc_type, description = dialog.get_data()
             try:
-                # Need student_code; get from service
                 from centermanager.services.student_service import StudentService
                 from centermanager.database.engine import create_production_engine
                 from sqlalchemy.orm import sessionmaker
@@ -17435,6 +17981,21 @@ class DocumentsWidget(QWidget):
                 self.document_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Upload Error", str(e))
+
+    def _delete_document(self, document_id: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Delete this document?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._service.delete_document(document_id)
+                self._load_documents()
+                self.document_changed.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
 
 class UploadDocumentDialog(QDialog):
@@ -17471,7 +18032,6 @@ File: src/centermanager/ui/student_workspace/notes_widget.py
 # -*- coding: utf-8 -*-
 """
 NotesWidget - display and manage student notes.
-Removed duplicate title (title is now in parent section).
 """
 from typing import Optional, List
 
@@ -17516,7 +18076,7 @@ class NoteDetailDialog(QDialog):
 
         self._load_note()
 
-    def _load_note(self):
+    def _load_note(self) -> None:
         try:
             self._note = self._service.get_note_by_id(self._note_id)
             if self._note:
@@ -17528,6 +18088,63 @@ class NoteDetailDialog(QDialog):
         except Exception as e:
             self.type_label.setText("Error")
             self.content_label.setText(str(e))
+
+
+class NoteEditDialog(QDialog):
+    def __init__(self, note_service: StudentNoteService, note_id: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = note_service
+        self._note_id = note_id
+        self._note: Optional[Note] = None
+        self.setWindowTitle("Edit Note")
+        self.setMinimumWidth(400)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.type_combo = QComboBox()
+        for t in NoteType.choices():
+            self.type_combo.addItem(t)
+        form.addRow("Type", self.type_combo)
+
+        self.content_edit = QPlainTextEdit()
+        self.content_edit.setPlaceholderText("Enter note content...")
+        self.content_edit.setMinimumHeight(100)
+        form.addRow("Content", self.content_edit)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._load_note()
+
+    def _load_note(self) -> None:
+        try:
+            self._note = self._service.get_note_by_id(self._note_id)
+            if self._note:
+                idx = self.type_combo.findText(self._note.note_type)
+                if idx >= 0:
+                    self.type_combo.setCurrentIndex(idx)
+                self.content_edit.setPlainText(self._note.content)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            self.reject()
+
+    def _save(self) -> None:
+        note_type = self.type_combo.currentText()
+        content = self.content_edit.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, "Validation", "Content cannot be empty.")
+            return
+        try:
+            self._service.update_note(self._note_id, note_type, content)
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
 
 class NoteCard(QFrame):
@@ -17560,6 +18177,19 @@ class NoteCard(QFrame):
         time_label.setStyleSheet("color: #888; font-size: 11px;")
         header.addStretch()
         header.addWidget(time_label)
+
+        self.edit_btn = QPushButton("✎")
+        self.edit_btn.setStyleSheet("background: transparent; border: none; font-size: 14px;")
+        self.edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.edit_btn.clicked.connect(self._edit)
+        header.addWidget(self.edit_btn)
+
+        self.delete_btn = QPushButton("✕")
+        self.delete_btn.setStyleSheet("background: transparent; border: none; color: red; font-size: 14px;")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.clicked.connect(self._delete)
+        header.addWidget(self.delete_btn)
+
         layout.addLayout(header)
 
         content_label = QLabel(note.content)
@@ -17567,7 +18197,21 @@ class NoteCard(QFrame):
         content_label.setStyleSheet("font-size: 13px; color: #333;")
         layout.addWidget(content_label)
 
-    def mouseDoubleClickEvent(self, event):
+    def _edit(self) -> None:
+        parent = self.parent()
+        while parent and not isinstance(parent, NotesWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_edit_note'):
+            parent._edit_note(self._note.id)
+
+    def _delete(self) -> None:
+        parent = self.parent()
+        while parent and not isinstance(parent, NotesWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_delete_note'):
+            parent._delete_note(self._note.id)
+
+    def mouseDoubleClickEvent(self, event) -> None:
         parent = self.parent()
         while parent and not isinstance(parent, NotesWidget):
             parent = parent.parent()
@@ -17590,8 +18234,6 @@ class NotesWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['sm'])
 
-        # No title here - title is in parent section
-        # Only Add button
         header = QHBoxLayout()
         header.addStretch()
         self.add_btn = QPushButton("+ Add Note")
@@ -17655,6 +18297,27 @@ class NotesWidget(QWidget):
     def _on_view_note(self, note_id: int) -> None:
         dialog = NoteDetailDialog(self._service, note_id, parent=self)
         dialog.exec()
+
+    def _edit_note(self, note_id: int) -> None:
+        dialog = NoteEditDialog(self._service, note_id, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load_notes()
+            self.note_changed.emit()
+
+    def _delete_note(self, note_id: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Delete this note?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._service.delete_note(note_id)
+                self._load_notes()
+                self.note_changed.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
 
 class NoteDialog(QDialog):
@@ -17902,16 +18565,120 @@ class QuickActionsWidget(QWidget):
         self.upload_doc_btn.clicked.connect(on_upload_doc)
 
 ================
+File: src/centermanager/ui/student_workspace/student_analytics_page.py
+================
+# -*- coding: utf-8 -*-
+"""StudentAnalyticsPage - Analytics focuses on 'How is the business performing over time?'"""
+from typing import Optional
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame
+
+from centermanager.services.student_analytics_service import StudentAnalyticsService
+from centermanager.ui.shared import ChartCard, MetricCard, SectionHeader
+from centermanager.ui.design_system.tokens import SPACING
+from centermanager.ui.design_system.components import SecondaryButton
+
+
+class StudentAnalyticsPage(QWidget):
+    def __init__(self, analytics_service: StudentAnalyticsService, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._service = analytics_service
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setSpacing(SPACING['xl'])
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+
+        # ---- Summary Metrics ----
+        self.summary_grid = QHBoxLayout()
+        self.summary_grid.setSpacing(SPACING['md'])
+        self.avg_score_widget = MetricCard("⭐", "Average Score", "0", "")
+        self.total_students_widget = MetricCard("👥", "Total Students", "0", "")
+        self.growth_widget = MetricCard("📈", "Monthly Growth", "0%", "")
+        self.summary_grid.addWidget(self.avg_score_widget)
+        self.summary_grid.addWidget(self.total_students_widget)
+        self.summary_grid.addWidget(self.growth_widget)
+        container_layout.addLayout(self.summary_grid)
+
+        # ---- Charts Grid (2 columns) ----
+        chart_grid = QHBoxLayout()
+        chart_grid.setSpacing(SPACING['md'])
+
+        self.enrollment_chart = ChartCard("Enrollment Trend", "bar")
+        self.assessment_chart = ChartCard("Assessment Distribution", "pie")
+        chart_grid.addWidget(self.enrollment_chart, 1)
+        chart_grid.addWidget(self.assessment_chart, 1)
+        container_layout.addLayout(chart_grid)
+
+        # ---- Second row ----
+        chart_grid2 = QHBoxLayout()
+        chart_grid2.setSpacing(SPACING['md'])
+        self.age_chart = ChartCard("Age Distribution", "bar")
+        self.score_chart = ChartCard("Score Distribution", "bar")
+        chart_grid2.addWidget(self.age_chart, 1)
+        chart_grid2.addWidget(self.score_chart, 1)
+        container_layout.addLayout(chart_grid2)
+
+        # ---- Export button ----
+        export_section = QHBoxLayout()
+        export_section.addStretch()
+        self.export_btn = SecondaryButton("📊 Export Analytics Report")
+        self.export_btn.clicked.connect(self._export_report)
+        export_section.addWidget(self.export_btn)
+        container_layout.addLayout(export_section)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+    def refresh(self):
+        try:
+            data = self._service.get_dashboard_analytics()
+            # Summary metrics
+            self.avg_score_widget.set_value(f"{data.get('average_score', 0):.1f}/5")
+            self.total_students_widget.set_value(str(data.get('total_students', 0)))
+            growth = data.get('monthly_growth', 0)
+            self.growth_widget.set_value(f"{growth:+.1f}%")
+
+            # Charts
+            enrollment_data = data.get('enrollment_trend', [])
+            if enrollment_data:
+                self.enrollment_chart.set_data(enrollment_data)
+
+            assessment_data = data.get('assessment_distribution', [])
+            if assessment_data:
+                self.assessment_chart.set_data(assessment_data)
+
+            age_data = data.get('age_distribution', [])
+            if age_data:
+                self.age_chart.set_data(age_data)
+
+            score_data = data.get('score_distribution', [])
+            if score_data:
+                self.score_chart.set_data(score_data)
+        except Exception as e:
+            import logging
+            logging.exception("Failed to load analytics data")
+
+    def _export_report(self):
+        # Placeholder: sẽ implement export sau
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Export", "Analytics report export will be available soon.")
+
+================
 File: src/centermanager/ui/student_workspace/student_dashboard_page.py
 ================
 # -*- coding: utf-8 -*-
-"""
-StudentDashboardPage - Complete dashboard for Student Workspace.
-Properly sized for better visibility.
-"""
+"""StudentDashboardPage - Dashboard focuses on 'What requires my attention today?'"""
 import logging
-from typing import Optional
-from datetime import datetime, date, timedelta
+from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
@@ -17922,7 +18689,7 @@ from PySide6.QtWidgets import (
 from centermanager.services.student_dashboard_service import StudentDashboardService
 from centermanager.ui.shared import (
     MetricCard, StatisticGrid, ActivityCard, WarningBanner,
-    EmptyState, SectionHeader, SearchToolbar
+    EmptyState, SectionHeader
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.design_system.components import PrimaryButton, SecondaryButton
@@ -17962,7 +18729,7 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # ---- Stats Grid ----
+        # ---- KPI Cards ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
@@ -17991,32 +18758,48 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Upcoming Events ----
+        # ---- Upcoming Events (with scroll) ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
         events_layout.setSpacing(SPACING['sm'])
         events_header = SectionHeader("Upcoming Events")
         events_layout.addWidget(events_header)
+
+        self.events_scroll = QScrollArea()
+        self.events_scroll.setWidgetResizable(True)
+        self.events_scroll.setMaximumHeight(200)
+        self.events_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.events_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.events_container = QWidget()
+        self.events_container.setStyleSheet("background: transparent;")
         self.events_container_layout = QVBoxLayout(self.events_container)
         self.events_container_layout.setContentsMargins(0, 0, 0, 0)
         self.events_container_layout.setSpacing(SPACING['xs'])
-        events_layout.addWidget(self.events_container)
+        self.events_scroll.setWidget(self.events_container)
+        events_layout.addWidget(self.events_scroll)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities ----
+        # ---- Recent Activities (with scroll) ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
         recent_layout.setSpacing(SPACING['sm'])
         recent_header = SectionHeader("Recent Activities")
         recent_layout.addWidget(recent_header)
+
+        self.recent_scroll = QScrollArea()
+        self.recent_scroll.setWidgetResizable(True)
+        self.recent_scroll.setMaximumHeight(300)
+        self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.recent_container = QWidget()
+        self.recent_container.setStyleSheet("background: transparent;")
         self.recent_container_layout = QVBoxLayout(self.recent_container)
         self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
         self.recent_container_layout.setSpacing(SPACING['xs'])
-        recent_layout.addWidget(self.recent_container)
+        self.recent_scroll.setWidget(self.recent_container)
+        recent_layout.addWidget(self.recent_scroll)
         container_layout.addWidget(self.recent_section)
 
         # ---- Quick Actions ----
@@ -18046,7 +18829,13 @@ class StudentDashboardPage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        logger.debug("Refreshing dashboard...")
+        self._refresh_kpis()
+        self._refresh_insights()
+        self._refresh_attention()
+        self._refresh_events()
+        self._refresh_recent_activities()
+
+    def _refresh_kpis(self) -> None:
         try:
             stats = self._service.get_stats()
             self.stats_grid.set_metrics([
@@ -18058,24 +18847,18 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
 
-        self._populate_insights()
-        self._populate_attention()
-        self._populate_events()
-        self._populate_recent_activities()
-
-    def _populate_insights(self) -> None:
+    def _refresh_insights(self) -> None:
         try:
             insights = self._service.get_quick_insights()
             self.insights_grid.set_metrics([
                 {"icon": "📊", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5"},
                 {"icon": "🎂", "label": "Avg Age", "value": str(insights.avg_age)},
                 {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.assessment_completion_rate}%"},
-                {"icon": "📝", "label": "With Assessment", "value": f"{insights.assessment_completion_rate}%"},
-            ], columns=4)
+            ], columns=3)
         except Exception as e:
             logger.exception("Failed to load insights")
 
-    def _populate_attention(self) -> None:
+    def _refresh_attention(self) -> None:
         self._clear_layout(self.attention_container_layout)
         try:
             attention = self._service.get_students_requiring_attention(limit=10)
@@ -18100,10 +18883,10 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to load attention students")
 
-    def _populate_events(self) -> None:
+    def _refresh_events(self) -> None:
         self._clear_layout(self.events_container_layout)
         try:
-            events = self._service.get_upcoming_events()
+            events = self._service.get_upcoming_events()[:5]
             if events:
                 for ev in events:
                     icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
@@ -18128,10 +18911,10 @@ class StudentDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to load upcoming events")
 
-    def _populate_recent_activities(self) -> None:
+    def _refresh_recent_activities(self) -> None:
         self._clear_layout(self.recent_container_layout)
         try:
-            activities = self._service.get_recent_activities(limit=20)
+            activities = self._service.get_recent_activities(limit=5)
             if activities:
                 for act in activities:
                     card = ActivityCard(
@@ -18527,133 +19310,64 @@ class StudentDetailPage(QWidget):
 File: src/centermanager/ui/student_workspace/student_list_page.py
 ================
 # -*- coding: utf-8 -*-
-"""
-StudentListPage - page that displays student list with search, filter, add.
-"""
+"""StudentListPage - Enterprise data management screen."""
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QListWidget, QListWidgetItem, QSizePolicy, QScrollArea
+    QFrame, QMessageBox, QMenu, QSizePolicy
 )
+from PySide6.QtGui import QAction
 
 from centermanager.models.student import Student
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
+from centermanager.services.student_filter_service import StudentFilterService
+from centermanager.services.student_import_service import StudentImportService
+from centermanager.services.student_export_service import StudentExportService
 from centermanager.ui.design_system import (
     Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
     FilterBar
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
-from centermanager.services.student_import_service import StudentImportService
-from centermanager.services.student_export_service import StudentExportService
+from centermanager.ui.students.student_import_dialog import StudentImportDialog
 
 logger = logging.getLogger(__name__)
 
 
-class StudentListItem(QFrame):
-    """Student list item with avatar, name, code, status."""
-    
-    def __init__(self, student: Student, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._student = student
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        self.setFrameStyle(QFrame.Shape.NoFrame)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: {COLORS['surface']};
-                border-bottom: 1px solid {COLORS['border_light']};
-                padding: {SPACING['sm']}px {SPACING['md']}px;
-            }}
-            QFrame:hover {{
-                background: {COLORS['surface_hover']};
-            }}
-        """)
-        # Tăng 50%: từ 90 lên 135
-        self.setFixedHeight(135)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(SPACING['md'], SPACING['sm'], SPACING['md'], SPACING['sm'])
-        layout.setSpacing(SPACING['md'])
-
-        # Avatar - tăng từ 40 lên 52
-        avatar = Avatar(self._student.full_name, size=52, font_size=18)
-        avatar.setFixedSize(52, 52)
-        layout.addWidget(avatar)
-
-        # Info: Name + Code (font nhỏ hơn)
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(SPACING['xs'])
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        
-        name_label = QLabel(self._student.full_name)
-        name_label.setStyleSheet(f"""
-            font-size: 13px;
-            font-weight: 600;
-            color: {COLORS['text_primary']};
-        """)  # Giảm từ 16px xuống 13px
-        name_label.setWordWrap(False)
-        info_layout.addWidget(name_label)
-        
-        code_label = QLabel(self._student.student_code)
-        code_label.setStyleSheet(f"""
-            font-size: 11px;
-            color: {COLORS['text_muted']};
-            font-weight: 500;
-        """)  # Giảm từ 14px xuống 11px
-        info_layout.addWidget(code_label)
-        
-        layout.addLayout(info_layout, 1)
-
-        # Status badge
-        status = self._student.status or "ACTIVE"
-        from centermanager.ui.design_system.components import StatusBadge
-        badge = StatusBadge(status)
-        badge.setFixedHeight(24)
-        layout.addWidget(badge)
-
-        # Last updated
-        if self._student.updated_at:
-            time_label = QLabel(self._student.updated_at.strftime("%d/%m/%Y %H:%M"))
-            time_label.setStyleSheet(f"""
-                font-size: 11px;
-                color: {COLORS['text_muted']};
-            """)  # Giảm từ 13px xuống 11px
-            layout.addWidget(time_label)
-
-    @property
-    def student(self) -> Student:
-        return self._student
-
-
 class StudentListPage(QWidget):
     student_selected = Signal(int)
-    filter_clicked = Signal()
     data_updated = Signal()
+    filter_clicked = Signal()
 
     def __init__(
         self,
         student_service: StudentService,
         parent_service: ParentService,
         assessment_service: AssessmentService,
+        filter_service: StudentFilterService,
+        import_service: StudentImportService,
+        export_service: StudentExportService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._student_service = student_service
         self._parent_service = parent_service
         self._assessment_service = assessment_service
+        self._filter_service = filter_service
+        self._import_service = import_service
+        self._export_service = export_service
         self._students: List[Student] = []
         self._filtered: List[Student] = []
-        self._import_service = StudentImportService(student_service)
-        self._export_service = StudentExportService(student_service)
+        self._sort_key: Optional[str] = None
+        self._sort_asc: bool = True
+        self._selected_ids: List[int] = []
         self._setup_ui()
         self.refresh()
 
@@ -18662,7 +19376,7 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
+        # ---- Toolbar ----
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -18675,10 +19389,10 @@ class StudentListPage(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(SPACING['sm'])
-        
+
         self.search_bar = SearchBar()
-        self.search_bar.setPlaceholderText("Search...")
-        self.search_bar.text_changed.connect(self._filter)
+        self.search_bar.setPlaceholderText("Search by code, name, parent phone, parent name...")
+        self.search_bar.text_changed.connect(self._on_search)
         top_row.addWidget(self.search_bar)
 
         self.filter_btn = SecondaryButton("🔍 Filter")
@@ -18686,13 +19400,29 @@ class StudentListPage(QWidget):
         self.filter_btn.clicked.connect(self.filter_clicked.emit)
         top_row.addWidget(self.filter_btn)
 
+        self.refresh_btn = SecondaryButton("🔄 Refresh")
+        self.refresh_btn.setFixedHeight(34)
+        self.refresh_btn.clicked.connect(self.refresh)
+        top_row.addWidget(self.refresh_btn)
+
         self.add_btn = PrimaryButton("+ Add")
         self.add_btn.setFixedHeight(34)
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
 
+        self.import_btn = SecondaryButton("📥 Import")
+        self.import_btn.setFixedHeight(34)
+        self.import_btn.clicked.connect(self.show_import_dialog)
+        top_row.addWidget(self.import_btn)
+
+        self.export_btn = SecondaryButton("📤 Export")
+        self.export_btn.setFixedHeight(34)
+        self.export_btn.clicked.connect(self.export_students)
+        top_row.addWidget(self.export_btn)
+
         toolbar_layout.addLayout(top_row)
 
+        # Filter bar (quick filters)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -18703,117 +19433,227 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        self.count_label = QLabel("0 students")
-        self.count_label.setStyleSheet(f"""
+        # ---- Bulk actions bar ----
+        self.bulk_bar = QWidget()
+        self.bulk_bar.setStyleSheet(f"""
+            background: {COLORS['primary_hover']};
             padding: {SPACING['xs']}px {SPACING['md']}px;
-            font-size: 11px;
-            color: {COLORS['text_muted']};
-            background: {COLORS['gray_50']};
             border-bottom: 1px solid {COLORS['border_light']};
         """)
-        layout.addWidget(self.count_label)
+        self.bulk_bar.setVisible(False)
+        bulk_layout = QHBoxLayout(self.bulk_bar)
+        bulk_layout.setContentsMargins(0, 0, 0, 0)
+        self.bulk_count_label = QLabel("0 selected")
+        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
+        bulk_layout.addWidget(self.bulk_count_label)
+        bulk_layout.addStretch()
+        self.bulk_delete_btn = QPushButton("Delete Selected")
+        self.bulk_delete_btn.setStyleSheet(f"color: {COLORS['danger']};")
+        self.bulk_delete_btn.clicked.connect(self._bulk_delete)
+        bulk_layout.addWidget(self.bulk_delete_btn)
+        self.bulk_export_btn = QPushButton("Export Selected")
+        self.bulk_export_btn.clicked.connect(self._bulk_export)
+        bulk_layout.addWidget(self.bulk_export_btn)
+        self.bulk_clear_btn = QPushButton("Clear")
+        self.bulk_clear_btn.clicked.connect(self._clear_selection)
+        bulk_layout.addWidget(self.bulk_clear_btn)
+        layout.addWidget(self.bulk_bar)
 
-        self.list_widget = QListWidget()
-        self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        self.list_widget.setStyleSheet(f"""
-            QListWidget {{
-                border: none;
-                outline: none;
-                background: {COLORS['surface']};
-            }}
-            QListWidget::item {{
-                padding: 0px;
-            }}
-            QListWidget::item:selected {{
-                background: transparent;
-            }}
-            QListWidget::item:selected QFrame {{
-                background: {COLORS['primary_hover']};
-                border-left: 3px solid {COLORS['primary']};
-            }}
-        """)
-        self.list_widget.setSpacing(0)
-        self.list_widget.itemClicked.connect(self._on_item_clicked)
-        layout.addWidget(self.list_widget)
+        # ---- Data Table ----
+        columns = [
+            {"key": "student_code", "label": "Code", "sortable": True},
+            {"key": "full_name", "label": "Name", "sortable": True},
+            {"key": "status", "label": "Status", "sortable": True},
+            {"key": "current_level", "label": "Level", "sortable": True},
+            {"key": "created_at", "label": "Created", "sortable": True},
+        ]
+        self.data_table = DataTable(columns, page_size=20)
+        self.data_table.sort_requested.connect(self._on_sort)
+        self.data_table.selection_changed.connect(self._on_selection_changed)
+        self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
+        self.data_table.context_menu_requested.connect(self._on_context_menu)
+        layout.addWidget(self.data_table)
 
-        self.empty_widget = EmptyState(
-            icon="👤",
-            title="No students found",
-            description="Try adjusting your search or filter."
-        )
-        self.empty_widget.setVisible(False)
-        layout.addWidget(self.empty_widget)
-
-    # ============ Các phương thức giữ nguyên ============
-    def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        widget = self.list_widget.itemWidget(item)
-        if widget and hasattr(widget, 'student'):
-            self.student_selected.emit(widget.student.id)
-
-    def _on_filter_changed(self, filters: dict) -> None:
-        self._apply_filters(filters)
-
-    def _apply_filters(self, filters: dict) -> None:
-        self._filter(self.search_bar.text())
+        # ---- Loading overlay ----
+        self.loading = LoadingWidget()
+        self.loading.setVisible(False)
+        layout.addWidget(self.loading)
 
     def refresh(self) -> None:
+        self.loading.setVisible(True)
         try:
             self._students = self._student_service.list_students()
+            self._apply_filters_and_sort()
         except Exception as e:
-            logger.exception("Failed to load students")
-            self._students = []
-        self._filter(self.search_bar.text())
+            logger.exception("Failed to refresh student list")
+            QMessageBox.critical(self, "Error", "Failed to load students.")
+        finally:
+            self.loading.setVisible(False)
 
-    def _filter(self, text: str) -> None:
+    def _apply_filters_and_sort(self) -> None:
+        filtered = self._filter_students(self.search_bar.text())
+        if self._sort_key:
+            filtered.sort(key=lambda s: getattr(s, self._sort_key, ""), reverse=not self._sort_asc)
+        self._filtered = filtered
+        self._populate_table()
+
+    def _filter_students(self, text: str) -> List[Student]:
         if not text.strip():
-            self._filtered = self._students[:]
-        else:
-            if len(text.strip()) > 2:
-                try:
-                    self._filtered = self._student_service.search_students(text.strip())
-                except Exception as e:
-                    logger.exception("Search failed")
-                    self._filtered = self._students[:]
-            else:
-                lower = text.strip().lower()
-                self._filtered = [
-                    s for s in self._students
-                    if lower in s.student_code.lower() or lower in s.full_name.lower()
-                ]
-        self._populate_list()
+            return self._students[:]
+        try:
+            return self._student_service.search_students(text.strip())
+        except Exception:
+            lower = text.strip().lower()
+            return [s for s in self._students
+                    if lower in s.student_code.lower() or lower in s.full_name.lower()]
 
-    def _populate_list(self) -> None:
-        self.list_widget.clear()
-        self.count_label.setText(f"{len(self._filtered)} students")
+    def _populate_table(self) -> None:
+        data = []
+        for s in self._filtered:
+            data.append({
+                "student_code": s.student_code,
+                "full_name": s.full_name,
+                "status": s.status or "",
+                "current_level": s.current_level or "",
+                "created_at": s.created_at.strftime("%d/%m/%Y"),
+                "_id": s.id,
+            })
+        self.data_table.set_data(data, len(data))
+        self.data_updated.emit()
 
-        if not self._filtered:
-            self.list_widget.setVisible(False)
-            self.empty_widget.setVisible(True)
+    def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_filter_changed(self, filters: Dict[str, str]) -> None:
+        # Convert filters to StudentFilter DTO
+        from centermanager.dto.student_filter_dto import StudentFilter
+        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
+        enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
+        assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
+
+        filter_dto = StudentFilter(
+            status=status_map.get(filters.get("status", ""), None),
+            enrollment_status=enrollment_map.get(filters.get("enrollment", ""), None),
+            assessment_status=assessment_map.get(filters.get("assessment", ""), None),
+        )
+        try:
+            self._filtered = self._filter_service.filter_students(filter_dto)
+            # Re-apply search if any
+            self._apply_filters_and_sort()
+        except Exception as e:
+            logger.exception("Filter failed")
+            QMessageBox.critical(self, "Filter Error", str(e))
+
+    def _on_sort(self, key: str, ascending: bool) -> None:
+        self._sort_key = key
+        self._sort_asc = ascending
+        self._apply_filters_and_sort()
+
+    def _on_selection_changed(self, indices: List[int]) -> None:
+        self._selected_ids = []
+        for idx in indices:
+            if idx < len(self._filtered):
+                self._selected_ids.append(self._filtered[idx].id)
+        self._update_bulk_bar()
+
+    def _update_bulk_bar(self) -> None:
+        count = len(self._selected_ids)
+        self.bulk_bar.setVisible(count > 0)
+        self.bulk_count_label.setText(f"{count} selected")
+
+    def _clear_selection(self) -> None:
+        self.data_table.clear_selection()
+        self._selected_ids = []
+        self._update_bulk_bar()
+
+    def _bulk_delete(self) -> None:
+        if not self._selected_ids:
             return
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete {len(self._selected_ids)} students?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                for sid in self._selected_ids:
+                    self._student_service.delete_student(sid)
+                self._clear_selection()
+                self.refresh()
+            except Exception as e:
+                logger.exception("Bulk delete failed")
+                QMessageBox.critical(self, "Error", "Failed to delete students.")
 
-        self.list_widget.setVisible(True)
-        self.empty_widget.setVisible(False)
+    def _bulk_export(self) -> None:
+        if not self._selected_ids:
+            return
+        try:
+            students = [self._student_service.get_student(sid) for sid in self._selected_ids]
+            file_path = self._export_service.export_csv(students)
+            QMessageBox.information(self, "Export", f"Exported {len(students)} students to {file_path}")
+        except Exception as e:
+            logger.exception("Bulk export failed")
+            QMessageBox.critical(self, "Error", "Failed to export students.")
 
-        for student in self._filtered:
-            item = QListWidgetItem()
-            widget = StudentListItem(student)
-            item.setSizeHint(widget.sizeHint())
-            self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, widget)
+    def _on_row_double_clicked(self, row: int) -> None:
+        if row < len(self._filtered):
+            self.student_selected.emit(self._filtered[row].id)
+
+    def _on_context_menu(self, pos, row: int) -> None:
+        if row < 0 or row >= len(self._filtered):
+            return
+        student = self._filtered[row]
+        menu = QMenu(self)
+        view_action = QAction("View Student", self)
+        view_action.triggered.connect(lambda: self.student_selected.emit(student.id))
+        menu.addAction(view_action)
+
+        edit_action = QAction("Edit Student", self)
+        edit_action.triggered.connect(lambda: self._edit_student(student.id))
+        menu.addAction(edit_action)
+
+        menu.addSeparator()
+        delete_action = QAction("Delete Student", self)
+        delete_action.triggered.connect(lambda: self._delete_student(student.id))
+        menu.addAction(delete_action)
+
+        menu.exec(pos)
+
+    def _edit_student(self, student_id: int) -> None:
+        dialog = StudentFormDialog(self._student_service, student_id=student_id, parent=self)
+        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _delete_student(self, student_id: int) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            "Delete this student?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._student_service.delete_student(student_id)
+                self.refresh()
+            except Exception as e:
+                logger.exception("Delete failed")
+                QMessageBox.critical(self, "Error", "Failed to delete student.")
 
     def show_add_dialog(self) -> None:
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
-            self.data_updated.emit()
+
+    def show_import_dialog(self) -> None:
+        dialog = StudentImportDialog(self._import_service, parent=self)
+        if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
+            self.refresh()
 
     def export_students(self) -> None:
         try:
             file_path = self._export_service.export_all_active()
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Export", f"Exported to: {file_path}")
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
+            logger.exception("Export failed")
             QMessageBox.critical(self, "Export Error", str(e))
 
     def show_filter_dialog(self) -> None:
@@ -18821,23 +19661,16 @@ class StudentListPage(QWidget):
         if dialog.exec() == StudentFilterDialog.DialogCode.Accepted:
             filter_criteria = dialog.get_filter()
             if filter_criteria:
-                from centermanager.services.student_filter_service import StudentFilterService
-                from centermanager.database.engine import create_production_engine
-                from sqlalchemy.orm import sessionmaker
-                engine = create_production_engine()
-                session_factory = sessionmaker(bind=engine)
-                filter_service = StudentFilterService(session_factory)
                 try:
-                    self._filtered = filter_service.filter_students(filter_criteria)
-                    self._populate_list()
+                    self._filtered = self._filter_service.filter_students(filter_criteria)
+                    self._populate_table()
                 except Exception as e:
-                    from PySide6.QtWidgets import QMessageBox
                     QMessageBox.critical(self, "Filter Error", str(e))
 
 ================
 File: src/centermanager/ui/student_workspace/student_workspace_shell.py
 ================
-# src/centermanager/ui/student_workspace/student_workspace_shell.py
+# -*- coding: utf-8 -*-
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -18851,6 +19684,7 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
 from centermanager.ui.student_workspace.student_list_page import StudentListPage
 from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
+from centermanager.ui.student_workspace.student_analytics_page import StudentAnalyticsPage
 
 
 class StudentWorkspaceShell(QWidget):
@@ -18870,6 +19704,10 @@ class StudentWorkspaceShell(QWidget):
         dashboard_service,
         student_note_service,
         document_service,
+        analytics_service,
+        filter_service,
+        export_service,
+        import_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -18884,6 +19722,10 @@ class StudentWorkspaceShell(QWidget):
         self._dashboard_service = dashboard_service
         self._student_note_service = student_note_service
         self._document_service = document_service
+        self._analytics_service = analytics_service
+        self._filter_service = filter_service
+        self._export_service = export_service
+        self._import_service = import_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
@@ -18904,10 +19746,10 @@ class StudentWorkspaceShell(QWidget):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Sidebar chỉ còn Dashboard và Students
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
+            {"id": "analytics", "icon": "📈", "label": "Analytics"},
         ]
         self.nav = WorkspaceNavigation("Student Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -18916,7 +19758,7 @@ class StudentWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        # Các page: Dashboard, Student List, Student Detail
+        # Dashboard (không cần analytics_service)
         self.dashboard_page = StudentDashboardPage(self._dashboard_service)
         self.dashboard_page.add_student_clicked.connect(self._on_add_action)
         self.dashboard_page.import_students_clicked.connect(self._on_import_action)
@@ -18924,16 +19766,21 @@ class StudentWorkspaceShell(QWidget):
         self.dashboard_page.student_selected.connect(self._on_student_selected_from_dashboard)
         self.content_stack.addWidget(self.dashboard_page)
 
+        # Student List
         self.list_page = StudentListPage(
             self._student_service,
             self._parent_service,
-            self._assessment_service
+            self._assessment_service,
+            self._filter_service,
+            self._import_service,
+            self._export_service,
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
         self.list_page.data_updated.connect(self.dashboard_page.refresh)
         self.content_stack.addWidget(self.list_page)
 
+        # Student Detail
         self.detail_page = StudentDetailPage(
             self._student_service,
             self._parent_service,
@@ -18950,7 +19797,9 @@ class StudentWorkspaceShell(QWidget):
         self.detail_page.student_updated.connect(self._on_student_updated)
         self.content_stack.addWidget(self.detail_page)
 
-        # ĐÃ XÓA: assessment_page, timeline_page, reports_page
+        # Analytics
+        self.analytics_page = StudentAnalyticsPage(self._analytics_service)
+        self.content_stack.addWidget(self.analytics_page)
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
@@ -18960,7 +19809,6 @@ class StudentWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        # Chỉ xử lý dashboard và students
         if page_id == "dashboard":
             self.content_stack.setCurrentWidget(self.dashboard_page)
             self.nav.set_active_page("dashboard")
@@ -18971,11 +19819,14 @@ class StudentWorkspaceShell(QWidget):
             self.nav.set_active_page("students")
             self.header.set_context("Student Workspace", "Students")
             self.list_page.refresh()
+        elif page_id == "analytics":
+            self.content_stack.setCurrentWidget(self.analytics_page)
+            self.nav.set_active_page("analytics")
+            self.header.set_context("Student Workspace", "Analytics")
+            self.analytics_page.refresh()
         else:
-            # Fallback
             self.content_stack.setCurrentWidget(self.dashboard_page)
 
-    # Các phương thức xử lý sự kiện giữ nguyên
     def _on_student_selected(self, student_id: int) -> None:
         self._current_student_id = student_id
         self.detail_page.load_student(student_id)
@@ -21174,10 +22025,7 @@ File: src/centermanager/ui/__init__.py
 File: src/centermanager/ui/home_page.py
 ================
 # -*- coding: utf-8 -*-
-"""
-HomePage - Command Center / Workspace Launcher for CenterManager.
-Now with workspace summaries, recent activities, today's summary, and system status.
-"""
+"""HomePage - Command Center / Workspace Launcher for CenterManager."""
 import logging
 from typing import Optional
 
@@ -21246,32 +22094,42 @@ class HomePage(QWidget):
 
         container_layout.addSpacing(8)
 
-        # Workspace cards grid
+        # Workspace cards
         self.workspace_grid = QGridLayout()
         self.workspace_grid.setSpacing(16)
         self.workspace_grid.setContentsMargins(0, 0, 0, 0)
         container_layout.addLayout(self.workspace_grid)
 
-        # Two-column layout for main content
+        # Two-column layout
         main_content = QHBoxLayout()
         main_content.setSpacing(24)
 
-        # Left column: Recent Activities + Today Summary
+        # Left column
         left_col = QVBoxLayout()
         left_col.setSpacing(24)
 
-        # Recent Activities
+        # Recent Activities with scroll (giới hạn 5)
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
         recent_layout.setSpacing(8)
         recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
         recent_layout.addWidget(recent_header)
+
+        # Scroll area cho recent activities
+        self.recent_scroll = QScrollArea()
+        self.recent_scroll.setWidgetResizable(True)
+        self.recent_scroll.setMaximumHeight(350)
+        self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.recent_container = QWidget()
+        self.recent_container.setStyleSheet("background: transparent;")
         self.recent_container_layout = QVBoxLayout(self.recent_container)
         self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
         self.recent_container_layout.setSpacing(0)
-        recent_layout.addWidget(self.recent_container)
+        self.recent_scroll.setWidget(self.recent_container)
+        recent_layout.addWidget(self.recent_scroll)
+
         left_col.addWidget(self.recent_section)
 
         # Today Summary
@@ -21316,14 +22174,12 @@ class HomePage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        """Refresh all dashboard data."""
         self._populate_workspace_cards()
         self._populate_recent_activities()
         self._populate_today_summary()
         self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
-        # Clear grid
         while self.workspace_grid.count():
             item = self.workspace_grid.takeAt(0)
             if item.widget():
@@ -21345,13 +22201,14 @@ class HomePage(QWidget):
             card.clicked.connect(self._on_workspace_clicked)
             self.workspace_grid.addWidget(card, row, col)
             col += 1
-            if col >= 3:
+            if col >= 2:
                 col = 0
                 row += 1
 
     def _populate_recent_activities(self) -> None:
         self._clear_layout(self.recent_container_layout)
-        activities = self._service.get_recent_activities(limit=8)
+        # Chỉ lấy 5 hoạt động gần nhất
+        activities = self._service.get_recent_activities(limit=5)
         if activities:
             for act in activities:
                 item = ActivityItem(
@@ -21373,7 +22230,6 @@ class HomePage(QWidget):
     def _populate_today_summary(self) -> None:
         self._clear_layout(self.today_container_layout)
         summary = self._service.get_today_summary()
-        # Show as small info cards
         items = [
             (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
             (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
@@ -21421,7 +22277,7 @@ class HomePage(QWidget):
 ================
 File: src/centermanager/ui/main_window.py
 ================
-# src/centermanager/ui/main_window.py
+# -*- coding: utf-8 -*-
 import logging
 from typing import Optional
 
@@ -21431,8 +22287,8 @@ from PySide6.QtCore import Qt
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
 
-
 logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -21449,6 +22305,10 @@ class MainWindow(QMainWindow):
         home_service,
         student_note_service,
         document_service,
+        analytics_service,
+        filter_service,
+        export_service,
+        import_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -21464,6 +22324,10 @@ class MainWindow(QMainWindow):
         self._home_service = home_service
         self._student_note_service = student_note_service
         self._document_service = document_service
+        self._analytics_service = analytics_service
+        self._filter_service = filter_service
+        self._export_service = export_service
+        self._import_service = import_service
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
@@ -21472,7 +22336,7 @@ class MainWindow(QMainWindow):
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
 
-        # Home Page (Command Center)
+        # Home Page
         self.home_page = HomePage(home_service=self._home_service, parent=self)
         self.home_page.workspace_selected.connect(self._on_workspace_selected)
         self.central_stack.addWidget(self.home_page)
@@ -21490,15 +22354,15 @@ class MainWindow(QMainWindow):
             dashboard_service=self._dashboard_service,
             student_note_service=self._student_note_service,
             document_service=self._document_service,
+            analytics_service=self._analytics_service,
+            filter_service=self._filter_service,
+            export_service=self._export_service,
+            import_service=self._import_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
 
-        # ĐÃ XÓA: assessment_workspace, timeline_workspace, reports_workspace
-
-        # Default: Home
         self.central_stack.setCurrentWidget(self.home_page)
-
         self.statusBar().showMessage("Ready")
         self._refresh_student_list()
 
@@ -21509,10 +22373,8 @@ class MainWindow(QMainWindow):
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
-            # Placeholder – sẽ triển khai sau
             self.statusBar().showMessage("Teacher Workspace coming soon")
         elif workspace_id == "finance":
-            # Placeholder – sẽ triển khai sau
             self.statusBar().showMessage("Finance Workspace coming soon")
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
@@ -22079,10 +22941,9 @@ from centermanager.services.student_dashboard_service import StudentDashboardSer
 from centermanager.services.student_filter_service import StudentFilterService
 from centermanager.services.student_export_service import StudentExportService
 from centermanager.services.student_import_service import StudentImportService
-# === THÊM IMPORT MỚI ===
 from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
-# ========================
+from centermanager.services.student_analytics_service import StudentAnalyticsService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
@@ -22096,12 +22957,10 @@ logger = logging.getLogger(__name__)
 def ensure_schema():
     from alembic.config import Config
     from alembic import command
-
     from centermanager.database.engine import get_database_path
     db_path = get_database_path()
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    # Đảm bảo upgrade lên head
     command.upgrade(alembic_cfg, "head")
 
 
@@ -22139,17 +22998,15 @@ def main() -> int:
     session_service = SessionService(session_factory)
     note_service = SessionNoteService(session_factory, session_service)
 
-    # === THÊM SERVICE MỚI ===
     student_note_service = StudentNoteService(session_factory, timeline_service)
     document_service = StudentDocumentService(session_factory, timeline_service)
-    # ========================
 
     summary_service = StudentSummaryService(
         student_service=student_service,
         parent_service=parent_service,
         assessment_service=assessment_service,
         timeline_service=timeline_service,
-        session_factory=session_factory,  # thêm session_factory
+        session_factory=session_factory,
     )
 
     # Event Bus
@@ -22160,14 +23017,17 @@ def main() -> int:
     timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
     event_bus.register(StudentHighlightCreated, timeline_handler)
 
-    # Dashboard, Filter, Export, Import services
+    # Dashboard, Analytics, Home, Filter, Export, Import
     dashboard_service = StudentDashboardService(session_factory)
     filter_service = StudentFilterService(session_factory)
     export_service = StudentExportService(student_service)
     import_service = StudentImportService(student_service)
     home_service = HomeDashboardService(session_factory)
+    analytics_service = StudentAnalyticsService(session_factory)
+
     logger.info("All services initialized")
 
+    # Tạo MainWindow với tất cả dịch vụ cần thiết
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -22179,8 +23039,12 @@ def main() -> int:
         highlight_service=highlight_service,
         dashboard_service=dashboard_service,
         home_service=home_service,
-        student_note_service=student_note_service,   # thêm
-        document_service=document_service,           # thêm
+        student_note_service=student_note_service,
+        document_service=document_service,
+        analytics_service=analytics_service,
+        filter_service=filter_service,
+        export_service=export_service,
+        import_service=import_service,
     )
     window.show()
     logger.info("Main window initialized")
