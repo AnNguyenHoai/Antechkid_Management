@@ -203,6 +203,7 @@ class HomePage(QWidget):
         permission_map = {
             "student": None,  # Always visible
             "teacher": "teacher.view",
+            "class": "class.view",
             "finance": "finance.view",
         }
 

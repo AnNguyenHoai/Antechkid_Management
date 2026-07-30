@@ -15,6 +15,8 @@ from centermanager.models.assessment import Assessment
 from centermanager.models.parent import Parent
 from centermanager.models.class_ import Class
 from centermanager.models.session import Session
+from centermanager.models.teacher import Teacher
+from centermanager.models.user import User
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.timeline_repository import TimelineRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
@@ -27,43 +29,39 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WorkspaceSummary:
-    """Summary for a workspace card."""
     workspace_id: str
     name: str
     icon: str
     description: str
     summary_text: str
-    health_status: str  # "good", "warning", "critical"
+    health_status: str
     health_details: str
     quick_action_label: str
-    quick_action_target: str  # e.g., "student" to open student workspace
+    quick_action_target: str
 
 
 @dataclass
 class RecentActivity:
-    """Recent activity across all workspaces."""
     workspace_id: str
     icon: str
     title: str
     student_name: str
     student_code: str
     time: datetime
-    activity_type: str  # e.g., "StudentCreated", "AssessmentCreated", etc.
+    activity_type: str
 
 
 @dataclass
 class TodaySummary:
-    """Today's summary panel."""
     today_classes: int
     today_assessments: int
-    today_birthdays: List[str]  # list of student names
-    pending_tasks: List[str]  # placeholder
+    today_birthdays: List[str]
+    pending_tasks: List[str]
     upcoming_sessions: int
 
 
 @dataclass
 class SystemStatus:
-    """System status panel."""
     database_status: str
     version: str
     last_backup: str
@@ -81,7 +79,6 @@ class HomeDashboardService:
             parent_repo = ParentRepository(session)
             assessment_repo = AssessmentRepository(session)
 
-            # Student workspace summary
             total_students = len(student_repo.list_active())
             parent_count = session.query(Parent).count()
             assessment_count = session.query(Assessment).count()
@@ -116,22 +113,33 @@ class HomeDashboardService:
                 quick_action_target="student"
             )
 
-            # Teacher workspace summary
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
+            teacher_count = session.query(Teacher).count()
             teacher_ws = WorkspaceSummary(
                 workspace_id="teacher",
                 name="Teacher Workspace",
                 icon="👨‍🏫",
                 description="Teaching activities and classes",
-                summary_text=f"{class_count} classes, {session_count} upcoming sessions",
+                summary_text=f"{teacher_count} teachers, {class_count} classes, {session_count} upcoming sessions",
                 health_status="good",
                 health_details="",
                 quick_action_label="Open →",
                 quick_action_target="teacher"
             )
 
-            # Finance workspace summary (placeholder)
+            class_ws = WorkspaceSummary(
+                workspace_id="class",
+                name="Class Workspace",
+                icon="📚",
+                description="Manage classes, enrollments, schedules",
+                summary_text=f"{class_count} classes",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="class"
+            )
+
             finance_ws = WorkspaceSummary(
                 workspace_id="finance",
                 name="Finance Workspace",
@@ -144,64 +152,61 @@ class HomeDashboardService:
                 quick_action_target="finance"
             )
 
-            # Chỉ trả về các Workspace Business Domain
-            return [student_ws, teacher_ws, finance_ws]
+            return [student_ws, teacher_ws, class_ws, finance_ws]
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
-        """Get recent activities across all workspaces."""
-        with self._session_factory() as session:
-            events = session.query(TimelineEvent).order_by(
-                TimelineEvent.created_at.desc()
-            ).limit(limit).all()
-            activities = []
-            for ev in events:
-                student = ev.student
-                workspace_id = "student"  # currently all timeline events are student-related
-                icon_map = {
-                    "StudentCreated": "🌟",
-                    "StudentUpdated": "✏️",
-                    "ParentAdded": "👨‍👩‍👧",
-                    "ParentUpdated": "✏️",
-                    "ParentDeleted": "🗑️",
-                    "AssessmentCreated": "📊",
-                    "AssessmentUpdated": "✏️",
-                    "AssessmentDeleted": "🗑️",
-                    "ProductAdded": "📁",
-                    "AttachmentAdded": "📎",
-                    "System": "⚙️",
-                }
-                icon = icon_map.get(ev.event_type, "📌")
-                activities.append(RecentActivity(
-                    workspace_id=workspace_id,
-                    icon=icon,
-                    title=ev.title,
-                    student_name=student.full_name if student else "Unknown",
-                    student_code=student.student_code if student else "",
-                    time=ev.created_at,
-                    activity_type=ev.event_type
-                ))
-            return activities
+        try:
+            with self._session_factory() as session:
+                events = session.query(TimelineEvent).order_by(
+                    TimelineEvent.created_at.desc()
+                ).limit(limit).all()
+                activities = []
+                for ev in events:
+                    student = ev.student
+                    workspace_id = "student"
+                    icon_map = {
+                        "StudentCreated": "🌟",
+                        "StudentUpdated": "✏️",
+                        "ParentAdded": "👨‍👩‍👧",
+                        "ParentUpdated": "✏️",
+                        "ParentDeleted": "🗑️",
+                        "AssessmentCreated": "📊",
+                        "AssessmentUpdated": "✏️",
+                        "AssessmentDeleted": "🗑️",
+                        "ProductAdded": "📁",
+                        "AttachmentAdded": "📎",
+                        "System": "⚙️",
+                    }
+                    icon = icon_map.get(ev.event_type, "📌")
+                    activities.append(RecentActivity(
+                        workspace_id=workspace_id,
+                        icon=icon,
+                        title=ev.title,
+                        student_name=student.full_name if student else "Unknown",
+                        student_code=student.student_code if student else "",
+                        time=ev.created_at,
+                        activity_type=ev.event_type
+                    ))
+                return activities
+        except Exception as e:
+            logger.exception("Failed to get recent activities")
+            return []
 
     def get_today_summary(self) -> TodaySummary:
-        """Get today's summary."""
         today = date.today()
         with self._session_factory() as session:
-            # Today's classes (sessions scheduled today)
             today_sessions = session.query(Session).filter(
                 Session.scheduled_date == today,
                 Session.status == "Scheduled"
             ).count()
-            # Today's assessments (assessments created today)
             today_assessments = session.query(Assessment).filter(
                 Assessment.assessment_date == today
             ).count()
-            # Today's birthdays (students with DOB month/day = today)
             students = session.query(Student).all()
             birthdays = []
             for s in students:
                 if s.date_of_birth and s.date_of_birth.month == today.month and s.date_of_birth.day == today.day:
                     birthdays.append(s.full_name)
-            # Upcoming sessions (next 7 days)
             week_later = today + timedelta(days=7)
             upcoming = session.query(Session).filter(
                 Session.scheduled_date > today,
@@ -209,7 +214,6 @@ class HomeDashboardService:
                 Session.status == "Scheduled"
             ).count()
 
-            # Pending tasks: students without parent or assessment (for now)
             student_repo = StudentRepository(session)
             parent_repo = ParentRepository(session)
             assessment_repo = AssessmentRepository(session)
@@ -220,7 +224,7 @@ class HomeDashboardService:
                     pending.append(f"{s.full_name} missing parent")
                 elif not assessment_repo.get_by_student(s.id):
                     pending.append(f"{s.full_name} no assessment")
-            pending_tasks = pending[:5]  # limit
+            pending_tasks = pending[:5]
 
             return TodaySummary(
                 today_classes=today_sessions,
@@ -231,7 +235,6 @@ class HomeDashboardService:
             )
 
     def get_system_status(self) -> SystemStatus:
-        """Get system status."""
         config = get_config()
         version = config.get("application.version", "0.1.0")
         return SystemStatus(

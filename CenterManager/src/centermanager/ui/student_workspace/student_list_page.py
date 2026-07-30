@@ -57,6 +57,7 @@ class StudentListPage(QWidget):
         self._sort_key: Optional[str] = None
         self._sort_asc: bool = True
         self._selected_ids: List[int] = []
+
         self._setup_ui()
         self.refresh()
 
@@ -65,7 +66,6 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---- Toolbar ----
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -111,7 +111,6 @@ class StudentListPage(QWidget):
 
         toolbar_layout.addLayout(top_row)
 
-        # Filter bar (quick filters)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -122,7 +121,6 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        # ---- Bulk actions bar ----
         self.bulk_bar = QWidget()
         self.bulk_bar.setStyleSheet(f"""
             background: {COLORS['primary_hover']};
@@ -148,7 +146,6 @@ class StudentListPage(QWidget):
         bulk_layout.addWidget(self.bulk_clear_btn)
         layout.addWidget(self.bulk_bar)
 
-        # ---- Data Table ----
         columns = [
             {"key": "student_code", "label": "Code", "sortable": True},
             {"key": "full_name", "label": "Name", "sortable": True},
@@ -163,7 +160,6 @@ class StudentListPage(QWidget):
         self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
 
-        # ---- Loading overlay ----
         self.loading = LoadingWidget()
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
@@ -178,6 +174,8 @@ class StudentListPage(QWidget):
             QMessageBox.critical(self, "Error", "Failed to load students.")
         finally:
             self.loading.setVisible(False)
+        # Emit data_updated để dashboard refresh
+        self.data_updated.emit()
 
     def _apply_filters_and_sort(self) -> None:
         filtered = self._filter_students(self.search_bar.text())
@@ -214,7 +212,6 @@ class StudentListPage(QWidget):
         self._apply_filters_and_sort()
 
     def _on_filter_changed(self, filters: Dict[str, str]) -> None:
-        # Convert filters to StudentFilter DTO
         from centermanager.dto.student_filter_dto import StudentFilter
         status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
         enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
@@ -227,7 +224,6 @@ class StudentListPage(QWidget):
         )
         try:
             self._filtered = self._filter_service.filter_students(filter_dto)
-            # Re-apply search if any
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Filter failed")

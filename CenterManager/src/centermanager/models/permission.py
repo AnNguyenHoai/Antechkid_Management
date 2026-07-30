@@ -54,6 +54,13 @@ class PermissionDefinitions:
     TEACHER_CREATE = "teacher.create"
     TEACHER_UPDATE = "teacher.update"
     TEACHER_DELETE = "teacher.delete"
+
+    # Class
+    CLASS_VIEW = "class.view"
+    CLASS_CREATE = "class.create"
+    CLASS_UPDATE = "class.update"
+    CLASS_DELETE = "class.delete"
+
     # Finance
     FINANCE_VIEW = "finance.view"
     FINANCE_INCOME_CREATE = "finance.income.create"
@@ -80,6 +87,10 @@ class PermissionDefinitions:
             cls.TEACHER_CREATE,
             cls.TEACHER_UPDATE,
             cls.TEACHER_DELETE,
+            cls.CLASS_VIEW,
+            cls.CLASS_CREATE,
+            cls.CLASS_UPDATE,
+            cls.CLASS_DELETE,
             cls.FINANCE_VIEW,
             cls.FINANCE_INCOME_CREATE,
             cls.FINANCE_INCOME_UPDATE,
@@ -102,6 +113,10 @@ class PermissionDefinitions:
             cls.TEACHER_CREATE: "teacher",
             cls.TEACHER_UPDATE: "teacher",
             cls.TEACHER_DELETE: "teacher",
+            cls.CLASS_VIEW: "class",
+            cls.CLASS_CREATE: "class",
+            cls.CLASS_UPDATE: "class",
+            cls.CLASS_DELETE: "class",
             cls.FINANCE_VIEW: "finance",
             cls.FINANCE_INCOME_CREATE: "finance",
             cls.FINANCE_INCOME_UPDATE: "finance",

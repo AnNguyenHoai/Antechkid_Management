@@ -49,6 +49,9 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.TEACHER_CREATE,
             PermissionDefinitions.TEACHER_UPDATE,
             PermissionDefinitions.TEACHER_DELETE,
+            PermissionDefinitions.CLASS_VIEW,
+            PermissionDefinitions.CLASS_CREATE,
+            PermissionDefinitions.CLASS_UPDATE,
             PermissionDefinitions.REPORT_VIEW,
         ]
     )
@@ -63,7 +66,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.STUDENT_VIEW,
             PermissionDefinitions.STUDENT_CREATE,
             PermissionDefinitions.STUDENT_UPDATE,
-            PermissionDefinitions.TEACHER_VIEW,  # reception có thể xem teacher
+            PermissionDefinitions.TEACHER_VIEW,
+            PermissionDefinitions.CLASS_VIEW,
         ]
     )
 

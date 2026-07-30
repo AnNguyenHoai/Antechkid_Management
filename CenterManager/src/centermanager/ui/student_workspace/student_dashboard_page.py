@@ -52,11 +52,9 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # ---- KPI Cards ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
-        # ---- Quick Insights ----
         self.insights_section = QWidget()
         insights_layout = QVBoxLayout(self.insights_section)
         insights_layout.setContentsMargins(0, 0, 0, 0)
@@ -67,7 +65,6 @@ class StudentDashboardPage(QWidget):
         insights_layout.addWidget(self.insights_grid)
         container_layout.addWidget(self.insights_section)
 
-        # ---- Need Attention ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -81,7 +78,6 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Upcoming Events (with QListWidget) ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -106,7 +102,6 @@ class StudentDashboardPage(QWidget):
         events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities (with QListWidget) ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -131,7 +126,6 @@ class StudentDashboardPage(QWidget):
         recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
-        # ---- Quick Actions ----
         actions_section = QWidget()
         actions_layout = QHBoxLayout(actions_section)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -158,11 +152,14 @@ class StudentDashboardPage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        self._refresh_kpis()
-        self._refresh_insights()
-        self._refresh_attention()
-        self._refresh_events()
-        self._refresh_recent_activities()
+        try:
+            self._refresh_kpis()
+            self._refresh_insights()
+            self._refresh_attention()
+            self._refresh_events()
+            self._refresh_recent_activities()
+        except Exception as e:
+            logger.exception("Error refreshing dashboard")
 
     def _refresh_kpis(self) -> None:
         try:

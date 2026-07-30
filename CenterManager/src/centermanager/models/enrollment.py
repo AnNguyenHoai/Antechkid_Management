@@ -15,6 +15,7 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.student import Student
+    from centermanager.models.class_ import Class
 
 
 class Enrollment(Base, TimestampMixin):
@@ -22,6 +23,7 @@ class Enrollment(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
 
     class_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     course_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -32,6 +34,7 @@ class Enrollment(Base, TimestampMixin):
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
-    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
+    class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")
+
     def __repr__(self) -> str:
         return f"<Enrollment(id={self.id}, student_id={self.student_id}, class='{self.class_name}')>"

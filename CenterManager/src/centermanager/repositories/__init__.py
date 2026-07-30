@@ -15,11 +15,14 @@ from .user_repository import UserRepository
 from .role_repository import RoleRepository
 from .permission_repository import PermissionRepository
 
-# Thêm các import mới
+# Teacher
 from .teacher_repository import TeacherRepository
 from .teacher_document_repository import TeacherDocumentRepository
 from .teacher_timeline_repository import TeacherTimelineRepository
 from .teacher_assignment_repository import TeacherAssignmentRepository
+
+# Class Timeline
+from .class_timeline_repository import ClassTimelineRepository
 
 __all__ = [
     "BaseRepository",
@@ -34,4 +37,9 @@ __all__ = [
     "UserRepository",
     "RoleRepository",
     "PermissionRepository",
+    "TeacherRepository",
+    "TeacherDocumentRepository",
+    "TeacherTimelineRepository",
+    "TeacherAssignmentRepository",
+    "ClassTimelineRepository",
 ]

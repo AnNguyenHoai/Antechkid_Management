@@ -39,7 +39,8 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
+from centermanager.services.class_service import ClassService
+from centermanager.services.class_timeline_service import ClassTimelineService
 
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,6 @@ def main() -> int:
     logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
     logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
-    # Ensure database schema is up to date
     ensure_schema()
 
     qapp = QApplication(sys.argv)
@@ -95,7 +95,6 @@ def main() -> int:
         logger.info("Login cancelled. Exiting.")
         return 0
 
-    # Get authenticated user
     current_user = login_dialog.get_user()
     if current_user is None:
         logger.warning("No user after login. Exiting.")
@@ -123,15 +122,12 @@ def main() -> int:
         session_factory=session_factory,
     )
 
-    # Event Bus
     event_bus = EventBus()
     highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
 
-    # Register timeline handler
     timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
     event_bus.register(StudentHighlightCreated, timeline_handler)
 
-    # Dashboard, Analytics, Home, Filter, Export, Import
     dashboard_service = StudentDashboardService(session_factory)
     filter_service = StudentFilterService(session_factory)
     export_service = StudentExportService(student_service)
@@ -144,9 +140,15 @@ def main() -> int:
     teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
     teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
 
+    # Class services
+    class_timeline_service = ClassTimelineService(session_factory)
+    class_service = ClassService(
+        session_factory,
+        timeline_service=class_timeline_service,
+    )
+
     logger.info("All services initialized")
 
-    # --- Create MainWindow with permission service ---
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -169,6 +171,9 @@ def main() -> int:
         teacher_assignment_service=teacher_assignment_service,
         teacher_document_service=teacher_document_service,
         teacher_timeline_service=teacher_timeline_service,
+        class_service=class_service,
+        class_timeline_service=class_timeline_service,
+        teacher_assignment_service_for_class=teacher_assignment_service,  # same as above
     )
     window.show()
     logger.info("Main window initialized")

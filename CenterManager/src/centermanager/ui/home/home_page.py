@@ -17,6 +17,10 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
 from centermanager.ui.home.activity_item import ActivityItem
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionService
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,13 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
+        self._current_user = get_current_user()
+        
+        # Initialize permission service
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+        self._permission_service = PermissionService(session_factory)
+        
         self._setup_ui()
         self.refresh()
 
@@ -198,7 +209,6 @@ class HomePage(QWidget):
     def _populate_today_summary(self) -> None:
         self._clear_layout(self.today_container_layout)
         summary = self._service.get_today_summary()
-        # Show as small info cards
         items = [
             (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
             (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),

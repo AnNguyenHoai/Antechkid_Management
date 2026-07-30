@@ -85,7 +85,7 @@ docs/
 migrations/
   versions/
     __init__.py
-    3a7a76ecb339_initial_schema.py
+    d052696b6a84_initial_schema.py
   env.py
   README
   script.py.mako
@@ -131,6 +131,7 @@ src/
       assessment.py
       attachment.py
       class_.py
+      class_timeline_event.py
       document.py
       enrollment.py
       mixins.py
@@ -158,6 +159,7 @@ src/
       assessment_repository.py
       base.py
       class_repository.py
+      class_timeline_repository.py
       document_repository.py
       enrollment_repository.py
       note_repository.py
@@ -177,6 +179,8 @@ src/
     services/
       __init__.py
       assessment_service.py
+      class_service.py
+      class_timeline_service.py
       exceptions.py
       home_dashboard_service.py
       parent_service.py
@@ -205,6 +209,14 @@ src/
         assessment_dialog.py
         assessment_section.py
         rating_widget.py
+      class_workspace/
+        class_assignment_dialog.py
+        class_detail_page.py
+        class_enrollment_dialog.py
+        class_form_dialog.py
+        class_list_page.py
+        class_schedule_widget.py
+        class_workspace_shell.py
       common/
         __init__.py
         activity_item.py
@@ -16009,13 +16021,13 @@ File: migrations/versions/__init__.py
 
 
 ================
-File: migrations/versions/3a7a76ecb339_initial_schema.py
+File: migrations/versions/d052696b6a84_initial_schema.py
 ================
 """initial_schema
 
-Revision ID: 3a7a76ecb339
+Revision ID: d052696b6a84
 Revises: 
-Create Date: 2026-07-30 09:56:37.163697
+Create Date: 2026-07-30 12:05:06.910370
 
 """
 from typing import Sequence, Union
@@ -16025,7 +16037,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '3a7a76ecb339'
+revision: str = 'd052696b6a84'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -16041,6 +16053,9 @@ def upgrade() -> None:
     sa.Column('teacher', sa.String(length=100), nullable=True),
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
+    sa.Column('capacity', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
@@ -16136,6 +16151,20 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('class_timeline_events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('event_type', sa.String(length=50), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('metadata_json', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.String(length=100), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('idx_class_timeline_class_id', 'class_timeline_events', ['class_id'], unique=False)
+    op.create_index('idx_class_timeline_created_at', 'class_timeline_events', ['created_at'], unique=False)
     op.create_table('documents',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
@@ -16151,6 +16180,7 @@ def upgrade() -> None:
     op.create_table('enrollments',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=True),
     sa.Column('class_name', sa.String(length=100), nullable=True),
     sa.Column('course_name', sa.String(length=100), nullable=True),
     sa.Column('teacher_name', sa.String(length=100), nullable=True),
@@ -16158,7 +16188,6 @@ def upgrade() -> None:
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('class_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
@@ -16361,6 +16390,9 @@ def downgrade() -> None:
     op.drop_table('notes')
     op.drop_table('enrollments')
     op.drop_table('documents')
+    op.drop_index('idx_class_timeline_created_at', table_name='class_timeline_events')
+    op.drop_index('idx_class_timeline_class_id', table_name='class_timeline_events')
+    op.drop_table('class_timeline_events')
     op.drop_table('attachments')
     op.drop_table('assessments')
     op.drop_table('teachers')
@@ -17224,6 +17256,9 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.TEACHER_CREATE,
             PermissionDefinitions.TEACHER_UPDATE,
             PermissionDefinitions.TEACHER_DELETE,
+            PermissionDefinitions.CLASS_VIEW,
+            PermissionDefinitions.CLASS_CREATE,
+            PermissionDefinitions.CLASS_UPDATE,
             PermissionDefinitions.REPORT_VIEW,
         ]
     )
@@ -17238,7 +17273,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.STUDENT_VIEW,
             PermissionDefinitions.STUDENT_CREATE,
             PermissionDefinitions.STUDENT_UPDATE,
-            PermissionDefinitions.TEACHER_VIEW,  # reception có thể xem teacher
+            PermissionDefinitions.TEACHER_VIEW,
+            PermissionDefinitions.CLASS_VIEW,
         ]
     )
 
@@ -17671,11 +17707,15 @@ from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.models.role_permission import RolePermission
-# Thêm các import mới
+
+# Teacher
 from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_document import TeacherDocument
 from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
 from centermanager.models.teacher_assignment import TeacherAssignment
+
+# Class Timeline
+from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
 
 __all__ = [
     "Student",
@@ -17700,6 +17740,13 @@ __all__ = [
     "Permission",
     "PermissionDefinitions",
     "RolePermission",
+    "Teacher",
+    "TeacherDocument",
+    "TeacherTimelineEvent",
+    "TeacherTimelineEventType",
+    "TeacherAssignment",
+    "ClassTimelineEvent",
+    "ClassTimelineEventType",
 ]
 
 ================
@@ -17814,10 +17861,10 @@ Class model - a course/class group.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Date
+from sqlalchemy import String, Date, Integer, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -17826,7 +17873,8 @@ from centermanager.models.mixins import TimestampMixin
 if TYPE_CHECKING:
     from centermanager.models.session import Session
     from centermanager.models.teacher import Teacher
-    from centermanager.models.teacher_assignment import TeacherAssignment 
+    from centermanager.models.enrollment import Enrollment
+    from centermanager.models.class_timeline_event import ClassTimelineEvent
 
 
 class Class(Base, TimestampMixin):
@@ -17835,9 +17883,12 @@ class Class(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     course: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    teacher: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    teacher: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # legacy
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=20)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     sessions: Mapped[List[Session]] = relationship("Session", back_populates="class_", cascade="all, delete-orphan")
@@ -17847,9 +17898,94 @@ class Class(Base, TimestampMixin):
         back_populates="assigned_classes",
         lazy="selectin"
     )
+    enrollments: Mapped[List[Enrollment]] = relationship("Enrollment", back_populates="class_", cascade="all, delete-orphan")
+    timeline_events: Mapped[List[ClassTimelineEvent]] = relationship(
+        "ClassTimelineEvent", back_populates="class_", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Class(id={self.id}, name='{self.name}')>"
+
+    @property
+    def student_count(self) -> int:
+        return len(self.enrollments)
+
+    @property
+    def is_full(self) -> bool:
+        if self.capacity is None:
+            return False
+        return self.student_count >= self.capacity
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == "ACTIVE" and self.deleted_at is None
+
+================
+File: src/centermanager/models/class_timeline_event.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassTimelineEvent - history log for class actions.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Optional, TYPE_CHECKING
+
+import sqlalchemy as sa
+from sqlalchemy import String, Text, ForeignKey, DateTime, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+
+if TYPE_CHECKING:
+    from centermanager.models.class_ import Class
+
+
+class ClassTimelineEventType(str, Enum):
+    CLASS_CREATED = "ClassCreated"
+    CLASS_UPDATED = "ClassUpdated"
+    CLASS_ARCHIVED = "ClassArchived"
+    CLASS_RESTORED = "ClassRestored"
+    TEACHER_ASSIGNED = "TeacherAssigned"
+    TEACHER_REPLACED = "TeacherReplaced"
+    TEACHER_REMOVED = "TeacherRemoved"
+    STUDENT_ENROLLED = "StudentEnrolled"
+    STUDENT_REMOVED = "StudentRemoved"
+    SCHEDULE_UPDATED = "ScheduleUpdated"
+
+    @classmethod
+    def choices(cls):
+        return [e.value for e in cls]
+
+
+class ClassTimelineEvent(Base):
+    __tablename__ = "class_timeline_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+        server_default=sa.text('(CURRENT_TIMESTAMP)')
+    )
+
+    class_: Mapped[Class] = relationship("Class", back_populates="timeline_events")
+
+    __table_args__ = (
+        Index("idx_class_timeline_class_id", "class_id"),
+        Index("idx_class_timeline_created_at", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ClassTimelineEvent(id={self.id}, class_id={self.class_id}, type='{self.event_type}')>"
 
 ================
 File: src/centermanager/models/document.py
@@ -17909,6 +18045,7 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.student import Student
+    from centermanager.models.class_ import Class
 
 
 class Enrollment(Base, TimestampMixin):
@@ -17916,6 +18053,7 @@ class Enrollment(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
 
     class_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     course_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -17926,7 +18064,8 @@ class Enrollment(Base, TimestampMixin):
     status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
-    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
+    class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")
+
     def __repr__(self) -> str:
         return f"<Enrollment(id={self.id}, student_id={self.student_id}, class='{self.class_name}')>"
 
@@ -18138,6 +18277,13 @@ class PermissionDefinitions:
     TEACHER_CREATE = "teacher.create"
     TEACHER_UPDATE = "teacher.update"
     TEACHER_DELETE = "teacher.delete"
+
+    # Class
+    CLASS_VIEW = "class.view"
+    CLASS_CREATE = "class.create"
+    CLASS_UPDATE = "class.update"
+    CLASS_DELETE = "class.delete"
+
     # Finance
     FINANCE_VIEW = "finance.view"
     FINANCE_INCOME_CREATE = "finance.income.create"
@@ -18164,6 +18310,10 @@ class PermissionDefinitions:
             cls.TEACHER_CREATE,
             cls.TEACHER_UPDATE,
             cls.TEACHER_DELETE,
+            cls.CLASS_VIEW,
+            cls.CLASS_CREATE,
+            cls.CLASS_UPDATE,
+            cls.CLASS_DELETE,
             cls.FINANCE_VIEW,
             cls.FINANCE_INCOME_CREATE,
             cls.FINANCE_INCOME_UPDATE,
@@ -18186,6 +18336,10 @@ class PermissionDefinitions:
             cls.TEACHER_CREATE: "teacher",
             cls.TEACHER_UPDATE: "teacher",
             cls.TEACHER_DELETE: "teacher",
+            cls.CLASS_VIEW: "class",
+            cls.CLASS_CREATE: "class",
+            cls.CLASS_UPDATE: "class",
+            cls.CLASS_DELETE: "class",
             cls.FINANCE_VIEW: "finance",
             cls.FINANCE_INCOME_CREATE: "finance",
             cls.FINANCE_INCOME_UPDATE: "finance",
@@ -19011,11 +19165,14 @@ from .user_repository import UserRepository
 from .role_repository import RoleRepository
 from .permission_repository import PermissionRepository
 
-# Thêm các import mới
+# Teacher
 from .teacher_repository import TeacherRepository
 from .teacher_document_repository import TeacherDocumentRepository
 from .teacher_timeline_repository import TeacherTimelineRepository
 from .teacher_assignment_repository import TeacherAssignmentRepository
+
+# Class Timeline
+from .class_timeline_repository import ClassTimelineRepository
 
 __all__ = [
     "BaseRepository",
@@ -19030,6 +19187,11 @@ __all__ = [
     "UserRepository",
     "RoleRepository",
     "PermissionRepository",
+    "TeacherRepository",
+    "TeacherDocumentRepository",
+    "TeacherTimelineRepository",
+    "TeacherAssignmentRepository",
+    "ClassTimelineRepository",
 ]
 
 ================
@@ -19146,10 +19308,13 @@ File: src/centermanager/repositories/class_repository.py
 Class repository - data access for Class entity.
 """
 from typing import List, Optional
+import re
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 
 from centermanager.models.class_ import Class
+from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.base import BaseRepository
 
 
@@ -19160,8 +19325,94 @@ class ClassRepository(BaseRepository[Class]):
     def get_by_name(self, name: str) -> Optional[Class]:
         return self._session.query(Class).filter(Class.name == name).first()
 
+    def list_active(self) -> List[Class]:
+        return self._session.query(Class).options(
+            joinedload(Class.teachers),
+            joinedload(Class.enrollments)
+        ).filter(
+            Class.deleted_at.is_(None)
+        ).order_by(Class.name).all()
+
     def list_all(self) -> List[Class]:
-        return self._session.query(Class).all()
+        return self._session.query(Class).options(
+            joinedload(Class.teachers),
+            joinedload(Class.enrollments)
+        ).order_by(Class.name).all()
+
+    def get_by_id_with_relations(self, class_id: int) -> Optional[Class]:
+        return self._session.query(Class).options(
+            joinedload(Class.teachers),
+            joinedload(Class.enrollments).joinedload(Enrollment.student)
+        ).filter(Class.id == class_id).first()
+
+    def search_classes(self, query: str) -> List[Class]:
+        q = self._session.query(Class).options(
+            joinedload(Class.teachers),
+            joinedload(Class.enrollments)
+        ).filter(Class.deleted_at.is_(None))
+        if query:
+            q = q.filter(
+                or_(
+                    Class.name.ilike(f"%{query}%"),
+                    Class.course.ilike(f"%{query}%"),
+                    Class.teacher.ilike(f"%{query}%")
+                )
+            )
+        return q.all()
+
+    def get_highest_class_number(self) -> Optional[int]:
+        all_codes = [c.name for c in self._session.query(Class.name).all() if c.name]
+        pattern = re.compile(r"^CLS(\d+)$")
+        max_num = None
+        for code in all_codes:
+            match = pattern.match(code)
+            if match:
+                num = int(match.group(1))
+                if max_num is None or num > max_num:
+                    max_num = num
+        return max_num
+
+    def add(self, class_obj: Class) -> Class:
+        self._session.add(class_obj)
+        return class_obj
+
+    def delete(self, class_obj: Class) -> None:
+        self._session.delete(class_obj)
+
+================
+File: src/centermanager/repositories/class_timeline_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassTimeline repository - data access for ClassTimelineEvent.
+"""
+from typing import List, Optional
+
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from centermanager.models.class_timeline_event import ClassTimelineEvent
+from centermanager.repositories.base import BaseRepository
+
+
+class ClassTimelineRepository(BaseRepository[ClassTimelineEvent]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, ClassTimelineEvent)
+
+    def get_by_class(self, class_id: int, limit: Optional[int] = None) -> List[ClassTimelineEvent]:
+        query = self._session.query(ClassTimelineEvent).filter(
+            ClassTimelineEvent.class_id == class_id
+        ).order_by(desc(ClassTimelineEvent.created_at))
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+
+    def add(self, event: ClassTimelineEvent) -> ClassTimelineEvent:
+        self._session.add(event)
+        return event
+
+    def delete(self, event: ClassTimelineEvent) -> None:
+        self._session.delete(event)
 
 ================
 File: src/centermanager/repositories/document_repository.py
@@ -19202,9 +19453,10 @@ File: src/centermanager/repositories/enrollment_repository.py
 """
 Enrollment repository - data access for Enrollment entity.
 """
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.base import BaseRepository
@@ -19220,6 +19472,29 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id
         ).first() is not None
+
+    def get_by_student(self, student_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.student_id == student_id
+        ).order_by(desc(Enrollment.created_at)).all()
+
+    def get_by_class(self, class_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.class_id == class_id
+        ).order_by(Enrollment.id).all()
+
+    def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
+        from sqlalchemy.orm import joinedload
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.student)
+        ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
+
+    def add(self, enrollment: Enrollment) -> Enrollment:
+        self._session.add(enrollment)
+        return enrollment
+
+    def delete(self, enrollment: Enrollment) -> None:
+        self._session.delete(enrollment)
 
 ================
 File: src/centermanager/repositories/note_repository.py
@@ -19903,12 +20178,15 @@ from centermanager.services.exceptions import (
 from .session_service import SessionService
 from .session_note_service import SessionNoteService
 
-# Thêm các import mới
+# Teacher
 from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
 from .teacher_assignment_service import TeacherAssignmentService
 from .teacher_document_service import TeacherDocumentService
 from .teacher_timeline_service import TeacherTimelineService
 
+# Class
+from .class_service import ClassService, ClassNotFoundError, ClassValidationError, ClassFullError, StudentAlreadyEnrolledError
+from .class_timeline_service import ClassTimelineService
 
 __all__ = [
     "StudentService",
@@ -19922,6 +20200,18 @@ __all__ = [
     "StudentValidationError",
     "StudentAlreadyDeletedError",
     "StudentNotDeletedError",
+    "TeacherService",
+    "TeacherNotFoundError",
+    "TeacherValidationError",
+    "TeacherAssignmentService",
+    "TeacherDocumentService",
+    "TeacherTimelineService",
+    "ClassService",
+    "ClassNotFoundError",
+    "ClassValidationError",
+    "ClassFullError",
+    "StudentAlreadyEnrolledError",
+    "ClassTimelineService",
 ]
 
 ================
@@ -20176,6 +20466,458 @@ class AssessmentService:
             return repo.get_by_student_with_student(student_id)
 
 ================
+File: src/centermanager/services/class_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassService - business logic for Class entity.
+"""
+from datetime import date, datetime, timezone
+from typing import Optional, List, Any
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from centermanager.models.class_ import Class
+from centermanager.models.class_timeline_event import ClassTimelineEventType
+from centermanager.models.enrollment import Enrollment
+from centermanager.repositories.class_repository import ClassRepository
+from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.services.exceptions import (
+    StudentServiceError,
+    StudentValidationError,
+)
+
+UNSET = object()
+
+
+class ClassNotFoundError(StudentServiceError):
+    pass
+
+
+class ClassValidationError(StudentServiceError):
+    pass
+
+
+class ClassAlreadyDeletedError(StudentServiceError):
+    pass
+
+
+class ClassNotDeletedError(StudentServiceError):
+    pass
+
+
+class ClassFullError(StudentServiceError):
+    pass
+
+
+class StudentAlreadyEnrolledError(StudentServiceError):
+    pass
+
+
+class ClassService:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[ClassTimelineService] = None
+    ) -> None:
+        self._session_factory = session_factory
+        self._timeline_service = timeline_service
+
+    def _utc_now(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _normalize_text(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped if stripped else None
+
+    def _validate_name(self, name: Optional[str]) -> str:
+        normalized = self._normalize_text(name)
+        if not normalized:
+            raise ClassValidationError("Class name is required and cannot be blank.")
+        return normalized
+
+    def _generate_class_code(self, session: Session) -> str:
+        repo = ClassRepository(session)
+        highest = repo.get_highest_class_number()
+        next_num = (highest or 0) + 1
+        return f"CLS{next_num:03d}"
+
+    # ===== CRUD =====
+
+    def create_class(
+        self,
+        name: str,
+        course: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        capacity: Optional[int] = None,
+        status: str = "ACTIVE",
+    ) -> Class:
+        norm_name = self._validate_name(name)
+        norm_course = self._normalize_text(course)
+
+        with self._session_factory() as session:
+            class_code = self._generate_class_code(session)
+            class_obj = Class(
+                name=norm_name,
+                course=norm_course,
+                start_date=start_date,
+                end_date=end_date,
+                capacity=capacity,
+                status=status,
+            )
+            repo = ClassRepository(session)
+            repo.add(class_obj)
+            session.commit()
+            session.refresh(class_obj)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    class_id=class_obj.id,
+                    event_type=ClassTimelineEventType.CLASS_CREATED,
+                    title="Class Created",
+                    description=f"{class_obj.name} ({class_code}) was created.",
+                    metadata={"class_code": class_code},
+                )
+            return class_obj
+
+    def get_class(self, class_id: int) -> Class:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise ClassNotFoundError(f"Class {class_id} not found or deleted.")
+            return class_obj
+
+    def get_class_with_details(self, class_id: int) -> Class:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            class_obj = repo.get_by_id_with_relations(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise ClassNotFoundError(f"Class {class_id} not found or deleted.")
+            return class_obj
+
+    def list_classes(self, include_archived: bool = False) -> List[Class]:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            if include_archived:
+                return repo.list_all()
+            return repo.list_active()
+
+    def search_classes(self, query: str) -> List[Class]:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            return repo.search_classes(query)
+
+    def update_class(
+        self,
+        class_id: int,
+        name: Any = UNSET,
+        course: Any = UNSET,
+        start_date: Any = UNSET,
+        end_date: Any = UNSET,
+        capacity: Any = UNSET,
+        status: Any = UNSET,
+    ) -> Class:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+
+            changes = []
+
+            if name is not UNSET:
+                new_val = self._validate_name(name)
+                old_val = class_obj.name
+                if old_val != new_val:
+                    changes.append(f"name: '{old_val}' -> '{new_val}'")
+                class_obj.name = new_val
+
+            if course is not UNSET:
+                new_val = self._normalize_text(course)
+                old_val = class_obj.course or "(none)"
+                if old_val != (new_val or "(none)"):
+                    changes.append(f"course: '{old_val}' -> '{new_val or '(none)'}'")
+                class_obj.course = new_val
+
+            if start_date is not UNSET:
+                old = class_obj.start_date.strftime("%d/%m/%Y") if class_obj.start_date else "(none)"
+                new = start_date.strftime("%d/%m/%Y") if start_date else "(none)"
+                if old != new:
+                    changes.append(f"start_date: '{old}' -> '{new}'")
+                class_obj.start_date = start_date
+
+            if end_date is not UNSET:
+                old = class_obj.end_date.strftime("%d/%m/%Y") if class_obj.end_date else "(none)"
+                new = end_date.strftime("%d/%m/%Y") if end_date else "(none)"
+                if old != new:
+                    changes.append(f"end_date: '{old}' -> '{new}'")
+                class_obj.end_date = end_date
+
+            if capacity is not UNSET:
+                old = class_obj.capacity if class_obj.capacity is not None else "(none)"
+                new = capacity if capacity is not None else "(none)"
+                if str(old) != str(new):
+                    changes.append(f"capacity: '{old}' -> '{new}'")
+                class_obj.capacity = capacity
+
+            if status is not UNSET:
+                new_val = self._normalize_text(status) or "ACTIVE"
+                old_val = class_obj.status
+                if old_val != new_val:
+                    changes.append(f"status: '{old_val}' -> '{new_val}'")
+                class_obj.status = new_val
+
+            if not changes:
+                return class_obj
+
+            session.commit()
+            session.refresh(class_obj)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    class_id=class_obj.id,
+                    event_type=ClassTimelineEventType.CLASS_UPDATED,
+                    title="Class Updated",
+                    description="Updated: " + "; ".join(changes),
+                    metadata={"changes": changes},
+                )
+            return class_obj
+
+    def archive_class(self, class_id: int) -> None:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+            if class_obj.deleted_at is not None:
+                raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
+            class_obj.deleted_at = self._utc_now()
+            session.commit()
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    class_id=class_obj.id,
+                    event_type=ClassTimelineEventType.CLASS_ARCHIVED,
+                    title="Class Archived",
+                    description=f"{class_obj.name} was archived.",
+                )
+
+    def restore_class(self, class_id: int) -> None:
+        with self._session_factory() as session:
+            repo = ClassRepository(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+            if class_obj.deleted_at is None:
+                raise ClassNotDeletedError(f"Class {class_id} is not archived.")
+            class_obj.deleted_at = None
+            session.commit()
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    class_id=class_obj.id,
+                    event_type=ClassTimelineEventType.CLASS_RESTORED,
+                    title="Class Restored",
+                    description=f"{class_obj.name} was restored.",
+                )
+
+    # ===== Enrollment =====
+
+    def enroll_student(self, class_id: int, student_id: int) -> Enrollment:
+        with self._session_factory() as session:
+            # Check class exists and not archived
+            class_repo = ClassRepository(session)
+            class_obj = class_repo.get_by_id(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise ClassNotFoundError("Class not found or archived.")
+
+            # Check student exists
+            from centermanager.repositories.student_repository import StudentRepository
+            student_repo = StudentRepository(session)
+            student = student_repo.get_by_id(student_id)
+            if student is None or student.deleted_at is not None:
+                raise StudentValidationError("Student not found or inactive.")
+
+            # Check capacity
+            if class_obj.capacity is not None and class_obj.student_count >= class_obj.capacity:
+                raise ClassFullError(f"Class capacity ({class_obj.capacity}) reached.")
+
+            # Check if already enrolled
+            enroll_repo = EnrollmentRepository(session)
+            if enroll_repo.exists(student_id, class_id):
+                raise StudentAlreadyEnrolledError("Student already enrolled in this class.")
+
+            enrollment = Enrollment(
+                student_id=student_id,
+                class_id=class_id,
+                class_name=class_obj.name,
+                course_name=class_obj.course,
+            )
+            enroll_repo.add(enrollment)
+            session.commit()
+            session.refresh(enrollment)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    class_id=class_id,
+                    event_type=ClassTimelineEventType.STUDENT_ENROLLED,
+                    title="Student Enrolled",
+                    description=f"{student.full_name} ({student.student_code}) enrolled in {class_obj.name}.",
+                    metadata={"student_id": student_id, "student_name": student.full_name},
+                )
+            return enrollment
+
+    def remove_student(self, class_id: int, student_id: int) -> None:
+        with self._session_factory() as session:
+            enroll_repo = EnrollmentRepository(session)
+            enrollment = session.query(Enrollment).filter(
+                Enrollment.class_id == class_id,
+                Enrollment.student_id == student_id
+            ).first()
+            if enrollment is None:
+                raise ClassNotFoundError("Enrollment not found.")
+
+            # Get student name for timeline
+            from centermanager.repositories.student_repository import StudentRepository
+            student_repo = StudentRepository(session)
+            student = student_repo.get_by_id(student_id)
+
+            enroll_repo.delete(enrollment)
+            session.commit()
+
+            if self._timeline_service:
+                student_name = student.full_name if student else "Student"
+                self._timeline_service.log_event(
+                    class_id=class_id,
+                    event_type=ClassTimelineEventType.STUDENT_REMOVED,
+                    title="Student Removed",
+                    description=f"{student_name} removed from class.",
+                    metadata={"student_id": student_id},
+                )
+
+    def get_enrolled_students(self, class_id: int) -> List[Student]:
+        with self._session_factory() as session:
+            enroll_repo = EnrollmentRepository(session)
+            enrollments = enroll_repo.get_by_class_with_student(class_id)
+            return [e.student for e in enrollments if e.student]
+
+    # ===== Teacher Assignment (using existing TeacherAssignmentService) =====
+
+    def assign_teacher(self, class_id: int, teacher_id: int) -> TeacherAssignment:
+        from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+        from centermanager.services.teacher_timeline_service import TeacherTimelineService
+
+        timeline_service = TeacherTimelineService(self._session_factory)
+        assignment_service = TeacherAssignmentService(self._session_factory, timeline_service)
+
+        assignment = assignment_service.assign_teacher_to_class(teacher_id, class_id)
+
+        if self._timeline_service:
+            with self._session_factory() as session:
+                from centermanager.repositories.teacher_repository import TeacherRepository
+                teacher_repo = TeacherRepository(session)
+                teacher = teacher_repo.get_by_id(teacher_id)
+                teacher_name = teacher.full_name if teacher else f"Teacher #{teacher_id}"
+
+            self._timeline_service.log_event(
+                class_id=class_id,
+                event_type=ClassTimelineEventType.TEACHER_ASSIGNED,
+                title="Teacher Assigned",
+                description=f"{teacher_name} assigned to class.",
+                metadata={"teacher_id": teacher_id},
+            )
+        return assignment
+
+    def remove_teacher(self, class_id: int, teacher_id: int) -> None:
+        from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+        from centermanager.services.teacher_timeline_service import TeacherTimelineService
+
+        timeline_service = TeacherTimelineService(self._session_factory)
+        assignment_service = TeacherAssignmentService(self._session_factory, timeline_service)
+
+        with self._session_factory() as session:
+            from centermanager.repositories.teacher_repository import TeacherRepository
+            teacher_repo = TeacherRepository(session)
+            teacher = teacher_repo.get_by_id(teacher_id)
+            teacher_name = teacher.full_name if teacher else f"Teacher #{teacher_id}"
+
+        assignment_service.unassign_teacher_from_class(teacher_id, class_id)
+
+        if self._timeline_service:
+            self._timeline_service.log_event(
+                class_id=class_id,
+                event_type=ClassTimelineEventType.TEACHER_REMOVED,
+                title="Teacher Removed",
+                description=f"{teacher_name} removed from class.",
+                metadata={"teacher_id": teacher_id},
+            )
+
+    def get_assigned_teachers(self, class_id: int) -> List[Teacher]:
+        with self._session_factory() as session:
+            class_obj = self.get_class_with_details(class_id)
+            return class_obj.teachers
+
+================
+File: src/centermanager/services/class_timeline_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassTimelineService - log timeline events for classes.
+"""
+import json
+from typing import Optional, List
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
+from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
+
+
+class ClassTimelineService:
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    def log_event(
+        self,
+        class_id: int,
+        event_type: ClassTimelineEventType,
+        title: str,
+        description: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        created_by: Optional[str] = None,
+    ) -> ClassTimelineEvent:
+        if isinstance(event_type, ClassTimelineEventType):
+            event_type_str = event_type.value
+        else:
+            event_type_str = str(event_type)
+
+        metadata_json = json.dumps(metadata) if metadata else None
+
+        with self._session_factory() as session:
+            event = ClassTimelineEvent(
+                class_id=class_id,
+                event_type=event_type_str,
+                title=title,
+                description=description,
+                metadata_json=metadata_json,
+                created_by=created_by or "system",
+            )
+            repo = ClassTimelineRepository(session)
+            repo.add(event)
+            session.commit()
+            session.refresh(event)
+            return event
+
+    def get_class_timeline(self, class_id: int, limit: Optional[int] = None) -> List[ClassTimelineEvent]:
+        with self._session_factory() as session:
+            repo = ClassTimelineRepository(session)
+            return repo.get_by_class(class_id, limit)
+
+================
 File: src/centermanager/services/exceptions.py
 ================
 # -*- coding: utf-8 -*-
@@ -20228,6 +20970,8 @@ from centermanager.models.assessment import Assessment
 from centermanager.models.parent import Parent
 from centermanager.models.class_ import Class
 from centermanager.models.session import Session
+from centermanager.models.teacher import Teacher
+from centermanager.models.user import User
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.timeline_repository import TimelineRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
@@ -20240,43 +20984,39 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WorkspaceSummary:
-    """Summary for a workspace card."""
     workspace_id: str
     name: str
     icon: str
     description: str
     summary_text: str
-    health_status: str  # "good", "warning", "critical"
+    health_status: str
     health_details: str
     quick_action_label: str
-    quick_action_target: str  # e.g., "student" to open student workspace
+    quick_action_target: str
 
 
 @dataclass
 class RecentActivity:
-    """Recent activity across all workspaces."""
     workspace_id: str
     icon: str
     title: str
     student_name: str
     student_code: str
     time: datetime
-    activity_type: str  # e.g., "StudentCreated", "AssessmentCreated", etc.
+    activity_type: str
 
 
 @dataclass
 class TodaySummary:
-    """Today's summary panel."""
     today_classes: int
     today_assessments: int
-    today_birthdays: List[str]  # list of student names
-    pending_tasks: List[str]  # placeholder
+    today_birthdays: List[str]
+    pending_tasks: List[str]
     upcoming_sessions: int
 
 
 @dataclass
 class SystemStatus:
-    """System status panel."""
     database_status: str
     version: str
     last_backup: str
@@ -20294,7 +21034,6 @@ class HomeDashboardService:
             parent_repo = ParentRepository(session)
             assessment_repo = AssessmentRepository(session)
 
-            # Student workspace summary
             total_students = len(student_repo.list_active())
             parent_count = session.query(Parent).count()
             assessment_count = session.query(Assessment).count()
@@ -20329,22 +21068,33 @@ class HomeDashboardService:
                 quick_action_target="student"
             )
 
-            # Teacher workspace summary
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
+            teacher_count = session.query(Teacher).count()
             teacher_ws = WorkspaceSummary(
                 workspace_id="teacher",
                 name="Teacher Workspace",
                 icon="👨‍🏫",
                 description="Teaching activities and classes",
-                summary_text=f"{class_count} classes, {session_count} upcoming sessions",
+                summary_text=f"{teacher_count} teachers, {class_count} classes, {session_count} upcoming sessions",
                 health_status="good",
                 health_details="",
                 quick_action_label="Open →",
                 quick_action_target="teacher"
             )
 
-            # Finance workspace summary (placeholder)
+            class_ws = WorkspaceSummary(
+                workspace_id="class",
+                name="Class Workspace",
+                icon="📚",
+                description="Manage classes, enrollments, schedules",
+                summary_text=f"{class_count} classes",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="class"
+            )
+
             finance_ws = WorkspaceSummary(
                 workspace_id="finance",
                 name="Finance Workspace",
@@ -20357,64 +21107,61 @@ class HomeDashboardService:
                 quick_action_target="finance"
             )
 
-            # Chỉ trả về các Workspace Business Domain
-            return [student_ws, teacher_ws, finance_ws]
+            return [student_ws, teacher_ws, class_ws, finance_ws]
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
-        """Get recent activities across all workspaces."""
-        with self._session_factory() as session:
-            events = session.query(TimelineEvent).order_by(
-                TimelineEvent.created_at.desc()
-            ).limit(limit).all()
-            activities = []
-            for ev in events:
-                student = ev.student
-                workspace_id = "student"  # currently all timeline events are student-related
-                icon_map = {
-                    "StudentCreated": "🌟",
-                    "StudentUpdated": "✏️",
-                    "ParentAdded": "👨‍👩‍👧",
-                    "ParentUpdated": "✏️",
-                    "ParentDeleted": "🗑️",
-                    "AssessmentCreated": "📊",
-                    "AssessmentUpdated": "✏️",
-                    "AssessmentDeleted": "🗑️",
-                    "ProductAdded": "📁",
-                    "AttachmentAdded": "📎",
-                    "System": "⚙️",
-                }
-                icon = icon_map.get(ev.event_type, "📌")
-                activities.append(RecentActivity(
-                    workspace_id=workspace_id,
-                    icon=icon,
-                    title=ev.title,
-                    student_name=student.full_name if student else "Unknown",
-                    student_code=student.student_code if student else "",
-                    time=ev.created_at,
-                    activity_type=ev.event_type
-                ))
-            return activities
+        try:
+            with self._session_factory() as session:
+                events = session.query(TimelineEvent).order_by(
+                    TimelineEvent.created_at.desc()
+                ).limit(limit).all()
+                activities = []
+                for ev in events:
+                    student = ev.student
+                    workspace_id = "student"
+                    icon_map = {
+                        "StudentCreated": "🌟",
+                        "StudentUpdated": "✏️",
+                        "ParentAdded": "👨‍👩‍👧",
+                        "ParentUpdated": "✏️",
+                        "ParentDeleted": "🗑️",
+                        "AssessmentCreated": "📊",
+                        "AssessmentUpdated": "✏️",
+                        "AssessmentDeleted": "🗑️",
+                        "ProductAdded": "📁",
+                        "AttachmentAdded": "📎",
+                        "System": "⚙️",
+                    }
+                    icon = icon_map.get(ev.event_type, "📌")
+                    activities.append(RecentActivity(
+                        workspace_id=workspace_id,
+                        icon=icon,
+                        title=ev.title,
+                        student_name=student.full_name if student else "Unknown",
+                        student_code=student.student_code if student else "",
+                        time=ev.created_at,
+                        activity_type=ev.event_type
+                    ))
+                return activities
+        except Exception as e:
+            logger.exception("Failed to get recent activities")
+            return []
 
     def get_today_summary(self) -> TodaySummary:
-        """Get today's summary."""
         today = date.today()
         with self._session_factory() as session:
-            # Today's classes (sessions scheduled today)
             today_sessions = session.query(Session).filter(
                 Session.scheduled_date == today,
                 Session.status == "Scheduled"
             ).count()
-            # Today's assessments (assessments created today)
             today_assessments = session.query(Assessment).filter(
                 Assessment.assessment_date == today
             ).count()
-            # Today's birthdays (students with DOB month/day = today)
             students = session.query(Student).all()
             birthdays = []
             for s in students:
                 if s.date_of_birth and s.date_of_birth.month == today.month and s.date_of_birth.day == today.day:
                     birthdays.append(s.full_name)
-            # Upcoming sessions (next 7 days)
             week_later = today + timedelta(days=7)
             upcoming = session.query(Session).filter(
                 Session.scheduled_date > today,
@@ -20422,7 +21169,6 @@ class HomeDashboardService:
                 Session.status == "Scheduled"
             ).count()
 
-            # Pending tasks: students without parent or assessment (for now)
             student_repo = StudentRepository(session)
             parent_repo = ParentRepository(session)
             assessment_repo = AssessmentRepository(session)
@@ -20433,7 +21179,7 @@ class HomeDashboardService:
                     pending.append(f"{s.full_name} missing parent")
                 elif not assessment_repo.get_by_student(s.id):
                     pending.append(f"{s.full_name} no assessment")
-            pending_tasks = pending[:5]  # limit
+            pending_tasks = pending[:5]
 
             return TodaySummary(
                 today_classes=today_sessions,
@@ -20444,7 +21190,6 @@ class HomeDashboardService:
             )
 
     def get_system_status(self) -> SystemStatus:
-        """Get system status."""
         config = get_config()
         version = config.get("application.version", "0.1.0")
         return SystemStatus(
@@ -23840,6 +24585,1314 @@ class RatingWidget(QWidget):
                 """)
 
 ================
+File: src/centermanager/ui/class_workspace/class_assignment_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassAssignmentDialog - assign teacher to class.
+"""
+from typing import Optional, List
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QPushButton, QLabel, QMessageBox
+)
+
+from centermanager.services.class_service import ClassService
+from centermanager.repositories.teacher_repository import TeacherRepository
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
+
+
+class ClassAssignmentDialog(QDialog):
+    def __init__(
+        self,
+        class_service: ClassService,
+        class_id: int,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._class_id = class_id
+        self._all_teachers: List = []
+        self._assigned_ids: List[int] = []
+
+        self.setWindowTitle("Assign Teacher to Class")
+        self.setMinimumSize(400, 300)
+        self.setModal(True)
+
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Available teachers
+        layout.addWidget(QLabel("Available Teachers"))
+        self.available_list = QListWidget()
+        self.available_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        layout.addWidget(self.available_list)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.assign_btn = QPushButton("→ Assign")
+        self.assign_btn.clicked.connect(self._assign_selected)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.assign_btn)
+
+        # Assigned teachers
+        layout.addWidget(QLabel("Assigned Teachers"))
+        self.assigned_list = QListWidget()
+        self.assigned_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        layout.addWidget(self.assigned_list)
+
+        self.unassign_btn = QPushButton("← Unassign")
+        self.unassign_btn.clicked.connect(self._unassign_selected)
+
+        btn_layout2 = QHBoxLayout()
+        btn_layout2.addStretch()
+        btn_layout2.addWidget(self.unassign_btn)
+
+        layout.addLayout(btn_layout)
+        layout.addLayout(btn_layout2)
+
+        # Done
+        done_btn = QPushButton("Done")
+        done_btn.clicked.connect(self.accept)
+        layout.addWidget(done_btn)
+
+    def _load_data(self) -> None:
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+
+        with session_factory() as session:
+            repo = TeacherRepository(session)
+            self._all_teachers = repo.list_active()
+
+        # Get currently assigned teachers
+        class_obj = self._class_service.get_class_with_details(self._class_id)
+        self._assigned_ids = [t.id for t in class_obj.teachers]
+
+        self._update_lists()
+
+    def _update_lists(self) -> None:
+        self.available_list.clear()
+        self.assigned_list.clear()
+
+        assigned_set = set(self._assigned_ids)
+
+        for t in self._all_teachers:
+            if t.id in assigned_set:
+                item = QListWidgetItem(f"{t.full_name} ({t.teacher_code})")
+                item.setData(Qt.ItemDataRole.UserRole, t.id)
+                self.assigned_list.addItem(item)
+            else:
+                item = QListWidgetItem(f"{t.full_name} ({t.teacher_code})")
+                item.setData(Qt.ItemDataRole.UserRole, t.id)
+                self.available_list.addItem(item)
+
+    def _assign_selected(self) -> None:
+        items = self.available_list.selectedItems()
+        if not items:
+            QMessageBox.warning(self, "Warning", "Please select a teacher.")
+            return
+        item = items[0]
+        teacher_id = item.data(Qt.ItemDataRole.UserRole)
+
+        try:
+            self._class_service.assign_teacher(self._class_id, teacher_id)
+            self._assigned_ids.append(teacher_id)
+            self._update_lists()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def _unassign_selected(self) -> None:
+        items = self.assigned_list.selectedItems()
+        if not items:
+            QMessageBox.warning(self, "Warning", "Please select a teacher.")
+            return
+        item = items[0]
+        teacher_id = item.data(Qt.ItemDataRole.UserRole)
+
+        try:
+            self._class_service.remove_teacher(self._class_id, teacher_id)
+            self._assigned_ids.remove(teacher_id)
+            self._update_lists()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+================
+File: src/centermanager/ui/class_workspace/class_detail_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassDetailPage - full class profile with teacher assignment, student enrollment, schedule, timeline.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QFrame, QSizePolicy, QMessageBox
+)
+
+from centermanager.models.class_ import Class
+from centermanager.models.teacher import Teacher
+from centermanager.models.student import Student
+from centermanager.services.class_service import ClassService
+from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.ui.design_system import (
+    Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
+)
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
+from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
+from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
+from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
+from centermanager.ui.timeline import TimelineWidget
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClassDetailPage(QWidget):
+    back_clicked = Signal()
+    class_updated = Signal()
+
+    def __init__(
+        self,
+        class_service: ClassService,
+        assignment_service: TeacherAssignmentService,
+        timeline_service: ClassTimelineService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._assignment_service = assignment_service
+        self._timeline_service = timeline_service
+        self._current_class_id: Optional[int] = None
+        self._current_class: Optional[Class] = None
+
+        self._setup_ui()
+        self._show_empty()
+
+    def _setup_ui(self) -> None:
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Top bar
+        top_bar = QWidget()
+        top_bar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            border-bottom: 1px solid {COLORS['border_light']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+        """)
+        top_bar_layout = QHBoxLayout(top_bar)
+        self.back_btn = SecondaryButton("← Back")
+        self.back_btn.clicked.connect(self.back_clicked.emit)
+        top_bar_layout.addWidget(self.back_btn)
+        top_bar_layout.addStretch()
+        main_layout.addWidget(top_bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
+
+        # Profile header
+        self.profile_widget = QWidget()
+        profile_layout = QHBoxLayout(self.profile_widget)
+        profile_layout.setSpacing(SPACING['lg'])
+
+        self.avatar = Avatar("📚", size=56)
+        self.avatar.setFixedSize(56, 56)
+        self.avatar.setStyleSheet("font-size: 28px; background: #e3f2fd; border-radius: 28px;")
+        profile_layout.addWidget(self.avatar)
+
+        info = QVBoxLayout()
+        info.setSpacing(SPACING['xs'])
+        self.name_label = QLabel()
+        self.name_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {COLORS['text_primary']};")
+        info.addWidget(self.name_label)
+
+        code_status = QHBoxLayout()
+        code_status.setSpacing(SPACING['sm'])
+        self.code_label = QLabel()
+        self.code_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_muted']}; font-weight: 500;")
+        code_status.addWidget(self.code_label)
+        self.status_badge = StatusBadge("")
+        code_status.addWidget(self.status_badge)
+        code_status.addStretch()
+        info.addLayout(code_status)
+
+        self.course_label = QLabel()
+        self.course_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']};")
+        info.addWidget(self.course_label)
+
+        profile_layout.addLayout(info)
+        profile_layout.addStretch()
+
+        self.edit_btn = PrimaryButton("✏️ Edit")
+        self.edit_btn.setFixedHeight(34)
+        self.edit_btn.clicked.connect(self._on_edit)
+        profile_layout.addWidget(self.edit_btn)
+
+        container_layout.addWidget(self.profile_widget)
+
+        # Divider
+        container_layout.addWidget(self._divider())
+
+        # Stats
+        self.stats_widget = self._create_stats()
+        container_layout.addWidget(self.stats_widget)
+
+        # Teacher Assignment
+        self.teacher_section = self._create_section("👨‍🏫 Assigned Teacher")
+        self.teacher_container = QWidget()
+        self.teacher_layout = QVBoxLayout(self.teacher_container)
+        self.teacher_layout.setSpacing(SPACING['sm'])
+        self.teacher_layout.setContentsMargins(0, 0, 0, 0)
+        self.teacher_section.layout().addWidget(self.teacher_container)
+        container_layout.addWidget(self.teacher_section)
+
+        # Students
+        self.student_section = self._create_section("👨‍🎓 Enrolled Students")
+        self.student_container = QWidget()
+        self.student_layout = QVBoxLayout(self.student_container)
+        self.student_layout.setSpacing(SPACING['sm'])
+        self.student_layout.setContentsMargins(0, 0, 0, 0)
+        self.student_section.layout().addWidget(self.student_container)
+        container_layout.addWidget(self.student_section)
+
+        # Schedule
+        self.schedule_widget = ClassScheduleWidget()
+        schedule_section = self._create_section("📅 Weekly Schedule")
+        schedule_section.layout().addWidget(self.schedule_widget)
+        container_layout.addWidget(schedule_section)
+
+        # Timeline
+        self.timeline_widget = TimelineWidget()
+        timeline_section = self._create_section("📅 Timeline")
+        timeline_section.layout().addWidget(self.timeline_widget)
+        container_layout.addWidget(timeline_section)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+    def _divider(self) -> QFrame:
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        return line
+
+    def _create_section(self, title: str) -> QWidget:
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING['xs'])
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
+        layout.addWidget(title_label)
+        layout.addWidget(self._divider())
+        return section
+
+    def _create_stats(self) -> QWidget:
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(SPACING['xl'])
+        self.students_label = QLabel("0 students")
+        self.students_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
+        self.capacity_label = QLabel("Capacity: Unlimited")
+        self.capacity_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
+        layout.addWidget(self.students_label)
+        layout.addWidget(self.capacity_label)
+        layout.addStretch()
+        return widget
+
+    def _show_empty(self) -> None:
+        self.profile_widget.setVisible(False)
+        self.stats_widget.setVisible(False)
+        self.teacher_section.setVisible(False)
+        self.student_section.setVisible(False)
+        self.schedule_widget.setVisible(False)
+        self.timeline_widget.setVisible(False)
+
+    def _show_detail(self) -> None:
+        self.profile_widget.setVisible(True)
+        self.stats_widget.setVisible(True)
+        self.teacher_section.setVisible(True)
+        self.student_section.setVisible(True)
+        self.schedule_widget.setVisible(True)
+        self.timeline_widget.setVisible(True)
+
+    def load_class(self, class_id: int) -> None:
+        try:
+            class_obj = self._class_service.get_class_with_details(class_id)
+            self._current_class_id = class_obj.id
+            self._current_class = class_obj
+            self._populate(class_obj)
+            self._show_detail()
+        except Exception as e:
+            logger.exception(f"Error loading class {class_id}")
+            self._show_empty()
+
+    def _populate(self, class_obj: Class) -> None:
+        self.name_label.setText(class_obj.name)
+        self.code_label.setText(class_obj.name)  # or use a generated code if added
+        self.status_badge.set_status(class_obj.status or "")
+        self.course_label.setText(f"Course: {class_obj.course or '-'}")
+        self.students_label.setText(f"{class_obj.student_count} students")
+        self.capacity_label.setText(f"Capacity: {class_obj.capacity if class_obj.capacity else 'Unlimited'}")
+
+        # Teachers
+        self._update_teachers(class_obj.teachers)
+
+        # Students
+        self._update_students()
+
+        # Schedule
+        self.schedule_widget.set_class(class_obj.id)
+
+        # Timeline
+        events = self._timeline_service.get_class_timeline(class_obj.id)
+        self.timeline_widget.set_events(events)
+
+    def _update_teachers(self, teachers: List[Teacher]) -> None:
+        self._clear_layout(self.teacher_layout)
+
+        if not teachers:
+            btn = QPushButton("+ Assign Teacher")
+            btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+            btn.clicked.connect(self._on_assign_teacher)
+            self.teacher_layout.addWidget(btn)
+            return
+
+        for teacher in teachers:
+            w = QWidget()
+            layout = QHBoxLayout(w)
+            layout.setContentsMargins(0, 2, 0, 2)
+            label = QLabel(f"{teacher.full_name} ({teacher.teacher_code})")
+            label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']};")
+            layout.addWidget(label)
+            layout.addStretch()
+            remove_btn = QPushButton("Remove")
+            remove_btn.setStyleSheet("color: #d32f2f; background: transparent; border: none;")
+            remove_btn.clicked.connect(lambda checked, tid=teacher.id: self._on_remove_teacher(tid))
+            layout.addWidget(remove_btn)
+            self.teacher_layout.addWidget(w)
+
+        add_btn = QPushButton("+ Assign Another Teacher")
+        add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+        add_btn.clicked.connect(self._on_assign_teacher)
+        self.teacher_layout.addWidget(add_btn)
+
+    def _update_students(self) -> None:
+        self._clear_layout(self.student_layout)
+        if self._current_class_id is None:
+            return
+
+        try:
+            students = self._class_service.get_enrolled_students(self._current_class_id)
+        except Exception as e:
+            logger.exception("Error loading students")
+            students = []
+
+        if not students:
+            btn = QPushButton("+ Enroll Student")
+            btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+            btn.clicked.connect(self._on_enroll_student)
+            self.student_layout.addWidget(btn)
+            return
+
+        for student in students:
+            w = QWidget()
+            layout = QHBoxLayout(w)
+            layout.setContentsMargins(0, 2, 0, 2)
+            label = QLabel(f"{student.full_name} ({student.student_code})")
+            label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']};")
+            layout.addWidget(label)
+            layout.addStretch()
+            remove_btn = QPushButton("Remove")
+            remove_btn.setStyleSheet("color: #d32f2f; background: transparent; border: none;")
+            remove_btn.clicked.connect(lambda checked, sid=student.id: self._on_remove_student(sid))
+            layout.addWidget(remove_btn)
+            self.student_layout.addWidget(w)
+
+        add_btn = QPushButton("+ Enroll Another Student")
+        add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+        add_btn.clicked.connect(self._on_enroll_student)
+        self.student_layout.addWidget(add_btn)
+
+    def _clear_layout(self, layout) -> None:
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+    def _on_edit(self) -> None:
+        if self._current_class_id is None:
+            return
+        dialog = ClassFormDialog(self._class_service, self._current_class_id, parent=self)
+        if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+
+    def _on_assign_teacher(self) -> None:
+        if self._current_class_id is None:
+            return
+        dialog = ClassAssignmentDialog(
+            self._class_service,
+            self._current_class_id,
+            parent=self
+        )
+        if dialog.exec() == ClassAssignmentDialog.DialogCode.Accepted:
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+
+    def _on_remove_teacher(self, teacher_id: int) -> None:
+        if self._current_class_id is None:
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Remove",
+            "Remove this teacher from the class?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._class_service.remove_teacher(self._current_class_id, teacher_id)
+                self.load_class(self._current_class_id)
+                self.class_updated.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def _on_enroll_student(self) -> None:
+        if self._current_class_id is None:
+            return
+        dialog = ClassEnrollmentDialog(
+            self._class_service,
+            self._current_class_id,
+            parent=self
+        )
+        if dialog.exec() == ClassEnrollmentDialog.DialogCode.Accepted:
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+
+    def _on_remove_student(self, student_id: int) -> None:
+        if self._current_class_id is None:
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Remove",
+            "Remove this student from the class?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._class_service.remove_student(self._current_class_id, student_id)
+                self.load_class(self._current_class_id)
+                self.class_updated.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def _on_data_changed(self) -> None:
+        if self._current_class_id:
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+
+================
+File: src/centermanager/ui/class_workspace/class_enrollment_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassEnrollmentDialog - enroll/remove student from class.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QPushButton, QLabel, QLineEdit, QMessageBox
+)
+
+from centermanager.services.class_service import ClassService
+from centermanager.repositories.student_repository import StudentRepository
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
+
+logger = logging.getLogger(__name__)
+
+
+class ClassEnrollmentDialog(QDialog):
+    def __init__(
+        self,
+        class_service: ClassService,
+        class_id: int,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._class_id = class_id
+        self._all_students: List = []
+        self._enrolled_ids: List[int] = []
+
+        self.setWindowTitle("Manage Students")
+        self.setMinimumSize(450, 400)
+        self.setModal(True)
+
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Search
+        search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search students...")
+        self.search_edit.textChanged.connect(self._filter_students)
+        search_layout.addWidget(self.search_edit)
+        layout.addLayout(search_layout)
+
+        # Available students
+        layout.addWidget(QLabel("Available Students"))
+        self.available_list = QListWidget()
+        self.available_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        layout.addWidget(self.available_list)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.enroll_btn = QPushButton("→ Enroll")
+        self.enroll_btn.clicked.connect(self._enroll_selected)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.enroll_btn)
+
+        # Enrolled students
+        layout.addWidget(QLabel("Enrolled Students"))
+        self.enrolled_list = QListWidget()
+        self.enrolled_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        layout.addWidget(self.enrolled_list)
+
+        self.remove_btn = QPushButton("← Remove")
+        self.remove_btn.clicked.connect(self._remove_selected)
+
+        btn_layout2 = QHBoxLayout()
+        btn_layout2.addStretch()
+        btn_layout2.addWidget(self.remove_btn)
+
+        layout.addLayout(btn_layout)
+        layout.addLayout(btn_layout2)
+
+        # Done
+        done_btn = QPushButton("Done")
+        done_btn.clicked.connect(self.accept)
+        layout.addWidget(done_btn)
+
+    def _load_data(self) -> None:
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+
+        with session_factory() as session:
+            repo = StudentRepository(session)
+            self._all_students = repo.list_active()
+
+        # Get currently enrolled students
+        self._enrolled_ids = [s.id for s in self._class_service.get_enrolled_students(self._class_id)]
+
+        self._update_lists()
+
+    def _filter_students(self, text: str) -> None:
+        self._update_lists(text)
+
+    def _update_lists(self, search_text: str = "") -> None:
+        self.available_list.clear()
+        self.enrolled_list.clear()
+
+        enrolled_set = set(self._enrolled_ids)
+
+        for s in self._all_students:
+            if search_text and search_text.lower() not in s.full_name.lower() and search_text.lower() not in s.student_code.lower():
+                continue
+            display = f"{s.full_name} ({s.student_code})"
+            if s.id in enrolled_set:
+                item = QListWidgetItem(display)
+                item.setData(Qt.ItemDataRole.UserRole, s.id)
+                self.enrolled_list.addItem(item)
+            else:
+                item = QListWidgetItem(display)
+                item.setData(Qt.ItemDataRole.UserRole, s.id)
+                self.available_list.addItem(item)
+
+    def _enroll_selected(self) -> None:
+        items = self.available_list.selectedItems()
+        if not items:
+            QMessageBox.warning(self, "Warning", "Please select at least one student.")
+            return
+
+        for item in items:
+            student_id = item.data(Qt.ItemDataRole.UserRole)
+            try:
+                logger.info(f"Enrolling student {student_id} into class {self._class_id}")
+                self._class_service.enroll_student(self._class_id, student_id)
+                self._enrolled_ids.append(student_id)
+                logger.info(f"Successfully enrolled student {student_id}")
+            except Exception as e:
+                logger.exception(f"Failed to enroll student {student_id}: {e}")
+                QMessageBox.warning(self, "Enrollment Error", f"Failed to enroll student: {str(e)}")
+
+        self._update_lists()
+
+    def _remove_selected(self) -> None:
+        items = self.enrolled_list.selectedItems()
+        if not items:
+            QMessageBox.warning(self, "Warning", "Please select at least one student.")
+            return
+
+        for item in items:
+            student_id = item.data(Qt.ItemDataRole.UserRole)
+            try:
+                logger.info(f"Removing student {student_id} from class {self._class_id}")
+                self._class_service.remove_student(self._class_id, student_id)
+                self._enrolled_ids.remove(student_id)
+                logger.info(f"Successfully removed student {student_id}")
+            except Exception as e:
+                logger.exception(f"Failed to remove student {student_id}: {e}")
+                QMessageBox.warning(self, "Removal Error", f"Failed to remove student: {str(e)}")
+
+        self._update_lists()
+
+================
+File: src/centermanager/ui/class_workspace/class_form_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassFormDialog - create or edit a class.
+"""
+import logging
+from datetime import date
+from typing import Optional
+
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
+    QComboBox, QSpinBox, QPushButton, QHBoxLayout,
+    QMessageBox, QWidget
+)
+
+from centermanager.services.class_service import ClassService, ClassValidationError
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClassFormDialog(QDialog):
+    def __init__(
+        self,
+        class_service: ClassService,
+        class_id: Optional[int] = None,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._service = class_service
+        self._class_id = class_id
+        self._is_edit = class_id is not None
+
+        self.setWindowTitle("Edit Class" if self._is_edit else "Add Class")
+        self.setMinimumWidth(450)
+        self.setModal(True)
+
+        self._setup_ui()
+        if self._is_edit:
+            self._load_class()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        # Name
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Class name")
+        form.addRow("Class Name *", self.name_edit)
+
+        # Course
+        self.course_edit = QLineEdit()
+        self.course_edit.setPlaceholderText("Course name")
+        form.addRow("Course", self.course_edit)
+
+        # Start Date
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setDisplayFormat("dd/MM/yyyy")
+        self.start_date_edit.setSpecialValueText("")
+        self.start_date_edit.setDate(QDate.currentDate())
+        form.addRow("Start Date", self.start_date_edit)
+
+        # End Date
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDisplayFormat("dd/MM/yyyy")
+        self.end_date_edit.setSpecialValueText("")
+        self.end_date_edit.setDate(QDate.currentDate().addDays(30))
+        form.addRow("End Date", self.end_date_edit)
+
+        # Capacity
+        self.capacity_spin = QSpinBox()
+        self.capacity_spin.setRange(0, 999)
+        self.capacity_spin.setSpecialValueText("Unlimited")
+        form.addRow("Capacity", self.capacity_spin)
+
+        # Status
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["ACTIVE", "INACTIVE"])
+        form.addRow("Status", self.status_combo)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setFixedWidth(100)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self.save_btn.clicked.connect(self._save)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def _load_class(self) -> None:
+        try:
+            class_obj = self._service.get_class(self._class_id)
+            self.name_edit.setText(class_obj.name)
+            self.course_edit.setText(class_obj.course or "")
+            if class_obj.start_date:
+                qdate = QDate(class_obj.start_date.year, class_obj.start_date.month, class_obj.start_date.day)
+                self.start_date_edit.setDate(qdate)
+            if class_obj.end_date:
+                qdate = QDate(class_obj.end_date.year, class_obj.end_date.month, class_obj.end_date.day)
+                self.end_date_edit.setDate(qdate)
+            self.capacity_spin.setValue(class_obj.capacity or 0)
+            status_idx = self.status_combo.findText(class_obj.status or "ACTIVE")
+            if status_idx >= 0:
+                self.status_combo.setCurrentIndex(status_idx)
+        except Exception as e:
+            logger.exception("Error loading class")
+            QMessageBox.critical(self, "Error", "Could not load class data.")
+            self.reject()
+
+    def _save(self) -> None:
+        name = self.name_edit.text().strip()
+        course = self.course_edit.text().strip() or None
+        start_date = self.start_date_edit.date().toPython() if self.start_date_edit.date().isValid() else None
+        end_date = self.end_date_edit.date().toPython() if self.end_date_edit.date().isValid() else None
+        capacity = self.capacity_spin.value() or None
+        status = self.status_combo.currentText()
+
+        try:
+            if self._is_edit:
+                self._service.update_class(
+                    class_id=self._class_id,
+                    name=name,
+                    course=course,
+                    start_date=start_date,
+                    end_date=end_date,
+                    capacity=capacity,
+                    status=status,
+                )
+            else:
+                self._service.create_class(
+                    name=name,
+                    course=course,
+                    start_date=start_date,
+                    end_date=end_date,
+                    capacity=capacity,
+                    status=status,
+                )
+            self.accept()
+        except ClassValidationError as e:
+            QMessageBox.warning(self, "Validation Error", str(e))
+        except Exception as e:
+            logger.exception("Error saving class")
+            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+
+================
+File: src/centermanager/ui/class_workspace/class_list_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassListPage - list of classes with search, filter, CRUD.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFrame, QMessageBox, QMenu, QSizePolicy
+)
+from PySide6.QtGui import QAction
+
+from centermanager.models.class_ import Class
+from centermanager.services.class_service import ClassService
+from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.ui.design_system import (
+    SearchBar, EmptyState, PrimaryButton, SecondaryButton
+)
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
+from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClassListPage(QWidget):
+    class_selected = Signal(int)
+
+    def __init__(
+        self,
+        class_service: ClassService,
+        assignment_service: TeacherAssignmentService,
+        timeline_service: ClassTimelineService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._assignment_service = assignment_service
+        self._timeline_service = timeline_service
+        self._classes: List[Class] = []
+        self._filtered: List[Class] = []
+        self._sort_key: Optional[str] = None
+        self._sort_asc: bool = True
+        self._selected_ids: List[int] = []
+
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Toolbar
+        toolbar = QWidget()
+        toolbar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
+        toolbar_layout = QVBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(SPACING['xs'])
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(SPACING['sm'])
+
+        self.search_bar = SearchBar("Search by name, course, teacher...")
+        self.search_bar.text_changed.connect(self._on_search)
+        top_row.addWidget(self.search_bar)
+
+        self.refresh_btn = SecondaryButton("🔄 Refresh")
+        self.refresh_btn.setFixedHeight(34)
+        self.refresh_btn.clicked.connect(self.refresh)
+        top_row.addWidget(self.refresh_btn)
+
+        self.add_btn = PrimaryButton("+ Add Class")
+        self.add_btn.setFixedHeight(34)
+        self.add_btn.clicked.connect(self.show_add_dialog)
+        top_row.addWidget(self.add_btn)
+
+        toolbar_layout.addLayout(top_row)
+        layout.addWidget(toolbar)
+
+        # Bulk actions bar
+        self.bulk_bar = QWidget()
+        self.bulk_bar.setStyleSheet(f"""
+            background: {COLORS['primary_hover']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
+        self.bulk_bar.setVisible(False)
+        bulk_layout = QHBoxLayout(self.bulk_bar)
+        bulk_layout.setContentsMargins(0, 0, 0, 0)
+        self.bulk_count_label = QLabel("0 selected")
+        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
+        bulk_layout.addWidget(self.bulk_count_label)
+        bulk_layout.addStretch()
+        self.bulk_archive_btn = QPushButton("Archive Selected")
+        self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
+        self.bulk_archive_btn.clicked.connect(self._bulk_archive)
+        bulk_layout.addWidget(self.bulk_archive_btn)
+        self.bulk_clear_btn = QPushButton("Clear")
+        self.bulk_clear_btn.clicked.connect(self._clear_selection)
+        bulk_layout.addWidget(self.bulk_clear_btn)
+        layout.addWidget(self.bulk_bar)
+
+        # Data Table
+        columns = [
+            {"key": "name", "label": "Class", "sortable": True},
+            {"key": "course", "label": "Course", "sortable": True},
+            {"key": "teacher_names", "label": "Teacher", "sortable": False},
+            {"key": "student_count", "label": "Students", "sortable": False},
+            {"key": "status", "label": "Status", "sortable": True},
+            {"key": "schedule", "label": "Schedule", "sortable": False},
+        ]
+        self.data_table = DataTable(columns, page_size=20)
+        self.data_table.sort_requested.connect(self._on_sort)
+        self.data_table.selection_changed.connect(self._on_selection_changed)
+        self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
+        self.data_table.context_menu_requested.connect(self._on_context_menu)
+        layout.addWidget(self.data_table)
+
+        self.loading = LoadingWidget()
+        self.loading.setVisible(False)
+        layout.addWidget(self.loading)
+
+    def refresh(self) -> None:
+        self.loading.setVisible(True)
+        try:
+            self._classes = self._class_service.list_classes()
+            self._apply_filters_and_sort()
+        except Exception as e:
+            logger.exception("Failed to refresh class list")
+            QMessageBox.critical(self, "Error", "Failed to load classes.")
+        finally:
+            self.loading.setVisible(False)
+
+    def _apply_filters_and_sort(self) -> None:
+        filtered = self._filter_classes(self.search_bar.text())
+        if self._sort_key:
+            filtered.sort(key=lambda c: getattr(c, self._sort_key, ""), reverse=not self._sort_asc)
+        self._filtered = filtered
+        self._populate_table()
+
+    def _filter_classes(self, text: str) -> List[Class]:
+        if not text.strip():
+            return self._classes[:]
+        try:
+            return self._class_service.search_classes(text.strip())
+        except Exception:
+            lower = text.strip().lower()
+            return [c for c in self._classes
+                    if lower in c.name.lower() or lower in (c.course or "").lower()]
+
+    def _populate_table(self) -> None:
+        data = []
+        for c in self._filtered:
+            teacher_names = ", ".join([t.full_name for t in c.teachers]) if c.teachers else "-"
+            schedule = f"{c.start_date.strftime('%d/%m/%Y') if c.start_date else ''} - {c.end_date.strftime('%d/%m/%Y') if c.end_date else ''}"
+            data.append({
+                "name": c.name,
+                "course": c.course or "-",
+                "teacher_names": teacher_names,
+                "student_count": str(c.student_count),
+                "status": c.status or "ACTIVE",
+                "schedule": schedule,
+                "_id": c.id,
+            })
+        self.data_table.set_data(data, len(data))
+
+    def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_sort(self, key: str, ascending: bool) -> None:
+        self._sort_key = key
+        self._sort_asc = ascending
+        self._apply_filters_and_sort()
+
+    def _on_selection_changed(self, indices: List[int]) -> None:
+        self._selected_ids = []
+        for idx in indices:
+            if idx < len(self._filtered):
+                self._selected_ids.append(self._filtered[idx].id)
+        self._update_bulk_bar()
+
+    def _update_bulk_bar(self) -> None:
+        count = len(self._selected_ids)
+        self.bulk_bar.setVisible(count > 0)
+        self.bulk_count_label.setText(f"{count} selected")
+
+    def _clear_selection(self) -> None:
+        self.data_table.clear_selection()
+        self._selected_ids = []
+        self._update_bulk_bar()
+
+    def _bulk_archive(self) -> None:
+        if not self._selected_ids:
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Archive",
+            f"Archive {len(self._selected_ids)} classes?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                for cid in self._selected_ids:
+                    self._class_service.archive_class(cid)
+                self._clear_selection()
+                self.refresh()
+            except Exception as e:
+                logger.exception("Bulk archive failed")
+                QMessageBox.critical(self, "Error", "Failed to archive classes.")
+
+    def _on_row_double_clicked(self, row: int) -> None:
+        if row < len(self._filtered):
+            self.class_selected.emit(self._filtered[row].id)
+
+    def _on_context_menu(self, pos, row: int) -> None:
+        if row < 0 or row >= len(self._filtered):
+            return
+        class_obj = self._filtered[row]
+        menu = QMenu(self)
+        view_action = QAction("View Class", self)
+        view_action.triggered.connect(lambda: self.class_selected.emit(class_obj.id))
+        menu.addAction(view_action)
+
+        edit_action = QAction("Edit Class", self)
+        edit_action.triggered.connect(lambda: self._edit_class(class_obj.id))
+        menu.addAction(edit_action)
+
+        menu.addSeparator()
+        archive_action = QAction("Archive Class", self)
+        archive_action.triggered.connect(lambda: self._archive_class(class_obj.id))
+        menu.addAction(archive_action)
+
+        menu.exec(pos)
+
+    def _edit_class(self, class_id: int) -> None:
+        dialog = ClassFormDialog(self._class_service, class_id=class_id, parent=self)
+        if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _archive_class(self, class_id: int) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Archive",
+            "Archive this class?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._class_service.archive_class(class_id)
+                self.refresh()
+            except Exception as e:
+                logger.exception("Archive failed")
+                QMessageBox.critical(self, "Error", "Failed to archive class.")
+
+    def show_add_dialog(self) -> None:
+        dialog = ClassFormDialog(self._class_service, parent=self)
+        if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+================
+File: src/centermanager/ui/class_workspace/class_schedule_widget.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassScheduleWidget - display weekly schedule for a class.
+Currently displays sessions, future will support full weekly schedule.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QTableWidget, QTableWidgetItem, QHeaderView
+)
+
+from centermanager.services.session_service import SessionService
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
+
+logger = logging.getLogger(__name__)
+
+
+class ClassScheduleWidget(QWidget):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._session_service = None
+        self._class_id: Optional[int] = None
+        self._setup_ui()
+        self._show_empty()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Session", "Date", "Topic"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table)
+
+    def set_class(self, class_id: int) -> None:
+        self._class_id = class_id
+        self._load_sessions()
+
+    def _load_sessions(self) -> None:
+        if self._class_id is None:
+            self._show_empty()
+            return
+
+        try:
+            engine = create_production_engine()
+            session_factory = sessionmaker(bind=engine)
+            self._session_service = SessionService(session_factory)
+            sessions = self._session_service.get_sessions_for_class(self._class_id)
+
+            if not sessions:
+                self._show_empty()
+                return
+
+            self.table.setRowCount(len(sessions))
+            for row, sess in enumerate(sessions):
+                self.table.setItem(row, 0, QTableWidgetItem(f"#{sess.session_number}"))
+                self.table.setItem(row, 1, QTableWidgetItem(sess.scheduled_date.strftime("%d/%m/%Y")))
+                self.table.setItem(row, 2, QTableWidgetItem(sess.title))
+            self.table.setVisible(True)
+        except Exception as e:
+            logger.exception("Error loading sessions")
+            self._show_empty()
+
+    def _show_empty(self) -> None:
+        self.table.setRowCount(1)
+        self.table.setItem(0, 0, QTableWidgetItem("No sessions scheduled"))
+        self.table.setItem(0, 1, QTableWidgetItem(""))
+        self.table.setItem(0, 2, QTableWidgetItem(""))
+        self.table.setVisible(True)
+
+================
+File: src/centermanager/ui/class_workspace/class_workspace_shell.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassWorkspaceShell - main shell for Class Workspace.
+"""
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QFrame, QSizePolicy
+)
+
+from centermanager.ui.workspace_navigation import WorkspaceNavigation
+from centermanager.ui.workspace_header import WorkspaceHeader
+from centermanager.ui.class_workspace.class_list_page import ClassListPage
+from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
+
+
+class ClassWorkspaceShell(QWidget):
+    go_home = Signal()
+
+    def __init__(
+        self,
+        class_service,
+        assignment_service,
+        timeline_service,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._assignment_service = assignment_service
+        self._timeline_service = timeline_service
+
+        self._current_class_id: Optional[int] = None
+
+        self._setup_ui()
+        self._connect_signals()
+        self.navigate_to("classes")
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.header = WorkspaceHeader("Class Workspace", "Classes")
+        self.header.back_home_clicked.connect(self.go_home.emit)
+        layout.addWidget(self.header)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        pages = [
+            {"id": "classes", "icon": "📚", "label": "Classes"},
+        ]
+        self.nav = WorkspaceNavigation("Class Workspace", pages)
+        self.nav.page_selected.connect(self.navigate_to)
+        body.addWidget(self.nav)
+
+        self.content_stack = QStackedWidget()
+        self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Class List
+        self.list_page = ClassListPage(
+            self._class_service,
+            self._assignment_service,
+            self._timeline_service,
+        )
+        self.list_page.class_selected.connect(self._on_class_selected)
+        self.content_stack.addWidget(self.list_page)
+
+        # Class Detail
+        self.detail_page = ClassDetailPage(
+            self._class_service,
+            self._assignment_service,
+            self._timeline_service,
+        )
+        self.detail_page.back_clicked.connect(self._on_back_from_detail)
+        self.detail_page.class_updated.connect(self._on_class_updated)
+        self.content_stack.addWidget(self.detail_page)
+
+        body.addWidget(self.content_stack, 1)
+        layout.addLayout(body)
+
+    def _connect_signals(self) -> None:
+        self.nav.page_selected.connect(self.navigate_to)
+        self.header.back_home_clicked.connect(self.go_home.emit)
+
+    def navigate_to(self, page_id: str) -> None:
+        if page_id == "classes":
+            self.content_stack.setCurrentWidget(self.list_page)
+            self.nav.set_active_page("classes")
+            self.header.set_context("Class Workspace", "Classes")
+            self.list_page.refresh()
+
+    def _on_class_selected(self, class_id: int) -> None:
+        self._current_class_id = class_id
+        self.detail_page.load_class(class_id)
+        self.content_stack.setCurrentWidget(self.detail_page)
+        self.nav.set_active_page("classes")
+        self.header.set_context("Class Workspace", "Class Detail")
+
+    def _on_back_from_detail(self) -> None:
+        self.navigate_to("classes")
+        self.list_page.refresh()
+
+    def _on_class_updated(self) -> None:
+        self.list_page.refresh()
+
+================
 File: src/centermanager/ui/common/__init__.py
 ================
 # -*- coding: utf-8 -*-
@@ -25308,6 +27361,10 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
 from centermanager.ui.home.activity_item import ActivityItem
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionService
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -25322,6 +27379,13 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
+        self._current_user = get_current_user()
+        
+        # Initialize permission service
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+        self._permission_service = PermissionService(session_factory)
+        
         self._setup_ui()
         self.refresh()
 
@@ -25489,7 +27553,6 @@ class HomePage(QWidget):
     def _populate_today_summary(self) -> None:
         self._clear_layout(self.today_container_layout)
         summary = self._service.get_today_summary()
-        # Show as small info cards
         items = [
             (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
             (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
@@ -29372,11 +31435,9 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # ---- KPI Cards ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
-        # ---- Quick Insights ----
         self.insights_section = QWidget()
         insights_layout = QVBoxLayout(self.insights_section)
         insights_layout.setContentsMargins(0, 0, 0, 0)
@@ -29387,7 +31448,6 @@ class StudentDashboardPage(QWidget):
         insights_layout.addWidget(self.insights_grid)
         container_layout.addWidget(self.insights_section)
 
-        # ---- Need Attention ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -29401,7 +31461,6 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Upcoming Events (with QListWidget) ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -29426,7 +31485,6 @@ class StudentDashboardPage(QWidget):
         events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities (with QListWidget) ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -29451,7 +31509,6 @@ class StudentDashboardPage(QWidget):
         recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
-        # ---- Quick Actions ----
         actions_section = QWidget()
         actions_layout = QHBoxLayout(actions_section)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -29478,11 +31535,14 @@ class StudentDashboardPage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        self._refresh_kpis()
-        self._refresh_insights()
-        self._refresh_attention()
-        self._refresh_events()
-        self._refresh_recent_activities()
+        try:
+            self._refresh_kpis()
+            self._refresh_insights()
+            self._refresh_attention()
+            self._refresh_events()
+            self._refresh_recent_activities()
+        except Exception as e:
+            logger.exception("Error refreshing dashboard")
 
     def _refresh_kpis(self) -> None:
         try:
@@ -30029,6 +32089,7 @@ class StudentListPage(QWidget):
         self._sort_key: Optional[str] = None
         self._sort_asc: bool = True
         self._selected_ids: List[int] = []
+
         self._setup_ui()
         self.refresh()
 
@@ -30037,7 +32098,6 @@ class StudentListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---- Toolbar ----
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -30083,7 +32143,6 @@ class StudentListPage(QWidget):
 
         toolbar_layout.addLayout(top_row)
 
-        # Filter bar (quick filters)
         self.filter_bar = FilterBar([
             {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
@@ -30094,7 +32153,6 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        # ---- Bulk actions bar ----
         self.bulk_bar = QWidget()
         self.bulk_bar.setStyleSheet(f"""
             background: {COLORS['primary_hover']};
@@ -30120,7 +32178,6 @@ class StudentListPage(QWidget):
         bulk_layout.addWidget(self.bulk_clear_btn)
         layout.addWidget(self.bulk_bar)
 
-        # ---- Data Table ----
         columns = [
             {"key": "student_code", "label": "Code", "sortable": True},
             {"key": "full_name", "label": "Name", "sortable": True},
@@ -30135,7 +32192,6 @@ class StudentListPage(QWidget):
         self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
 
-        # ---- Loading overlay ----
         self.loading = LoadingWidget()
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
@@ -30150,6 +32206,8 @@ class StudentListPage(QWidget):
             QMessageBox.critical(self, "Error", "Failed to load students.")
         finally:
             self.loading.setVisible(False)
+        # Emit data_updated để dashboard refresh
+        self.data_updated.emit()
 
     def _apply_filters_and_sort(self) -> None:
         filtered = self._filter_students(self.search_bar.text())
@@ -30186,7 +32244,6 @@ class StudentListPage(QWidget):
         self._apply_filters_and_sort()
 
     def _on_filter_changed(self, filters: Dict[str, str]) -> None:
-        # Convert filters to StudentFilter DTO
         from centermanager.dto.student_filter_dto import StudentFilter
         status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
         enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
@@ -30199,7 +32256,6 @@ class StudentListPage(QWidget):
         )
         try:
             self._filtered = self._filter_service.filter_students(filter_dto)
-            # Re-apply search if any
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Filter failed")
@@ -34115,6 +36171,7 @@ class HomePage(QWidget):
         permission_map = {
             "student": None,  # Always visible
             "teacher": "teacher.view",
+            "class": "class.view",
             "finance": "finance.view",
         }
 
@@ -34408,7 +36465,7 @@ from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper, get_menu_items_for_role
 from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
-
+from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 
 logger = logging.getLogger(__name__)
 
@@ -34436,6 +36493,9 @@ class MainWindow(QMainWindow):
         teacher_assignment_service,
         teacher_document_service,
         teacher_timeline_service,
+        class_service,
+        class_timeline_service,
+        teacher_assignment_service_for_class,
         permission_service: PermissionService,
         parent: Optional[QWidget] = None
     ) -> None:
@@ -34462,20 +36522,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
 
-        # Central stacked widget
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
 
-        # Get current user for menu filtering
         self._current_user = get_current_user()
         self._role_name = self._current_user.role.name if self._current_user and self._current_user.role else None
 
-        # Home Page
+        # Home
         self.home_page = HomePage(home_service=self._home_service, parent=self)
         self.home_page.workspace_selected.connect(self._on_workspace_selected)
         self.central_stack.addWidget(self.home_page)
 
-        # Student Workspace Shell
+        # Student
         self.student_workspace = StudentWorkspaceShell(
             student_service=self._student_service,
             parent_service=self._parent_service,
@@ -34494,8 +36552,9 @@ class MainWindow(QMainWindow):
             import_service=self._import_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
-
         self.central_stack.addWidget(self.student_workspace)
+
+        # Teacher
         self.teacher_workspace = TeacherWorkspaceShell(
             teacher_service=teacher_service,
             assignment_service=teacher_assignment_service,
@@ -34504,38 +36563,30 @@ class MainWindow(QMainWindow):
         )
         self.teacher_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.teacher_workspace)
-        
-        # Initially show Home
+
+        # Class
+        self.class_workspace = ClassWorkspaceShell(
+            class_service=class_service,
+            assignment_service=teacher_assignment_service_for_class,
+            timeline_service=class_timeline_service,
+        )
+        self.class_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.class_workspace)
+
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
 
-        # Apply permission-based menu visibility
         self._apply_menu_permissions()
-
         self._refresh_student_list()
 
     def _apply_menu_permissions(self) -> None:
-        """
-        Apply permission-based visibility to menu items.
-        This will be called after the UI is fully constructed.
-        """
-        # Get visible menu items for current role
-        visible_items = get_menu_items_for_role(self._role_name)
-        visible_ids = {item["id"] for item in visible_items}
-
-        # Filter workspace cards on home page
-        # The home page will be refreshed with only visible workspaces
         self.home_page.refresh()
 
-        # Note: The actual workspace cards filtering is done in HomePage._populate_workspace_cards()
-        # which uses the permission service
-
     def _on_workspace_selected(self, workspace_id: str) -> None:
-        """Handle workspace selection from Home page."""
-        # Check permission for workspace access
         permission_map = {
-            "student": None,  # Always accessible
+            "student": None,
             "teacher": "teacher.view",
+            "class": "class.view",
             "finance": "finance.view",
             "reports": "report.view",
             "settings": "setting.update",
@@ -34553,28 +36604,28 @@ class MainWindow(QMainWindow):
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
-            self.statusBar().showMessage("Teacher Workspace coming soon")
+            self.central_stack.setCurrentWidget(self.teacher_workspace)
+            self.statusBar().showMessage("Teacher Workspace")
+            self.teacher_workspace.list_page.refresh()
+        elif workspace_id == "class":
+            self.central_stack.setCurrentWidget(self.class_workspace)
+            self.statusBar().showMessage("Class Workspace")
+            self.class_workspace.list_page.refresh()
         elif workspace_id == "finance":
             self.statusBar().showMessage("Finance Workspace coming soon")
         elif workspace_id == "reports":
             self.statusBar().showMessage("Reports Workspace coming soon")
         elif workspace_id == "settings":
             self.statusBar().showMessage("Settings coming soon")
-        elif workspace_id == "teacher":
-            self.central_stack.setCurrentWidget(self.teacher_workspace)
-            self.statusBar().showMessage("Teacher Workspace")
-            self.teacher_workspace.list_page.refresh()
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
     def _go_home(self) -> None:
-        """Navigate back to Home."""
         self.central_stack.setCurrentWidget(self.home_page)
         self.home_page.refresh()
         self.statusBar().showMessage("Home")
 
     def _refresh_student_list(self) -> None:
-        """Refresh student list in the student workspace."""
         try:
             students = self._student_service.list_students()
             self.student_workspace.list_page._students = students
@@ -35270,7 +37321,8 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
+from centermanager.services.class_service import ClassService
+from centermanager.services.class_timeline_service import ClassTimelineService
 
 
 logger = logging.getLogger(__name__)
@@ -35302,7 +37354,6 @@ def main() -> int:
     logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
     logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
-    # Ensure database schema is up to date
     ensure_schema()
 
     qapp = QApplication(sys.argv)
@@ -35326,7 +37377,6 @@ def main() -> int:
         logger.info("Login cancelled. Exiting.")
         return 0
 
-    # Get authenticated user
     current_user = login_dialog.get_user()
     if current_user is None:
         logger.warning("No user after login. Exiting.")
@@ -35354,15 +37404,12 @@ def main() -> int:
         session_factory=session_factory,
     )
 
-    # Event Bus
     event_bus = EventBus()
     highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
 
-    # Register timeline handler
     timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
     event_bus.register(StudentHighlightCreated, timeline_handler)
 
-    # Dashboard, Analytics, Home, Filter, Export, Import
     dashboard_service = StudentDashboardService(session_factory)
     filter_service = StudentFilterService(session_factory)
     export_service = StudentExportService(student_service)
@@ -35375,9 +37422,15 @@ def main() -> int:
     teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
     teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
 
+    # Class services
+    class_timeline_service = ClassTimelineService(session_factory)
+    class_service = ClassService(
+        session_factory,
+        timeline_service=class_timeline_service,
+    )
+
     logger.info("All services initialized")
 
-    # --- Create MainWindow with permission service ---
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -35400,6 +37453,9 @@ def main() -> int:
         teacher_assignment_service=teacher_assignment_service,
         teacher_document_service=teacher_document_service,
         teacher_timeline_service=teacher_timeline_service,
+        class_service=class_service,
+        class_timeline_service=class_timeline_service,
+        teacher_assignment_service_for_class=teacher_assignment_service,  # same as above
     )
     window.show()
     logger.info("Main window initialized")

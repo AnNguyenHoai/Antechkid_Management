@@ -2,9 +2,10 @@
 """
 Enrollment repository - data access for Enrollment entity.
 """
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.base import BaseRepository
@@ -20,3 +21,26 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id
         ).first() is not None
+
+    def get_by_student(self, student_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.student_id == student_id
+        ).order_by(desc(Enrollment.created_at)).all()
+
+    def get_by_class(self, class_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.class_id == class_id
+        ).order_by(Enrollment.id).all()
+
+    def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
+        from sqlalchemy.orm import joinedload
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.student)
+        ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
+
+    def add(self, enrollment: Enrollment) -> Enrollment:
+        self._session.add(enrollment)
+        return enrollment
+
+    def delete(self, enrollment: Enrollment) -> None:
+        self._session.delete(enrollment)

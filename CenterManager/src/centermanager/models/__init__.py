@@ -22,11 +22,15 @@ from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.models.role_permission import RolePermission
-# Thêm các import mới
+
+# Teacher
 from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_document import TeacherDocument
 from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
 from centermanager.models.teacher_assignment import TeacherAssignment
+
+# Class Timeline
+from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
 
 __all__ = [
     "Student",
@@ -51,4 +55,11 @@ __all__ = [
     "Permission",
     "PermissionDefinitions",
     "RolePermission",
+    "Teacher",
+    "TeacherDocument",
+    "TeacherTimelineEvent",
+    "TeacherTimelineEventType",
+    "TeacherAssignment",
+    "ClassTimelineEvent",
+    "ClassTimelineEventType",
 ]

@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 3a7a76ecb339
+Revision ID: d052696b6a84
 Revises: 
-Create Date: 2026-07-30 09:56:37.163697
+Create Date: 2026-07-30 12:05:06.910370
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '3a7a76ecb339'
+revision: str = 'd052696b6a84'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -28,6 +28,9 @@ def upgrade() -> None:
     sa.Column('teacher', sa.String(length=100), nullable=True),
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
+    sa.Column('capacity', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
@@ -123,6 +126,20 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('class_timeline_events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('event_type', sa.String(length=50), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('metadata_json', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.String(length=100), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('idx_class_timeline_class_id', 'class_timeline_events', ['class_id'], unique=False)
+    op.create_index('idx_class_timeline_created_at', 'class_timeline_events', ['created_at'], unique=False)
     op.create_table('documents',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
@@ -138,6 +155,7 @@ def upgrade() -> None:
     op.create_table('enrollments',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=True),
     sa.Column('class_name', sa.String(length=100), nullable=True),
     sa.Column('course_name', sa.String(length=100), nullable=True),
     sa.Column('teacher_name', sa.String(length=100), nullable=True),
@@ -145,7 +163,6 @@ def upgrade() -> None:
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('class_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
@@ -348,6 +365,9 @@ def downgrade() -> None:
     op.drop_table('notes')
     op.drop_table('enrollments')
     op.drop_table('documents')
+    op.drop_index('idx_class_timeline_created_at', table_name='class_timeline_events')
+    op.drop_index('idx_class_timeline_class_id', table_name='class_timeline_events')
+    op.drop_table('class_timeline_events')
     op.drop_table('attachments')
     op.drop_table('assessments')
     op.drop_table('teachers')

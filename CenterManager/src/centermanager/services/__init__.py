@@ -18,12 +18,15 @@ from centermanager.services.exceptions import (
 from .session_service import SessionService
 from .session_note_service import SessionNoteService
 
-# Thêm các import mới
+# Teacher
 from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
 from .teacher_assignment_service import TeacherAssignmentService
 from .teacher_document_service import TeacherDocumentService
 from .teacher_timeline_service import TeacherTimelineService
 
+# Class
+from .class_service import ClassService, ClassNotFoundError, ClassValidationError, ClassFullError, StudentAlreadyEnrolledError
+from .class_timeline_service import ClassTimelineService
 
 __all__ = [
     "StudentService",
@@ -37,4 +40,16 @@ __all__ = [
     "StudentValidationError",
     "StudentAlreadyDeletedError",
     "StudentNotDeletedError",
+    "TeacherService",
+    "TeacherNotFoundError",
+    "TeacherValidationError",
+    "TeacherAssignmentService",
+    "TeacherDocumentService",
+    "TeacherTimelineService",
+    "ClassService",
+    "ClassNotFoundError",
+    "ClassValidationError",
+    "ClassFullError",
+    "StudentAlreadyEnrolledError",
+    "ClassTimelineService",
 ]

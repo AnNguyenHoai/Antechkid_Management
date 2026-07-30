@@ -11,7 +11,7 @@ from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper, get_menu_items_for_role
 from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
-
+from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ class MainWindow(QMainWindow):
         teacher_assignment_service,
         teacher_document_service,
         teacher_timeline_service,
+        class_service,
+        class_timeline_service,
+        teacher_assignment_service_for_class,
         permission_service: PermissionService,
         parent: Optional[QWidget] = None
     ) -> None:
@@ -65,20 +68,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
 
-        # Central stacked widget
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
 
-        # Get current user for menu filtering
         self._current_user = get_current_user()
         self._role_name = self._current_user.role.name if self._current_user and self._current_user.role else None
 
-        # Home Page
+        # Home
         self.home_page = HomePage(home_service=self._home_service, parent=self)
         self.home_page.workspace_selected.connect(self._on_workspace_selected)
         self.central_stack.addWidget(self.home_page)
 
-        # Student Workspace Shell
+        # Student
         self.student_workspace = StudentWorkspaceShell(
             student_service=self._student_service,
             parent_service=self._parent_service,
@@ -97,8 +98,9 @@ class MainWindow(QMainWindow):
             import_service=self._import_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
-
         self.central_stack.addWidget(self.student_workspace)
+
+        # Teacher
         self.teacher_workspace = TeacherWorkspaceShell(
             teacher_service=teacher_service,
             assignment_service=teacher_assignment_service,
@@ -107,38 +109,30 @@ class MainWindow(QMainWindow):
         )
         self.teacher_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.teacher_workspace)
-        
-        # Initially show Home
+
+        # Class
+        self.class_workspace = ClassWorkspaceShell(
+            class_service=class_service,
+            assignment_service=teacher_assignment_service_for_class,
+            timeline_service=class_timeline_service,
+        )
+        self.class_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.class_workspace)
+
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
 
-        # Apply permission-based menu visibility
         self._apply_menu_permissions()
-
         self._refresh_student_list()
 
     def _apply_menu_permissions(self) -> None:
-        """
-        Apply permission-based visibility to menu items.
-        This will be called after the UI is fully constructed.
-        """
-        # Get visible menu items for current role
-        visible_items = get_menu_items_for_role(self._role_name)
-        visible_ids = {item["id"] for item in visible_items}
-
-        # Filter workspace cards on home page
-        # The home page will be refreshed with only visible workspaces
         self.home_page.refresh()
 
-        # Note: The actual workspace cards filtering is done in HomePage._populate_workspace_cards()
-        # which uses the permission service
-
     def _on_workspace_selected(self, workspace_id: str) -> None:
-        """Handle workspace selection from Home page."""
-        # Check permission for workspace access
         permission_map = {
-            "student": None,  # Always accessible
+            "student": None,
             "teacher": "teacher.view",
+            "class": "class.view",
             "finance": "finance.view",
             "reports": "report.view",
             "settings": "setting.update",
@@ -159,6 +153,10 @@ class MainWindow(QMainWindow):
             self.central_stack.setCurrentWidget(self.teacher_workspace)
             self.statusBar().showMessage("Teacher Workspace")
             self.teacher_workspace.list_page.refresh()
+        elif workspace_id == "class":
+            self.central_stack.setCurrentWidget(self.class_workspace)
+            self.statusBar().showMessage("Class Workspace")
+            self.class_workspace.list_page.refresh()
         elif workspace_id == "finance":
             self.statusBar().showMessage("Finance Workspace coming soon")
         elif workspace_id == "reports":
@@ -169,13 +167,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
     def _go_home(self) -> None:
-        """Navigate back to Home."""
         self.central_stack.setCurrentWidget(self.home_page)
         self.home_page.refresh()
         self.statusBar().showMessage("Home")
 
     def _refresh_student_list(self) -> None:
-        """Refresh student list in the student workspace."""
         try:
             students = self._student_service.list_students()
             self.student_workspace.list_page._students = students
