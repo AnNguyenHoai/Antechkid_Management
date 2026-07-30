@@ -29,6 +29,7 @@ from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
+from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
 
 logger = logging.getLogger(__name__)
@@ -155,8 +156,25 @@ class ClassDetailPage(QWidget):
         self.student_section.layout().addWidget(self.student_container)
         container_layout.addWidget(self.student_section)
 
-        # Schedule + Assessment
-        schedule_section = self._create_section("📅 Weekly Schedule & Assessment")
+        # Schedule + Assessment with Add button
+        schedule_section = QWidget()
+        schedule_layout = QVBoxLayout(schedule_section)
+        schedule_layout.setContentsMargins(0, 0, 0, 0)
+        schedule_layout.setSpacing(SPACING['xs'])
+        
+        # Header with Add button
+        schedule_header = QHBoxLayout()
+        title_label = QLabel("📅 Weekly Schedule & Assessment")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
+        schedule_header.addWidget(title_label)
+        schedule_header.addStretch()
+        self.add_session_btn = PrimaryButton("+ Add Session")
+        self.add_session_btn.setFixedHeight(30)
+        self.add_session_btn.clicked.connect(self._on_add_session)
+        schedule_header.addWidget(self.add_session_btn)
+        schedule_layout.addLayout(schedule_header)
+        schedule_layout.addWidget(self._divider())
+        
         self.schedule_widget = ClassScheduleWidget(
             self._session_service,
             self._note_service,
@@ -164,7 +182,7 @@ class ClassDetailPage(QWidget):
             self._student_service
         )
         self.schedule_widget.session_updated.connect(self._on_data_changed)
-        schedule_section.layout().addWidget(self.schedule_widget)
+        schedule_layout.addWidget(self.schedule_widget)
         container_layout.addWidget(schedule_section)
 
         # Timeline
@@ -215,6 +233,7 @@ class ClassDetailPage(QWidget):
         self.student_section.setVisible(False)
         self.schedule_widget.setVisible(False)
         self.timeline_widget.setVisible(False)
+        self.add_session_btn.setVisible(False)
 
     def _show_detail(self) -> None:
         self.profile_widget.setVisible(True)
@@ -223,6 +242,7 @@ class ClassDetailPage(QWidget):
         self.student_section.setVisible(True)
         self.schedule_widget.setVisible(True)
         self.timeline_widget.setVisible(True)
+        self.add_session_btn.setVisible(True)
 
     def load_class(self, class_id: int) -> None:
         try:
@@ -391,6 +411,31 @@ class ClassDetailPage(QWidget):
                 self.class_updated.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def _on_add_session(self) -> None:
+        """Open dialog to add a new session."""
+        if self._current_class_id is None:
+            QMessageBox.warning(self, "Error", "No class selected.")
+            return
+        logger.info(f"Opening Add Session dialog for class {self._current_class_id}")
+        try:
+            dialog = SessionDialog(
+                self._session_service,
+                self._current_class_id,
+                parent=self
+            )
+            if dialog.exec() == SessionDialog.DialogCode.Accepted:
+                logger.info("Session added successfully, refreshing schedule.")
+                self.schedule_widget.refresh()
+                if self._current_class_id:
+                    events = self._timeline_service.get_class_timeline(self._current_class_id)
+                    self.timeline_widget.set_events(events)
+                self.class_updated.emit()
+            else:
+                logger.info("Session dialog cancelled.")
+        except Exception as e:
+            logger.exception("Error adding session")
+            QMessageBox.critical(self, "Error", f"Could not add session: {str(e)}")
 
     def _on_data_changed(self) -> None:
         if self._current_class_id:

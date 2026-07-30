@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.session import Session, SessionStatus
 from centermanager.repositories.session_repository import SessionRepository
+from centermanager.repositories.class_repository import ClassRepository
 
 
 class SessionServiceError(Exception):
@@ -49,6 +50,13 @@ class SessionService:
         actual_date: Optional[date] = None,
         teacher_id: Optional[int] = None,
     ) -> Session:
+        # Validate class exists
+        with self._session_factory() as session:
+            class_repo = ClassRepository(session)
+            class_obj = class_repo.get_by_id(class_id)
+            if class_obj is None:
+                raise SessionValidationError(f"Class with id {class_id} not found.")
+
         norm_title = self._normalize_text(title)
         if not norm_title:
             raise SessionValidationError("Title is required.")
@@ -78,6 +86,8 @@ class SessionService:
             session.commit()
             session.refresh(session_obj)
             return session_obj
+
+    # ... các phương thức khác giữ nguyên ...
 
     def get_session(self, session_id: int) -> Session:
         with self._session_factory() as session:

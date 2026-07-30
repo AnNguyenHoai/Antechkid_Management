@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClassScheduleWidget(QWidget):
-    session_updated = Signal()  # emitted when a session is updated
+    session_updated = Signal()
 
     def __init__(
         self,
@@ -68,7 +68,6 @@ class ClassScheduleWidget(QWidget):
         layout.addWidget(refresh_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
     def set_class(self, class_id: int) -> None:
-        """Load schedule for a class."""
         self._class_id = class_id
         self._load_sessions()
 
@@ -128,21 +127,24 @@ class ClassScheduleWidget(QWidget):
         self.table.setVisible(True)
 
     def _open_session_detail(self, session_id: int) -> None:
-        """Open the teaching workspace (session detail) for assessment."""
-        dialog = SessionDetailDialog(
-            self._session_service,
-            self._note_service,
-            self._highlight_service,
-            self._student_service,
-            session_id,
-            parent=self
-        )
-        if dialog.exec() == SessionDetailDialog.DialogCode.Accepted:
-            # Refresh after dialog closes
-            self._load_sessions()
-            self.session_updated.emit()
+        logger.info(f"Opening session detail for session {session_id}")
+        try:
+            dialog = SessionDetailDialog(
+                self._session_service,
+                self._note_service,
+                self._highlight_service,
+                self._student_service,
+                session_id,
+                parent=self
+            )
+            if dialog.exec() == SessionDetailDialog.DialogCode.Accepted:
+                self._load_sessions()
+                self.session_updated.emit()
+        except Exception as e:
+            logger.exception(f"Error opening session detail: {e}")
+            QMessageBox.critical(self, "Error", f"Could not open session: {str(e)}")
 
     def refresh(self) -> None:
-        """External refresh."""
+        """External refresh method."""
         if self._class_id:
             self._load_sessions()

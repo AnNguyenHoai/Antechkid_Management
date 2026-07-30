@@ -121,6 +121,14 @@ class SessionDialog(QDialog):
         actual_date = self.actual_date_edit.date().toPython() if self.actual_date_edit.date().isValid() else None
         status = self.status_combo.currentText()
 
+        # Validate
+        if not title:
+            QMessageBox.warning(self, "Validation Error", "Title is required.")
+            return
+        if scheduled_date is None:
+            QMessageBox.warning(self, "Validation Error", "Scheduled date is required.")
+            return
+
         try:
             if self._is_edit:
                 self._service.update_session(
@@ -145,4 +153,4 @@ class SessionDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", str(e))
         except Exception as e:
             logger.exception("Error saving session")
-            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")

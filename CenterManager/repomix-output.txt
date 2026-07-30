@@ -85,7 +85,7 @@ docs/
 migrations/
   versions/
     __init__.py
-    d052696b6a84_initial_schema.py
+    40a7ffec9940_initial_schema.py
   env.py
   README
   script.py.mako
@@ -211,6 +211,7 @@ src/
         rating_widget.py
       class_workspace/
         class_assignment_dialog.py
+        class_dashboard_page.py
         class_detail_page.py
         class_enrollment_dialog.py
         class_form_dialog.py
@@ -287,6 +288,7 @@ src/
         summary_widget.py
       teacher_workspace/
         teacher_assignment_dialog.py
+        teacher_dashboard_page.py
         teacher_detail_page.py
         teacher_documents_widget.py
         teacher_form_dialog.py
@@ -297,7 +299,6 @@ src/
         timeline_card.py
         timeline_widget.py
       __init__.py
-      home_page.py
       login_dialog.py
       main_window.py
       permission_helpers.py
@@ -16021,13 +16022,13 @@ File: migrations/versions/__init__.py
 
 
 ================
-File: migrations/versions/d052696b6a84_initial_schema.py
+File: migrations/versions/40a7ffec9940_initial_schema.py
 ================
 """initial_schema
 
-Revision ID: d052696b6a84
+Revision ID: 40a7ffec9940
 Revises: 
-Create Date: 2026-07-30 12:05:06.910370
+Create Date: 2026-07-30 13:52:17.663663
 
 """
 from typing import Sequence, Union
@@ -16037,7 +16038,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd052696b6a84'
+revision: str = '40a7ffec9940'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -16345,6 +16346,8 @@ def upgrade() -> None:
     sa.Column('difficulties', sa.Text(), nullable=True),
     sa.Column('next_plan', sa.Text(), nullable=True),
     sa.Column('remark', sa.Text(), nullable=True),
+    sa.Column('lesson_content', sa.Text(), nullable=True),
+    sa.Column('homework', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
@@ -18561,6 +18564,10 @@ class SessionNote(Base, TimestampMixin):
     difficulties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     next_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # NEW FIELDS
+    lesson_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    homework: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     session: Mapped[Session] = relationship("Session", back_populates="note")
@@ -20481,6 +20488,7 @@ from centermanager.models.class_ import Class
 from centermanager.models.class_timeline_event import ClassTimelineEventType
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.class_repository import ClassRepository
+from centermanager.repositories.enrollment_repository import EnrollmentRepository   # <--- thêm dòng này
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.exceptions import (
     StudentServiceError,
@@ -20955,29 +20963,24 @@ File: src/centermanager/services/home_dashboard_service.py
 ================
 # -*- coding: utf-8 -*-
 """
-HomeDashboardService - provides aggregated data for Home Workspace (Command Center).
+HomeDashboardService - provides aggregated data for Home Workspace (Workspace Launcher).
+Now simplified: only provides workspace summaries for the launcher.
 """
 import logging
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.student import Student
-from centermanager.models.timeline_event import TimelineEvent
-from centermanager.models.assessment import Assessment
 from centermanager.models.parent import Parent
+from centermanager.models.assessment import Assessment
 from centermanager.models.class_ import Class
 from centermanager.models.session import Session
 from centermanager.models.teacher import Teacher
-from centermanager.models.user import User
 from centermanager.repositories.student_repository import StudentRepository
-from centermanager.repositories.timeline_repository import TimelineRepository
-from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.parent_repository import ParentRepository
-from centermanager.repositories.session_repository import SessionRepository
-from centermanager.core.config import get_config
+from centermanager.repositories.assessment_repository import AssessmentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20989,39 +20992,10 @@ class WorkspaceSummary:
     icon: str
     description: str
     summary_text: str
-    health_status: str
+    health_status: str          # "good", "warning", "critical"
     health_details: str
     quick_action_label: str
     quick_action_target: str
-
-
-@dataclass
-class RecentActivity:
-    workspace_id: str
-    icon: str
-    title: str
-    student_name: str
-    student_code: str
-    time: datetime
-    activity_type: str
-
-
-@dataclass
-class TodaySummary:
-    today_classes: int
-    today_assessments: int
-    today_birthdays: List[str]
-    pending_tasks: List[str]
-    upcoming_sessions: int
-
-
-@dataclass
-class SystemStatus:
-    database_status: str
-    version: str
-    last_backup: str
-    current_user: str
-    environment: str
 
 
 class HomeDashboardService:
@@ -21045,6 +21019,7 @@ class HomeDashboardService:
                     students_without_parent += 1
                 if not assessment_repo.get_by_student(s.id):
                     students_without_assessment += 1
+
             health_status = "good"
             health_details = ""
             if students_without_parent > 0 or students_without_assessment > 0:
@@ -21055,7 +21030,9 @@ class HomeDashboardService:
                 if students_without_assessment > 0:
                     parts.append(f"{students_without_assessment} no assessment")
                 health_details = "; ".join(parts)
+
             summary_text = f"{total_students} students, {parent_count} parents, {assessment_count} assessments"
+
             student_ws = WorkspaceSummary(
                 workspace_id="student",
                 name="Student Workspace",
@@ -21071,6 +21048,7 @@ class HomeDashboardService:
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
             teacher_count = session.query(Teacher).count()
+
             teacher_ws = WorkspaceSummary(
                 workspace_id="teacher",
                 name="Teacher Workspace",
@@ -21095,6 +21073,7 @@ class HomeDashboardService:
                 quick_action_target="class"
             )
 
+            # Finance placeholder (always visible but no data yet)
             finance_ws = WorkspaceSummary(
                 workspace_id="finance",
                 name="Finance Workspace",
@@ -21108,97 +21087,6 @@ class HomeDashboardService:
             )
 
             return [student_ws, teacher_ws, class_ws, finance_ws]
-
-    def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
-        try:
-            with self._session_factory() as session:
-                events = session.query(TimelineEvent).order_by(
-                    TimelineEvent.created_at.desc()
-                ).limit(limit).all()
-                activities = []
-                for ev in events:
-                    student = ev.student
-                    workspace_id = "student"
-                    icon_map = {
-                        "StudentCreated": "🌟",
-                        "StudentUpdated": "✏️",
-                        "ParentAdded": "👨‍👩‍👧",
-                        "ParentUpdated": "✏️",
-                        "ParentDeleted": "🗑️",
-                        "AssessmentCreated": "📊",
-                        "AssessmentUpdated": "✏️",
-                        "AssessmentDeleted": "🗑️",
-                        "ProductAdded": "📁",
-                        "AttachmentAdded": "📎",
-                        "System": "⚙️",
-                    }
-                    icon = icon_map.get(ev.event_type, "📌")
-                    activities.append(RecentActivity(
-                        workspace_id=workspace_id,
-                        icon=icon,
-                        title=ev.title,
-                        student_name=student.full_name if student else "Unknown",
-                        student_code=student.student_code if student else "",
-                        time=ev.created_at,
-                        activity_type=ev.event_type
-                    ))
-                return activities
-        except Exception as e:
-            logger.exception("Failed to get recent activities")
-            return []
-
-    def get_today_summary(self) -> TodaySummary:
-        today = date.today()
-        with self._session_factory() as session:
-            today_sessions = session.query(Session).filter(
-                Session.scheduled_date == today,
-                Session.status == "Scheduled"
-            ).count()
-            today_assessments = session.query(Assessment).filter(
-                Assessment.assessment_date == today
-            ).count()
-            students = session.query(Student).all()
-            birthdays = []
-            for s in students:
-                if s.date_of_birth and s.date_of_birth.month == today.month and s.date_of_birth.day == today.day:
-                    birthdays.append(s.full_name)
-            week_later = today + timedelta(days=7)
-            upcoming = session.query(Session).filter(
-                Session.scheduled_date > today,
-                Session.scheduled_date <= week_later,
-                Session.status == "Scheduled"
-            ).count()
-
-            student_repo = StudentRepository(session)
-            parent_repo = ParentRepository(session)
-            assessment_repo = AssessmentRepository(session)
-            pending = []
-            active_students = student_repo.list_active()
-            for s in active_students:
-                if not parent_repo.get_by_student(s.id):
-                    pending.append(f"{s.full_name} missing parent")
-                elif not assessment_repo.get_by_student(s.id):
-                    pending.append(f"{s.full_name} no assessment")
-            pending_tasks = pending[:5]
-
-            return TodaySummary(
-                today_classes=today_sessions,
-                today_assessments=today_assessments,
-                today_birthdays=birthdays,
-                pending_tasks=pending_tasks,
-                upcoming_sessions=upcoming
-            )
-
-    def get_system_status(self) -> SystemStatus:
-        config = get_config()
-        version = config.get("application.version", "0.1.0")
-        return SystemStatus(
-            database_status="Online",
-            version=version,
-            last_backup="Never",
-            current_user="Admin",
-            environment="Development"
-        )
 
 ================
 File: src/centermanager/services/parent_service.py
@@ -21673,6 +21561,8 @@ class SessionNoteService:
         difficulties: Optional[str] = None,
         next_plan: Optional[str] = None,
         remark: Optional[str] = None,
+        lesson_content: Optional[str] = None,
+        homework: Optional[str] = None,
     ) -> SessionNote:
         # Validate session exists and is COMPLETED
         try:
@@ -21698,6 +21588,8 @@ class SessionNoteService:
             norm_difficulties = self._normalize_text(difficulties)
             norm_next_plan = self._normalize_text(next_plan)
             norm_remark = self._normalize_text(remark)
+            norm_lesson_content = self._normalize_text(lesson_content)
+            norm_homework = self._normalize_text(homework)
 
             note = SessionNote(
                 session_id=session_id,
@@ -21706,6 +21598,8 @@ class SessionNoteService:
                 difficulties=norm_difficulties,
                 next_plan=norm_next_plan,
                 remark=norm_remark,
+                lesson_content=norm_lesson_content,
+                homework=norm_homework,
             )
             repo.add(note)
             db_session.commit()
@@ -21725,6 +21619,8 @@ class SessionNoteService:
         difficulties: Optional[str] = None,
         next_plan: Optional[str] = None,
         remark: Optional[str] = None,
+        lesson_content: Optional[str] = None,
+        homework: Optional[str] = None,
     ) -> SessionNote:
         with self._session_factory() as db_session:
             repo = SessionNoteRepository(db_session)
@@ -21770,6 +21666,22 @@ class SessionNoteService:
                     changed.append(f"remark: '{old}' -> '{new}'")
                 note.remark = new_val
 
+            if lesson_content is not None:
+                new_val = self._normalize_text(lesson_content)
+                old = note.lesson_content or "(none)"
+                new = new_val or "(none)"
+                if old != new:
+                    changed.append(f"lesson_content: '{old}' -> '{new}'")
+                note.lesson_content = new_val
+
+            if homework is not None:
+                new_val = self._normalize_text(homework)
+                old = note.homework or "(none)"
+                new = new_val or "(none)"
+                if old != new:
+                    changed.append(f"homework: '{old}' -> '{new}'")
+                note.homework = new_val
+
             if not changed:
                 return note
 
@@ -21800,6 +21712,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.session import Session, SessionStatus
 from centermanager.repositories.session_repository import SessionRepository
+from centermanager.repositories.class_repository import ClassRepository
 
 
 class SessionServiceError(Exception):
@@ -21840,6 +21753,13 @@ class SessionService:
         actual_date: Optional[date] = None,
         teacher_id: Optional[int] = None,
     ) -> Session:
+        # Validate class exists
+        with self._session_factory() as session:
+            class_repo = ClassRepository(session)
+            class_obj = class_repo.get_by_id(class_id)
+            if class_obj is None:
+                raise SessionValidationError(f"Class with id {class_id} not found.")
+
         norm_title = self._normalize_text(title)
         if not norm_title:
             raise SessionValidationError("Title is required.")
@@ -21869,6 +21789,8 @@ class SessionService:
             session.commit()
             session.refresh(session_obj)
             return session_obj
+
+    # ... các phương thức khác giữ nguyên ...
 
     def get_session(self, session_id: int) -> Session:
         with self._session_factory() as session:
@@ -24723,6 +24645,204 @@ class ClassAssignmentDialog(QDialog):
             QMessageBox.warning(self, "Error", str(e))
 
 ================
+File: src/centermanager/ui/class_workspace/class_dashboard_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+ClassDashboardPage - Dashboard for Class Workspace.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
+    QLabel, QSizePolicy, QListWidget, QListWidgetItem
+)
+
+from centermanager.services.class_service import ClassService
+from centermanager.services.session_service import SessionService
+from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.ui.shared import StatisticGrid, SectionHeader, EmptyState, ActivityCard
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+
+logger = logging.getLogger(__name__)
+
+
+class ClassDashboardPage(QWidget):
+    def __init__(
+        self,
+        class_service: ClassService,
+        session_service: SessionService,
+        timeline_service: ClassTimelineService,  # <-- thêm
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._class_service = class_service
+        self._session_service = session_service
+        self._timeline_service = timeline_service
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"background: {COLORS['background']};")
+
+        container = QWidget()
+        container.setStyleSheet(f"background: {COLORS['background']};")
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
+
+        # Stats grid
+        self.stats_grid = StatisticGrid()
+        container_layout.addWidget(self.stats_grid)
+
+        # Upcoming sessions
+        upcoming_section = QWidget()
+        upcoming_layout = QVBoxLayout(upcoming_section)
+        upcoming_layout.setContentsMargins(0, 0, 0, 0)
+        upcoming_layout.setSpacing(SPACING['sm'])
+        upcoming_header = SectionHeader("Upcoming Sessions")
+        upcoming_layout.addWidget(upcoming_header)
+        self.upcoming_label = QLabel("Loading...")
+        self.upcoming_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
+        upcoming_layout.addWidget(self.upcoming_label)
+        container_layout.addWidget(upcoming_section)
+
+        # Recent Activities
+        recent_section = QWidget()
+        recent_layout = QVBoxLayout(recent_section)
+        recent_layout.setContentsMargins(0, 0, 0, 0)
+        recent_layout.setSpacing(SPACING['sm'])
+        recent_header = SectionHeader("Recent Activities")
+        recent_layout.addWidget(recent_header)
+
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.recent_list.setMaximumHeight(340)
+        recent_layout.addWidget(self.recent_list)
+        container_layout.addWidget(recent_section)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+    def refresh(self) -> None:
+        try:
+            classes = self._class_service.list_classes()
+            total = len(classes)
+            active = sum(1 for c in classes if c.is_active)
+            total_students = sum(c.student_count for c in classes)
+            upcoming_sessions = 0
+            from datetime import date, timedelta
+            today = date.today()
+            week_later = today + timedelta(days=7)
+            for cls in classes:
+                sessions = self._session_service.get_sessions_for_class(cls.id)
+                upcoming_sessions += sum(1 for s in sessions if today <= s.scheduled_date <= week_later and s.status == "Scheduled")
+
+            self.stats_grid.set_metrics([
+                {"icon": "📚", "label": "Total Classes", "value": str(total)},
+                {"icon": "✅", "label": "Active Classes", "value": str(active)},
+                {"icon": "👨‍🎓", "label": "Total Students", "value": str(total_students)},
+                {"icon": "📅", "label": "Upcoming Sessions (7d)", "value": str(upcoming_sessions)},
+            ])
+
+            self.upcoming_label.setText(f"{upcoming_sessions} sessions scheduled in the next 7 days.")
+
+            # Recent activities from class timeline
+            self._refresh_recent_activities()
+
+        except Exception as e:
+            logger.exception("Failed to refresh class dashboard")
+            self.stats_grid.set_metrics([
+                {"icon": "📚", "label": "Total Classes", "value": "0"},
+                {"icon": "✅", "label": "Active Classes", "value": "0"},
+                {"icon": "👨‍🎓", "label": "Total Students", "value": "0"},
+                {"icon": "📅", "label": "Upcoming Sessions (7d)", "value": "0"},
+            ])
+            self.upcoming_label.setText("Unable to load data.")
+
+    def _refresh_recent_activities(self) -> None:
+        self.recent_list.clear()
+        try:
+            # Lấy tất cả các lớp và lấy timeline events từ mỗi lớp (giới hạn 5 events mỗi lớp)
+            classes = self._class_service.list_classes()
+            all_events = []
+            for cls in classes:
+                events = self._timeline_service.get_class_timeline(cls.id, limit=5)
+                for ev in events:
+                    all_events.append({
+                        'time': ev.created_at,
+                        'title': ev.title,
+                        'description': ev.description or '',
+                        'class_name': cls.name,
+                        'event_type': ev.event_type
+                    })
+            # Sắp xếp theo thời gian giảm dần và lấy 10 mới nhất
+            all_events.sort(key=lambda x: x['time'], reverse=True)
+            recent = all_events[:10]
+
+            if recent:
+                for ev in recent:
+                    icon_map = {
+                        "ClassCreated": "📚",
+                        "ClassUpdated": "✏️",
+                        "ClassArchived": "🗑️",
+                        "ClassRestored": "🔄",
+                        "TeacherAssigned": "👨‍🏫",
+                        "TeacherReplaced": "🔄",
+                        "TeacherRemoved": "❌",
+                        "StudentEnrolled": "👨‍🎓",
+                        "StudentRemoved": "🚫",
+                        "ScheduleUpdated": "📅",
+                    }
+                    icon = icon_map.get(ev['event_type'], "📌")
+                    subtitle = f"Class: {ev['class_name']}"
+                    card = ActivityCard(
+                        icon=icon,
+                        title=ev['title'],
+                        subtitle=subtitle,
+                        time=ev['time']
+                    )
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(card.sizeHint())
+                    self.recent_list.addItem(list_item)
+                    self.recent_list.setItemWidget(list_item, card)
+            else:
+                empty = EmptyState(
+                    icon="📭",
+                    title="No recent activities",
+                    description="Activities will appear here when classes are updated."
+                )
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, empty)
+        except Exception as e:
+            logger.exception("Failed to load recent activities")
+            error_item = QListWidgetItem("⚠️ Unable to load activities")
+            self.recent_list.addItem(error_item)
+
+================
 File: src/centermanager/ui/class_workspace/class_detail_page.py
 ================
 # -*- coding: utf-8 -*-
@@ -24744,6 +24864,10 @@ from centermanager.models.student import Student
 from centermanager.services.class_service import ClassService
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.session_service import SessionService
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
@@ -24752,8 +24876,8 @@ from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
+from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
-
 
 logger = logging.getLogger(__name__)
 
@@ -24767,12 +24891,20 @@ class ClassDetailPage(QWidget):
         class_service: ClassService,
         assignment_service: TeacherAssignmentService,
         timeline_service: ClassTimelineService,
+        session_service: SessionService,
+        note_service: SessionNoteService,
+        highlight_service: StudentHighlightService,
+        student_service: StudentService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._student_service = student_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -24871,10 +25003,33 @@ class ClassDetailPage(QWidget):
         self.student_section.layout().addWidget(self.student_container)
         container_layout.addWidget(self.student_section)
 
-        # Schedule
-        self.schedule_widget = ClassScheduleWidget()
-        schedule_section = self._create_section("📅 Weekly Schedule")
-        schedule_section.layout().addWidget(self.schedule_widget)
+        # Schedule + Assessment with Add button
+        schedule_section = QWidget()
+        schedule_layout = QVBoxLayout(schedule_section)
+        schedule_layout.setContentsMargins(0, 0, 0, 0)
+        schedule_layout.setSpacing(SPACING['xs'])
+        
+        # Header with Add button
+        schedule_header = QHBoxLayout()
+        title_label = QLabel("📅 Weekly Schedule & Assessment")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
+        schedule_header.addWidget(title_label)
+        schedule_header.addStretch()
+        self.add_session_btn = PrimaryButton("+ Add Session")
+        self.add_session_btn.setFixedHeight(30)
+        self.add_session_btn.clicked.connect(self._on_add_session)
+        schedule_header.addWidget(self.add_session_btn)
+        schedule_layout.addLayout(schedule_header)
+        schedule_layout.addWidget(self._divider())
+        
+        self.schedule_widget = ClassScheduleWidget(
+            self._session_service,
+            self._note_service,
+            self._highlight_service,
+            self._student_service
+        )
+        self.schedule_widget.session_updated.connect(self._on_data_changed)
+        schedule_layout.addWidget(self.schedule_widget)
         container_layout.addWidget(schedule_section)
 
         # Timeline
@@ -24925,6 +25080,7 @@ class ClassDetailPage(QWidget):
         self.student_section.setVisible(False)
         self.schedule_widget.setVisible(False)
         self.timeline_widget.setVisible(False)
+        self.add_session_btn.setVisible(False)
 
     def _show_detail(self) -> None:
         self.profile_widget.setVisible(True)
@@ -24933,6 +25089,7 @@ class ClassDetailPage(QWidget):
         self.student_section.setVisible(True)
         self.schedule_widget.setVisible(True)
         self.timeline_widget.setVisible(True)
+        self.add_session_btn.setVisible(True)
 
     def load_class(self, class_id: int) -> None:
         try:
@@ -24947,7 +25104,7 @@ class ClassDetailPage(QWidget):
 
     def _populate(self, class_obj: Class) -> None:
         self.name_label.setText(class_obj.name)
-        self.code_label.setText(class_obj.name)  # or use a generated code if added
+        self.code_label.setText(class_obj.name)
         self.status_badge.set_status(class_obj.status or "")
         self.course_label.setText(f"Course: {class_obj.course or '-'}")
         self.students_label.setText(f"{class_obj.student_count} students")
@@ -25101,6 +25258,31 @@ class ClassDetailPage(QWidget):
                 self.class_updated.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def _on_add_session(self) -> None:
+        """Open dialog to add a new session."""
+        if self._current_class_id is None:
+            QMessageBox.warning(self, "Error", "No class selected.")
+            return
+        logger.info(f"Opening Add Session dialog for class {self._current_class_id}")
+        try:
+            dialog = SessionDialog(
+                self._session_service,
+                self._current_class_id,
+                parent=self
+            )
+            if dialog.exec() == SessionDialog.DialogCode.Accepted:
+                logger.info("Session added successfully, refreshing schedule.")
+                self.schedule_widget.refresh()
+                if self._current_class_id:
+                    events = self._timeline_service.get_class_timeline(self._current_class_id)
+                    self.timeline_widget.set_events(events)
+                self.class_updated.emit()
+            else:
+                logger.info("Session dialog cancelled.")
+        except Exception as e:
+            logger.exception("Error adding session")
+            QMessageBox.critical(self, "Error", f"Could not add session: {str(e)}")
 
     def _on_data_changed(self) -> None:
         if self._current_class_id:
@@ -25703,30 +25885,47 @@ File: src/centermanager/ui/class_workspace/class_schedule_widget.py
 ================
 # -*- coding: utf-8 -*-
 """
-ClassScheduleWidget - display weekly schedule for a class.
-Currently displays sessions, future will support full weekly schedule.
+ClassScheduleWidget - display weekly schedule with assessment view.
 """
 import logging
 from typing import Optional, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+    QMessageBox
 )
 
+from centermanager.models.session import Session
 from centermanager.services.session_service import SessionService
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_service import StudentService
+from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
 
 logger = logging.getLogger(__name__)
 
 
 class ClassScheduleWidget(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    session_updated = Signal()
+
+    def __init__(
+        self,
+        session_service: SessionService,
+        note_service: SessionNoteService,
+        highlight_service: StudentHighlightService,
+        student_service: StudentService,
+        parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
-        self._session_service = None
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._student_service = student_service
         self._class_id: Optional[int] = None
+        self._sessions: List[Session] = []
+
         self._setup_ui()
         self._show_empty()
 
@@ -25735,14 +25934,23 @@ class ClassScheduleWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
+        # Table: Session, Date, Topic, Assessment Status, Actions
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Session", "Date", "Topic"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels([
+            "Session", "Date", "Topic", "Assessment", "Actions"
+        ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
+
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh Schedule")
+        refresh_btn.clicked.connect(self.refresh)
+        layout.addWidget(refresh_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
     def set_class(self, class_id: int) -> None:
         self._class_id = class_id
@@ -25754,31 +25962,77 @@ class ClassScheduleWidget(QWidget):
             return
 
         try:
-            engine = create_production_engine()
-            session_factory = sessionmaker(bind=engine)
-            self._session_service = SessionService(session_factory)
-            sessions = self._session_service.get_sessions_for_class(self._class_id)
-
-            if not sessions:
-                self._show_empty()
-                return
-
-            self.table.setRowCount(len(sessions))
-            for row, sess in enumerate(sessions):
-                self.table.setItem(row, 0, QTableWidgetItem(f"#{sess.session_number}"))
-                self.table.setItem(row, 1, QTableWidgetItem(sess.scheduled_date.strftime("%d/%m/%Y")))
-                self.table.setItem(row, 2, QTableWidgetItem(sess.title))
-            self.table.setVisible(True)
+            self._sessions = self._session_service.get_sessions_for_class(self._class_id)
+            self._update_table()
         except Exception as e:
             logger.exception("Error loading sessions")
             self._show_empty()
+
+    def _update_table(self) -> None:
+        self.table.setRowCount(len(self._sessions))
+        if not self._sessions:
+            self._show_empty()
+            return
+
+        for row, sess in enumerate(self._sessions):
+            # Session number
+            self.table.setItem(row, 0, QTableWidgetItem(f"#{sess.session_number}"))
+            # Date
+            self.table.setItem(row, 1, QTableWidgetItem(sess.scheduled_date.strftime("%d/%m/%Y")))
+            # Topic
+            self.table.setItem(row, 2, QTableWidgetItem(sess.title))
+
+            # Assessment status: check if note exists
+            note = self._note_service.get_note(sess.id)
+            has_highlights = len(self._highlight_service.get_highlights_for_session(sess.id)) > 0
+            status_text = "✅ Has assessment" if note else "❌ No assessment"
+            if note and has_highlights:
+                status_text = "✅ Complete"
+            elif note:
+                status_text = "📝 Note only"
+            elif has_highlights:
+                status_text = "⭐ Highlights only"
+            self.table.setItem(row, 3, QTableWidgetItem(status_text))
+
+            # Actions: View button
+            view_btn = QPushButton("View")
+            view_btn.setFixedWidth(60)
+            view_btn.clicked.connect(lambda checked, sid=sess.id: self._open_session_detail(sid))
+            self.table.setCellWidget(row, 4, view_btn)
+
+        self.table.setVisible(True)
 
     def _show_empty(self) -> None:
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No sessions scheduled"))
         self.table.setItem(0, 1, QTableWidgetItem(""))
         self.table.setItem(0, 2, QTableWidgetItem(""))
+        self.table.setItem(0, 3, QTableWidgetItem(""))
+        self.table.setCellWidget(0, 4, None)
         self.table.setVisible(True)
+
+    def _open_session_detail(self, session_id: int) -> None:
+        logger.info(f"Opening session detail for session {session_id}")
+        try:
+            dialog = SessionDetailDialog(
+                self._session_service,
+                self._note_service,
+                self._highlight_service,
+                self._student_service,
+                session_id,
+                parent=self
+            )
+            if dialog.exec() == SessionDetailDialog.DialogCode.Accepted:
+                self._load_sessions()
+                self.session_updated.emit()
+        except Exception as e:
+            logger.exception(f"Error opening session detail: {e}")
+            QMessageBox.critical(self, "Error", f"Could not open session: {str(e)}")
+
+    def refresh(self) -> None:
+        """External refresh method."""
+        if self._class_id:
+            self._load_sessions()
 
 ================
 File: src/centermanager/ui/class_workspace/class_workspace_shell.py
@@ -25799,6 +26053,7 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.class_workspace.class_list_page import ClassListPage
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
+from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage
 
 
 class ClassWorkspaceShell(QWidget):
@@ -25809,25 +26064,33 @@ class ClassWorkspaceShell(QWidget):
         class_service,
         assignment_service,
         timeline_service,
+        session_service,
+        note_service,
+        highlight_service,
+        student_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._student_service = student_service
 
         self._current_class_id: Optional[int] = None
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("classes")
+        self.navigate_to("dashboard")
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.header = WorkspaceHeader("Class Workspace", "Classes")
+        self.header = WorkspaceHeader("Class Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
         layout.addWidget(self.header)
 
@@ -25836,6 +26099,7 @@ class ClassWorkspaceShell(QWidget):
         body.setSpacing(0)
 
         pages = [
+            {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "classes", "icon": "📚", "label": "Classes"},
         ]
         self.nav = WorkspaceNavigation("Class Workspace", pages)
@@ -25844,6 +26108,14 @@ class ClassWorkspaceShell(QWidget):
 
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Dashboard
+        self.dashboard_page = ClassDashboardPage(
+            self._class_service,
+            self._session_service,
+            self._timeline_service
+        )
+        self.content_stack.addWidget(self.dashboard_page)
 
         # Class List
         self.list_page = ClassListPage(
@@ -25859,6 +26131,10 @@ class ClassWorkspaceShell(QWidget):
             self._class_service,
             self._assignment_service,
             self._timeline_service,
+            self._session_service,
+            self._note_service,
+            self._highlight_service,
+            self._student_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.class_updated.connect(self._on_class_updated)
@@ -25872,7 +26148,12 @@ class ClassWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        if page_id == "classes":
+        if page_id == "dashboard":
+            self.content_stack.setCurrentWidget(self.dashboard_page)
+            self.nav.set_active_page("dashboard")
+            self.header.set_context("Class Workspace", "Dashboard")
+            self.dashboard_page.refresh()
+        elif page_id == "classes":
             self.content_stack.setCurrentWidget(self.list_page)
             self.nav.set_active_page("classes")
             self.header.set_context("Class Workspace", "Classes")
@@ -27344,27 +27625,22 @@ File: src/centermanager/ui/home/home_page.py
 ================
 # -*- coding: utf-8 -*-
 """
-HomePage - Command Center / Workspace Launcher for CenterManager.
-Now with workspace summaries, recent activities, today's summary, and system status.
+HomePage - Workspace Launcher for CenterManager.
+This page only displays workspace cards and allows navigation.
+No business logic or dashboard data is shown here.
 """
 import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
-    QLabel, QFrame, QSizePolicy, QPushButton
+    QWidget, QVBoxLayout, QGridLayout, QScrollArea,
+    QLabel, QFrame, QSizePolicy
 )
 
 from centermanager.services.home_dashboard_service import HomeDashboardService
-from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
-from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
-from centermanager.ui.home.activity_item import ActivityItem
-from centermanager.core.current_user import get_current_user
-from centermanager.services.permission_service import PermissionService
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
+from centermanager.ui.design_system.tokens import COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -27379,18 +27655,11 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
-        self._current_user = get_current_user()
-        
-        # Initialize permission service
-        engine = create_production_engine()
-        session_factory = sessionmaker(bind=engine)
-        self._permission_service = PermissionService(session_factory)
-        
         self._setup_ui()
         self.refresh()
 
     def _setup_ui(self) -> None:
-        self.setStyleSheet("background-color: #f5f7fa;")
+        self.setStyleSheet(f"background-color: {COLORS['background']};")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -27424,7 +27693,7 @@ class HomePage(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         container_layout.addWidget(subtitle)
 
-        container_layout.addSpacing(8)
+        container_layout.addSpacing(16)
 
         # Workspace cards grid
         self.workspace_grid = QGridLayout()
@@ -27432,75 +27701,13 @@ class HomePage(QWidget):
         self.workspace_grid.setContentsMargins(0, 0, 0, 0)
         container_layout.addLayout(self.workspace_grid)
 
-        # Two-column layout for main content
-        main_content = QHBoxLayout()
-        main_content.setSpacing(24)
-
-        # Left column: Recent Activities + Today Summary
-        left_col = QVBoxLayout()
-        left_col.setSpacing(24)
-
-        # Recent Activities
-        self.recent_section = QWidget()
-        recent_layout = QVBoxLayout(self.recent_section)
-        recent_layout.setContentsMargins(0, 0, 0, 0)
-        recent_layout.setSpacing(8)
-        recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
-        recent_layout.addWidget(recent_header)
-        self.recent_container = QWidget()
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(0)
-        recent_layout.addWidget(self.recent_container)
-        left_col.addWidget(self.recent_section)
-
-        # Today Summary
-        self.today_section = QWidget()
-        today_layout = QVBoxLayout(self.today_section)
-        today_layout.setContentsMargins(0, 0, 0, 0)
-        today_layout.setSpacing(8)
-        today_header = SectionHeader("Today's Summary")
-        today_layout.addWidget(today_header)
-        self.today_container = QWidget()
-        self.today_container_layout = QVBoxLayout(self.today_container)
-        self.today_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.today_container_layout.setSpacing(4)
-        today_layout.addWidget(self.today_container)
-        left_col.addWidget(self.today_section)
-
-        left_col.addStretch()
-        main_content.addLayout(left_col, 2)
-
-        # Right column: System Status
-        right_col = QVBoxLayout()
-        right_col.setSpacing(24)
-        self.status_section = QWidget()
-        status_layout = QVBoxLayout(self.status_section)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(8)
-        status_header = SectionHeader("System Status")
-        status_layout.addWidget(status_header)
-        self.status_container = QWidget()
-        self.status_container_layout = QVBoxLayout(self.status_container)
-        self.status_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_container_layout.setSpacing(4)
-        status_layout.addWidget(self.status_container)
-        right_col.addWidget(self.status_section)
-        right_col.addStretch()
-        main_content.addLayout(right_col, 1)
-
-        container_layout.addLayout(main_content)
         container_layout.addStretch()
-
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        """Refresh all dashboard data."""
+        """Refresh workspace cards."""
         self._populate_workspace_cards()
-        self._populate_recent_activities()
-        self._populate_today_summary()
-        self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
         # Clear grid
@@ -27528,71 +27735,6 @@ class HomePage(QWidget):
             if col >= 2:
                 col = 0
                 row += 1
-
-    def _populate_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
-        activities = self._service.get_recent_activities(limit=8)
-        if activities:
-            for act in activities:
-                item = ActivityItem(
-                    icon=act.icon,
-                    title=act.title,
-                    student_name=act.student_name,
-                    student_code=act.student_code,
-                    time=act.time
-                )
-                self.recent_container_layout.addWidget(item)
-        else:
-            empty = EmptyState(
-                icon="📭",
-                title="No recent activities",
-                description="Activities will appear here as you use the system."
-            )
-            self.recent_container_layout.addWidget(empty)
-
-    def _populate_today_summary(self) -> None:
-        self._clear_layout(self.today_container_layout)
-        summary = self._service.get_today_summary()
-        items = [
-            (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
-            (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
-            (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
-            (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
-            (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
-        ]
-        for label, detail in items:
-            widget = QWidget()
-            layout = QHBoxLayout(widget)
-            layout.setContentsMargins(0, 2, 0, 2)
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {COLORS['text_primary']};")
-            detail_w = QLabel(detail)
-            detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
-            layout.addWidget(label_w)
-            layout.addWidget(detail_w)
-            layout.addStretch()
-            self.today_container_layout.addWidget(widget)
-
-    def _populate_system_status(self) -> None:
-        self._clear_layout(self.status_container_layout)
-        status = self._service.get_system_status()
-        items = [
-            (f"🟢 Database: {status.database_status}", ""),
-            (f"📦 Version: {status.version}", ""),
-            (f"💾 Last backup: {status.last_backup}", ""),
-            (f"👤 User: {status.current_user}", ""),
-            (f"🌍 Environment: {status.environment}", ""),
-        ]
-        for label, _ in items:
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
-            self.status_container_layout.addWidget(label_w)
-
-    def _clear_layout(self, layout) -> None:
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
 
     def _on_workspace_clicked(self, workspace_id: str) -> None:
         self.workspace_selected.emit(workspace_id)
@@ -28234,6 +28376,9 @@ class SessionDetailDialog(QDialog):
         btn_layout.addWidget(self.close_btn)
         self.container_layout.addLayout(btn_layout)
 
+        #highlight connection
+        self.highlight_widget.highlight_changed.connect(self._on_highlight_changed)
+        
     def _divider(self) -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -28573,6 +28718,14 @@ class SessionDialog(QDialog):
         actual_date = self.actual_date_edit.date().toPython() if self.actual_date_edit.date().isValid() else None
         status = self.status_combo.currentText()
 
+        # Validate
+        if not title:
+            QMessageBox.warning(self, "Validation Error", "Title is required.")
+            return
+        if scheduled_date is None:
+            QMessageBox.warning(self, "Validation Error", "Scheduled date is required.")
+            return
+
         try:
             if self._is_edit:
                 self._service.update_session(
@@ -28597,7 +28750,7 @@ class SessionDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", str(e))
         except Exception as e:
             logger.exception("Error saving session")
-            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
 
 ================
 File: src/centermanager/ui/session/session_list.py
@@ -28792,7 +28945,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, QPlainTextEdit,
-    QPushButton, QHBoxLayout, QLabel, QFrame, QMessageBox
+    QPushButton, QHBoxLayout, QLabel, QFrame, QMessageBox,
+    QStackedWidget  # <-- IMPORT THÊM
 )
 
 from centermanager.models.session_note import TeachingProgress, ClassAtmosphere, SessionNote
@@ -28897,6 +29051,18 @@ class SessionNoteWidget(QWidget):
         self.remark_edit.setMaximumHeight(80)
         self.form.addRow("Remark", self.remark_edit)
 
+        # NEW: Lesson Content
+        self.lesson_content_edit = QPlainTextEdit()
+        self.lesson_content_edit.setPlaceholderText("Lesson content (optional)")
+        self.lesson_content_edit.setMaximumHeight(80)
+        self.form.addRow("Lesson Content", self.lesson_content_edit)
+
+        # NEW: Homework
+        self.homework_edit = QPlainTextEdit()
+        self.homework_edit.setPlaceholderText("Homework (optional)")
+        self.homework_edit.setMaximumHeight(80)
+        self.form.addRow("Homework", self.homework_edit)
+
         form_layout.addLayout(self.form)
 
         # Buttons
@@ -28909,7 +29075,7 @@ class SessionNoteWidget(QWidget):
         self.delete_btn.setVisible(False)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setFixedWidth(80)
-        self.cancel_btn.clicked.connect(self._load_note)  # reload to return to summary
+        self.cancel_btn.clicked.connect(self._load_note)
         btn_layout.addStretch()
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
@@ -28921,7 +29087,6 @@ class SessionNoteWidget(QWidget):
         self.save_btn.clicked.connect(self._save)
         self.delete_btn.clicked.connect(self._delete)
 
-        # Default: show empty
         self.stacked.setCurrentIndex(0)
 
     def _load_note(self) -> None:
@@ -28932,15 +29097,14 @@ class SessionNoteWidget(QWidget):
                 self._is_edit_mode = True
                 self._populate_form(self._note)
                 self.delete_btn.setVisible(True)
-                self.stacked.setCurrentIndex(1)  # show form
+                self.stacked.setCurrentIndex(1)
             else:
                 self._is_edit_mode = False
                 self._clear_form()
                 self.delete_btn.setVisible(False)
-                self.stacked.setCurrentIndex(0)  # show empty
+                self.stacked.setCurrentIndex(0)
         except Exception as e:
             logger.exception("Error loading session note")
-            # Show empty state with error message?
             self.stacked.setCurrentIndex(0)
 
     def _populate_form(self, note: SessionNote) -> None:
@@ -28953,6 +29117,8 @@ class SessionNoteWidget(QWidget):
         self.difficulties_edit.setPlainText(note.difficulties or "")
         self.next_plan_edit.setPlainText(note.next_plan or "")
         self.remark_edit.setPlainText(note.remark or "")
+        self.lesson_content_edit.setPlainText(note.lesson_content or "")
+        self.homework_edit.setPlainText(note.homework or "")
 
     def _clear_form(self) -> None:
         self.teaching_combo.setCurrentIndex(0)
@@ -28960,6 +29126,8 @@ class SessionNoteWidget(QWidget):
         self.difficulties_edit.clear()
         self.next_plan_edit.clear()
         self.remark_edit.clear()
+        self.lesson_content_edit.clear()
+        self.homework_edit.clear()
 
     def _show_form(self) -> None:
         self._clear_form()
@@ -28973,6 +29141,8 @@ class SessionNoteWidget(QWidget):
         difficulties = self.difficulties_edit.toPlainText().strip() or None
         next_plan = self.next_plan_edit.toPlainText().strip() or None
         remark = self.remark_edit.toPlainText().strip() or None
+        lesson_content = self.lesson_content_edit.toPlainText().strip() or None
+        homework = self.homework_edit.toPlainText().strip() or None
 
         try:
             if self._is_edit_mode and self._note:
@@ -28983,6 +29153,8 @@ class SessionNoteWidget(QWidget):
                     difficulties=difficulties,
                     next_plan=next_plan,
                     remark=remark,
+                    lesson_content=lesson_content,
+                    homework=homework,
                 )
                 QMessageBox.information(self, "Success", "Teaching Note updated.")
             else:
@@ -28993,11 +29165,12 @@ class SessionNoteWidget(QWidget):
                     difficulties=difficulties,
                     next_plan=next_plan,
                     remark=remark,
+                    lesson_content=lesson_content,
+                    homework=homework,
                 )
                 QMessageBox.information(self, "Success", "Teaching Note created.")
                 self._is_edit_mode = True
 
-            # Refresh to show note
             self._load_note()
             self.note_saved.emit()
         except SessionNoteValidationError as e:
@@ -31435,9 +31608,25 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
+        # ---- KPI stats ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
+        # ---- Today Summary ----
+        self.today_section = QWidget()
+        today_layout = QVBoxLayout(self.today_section)
+        today_layout.setContentsMargins(0, 0, 0, 0)
+        today_layout.setSpacing(SPACING['sm'])
+        today_header = SectionHeader("Today's Summary")
+        today_layout.addWidget(today_header)
+        self.today_container = QWidget()
+        self.today_container_layout = QVBoxLayout(self.today_container)
+        self.today_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.today_container_layout.setSpacing(SPACING['xs'])
+        today_layout.addWidget(self.today_container)
+        container_layout.addWidget(self.today_section)
+
+        # ---- Quick Insights ----
         self.insights_section = QWidget()
         insights_layout = QVBoxLayout(self.insights_section)
         insights_layout.setContentsMargins(0, 0, 0, 0)
@@ -31448,6 +31637,7 @@ class StudentDashboardPage(QWidget):
         insights_layout.addWidget(self.insights_grid)
         container_layout.addWidget(self.insights_section)
 
+        # ---- Need Attention ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -31461,6 +31651,7 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
+        # ---- Upcoming Events ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -31485,6 +31676,7 @@ class StudentDashboardPage(QWidget):
         events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
+        # ---- Recent Activities ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -31509,6 +31701,7 @@ class StudentDashboardPage(QWidget):
         recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
+        # ---- Quick Actions ----
         actions_section = QWidget()
         actions_layout = QHBoxLayout(actions_section)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -31537,6 +31730,7 @@ class StudentDashboardPage(QWidget):
     def refresh(self) -> None:
         try:
             self._refresh_kpis()
+            self._refresh_today_summary()
             self._refresh_insights()
             self._refresh_attention()
             self._refresh_events()
@@ -31555,6 +31749,32 @@ class StudentDashboardPage(QWidget):
             ])
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
+
+    def _refresh_today_summary(self) -> None:
+        self._clear_layout(self.today_container_layout)
+        try:
+            summary = self._service.get_today_summary()
+            items = [
+                (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
+                (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
+                (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
+                (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
+                (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
+            ]
+            for label, detail in items:
+                widget = QWidget()
+                layout = QHBoxLayout(widget)
+                layout.setContentsMargins(0, 2, 0, 2)
+                label_w = QLabel(label)
+                label_w.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {COLORS['text_primary']};")
+                detail_w = QLabel(detail)
+                detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
+                layout.addWidget(label_w)
+                layout.addWidget(detail_w)
+                layout.addStretch()
+                self.today_container_layout.addWidget(widget)
+        except Exception as e:
+            logger.exception("Failed to load today summary")
 
     def _refresh_insights(self) -> None:
         try:
@@ -34640,6 +34860,177 @@ class TeacherAssignmentDialog(QDialog):
         self._update_lists()
 
 ================
+File: src/centermanager/ui/teacher_workspace/teacher_dashboard_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDashboardPage - Dashboard for Teacher Workspace.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
+    QLabel, QSizePolicy, QListWidget, QListWidgetItem
+)
+
+from centermanager.services.teacher_service import TeacherService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.ui.shared import StatisticGrid, SectionHeader, EmptyState, ActivityCard
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+
+logger = logging.getLogger(__name__)
+
+
+class TeacherDashboardPage(QWidget):
+    def __init__(
+        self,
+        teacher_service: TeacherService,
+        assignment_service: TeacherAssignmentService,
+        timeline_service: TeacherTimelineService,  # <-- thêm
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._teacher_service = teacher_service
+        self._assignment_service = assignment_service
+        self._timeline_service = timeline_service
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"background: {COLORS['background']};")
+
+        container = QWidget()
+        container.setStyleSheet(f"background: {COLORS['background']};")
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
+
+        # Stats grid
+        self.stats_grid = StatisticGrid()
+        container_layout.addWidget(self.stats_grid)
+
+        # Recent Activities
+        recent_section = QWidget()
+        recent_layout = QVBoxLayout(recent_section)
+        recent_layout.setContentsMargins(0, 0, 0, 0)
+        recent_layout.setSpacing(SPACING['sm'])
+        recent_header = SectionHeader("Recent Activities")
+        recent_layout.addWidget(recent_header)
+
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.recent_list.setMaximumHeight(340)
+        recent_layout.addWidget(self.recent_list)
+        container_layout.addWidget(recent_section)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+    def refresh(self) -> None:
+        try:
+            teachers = self._teacher_service.list_teachers()
+            total = len(teachers)
+            active = sum(1 for t in teachers if t.status == "ACTIVE")
+            total_assignments = 0
+            for t in teachers:
+                total_assignments += len(self._assignment_service.get_assigned_classes(t.id))
+
+            self.stats_grid.set_metrics([
+                {"icon": "👨‍🏫", "label": "Total Teachers", "value": str(total)},
+                {"icon": "✅", "label": "Active Teachers", "value": str(active)},
+                {"icon": "📚", "label": "Total Assignments", "value": str(total_assignments)},
+            ])
+
+            self._refresh_recent_activities()
+
+        except Exception as e:
+            logger.exception("Failed to refresh teacher dashboard")
+            self.stats_grid.set_metrics([
+                {"icon": "👨‍🏫", "label": "Total Teachers", "value": "0"},
+                {"icon": "✅", "label": "Active Teachers", "value": "0"},
+                {"icon": "📚", "label": "Total Assignments", "value": "0"},
+            ])
+
+    def _refresh_recent_activities(self) -> None:
+        self.recent_list.clear()
+        try:
+            teachers = self._teacher_service.list_teachers()
+            all_events = []
+            for t in teachers:
+                events = self._timeline_service.get_teacher_timeline(t.id, limit=5)
+                for ev in events:
+                    all_events.append({
+                        'time': ev.created_at,
+                        'title': ev.title,
+                        'description': ev.description or '',
+                        'teacher_name': t.full_name,
+                        'event_type': ev.event_type
+                    })
+            all_events.sort(key=lambda x: x['time'], reverse=True)
+            recent = all_events[:10]
+
+            if recent:
+                for ev in recent:
+                    icon_map = {
+                        "TeacherCreated": "👨‍🏫",
+                        "TeacherUpdated": "✏️",
+                        "TeacherArchived": "🗑️",
+                        "TeacherRestored": "🔄",
+                        "TeacherAssigned": "📚",
+                        "TeacherUnassigned": "🚫",
+                        "DocumentUploaded": "📎",
+                        "DocumentDeleted": "🗑️",
+                    }
+                    icon = icon_map.get(ev['event_type'], "📌")
+                    subtitle = f"Teacher: {ev['teacher_name']}"
+                    card = ActivityCard(
+                        icon=icon,
+                        title=ev['title'],
+                        subtitle=subtitle,
+                        time=ev['time']
+                    )
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(card.sizeHint())
+                    self.recent_list.addItem(list_item)
+                    self.recent_list.setItemWidget(list_item, card)
+            else:
+                empty = EmptyState(
+                    icon="📭",
+                    title="No recent activities",
+                    description="Activities will appear here when teachers are updated."
+                )
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, empty)
+        except Exception as e:
+            logger.exception("Failed to load recent activities")
+            error_item = QListWidgetItem("⚠️ Unable to load activities")
+            self.recent_list.addItem(error_item)
+
+================
 File: src/centermanager/ui/teacher_workspace/teacher_detail_page.py
 ================
 # -*- coding: utf-8 -*-
@@ -34660,13 +35051,11 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.repositories.class_repository import ClassRepository  # <-- sửa
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
-from centermanager.ui.teacher_workspace.teacher_assignment_dialog import TeacherAssignmentDialog
 from centermanager.ui.teacher_workspace.teacher_documents_widget import TeacherDocumentsWidget
 from centermanager.ui.timeline import TimelineWidget
 
@@ -34773,11 +35162,12 @@ class TeacherDetailPage(QWidget):
         ])
         container_layout.addWidget(self.professional_widget)
 
-        # Assigned Classes
+        # Assigned Classes - Read-only (loại bỏ nút "Manage Assignments")
         self.classes_widget = QWidget()
         classes_layout = QVBoxLayout(self.classes_widget)
         classes_layout.setContentsMargins(0, 0, 0, 0)
-        classes_header = SectionHeader("Assigned Classes", action_text="Manage Assignments", action_callback=self._on_manage_assignments)
+        # Chỉ hiển thị tiêu đề, không có nút hành động
+        classes_header = SectionHeader("Assigned Classes")  # Không có action_text
         classes_layout.addWidget(classes_header)
         self.classes_list_label = QLabel("No classes assigned.")
         self.classes_list_label.setWordWrap(True)
@@ -34882,7 +35272,7 @@ class TeacherDetailPage(QWidget):
         self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
         self._field_1.setText(teacher.status or "-")
 
-        # Assigned classes
+        # Assigned classes (read-only)
         if teacher.assigned_classes:
             class_names = [c.name for c in teacher.assigned_classes]
             self.classes_list_label.setText(" • " + "\n • ".join(class_names))
@@ -34901,18 +35291,6 @@ class TeacherDetailPage(QWidget):
             return
         dialog = TeacherFormDialog(self._teacher_service, self._current_teacher_id, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
-            self.load_teacher(self._current_teacher_id)
-            self.teacher_updated.emit()
-
-    def _on_manage_assignments(self) -> None:
-        if self._current_teacher_id is None:
-            return
-        dialog = TeacherAssignmentDialog(
-            self._assignment_service,
-            self._current_teacher_id,
-            parent=self
-        )
-        if dialog.exec() == TeacherAssignmentDialog.DialogCode.Accepted:
             self.load_teacher(self._current_teacher_id)
             self.teacher_updated.emit()
 
@@ -35646,6 +36024,7 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.teacher_workspace.teacher_list_page import TeacherListPage
 from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
+from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage  # <-- import
 
 
 class TeacherWorkspaceShell(QWidget):
@@ -35669,14 +36048,14 @@ class TeacherWorkspaceShell(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("teachers")
+        self.navigate_to("dashboard")  # <-- mặc định dashboard
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.header = WorkspaceHeader("Teacher Workspace", "Teachers")
+        self.header = WorkspaceHeader("Teacher Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
         layout.addWidget(self.header)
 
@@ -35685,6 +36064,7 @@ class TeacherWorkspaceShell(QWidget):
         body.setSpacing(0)
 
         pages = [
+            {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "teachers", "icon": "👨‍🏫", "label": "Teachers"},
         ]
         self.nav = WorkspaceNavigation("Teacher Workspace", pages)
@@ -35693,6 +36073,14 @@ class TeacherWorkspaceShell(QWidget):
 
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Dashboard
+        self.dashboard_page = TeacherDashboardPage(
+            self._teacher_service,
+            self._assignment_service,
+            self._timeline_service
+        )
+        self.content_stack.addWidget(self.dashboard_page)
 
         # Teacher List
         self.list_page = TeacherListPage(
@@ -35723,7 +36111,12 @@ class TeacherWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        if page_id == "teachers":
+        if page_id == "dashboard":
+            self.content_stack.setCurrentWidget(self.dashboard_page)
+            self.nav.set_active_page("dashboard")
+            self.header.set_context("Teacher Workspace", "Dashboard")
+            self.dashboard_page.refresh()
+        elif page_id == "teachers":
             self.content_stack.setCurrentWidget(self.list_page)
             self.nav.set_active_page("teachers")
             self.header.set_context("Teacher Workspace", "Teachers")
@@ -35962,325 +36355,6 @@ File: src/centermanager/ui/__init__.py
 ================
 # -*- coding: utf-8 -*-
 """User interface components."""
-
-================
-File: src/centermanager/ui/home_page.py
-================
-# -*- coding: utf-8 -*-
-"""
-HomePage - Command Center / Workspace Launcher for CenterManager.
-Now with permission-based workspace filtering.
-"""
-import logging
-from typing import Optional, List
-
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
-    QLabel, QFrame, QSizePolicy, QPushButton, QListWidget, QListWidgetItem
-)
-
-from centermanager.services.home_dashboard_service import HomeDashboardService
-from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
-from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
-from centermanager.ui.home.workspace_card import WorkspaceCard
-from centermanager.ui.home.activity_item import ActivityItem
-from centermanager.core.current_user import get_current_user
-from centermanager.services.permission_service import PermissionService
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
-
-logger = logging.getLogger(__name__)
-
-
-class HomePage(QWidget):
-    workspace_selected = Signal(str)
-
-    def __init__(
-        self,
-        home_service: HomeDashboardService,
-        parent: Optional[QWidget] = None
-    ) -> None:
-        super().__init__(parent)
-        self._service = home_service
-        self._current_user = get_current_user()
-        
-        # Initialize permission service
-        engine = create_production_engine()
-        session_factory = sessionmaker(bind=engine)
-        self._permission_service = PermissionService(session_factory)
-        
-        self._setup_ui()
-        self.refresh()
-
-    def _setup_ui(self) -> None:
-        self.setStyleSheet("background-color: #f5f7fa;")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        main_scroll = QScrollArea()
-        main_scroll.setWidgetResizable(True)
-        main_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        main_scroll.setStyleSheet("background: transparent; border: none;")
-
-        container = QWidget()
-        container.setStyleSheet("background: transparent;")
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(40, 40, 40, 40)
-        container_layout.setSpacing(24)
-
-        # Header
-        header = QLabel("🏛️ CenterManager")
-        header.setStyleSheet(f"""
-            font-size: 28px;
-            font-weight: 700;
-            color: {COLORS['primary']};
-        """)
-        header.setAlignment(Qt.AlignCenter)
-        container_layout.addWidget(header)
-
-        subtitle = QLabel("Your education center command center")
-        subtitle.setStyleSheet(f"""
-            font-size: 16px;
-            color: {COLORS['muted']};
-        """)
-        subtitle.setAlignment(Qt.AlignCenter)
-        container_layout.addWidget(subtitle)
-
-        container_layout.addSpacing(8)
-
-        # Workspace cards
-        self.workspace_grid = QGridLayout()
-        self.workspace_grid.setSpacing(16)
-        self.workspace_grid.setContentsMargins(0, 0, 0, 0)
-        container_layout.addLayout(self.workspace_grid)
-
-        # Two-column layout
-        main_content = QHBoxLayout()
-        main_content.setSpacing(24)
-
-        # Left column
-        left_col = QVBoxLayout()
-        left_col.setSpacing(24)
-
-        # ---- Recent Activities using QListWidget ----
-        self.recent_section = QWidget()
-        recent_layout = QVBoxLayout(self.recent_section)
-        recent_layout.setContentsMargins(0, 0, 0, 0)
-        recent_layout.setSpacing(8)
-        recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
-        recent_layout.addWidget(recent_header)
-
-        self.recent_list = QListWidget()
-        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        self.recent_list.setUniformItemSizes(True)
-        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.recent_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
-                background: #ffffff;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 0px;
-                border-bottom: 1px solid #f0f0f0;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #f1f1f1;
-                width: 8px;
-                margin: 0px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #c1c1c1;
-                min-height: 20px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #a8a8a8;
-            }
-        """)
-        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.recent_list.setFixedHeight(400)
-        self.recent_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        recent_layout.addWidget(self.recent_list)
-
-        left_col.addWidget(self.recent_section)
-
-        # Today Summary
-        self.today_section = QWidget()
-        today_layout = QVBoxLayout(self.today_section)
-        today_layout.setContentsMargins(0, 0, 0, 0)
-        today_layout.setSpacing(8)
-        today_header = SectionHeader("Today's Summary")
-        today_layout.addWidget(today_header)
-        self.today_container = QWidget()
-        self.today_container_layout = QVBoxLayout(self.today_container)
-        self.today_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.today_container_layout.setSpacing(4)
-        today_layout.addWidget(self.today_container)
-        left_col.addWidget(self.today_section)
-
-        left_col.addStretch()
-        main_content.addLayout(left_col, 2)
-
-        # Right column: System Status
-        right_col = QVBoxLayout()
-        right_col.setSpacing(24)
-        self.status_section = QWidget()
-        status_layout = QVBoxLayout(self.status_section)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(8)
-        status_header = SectionHeader("System Status")
-        status_layout.addWidget(status_header)
-        self.status_container = QWidget()
-        self.status_container_layout = QVBoxLayout(self.status_container)
-        self.status_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_container_layout.setSpacing(4)
-        status_layout.addWidget(self.status_container)
-        right_col.addWidget(self.status_section)
-        right_col.addStretch()
-        main_content.addLayout(right_col, 1)
-
-        container_layout.addLayout(main_content)
-        container_layout.addStretch()
-
-        main_scroll.setWidget(container)
-        layout.addWidget(main_scroll)
-
-    def refresh(self) -> None:
-        self._populate_workspace_cards()
-        self._populate_recent_activities()
-        self._populate_today_summary()
-        self._populate_system_status()
-
-    def _populate_workspace_cards(self) -> None:
-        """Populate workspace cards with permission filtering."""
-        while self.workspace_grid.count():
-            item = self.workspace_grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        # Get all workspace summaries
-        all_summaries = self._service.get_workspace_summaries()
-
-        # Filter by permission
-        permission_map = {
-            "student": None,  # Always visible
-            "teacher": "teacher.view",
-            "class": "class.view",
-            "finance": "finance.view",
-        }
-
-        filtered_summaries = []
-        for ws in all_summaries:
-            required_perm = permission_map.get(ws.workspace_id)
-            if required_perm is None:
-                filtered_summaries.append(ws)
-            elif self._permission_service.has_permission(required_perm):
-                filtered_summaries.append(ws)
-
-        row, col = 0, 0
-        for ws in filtered_summaries:
-            card = WorkspaceCard(
-                workspace_id=ws.workspace_id,
-                name=ws.name,
-                icon=ws.icon,
-                description=ws.description,
-                summary_text=ws.summary_text,
-                health_status=ws.health_status,
-                health_details=ws.health_details,
-                quick_action_label=ws.quick_action_label,
-            )
-            card.clicked.connect(self._on_workspace_clicked)
-            self.workspace_grid.addWidget(card, row, col)
-            col += 1
-            if col >= 2:
-                col = 0
-                row += 1
-
-    def _populate_recent_activities(self) -> None:
-        self.recent_list.clear()
-        activities = self._service.get_recent_activities(limit=30)
-
-        if activities:
-            for act in activities:
-                item_widget = ActivityItem(
-                    icon=act.icon,
-                    title=act.title,
-                    student_name=act.student_name,
-                    student_code=act.student_code,
-                    time=act.time
-                )
-                item_widget.setFixedHeight(70)
-                list_item = QListWidgetItem()
-                list_item.setSizeHint(QSize(0, 70))
-                self.recent_list.addItem(list_item)
-                self.recent_list.setItemWidget(list_item, item_widget)
-        else:
-            empty = EmptyState(
-                icon="📭",
-                title="No recent activities",
-                description="Activities will appear here as you use the system."
-            )
-            empty.setFixedHeight(200)
-            list_item = QListWidgetItem()
-            list_item.setSizeHint(QSize(0, 200))
-            self.recent_list.addItem(list_item)
-            self.recent_list.setItemWidget(list_item, empty)
-
-        self.recent_list.updateGeometry()
-        self.recent_list.repaint()
-
-    def _populate_today_summary(self) -> None:
-        self._clear_layout(self.today_container_layout)
-        summary = self._service.get_today_summary()
-        items = [
-            (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
-            (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
-            (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
-            (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
-            (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
-        ]
-        for label, detail in items:
-            widget = QWidget()
-            layout = QHBoxLayout(widget)
-            layout.setContentsMargins(0, 2, 0, 2)
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {COLORS['text_primary']};")
-            detail_w = QLabel(detail)
-            detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
-            layout.addWidget(label_w)
-            layout.addWidget(detail_w)
-            layout.addStretch()
-            self.today_container_layout.addWidget(widget)
-
-    def _populate_system_status(self) -> None:
-        self._clear_layout(self.status_container_layout)
-        status = self._service.get_system_status()
-        items = [
-            (f"🟢 Database: {status.database_status}", ""),
-            (f"📦 Version: {status.version}", ""),
-            (f"💾 Last backup: {status.last_backup}", ""),
-            (f"👤 User: {status.current_user}", ""),
-            (f"🌍 Environment: {status.environment}", ""),
-        ]
-        for label, _ in items:
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
-            self.status_container_layout.addWidget(label_w)
-
-    def _clear_layout(self, layout) -> None:
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-    def _on_workspace_clicked(self, workspace_id: str) -> None:
-        self.workspace_selected.emit(workspace_id)
 
 ================
 File: src/centermanager/ui/login_dialog.py
@@ -36567,8 +36641,12 @@ class MainWindow(QMainWindow):
         # Class
         self.class_workspace = ClassWorkspaceShell(
             class_service=class_service,
-            assignment_service=teacher_assignment_service_for_class,
+            assignment_service=teacher_assignment_service,
             timeline_service=class_timeline_service,
+            session_service=session_service,
+            note_service=note_service,
+            highlight_service=highlight_service,
+            student_service=student_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.class_workspace)
@@ -36598,19 +36676,21 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Permission denied: Insufficient access rights")
                 return
 
+        # Chuyển đến workspace và cập nhật navigation
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
+            self.student_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Student Workspace")
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
             self.central_stack.setCurrentWidget(self.teacher_workspace)
+            self.teacher_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Teacher Workspace")
-            self.teacher_workspace.list_page.refresh()
         elif workspace_id == "class":
             self.central_stack.setCurrentWidget(self.class_workspace)
+            self.class_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Class Workspace")
-            self.class_workspace.list_page.refresh()
         elif workspace_id == "finance":
             self.statusBar().showMessage("Finance Workspace coming soon")
         elif workspace_id == "reports":
