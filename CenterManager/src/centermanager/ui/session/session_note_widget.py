@@ -2,6 +2,7 @@
 """
 SessionNoteWidget - form for creating/editing a session note.
 Now with improved empty state and auto-refresh.
+Only keeps Lesson content and Homework fields.
 """
 import logging
 from typing import Optional
@@ -10,7 +11,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, QPlainTextEdit,
     QPushButton, QHBoxLayout, QLabel, QFrame, QMessageBox,
-    QStackedWidget  # <-- IMPORT THÊM
+    QStackedWidget
 )
 
 from centermanager.models.session_note import TeachingProgress, ClassAtmosphere, SessionNote
@@ -97,31 +98,13 @@ class SessionNoteWidget(QWidget):
             self.atmosphere_combo.addItem(val)
         self.form.addRow("Class Atmosphere *", self.atmosphere_combo)
 
-        # Difficulties
-        self.difficulties_edit = QPlainTextEdit()
-        self.difficulties_edit.setPlaceholderText("Difficulties encountered (optional)")
-        self.difficulties_edit.setMaximumHeight(80)
-        self.form.addRow("Difficulties", self.difficulties_edit)
-
-        # Next Plan
-        self.next_plan_edit = QPlainTextEdit()
-        self.next_plan_edit.setPlaceholderText("Plan for next session (optional)")
-        self.next_plan_edit.setMaximumHeight(80)
-        self.form.addRow("Next Plan", self.next_plan_edit)
-
-        # Remark
-        self.remark_edit = QPlainTextEdit()
-        self.remark_edit.setPlaceholderText("Additional remarks (optional)")
-        self.remark_edit.setMaximumHeight(80)
-        self.form.addRow("Remark", self.remark_edit)
-
-        # NEW: Lesson Content
+        # Lesson Content
         self.lesson_content_edit = QPlainTextEdit()
         self.lesson_content_edit.setPlaceholderText("Lesson content (optional)")
         self.lesson_content_edit.setMaximumHeight(80)
         self.form.addRow("Lesson Content", self.lesson_content_edit)
 
-        # NEW: Homework
+        # Homework
         self.homework_edit = QPlainTextEdit()
         self.homework_edit.setPlaceholderText("Homework (optional)")
         self.homework_edit.setMaximumHeight(80)
@@ -178,18 +161,12 @@ class SessionNoteWidget(QWidget):
         idx2 = self.atmosphere_combo.findText(note.class_atmosphere)
         if idx2 >= 0:
             self.atmosphere_combo.setCurrentIndex(idx2)
-        self.difficulties_edit.setPlainText(note.difficulties or "")
-        self.next_plan_edit.setPlainText(note.next_plan or "")
-        self.remark_edit.setPlainText(note.remark or "")
         self.lesson_content_edit.setPlainText(note.lesson_content or "")
         self.homework_edit.setPlainText(note.homework or "")
 
     def _clear_form(self) -> None:
         self.teaching_combo.setCurrentIndex(0)
         self.atmosphere_combo.setCurrentIndex(0)
-        self.difficulties_edit.clear()
-        self.next_plan_edit.clear()
-        self.remark_edit.clear()
         self.lesson_content_edit.clear()
         self.homework_edit.clear()
 
@@ -202,9 +179,6 @@ class SessionNoteWidget(QWidget):
     def _save(self) -> None:
         teaching = self.teaching_combo.currentText()
         atmosphere = self.atmosphere_combo.currentText()
-        difficulties = self.difficulties_edit.toPlainText().strip() or None
-        next_plan = self.next_plan_edit.toPlainText().strip() or None
-        remark = self.remark_edit.toPlainText().strip() or None
         lesson_content = self.lesson_content_edit.toPlainText().strip() or None
         homework = self.homework_edit.toPlainText().strip() or None
 
@@ -214,9 +188,6 @@ class SessionNoteWidget(QWidget):
                     session_id=self._session_id,
                     teaching_progress=teaching,
                     class_atmosphere=atmosphere,
-                    difficulties=difficulties,
-                    next_plan=next_plan,
-                    remark=remark,
                     lesson_content=lesson_content,
                     homework=homework,
                 )
@@ -226,9 +197,6 @@ class SessionNoteWidget(QWidget):
                     session_id=self._session_id,
                     teaching_progress=teaching,
                     class_atmosphere=atmosphere,
-                    difficulties=difficulties,
-                    next_plan=next_plan,
-                    remark=remark,
                     lesson_content=lesson_content,
                     homework=homework,
                 )
