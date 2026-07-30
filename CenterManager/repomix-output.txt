@@ -52,11 +52,27 @@ docs/
     INFORMATION_ARCHITECTURE_V3.md
     NAVIGATION.md
     WORKSPACE_SPEC.md
+  CENTER DESIGN SYSTEM/
+    00_INFORMATION_ARCHITECTURE.md
   Enginnering/
     ENGINEERING_GUIDELINES.md
+  FINANCE/
+    FINANCE_MODULE_DESIGN.md
+    Sprint 2.3 - Finance Module
   Software/
     APPLICATION_ARCHITECTURE.md
     TECHNICAL_ARCHITECTURE.md
+  UX_Design/
+    01_DESIGN_PHILOSOPHY.md
+    02_DESIGN_TOKENS.md
+    03_LAYOUT_SYSTEM.md
+    04_PAGE_TEMPLATES.md
+    05_COMPONENT_BEHAVIORS.md
+    06_CONTENT_LANGUAGE_GUIDE.md
+    07_BUSINESS_COMPONENT_LIBRARY.md
+    08_IMPLEMENTATION_CONTRACT.md
+    09_PRODUCT_QUALITY_STANDARD.md
+    10_CDS_GOVERNANCE.md
   ARCHITECTURE.md
   CHANGELOG.md
   DATABASE_DESIGN.md
@@ -266,7 +282,6 @@ tests/
   test_student_ui.py
 .gitignore
 alembic.ini
-docs.zip
 pytest.ini
 README.md
 requirements-dev.txt
@@ -4473,6 +4488,568 @@ Mandatory
 YES
 
 ================
+File: docs/CENTER DESIGN SYSTEM/00_INFORMATION_ARCHITECTURE.md
+================
+# CENTER DESIGN SYSTEM
+
+# 00. INFORMATION ARCHITECTURE
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+This document defines the overall structure of CenterManager.
+
+Information Architecture (IA) determines
+
+- what modules exist,
+- how they relate,
+- where users navigate,
+- and where information belongs.
+
+A clear IA reduces navigation complexity
+and keeps future expansion predictable.
+
+---
+
+# Design Principles
+
+The system should answer three questions
+within five seconds.
+
+1. Where am I?
+2. What can I do here?
+3. Where should I go next?
+
+Every page should have one clear purpose.
+
+---
+
+# Product Structure
+
+CenterManager
+
+├── Dashboard
+├── Students
+├── Teachers
+├── Courses
+├── Classes
+├── Attendance
+├── Assessments
+├── Finance
+├── Reports
+└── Settings
+
+Each module is responsible
+for one business domain.
+
+Modules should not overlap.
+
+---
+
+# Dashboard
+
+Purpose
+
+Provide an operational overview.
+
+Contains
+
+Today's Summary
+
+Need Attention
+
+Upcoming Events
+
+Recent Activities
+
+Quick Insights
+
+Dashboard should never become
+a management page.
+
+No CRUD operations.
+
+---
+
+# Students Module
+
+Purpose
+
+Manage student lifecycle.
+
+Pages
+
+Student Dashboard
+
+↓
+
+Student List
+
+↓
+
+Student Detail
+
+↓
+
+Student Analytics
+
+Responsibilities
+
+Student Profile
+
+Enrollment
+
+Attendance
+
+Assessment
+
+Parents
+
+Documents
+
+Timeline
+
+---
+
+# Teachers Module
+
+Purpose
+
+Manage teachers.
+
+Pages
+
+Teacher Dashboard
+
+↓
+
+Teacher List
+
+↓
+
+Teacher Detail
+
+↓
+
+Teacher Analytics
+
+Responsibilities
+
+Teacher Profile
+
+Assigned Classes
+
+Schedule
+
+Performance
+
+Timeline
+
+---
+
+# Courses Module
+
+Purpose
+
+Manage learning programs.
+
+Pages
+
+Course List
+
+↓
+
+Course Detail
+
+↓
+
+Course Analytics
+
+Responsibilities
+
+Course Information
+
+Curriculum
+
+Duration
+
+Teachers
+
+Classes
+
+Enrollment Statistics
+
+---
+
+# Classes Module
+
+Purpose
+
+Manage actual teaching classes.
+
+Pages
+
+Class Dashboard
+
+↓
+
+Class List
+
+↓
+
+Class Detail
+
+Responsibilities
+
+Schedule
+
+Students
+
+Teacher
+
+Room
+
+Attendance
+
+Lesson History
+
+---
+
+# Attendance Module
+
+Purpose
+
+Manage attendance records.
+
+Pages
+
+Attendance Dashboard
+
+↓
+
+Attendance List
+
+↓
+
+Attendance Analytics
+
+Responsibilities
+
+Daily Attendance
+
+Absence
+
+Late Arrival
+
+Attendance Trends
+
+---
+
+# Assessments Module
+
+Purpose
+
+Manage student evaluations.
+
+Pages
+
+Assessment Dashboard
+
+↓
+
+Assessment List
+
+↓
+
+Assessment Detail
+
+↓
+
+Analytics
+
+Responsibilities
+
+Scores
+
+Comments
+
+Teacher Feedback
+
+Progress
+
+History
+
+---
+
+# Finance Module
+
+Purpose
+
+Manage financial operations.
+
+Pages
+
+Finance Dashboard
+
+↓
+
+Invoices
+
+↓
+
+Payments
+
+↓
+
+Revenue Analytics
+
+Responsibilities
+
+Invoices
+
+Payments
+
+Outstanding Fees
+
+Revenue
+
+Expenses
+
+---
+
+# Reports Module
+
+Purpose
+
+Generate business reports.
+
+Categories
+
+Students
+
+Teachers
+
+Finance
+
+Attendance
+
+Assessments
+
+Reports should be read-only.
+
+---
+
+# Settings Module
+
+Purpose
+
+Configure system behavior.
+
+Categories
+
+Organization
+
+Users
+
+Permissions
+
+Academic Settings
+
+Finance Settings
+
+Notification Settings
+
+Backup
+
+System
+
+---
+
+# Navigation Rules
+
+Navigation has three levels only.
+
+Level 1
+
+Main Module
+
+Example
+
+Students
+
+Level 2
+
+Workspace
+
+Student List
+
+Student Dashboard
+
+Student Analytics
+
+Level 3
+
+Entity
+
+Student Detail
+
+Avoid deeper navigation.
+
+---
+
+# Cross Navigation
+
+Modules should connect naturally.
+
+Student Detail
+
+↓
+
+Assessment
+
+↓
+
+Attendance
+
+↓
+
+Invoice
+
+↓
+
+Timeline
+
+Without returning to Dashboard.
+
+---
+
+# Global Search
+
+Global Search should access
+
+Students
+
+Teachers
+
+Courses
+
+Classes
+
+Invoices
+
+Documents
+
+Search should be available
+from every page.
+
+---
+
+# Notifications
+
+Notifications are global.
+
+Examples
+
+New Student
+
+Payment Received
+
+Assessment Completed
+
+Upcoming Class
+
+Notifications should always
+link back to the related entity.
+
+---
+
+# Timeline
+
+Every major business event
+creates a timeline entry.
+
+Timeline is the history
+of the organization.
+
+Examples
+
+Student Created
+
+Attendance Recorded
+
+Assessment Completed
+
+Invoice Paid
+
+Parent Updated
+
+---
+
+# Future Expansion
+
+New modules
+
+must follow the same structure.
+
+Dashboard
+
+↓
+
+List
+
+↓
+
+Detail
+
+↓
+
+Analytics
+
+No custom navigation structures.
+
+---
+
+# Information Ownership
+
+Each business entity
+has one owner.
+
+Student information
+
+belongs to Students.
+
+Payment information
+
+belongs to Finance.
+
+Assessment information
+
+belongs to Assessments.
+
+Avoid duplicated ownership.
+
+---
+
+# Final Principle
+
+Information should exist
+in exactly one place.
+
+Other modules may reference it,
+
+but should never duplicate it.
+
+A simple architecture
+is easier to learn,
+easier to maintain,
+and easier to extend.
+
+================
 File: docs/Enginnering/ENGINEERING_GUIDELINES.md
 ================
 # ENGINEERING_GUIDELINES.md
@@ -5210,6 +5787,1228 @@ APPROVED
 Mandatory
 
 YES
+
+================
+File: docs/FINANCE/FINANCE_MODULE_DESIGN.md
+================
+# Finance Module Design
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Objective
+
+Finance is the administration module of CenterManager.
+
+Its responsibilities are:
+
+- Record income.
+- Record expense.
+- Monitor outstanding tuition.
+- Generate financial dashboard.
+
+Finance is NOT the starting point of business workflows.
+
+Student remains the business center.
+
+---
+
+# Architecture
+
+Student
+        │
+        │ Collect Tuition
+        ▼
+Income Log
+        │
+        ├───────────────┐
+        ▼               ▼
+Outstanding      Finance Dashboard
+        │
+        ▼
+Student Timeline
+
+Expense
+
+↓
+
+Expense Log
+
+↓
+
+Finance Dashboard
+
+---
+
+# Workspace
+
+Finance
+
+├── Dashboard
+├── Income
+├── Expense
+└── Outstanding
+
+---
+
+# Income
+
+Purpose
+
+Record every income transaction.
+
+Source
+
+Student Tuition
+
+Book
+
+Robot Fee
+
+Material
+
+Other
+
+---
+
+Entity
+
+Income
+
+id
+
+studentId
+
+classId
+
+courseId
+
+amount
+
+incomeType
+
+paymentMethod
+
+paymentDate
+
+receivedBy
+
+note
+
+createdAt
+
+updatedAt
+
+---
+
+Income Type
+
+Tuition
+
+Robot Fee
+
+Book
+
+Material
+
+Other
+
+---
+
+Payment Method
+
+Cash
+
+Bank Transfer
+
+---
+
+Table
+
+Date
+
+Student
+
+Class
+
+Income Type
+
+Amount
+
+Method
+
+Received By
+
+Note
+
+---
+
+Functions
+
+Search
+
+Filter
+
+Sort
+
+Export
+
+Create
+
+Edit
+
+Delete
+
+---
+
+Workflow
+
+Student
+
+↓
+
+Financial Tab
+
+↓
+
+Collect Tuition
+
+↓
+
+Create Income
+
+↓
+
+Update Outstanding
+
+↓
+
+Update Dashboard
+
+↓
+
+Create Timeline
+
+---
+
+# Expense
+
+Purpose
+
+Record organization expenses.
+
+---
+
+Entity
+
+Expense
+
+id
+
+category
+
+description
+
+amount
+
+paymentMethod
+
+status
+
+paidBy
+
+paymentDate
+
+note
+
+createdAt
+
+updatedAt
+
+---
+
+Category
+
+Teacher Salary
+
+Office Rent
+
+Electricity
+
+Water
+
+Internet
+
+Equipment
+
+Marketing
+
+Office Supply
+
+Other
+
+---
+
+Status
+
+Pending
+
+Completed
+
+---
+
+Functions
+
+Search
+
+Filter
+
+Sort
+
+Export
+
+Create
+
+Edit
+
+Delete
+
+---
+
+Workflow
+
+Finance
+
+↓
+
+Create Expense
+
+↓
+
+Update Dashboard
+
+↓
+
+Create System Timeline
+
+---
+
+# Outstanding
+
+Purpose
+
+Monitor unpaid tuition.
+
+No CRUD.
+
+Automatically calculated.
+
+---
+
+Columns
+
+Student
+
+Class
+
+Expected
+
+Paid
+
+Outstanding
+
+Due Date
+
+---
+
+Formula
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+---
+
+# Dashboard
+
+Read Only
+
+---
+
+KPI
+
+Revenue Today
+
+Revenue This Month
+
+Expense Today
+
+Expense This Month
+
+Current Balance
+
+Outstanding Tuition
+
+---
+
+Widgets
+
+Revenue Trend
+
+Expense Trend
+
+Recent Income
+
+Recent Expense
+
+Need Attention
+
+---
+
+Dashboard Data
+
+Dashboard never stores data.
+
+Everything is calculated from
+
+Income
+
+Expense
+
+Outstanding
+
+---
+
+# Student Financial
+
+Location
+
+Student Detail
+
+↓
+
+Financial
+
+---
+
+Display
+
+Expected Tuition
+
+Paid
+
+Outstanding
+
+Payment History
+
+---
+
+Actions
+
+Collect Tuition
+
+View History
+
+Print Receipt
+
+---
+
+# Permission
+
+Teacher
+
+No Finance Access
+
+No Financial Tab
+
+---
+
+Admin
+
+Dashboard
+
+Income
+
+Expense
+
+Outstanding
+
+Export
+
+CRUD
+
+---
+
+Reception (Future)
+
+Collect Tuition Only
+
+No Finance Dashboard
+
+No Expense
+
+---
+
+# Security
+
+Permission is checked on Backend.
+
+UI hiding is NOT security.
+
+Every Finance API must verify permission.
+
+---
+
+# Development Order
+
+Phase 1
+
+Permission
+
+↓
+
+Phase 2
+
+Income
+
+↓
+
+Phase 3
+
+Expense
+
+↓
+
+Phase 4
+
+Outstanding
+
+↓
+
+Phase 5
+
+Dashboard
+
+↓
+
+Phase 6
+
+Integration
+
+---
+
+# Definition of Done
+
+Income
+
+CRUD
+
+Search
+
+Filter
+
+Export
+
+Timeline
+
+Student Integration
+
+Outstanding Update
+
+Dashboard Update
+
+Expense
+
+CRUD
+
+Dashboard Update
+
+Timeline
+
+Outstanding
+
+Realtime Calculation
+
+Dashboard
+
+Realtime KPI
+
+Realtime Chart
+
+Realtime Statistics
+
+---
+
+Final Principle
+
+Student owns business.
+
+Finance owns money.
+
+Dashboard owns visualization.
+
+Each module has only one responsibility.
+
+================
+File: docs/FINANCE/Sprint 2.3 - Finance Module
+================
+# Sprint 2.3 - Finance Module
+Version: 1.0
+Status: Approved
+Priority: HIGH
+
+---
+
+# Objective
+
+Implement Finance Module V1 for CenterManager.
+
+Finance is an administration module responsible for:
+
+- Recording income
+- Recording expenses
+- Tracking outstanding tuition
+- Providing financial dashboard
+
+Finance is NOT the starting point of business workflows.
+
+Student remains the center of the business process.
+
+---
+
+# IMPORTANT DESIGN PRINCIPLES
+
+## Principle 1
+
+Student owns business.
+
+Finance owns money.
+
+Dashboard owns visualization.
+
+Each module must have only ONE responsibility.
+
+---
+
+## Principle 2
+
+Finance Dashboard never stores calculated values.
+
+Everything must be calculated from source data.
+
+---
+
+## Principle 3
+
+Outstanding Tuition is NOT stored.
+
+It is calculated in real time.
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+---
+
+## Principle 4
+
+Do NOT redesign existing UI.
+
+Only implement business functionality.
+
+---
+
+# Development Order
+
+Task 2.3.1
+
+↓
+
+Task 2.3.2
+
+↓
+
+Task 2.3.3
+
+↓
+
+Task 2.3.4
+
+↓
+
+Task 2.3.5
+
+↓
+
+Task 2.3.6
+
+↓
+
+Task 2.3.7
+
+↓
+
+Task 2.3.8
+
+↓
+
+Task 2.3.9
+
+↓
+
+Task 2.3.10
+
+↓
+
+Task 2.3.11
+
+↓
+
+Task 2.3.12
+
+---
+
+# TASK 2.3.1
+
+## Finance Database
+
+### Objective
+
+Create Finance database schema.
+
+### Implement
+
+Tables
+
+- Income
+- Expense
+
+Include
+
+- Primary Key
+- Foreign Key
+- Index
+- Timestamp
+
+### Deliverables
+
+- migration.sql
+- Prisma Schema
+- ER Diagram
+
+### Acceptance
+
+- Migration succeeds
+- Foreign keys correct
+- Indexes created
+
+---
+
+# TASK 2.3.2
+
+## Finance Permission
+
+### Objective
+
+Implement backend authorization.
+
+Permissions
+
+finance.view
+
+finance.income.create
+
+finance.income.update
+
+finance.income.delete
+
+finance.expense.create
+
+finance.expense.update
+
+finance.expense.delete
+
+### Middleware
+
+PermissionGuard
+
+### Acceptance
+
+Teacher
+
+403 Forbidden
+
+Reception
+
+403 Forbidden
+
+Admin
+
+200 OK
+
+---
+
+# TASK 2.3.3
+
+## Income API
+
+### Implement
+
+GET
+
+POST
+
+PUT
+
+DELETE
+
+SEARCH
+
+EXPORT
+
+### Validation
+
+Amount > 0
+
+Student exists
+
+Payment Method valid
+
+Income Type valid
+
+### Acceptance
+
+All CRUD operations work correctly.
+
+---
+
+# TASK 2.3.4
+
+## Income UI
+
+Pages
+
+- Income List
+- Income Detail
+- Create Income
+- Edit Income
+
+Functions
+
+- Search
+- Filter
+- Pagination
+- Export
+- CRUD
+
+### Acceptance
+
+UI fully functional.
+
+---
+
+# TASK 2.3.5
+
+## Expense API
+
+CRUD
+
+Validation
+
+Category
+
+Amount
+
+Method
+
+Status
+
+### Acceptance
+
+All CRUD operations work.
+
+---
+
+# TASK 2.3.6
+
+## Expense UI
+
+Pages
+
+- Expense List
+- Create Expense
+- Edit Expense
+
+Functions
+
+CRUD
+
+Search
+
+Filter
+
+Export
+
+### Acceptance
+
+Fully functional.
+
+---
+
+# TASK 2.3.7
+
+## Outstanding Service
+
+### Objective
+
+Implement Outstanding Calculation Service.
+
+Input
+
+Student
+
+↓
+
+Course
+
+↓
+
+Payment
+
+Output
+
+Expected Tuition
+
+Paid
+
+Outstanding
+
+Formula
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+### Important
+
+Never store Outstanding in database.
+
+Always calculate.
+
+### Acceptance
+
+Realtime calculation.
+
+---
+
+# TASK 2.3.8
+
+## Dashboard Service
+
+Calculate
+
+Revenue Today
+
+Revenue Month
+
+Expense Today
+
+Expense Month
+
+Current Balance
+
+Outstanding Tuition
+
+Dashboard must calculate from
+
+Income
+
++
+
+Expense
+
++
+
+Outstanding
+
+No duplicated data.
+
+---
+
+# TASK 2.3.9
+
+## Dashboard UI
+
+Widgets
+
+Revenue Today
+
+Revenue Month
+
+Expense Today
+
+Expense Month
+
+Outstanding
+
+Recent Income
+
+Recent Expense
+
+Need Attention
+
+Acceptance
+
+Dashboard loading under one second.
+
+---
+
+# TASK 2.3.10
+
+## Student Integration
+
+Student Detail
+
+↓
+
+Financial Tab
+
+Display
+
+Expected Tuition
+
+Paid
+
+Outstanding
+
+Payment History
+
+Button
+
+Collect Tuition
+
+Workflow
+
+Collect Tuition
+
+↓
+
+Create Income
+
+↓
+
+Update Outstanding
+
+↓
+
+Update Dashboard
+
+↓
+
+Create Student Timeline
+
+Everything should happen automatically.
+
+---
+
+# TASK 2.3.11
+
+## Security Test
+
+Teacher
+
+Cannot see Finance Menu
+
+Teacher API
+
+403
+
+Reception
+
+403
+
+Admin
+
+OK
+
+Backend authorization is mandatory.
+
+UI hiding is NOT security.
+
+---
+
+# TASK 2.3.12
+
+## Final Integration
+
+Verify
+
+Income
+
+↓
+
+Outstanding
+
+↓
+
+Dashboard
+
+↓
+
+Timeline
+
+↓
+
+Student Detail
+
+Everything must stay synchronized.
+
+---
+
+# Deliverables
+
+Finance Module
+
+├── Database
+
+├── Permission
+
+├── Income API
+
+├── Income UI
+
+├── Expense API
+
+├── Expense UI
+
+├── Outstanding Service
+
+├── Dashboard Service
+
+├── Dashboard UI
+
+├── Student Integration
+
+└── Testing
+
+---
+
+# Development Rules
+
+1.
+
+DO NOT redesign existing UI.
+
+---
+
+2.
+
+DO NOT modify unrelated modules.
+
+---
+
+3.
+
+DO NOT add features outside this sprint.
+
+---
+
+4.
+
+Every task must compile successfully.
+
+---
+
+5.
+
+Every task must be independently testable.
+
+---
+
+6.
+
+Every task must include API testing.
+
+---
+
+7.
+
+Every task must include UI screenshots.
+
+---
+
+8.
+
+Permission must be validated on BOTH frontend and backend.
+
+---
+
+9.
+
+If architecture problems are discovered, STOP implementation and report instead of making assumptions.
+
+---
+
+10.
+
+Priority
+
+Correct Architecture
+
+>
+
+Business Logic
+
+>
+
+UI
+
+---
+
+# Definition of Done
+
+Finance module can:
+
+✔ Record Income
+
+✔ Record Expense
+
+✔ Calculate Outstanding
+
+✔ Display Dashboard
+
+✔ Integrate with Student
+
+✔ Update Timeline
+
+✔ Pass Permission Validation
+
+✔ Pass API Testing
+
+✔ Pass Integration Testing
+
+Finance V1 is considered COMPLETE only when all acceptance criteria above are satisfied.
 
 ================
 File: docs/Software/APPLICATION_ARCHITECTURE.md
@@ -6687,6 +8486,5106 @@ APPROVED
 Frozen
 
 YES
+
+================
+File: docs/UX_Design/01_DESIGN_PHILOSOPHY.md
+================
+# CENTER DESIGN SYSTEM
+
+# 01. DESIGN PHILOSOPHY
+
+Version: 1.0
+
+Status: Draft
+
+---
+
+# Purpose
+
+Center Design System (CDS) defines the visual language, interaction principles, layout rules, and reusable components used throughout the CenterManager platform.
+
+Every Workspace must follow CDS.
+
+Developers should implement the system instead of inventing new UI.
+
+---
+
+# Design Goal
+
+CenterManager is not designed to impress users with visual effects.
+
+It is designed to help education center staff complete daily work quickly, accurately, and with minimum cognitive load.
+
+The interface should disappear behind the workflow.
+
+Users should think about students—not about the software.
+
+---
+
+# Core Principles
+
+## 1. Business First
+
+Every screen must support a business task.
+
+Never add UI that exists only for decoration.
+
+Question before adding anything:
+
+"What business problem does this solve?"
+
+---
+
+## 2. Information Before Decoration
+
+Hierarchy is more important than colors.
+
+Spacing is more important than borders.
+
+Typography is more important than shadows.
+
+Users should immediately know
+
+- where they are
+- what is important
+- what action comes next
+
+---
+
+## 3. Consistency Over Creativity
+
+Every Workspace should feel familiar.
+
+If a user knows Student Workspace,
+
+they should already know how Teacher Workspace works.
+
+Consistency is preferred over originality.
+
+---
+
+## 4. One Responsibility Per Screen
+
+Every screen answers one question.
+
+Dashboard
+
+"What needs attention today?"
+
+Student List
+
+"Which student do I want to manage?"
+
+Student Detail
+
+"Everything about this student."
+
+Analytics
+
+"How is the business performing?"
+
+Never mix responsibilities.
+
+---
+
+## 5. Reduce Cognitive Load
+
+The interface should require as little thinking as possible.
+
+Avoid
+
+- duplicated navigation
+- repeated information
+- unnecessary buttons
+- excessive options
+
+The best UI is often the simplest one.
+
+---
+
+## 6. Progressive Disclosure
+
+Show only what users need now.
+
+Advanced information should appear only when required.
+
+Examples
+
+Dashboard
+
+↓
+
+Summary
+
+Student Detail
+
+↓
+
+Complete Information
+
+Analytics
+
+↓
+
+Historical Data
+
+---
+
+## 7. Reuse Everything
+
+Every button
+
+Every card
+
+Every table
+
+Every dialog
+
+Every toolbar
+
+should come from the Component Library.
+
+Never redesign an existing component.
+
+---
+
+## 8. Workflow Driven
+
+CenterManager is a workflow system.
+
+Not a CRUD system.
+
+Example
+
+Assessment Created
+
+↓
+
+Timeline Updated
+
+↓
+
+Dashboard Updated
+
+↓
+
+Analytics Updated
+
+↓
+
+Notification Generated
+
+The workflow is the product.
+
+---
+
+## 9. Data Over Decoration
+
+Charts exist to support decisions.
+
+Cards exist to summarize information.
+
+Icons exist to improve recognition.
+
+Nothing exists only because it looks nice.
+
+---
+
+## 10. Invisible Design
+
+The best compliment for the interface is
+
+"I finished my work quickly."
+
+Not
+
+"The UI looks beautiful."
+
+Beauty comes from clarity.
+
+---
+
+# Product Identity
+
+CenterManager should feel
+
+Professional
+
+Reliable
+
+Predictable
+
+Efficient
+
+Calm
+
+The interface should never feel
+
+Playful
+
+Flashy
+
+Distracting
+
+Experimental
+
+---
+
+# Design Inspiration
+
+The following products are used as references.
+
+Navigation
+
+Microsoft Dynamics 365
+
+Entity Detail
+
+HubSpot CRM
+
+Data Tables
+
+Airtable
+
+Analytics
+
+Power BI
+
+Interaction Simplicity
+
+Notion
+
+Component Consistency
+
+Fluent Design
+
+These products inspire the interaction model.
+
+They are not copied visually.
+
+---
+
+# CDS Rule
+
+Developers should never ask
+
+"How should I design this?"
+
+Instead ask
+
+"Which CDS pattern already solves this?"
+
+If no pattern exists,
+
+the Design System should evolve first.
+
+The application comes second.
+
+================
+File: docs/UX_Design/02_DESIGN_TOKENS.md
+================
+# CENTER DESIGN SYSTEM
+
+# 02. DESIGN TOKENS
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+Design Tokens define the smallest visual building blocks used throughout CenterManager.
+
+All UI must reference these tokens.
+
+Never hard-code values.
+
+---
+
+# Spacing System
+
+The entire application uses an 8-point spacing grid.
+
+## Tokens
+
+Space-0   = 0
+Space-1   = 4
+Space-2   = 8
+Space-3   = 12
+Space-4   = 16
+Space-5   = 24
+Space-6   = 32
+Space-7   = 40
+Space-8   = 48
+Space-9   = 64
+
+---
+
+# Usage
+
+Inside Button
+
+8
+
+Inside Card
+
+16
+
+Between Controls
+
+12
+
+Between Sections
+
+24
+
+Between Major Blocks
+
+32
+
+Page Margin
+
+24
+
+Dashboard Margin
+
+24
+
+Dialog Margin
+
+24
+
+Never invent new spacing.
+
+Examples
+
+❌ 13
+
+❌ 19
+
+❌ 27
+
+✅ 8
+
+✅ 16
+
+✅ 24
+
+✅ 32
+
+---
+
+# Radius
+
+Small
+
+4
+
+Medium
+
+8
+
+Large
+
+12
+
+Dialog
+
+16
+
+Round
+
+999
+
+---
+
+# Border Width
+
+Thin
+
+1
+
+Focus
+
+2
+
+Divider
+
+1
+
+Never use random border widths.
+
+---
+
+# Shadow
+
+Level 0
+
+None
+
+Level 1
+
+Card
+
+Level 2
+
+Floating Panel
+
+Level 3
+
+Dialog
+
+Maximum allowed shadow
+
+Level 3
+
+---
+
+# Scrollbar
+
+Width
+
+8
+
+Radius
+
+4
+
+Track
+
+Transparent
+
+Thumb
+
+Neutral Gray
+
+Hover
+
+Primary Gray
+
+Always visible on hover.
+
+---
+
+# Icon Size
+
+Small
+
+16
+
+Normal
+
+20
+
+Large
+
+24
+
+Hero
+
+32
+
+Never scale icons manually.
+
+---
+
+# Avatar
+
+Small
+
+24
+
+Medium
+
+32
+
+Large
+
+48
+
+Profile
+
+64
+
+---
+
+# Button Height
+
+Toolbar Button
+
+32
+
+Default Button
+
+36
+
+Primary Button
+
+40
+
+Large Button
+
+48
+
+---
+
+# Input Height
+
+Compact
+
+32
+
+Default
+
+36
+
+Large
+
+40
+
+---
+
+# Toolbar Height
+
+Small Toolbar
+
+40
+
+Standard Toolbar
+
+48
+
+Page Header
+
+64
+
+---
+
+# Sidebar
+
+Collapsed
+
+72
+
+Expanded
+
+240
+
+Workspace Header
+
+64
+
+---
+
+# Card
+
+Internal Padding
+
+16
+
+Gap Between Cards
+
+16
+
+Card Radius
+
+8
+
+Maximum Width
+
+None
+
+Cards grow naturally.
+
+---
+
+# Table
+
+Row Height
+
+40
+
+Header Height
+
+44
+
+Selection Column
+
+40
+
+Checkbox
+
+Centered
+
+Padding
+
+16
+
+---
+
+# Dialog
+
+Small
+
+480
+
+Medium
+
+720
+
+Large
+
+960
+
+Maximum
+
+1200
+
+---
+
+# Chart
+
+Minimum Height
+
+240
+
+Preferred Height
+
+320
+
+Maximum Height
+
+480
+
+---
+
+# Timeline
+
+Gap
+
+16
+
+Time Label Width
+
+120
+
+Event Padding
+
+12
+
+---
+
+# Empty State
+
+Illustration
+
+96
+
+Title Margin
+
+16
+
+Description Margin
+
+8
+
+Primary Button Margin
+
+24
+
+---
+
+# Animation
+
+Hover
+
+120 ms
+
+Normal
+
+180 ms
+
+Dialog
+
+250 ms
+
+Never exceed
+
+300 ms
+
+---
+
+# Responsive Breakpoints
+
+Compact
+
+<1280
+
+Standard
+
+1280~1600
+
+Wide
+
+1600+
+
+Ultra Wide
+
+1920+
+
+---
+
+# Token Rules
+
+Developers must never write
+
+padding:17
+
+margin:23
+
+radius:11
+
+Instead
+
+use the nearest Design Token.
+
+Consistency is more important than perfection.
+
+================
+File: docs/UX_Design/03_LAYOUT_SYSTEM.md
+================
+# CENTER DESIGN SYSTEM
+
+# 03. LAYOUT SYSTEM
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+Layout defines how information is organized on every screen.
+
+Layout is more important than components.
+
+Good layout reduces cognitive load.
+
+Poor layout cannot be fixed by better colors or better icons.
+
+---
+
+# Philosophy
+
+CenterManager follows
+
+"Scan First, Read Second"
+
+Users should understand
+
+• where they are
+
+• what is important
+
+• what action comes next
+
+within 3 seconds.
+
+---
+
+# Visual Hierarchy
+
+Every page follows exactly four levels.
+
+Level 1
+
+Page Identity
+
+Example
+
+Student Detail
+
+Teacher Dashboard
+
+Finance Workspace
+
+---
+
+Level 2
+
+Primary Actions
+
+Add
+
+Edit
+
+Export
+
+Import
+
+Search
+
+Filter
+
+---
+
+Level 3
+
+Business Information
+
+Cards
+
+Tables
+
+Charts
+
+Timeline
+
+Forms
+
+---
+
+Level 4
+
+Supporting Information
+
+Notes
+
+Description
+
+Metadata
+
+Statistics
+
+History
+
+---
+
+Never reverse this hierarchy.
+
+---
+
+# Page Width
+
+Content must breathe.
+
+Never stretch content across the entire screen.
+
+Recommended
+
+Content Width
+
+1200~1440 px
+
+Maximum
+
+1600 px
+
+Ultra-wide monitors
+
+Center content.
+
+Never let a table stretch to 3000 pixels.
+
+---
+
+# Page Margin
+
+Left
+
+24
+
+Right
+
+24
+
+Top
+
+24
+
+Bottom
+
+24
+
+Always use Design Tokens.
+
+---
+
+# Vertical Rhythm
+
+Every page follows
+
+24 px
+
+between sections.
+
+Example
+
+Header
+
+↓
+
+24
+
+↓
+
+Toolbar
+
+↓
+
+24
+
+↓
+
+Content
+
+↓
+
+24
+
+↓
+
+Footer
+
+Never use inconsistent spacing.
+
+---
+
+# Page Structure
+
+Every Workspace page follows
+
+Page Header
+
+↓
+
+Toolbar
+
+↓
+
+Main Content
+
+↓
+
+Secondary Content (optional)
+
+↓
+
+Footer (optional)
+
+Never skip the Header.
+
+---
+
+# Header Layout
+
+Contains
+
+Title
+
+Subtitle (optional)
+
+Primary Actions
+
+Never place filters inside Header.
+
+---
+
+# Toolbar Layout
+
+Toolbar contains
+
+Search
+
+Filter
+
+Sort
+
+Export
+
+Bulk Actions
+
+Toolbar is the operational area.
+
+---
+
+# Dashboard Layout
+
+Dashboard is an operational cockpit.
+
+Order is fixed.
+
+Today's Summary
+
+↓
+
+Need Attention
+
+↓
+
+Upcoming Events
+
+↓
+
+Recent Activities
+
+↓
+
+Quick Insights
+
+Never place charts above Need Attention.
+
+Operational information always comes first.
+
+---
+
+# List Page Layout
+
+Student List
+
+Teacher List
+
+Course List
+
+always follows
+
+Header
+
+↓
+
+Toolbar
+
+↓
+
+Table
+
+↓
+
+Pagination
+
+Filters never appear below the table.
+
+---
+
+# Detail Page Layout
+
+Every Detail page follows
+
+Entity Header
+
+↓
+
+Summary
+
+↓
+
+Statistics
+
+↓
+
+Main Tabs
+
+↓
+
+Business Content
+
+Example
+
+Student Header
+
+↓
+
+Student Summary
+
+↓
+
+Metrics
+
+↓
+
+Tabs
+
+↓
+
+Assessment
+
+↓
+
+Timeline
+
+↓
+
+Documents
+
+Never place Timeline above Summary.
+
+---
+
+# Form Layout
+
+Every Form
+
+General Information
+
+↓
+
+Business Information
+
+↓
+
+Advanced Information
+
+↓
+
+Danger Zone
+
+Save button always appears at the bottom right.
+
+Cancel always appears left of Save.
+
+---
+
+# Dialog Layout
+
+Dialog
+
+Title
+
+↓
+
+Description
+
+↓
+
+Content
+
+↓
+
+Actions
+
+Buttons always aligned right.
+
+Primary action on the far right.
+
+---
+
+# Card Layout
+
+Card
+
+Header
+
+↓
+
+Content
+
+↓
+
+Footer (optional)
+
+Do not mix Header and Content.
+
+---
+
+# Table Layout
+
+Table
+
+Toolbar
+
+↓
+
+Header
+
+↓
+
+Rows
+
+↓
+
+Pagination
+
+Actions belong to the last column.
+
+Checkbox belongs to the first column.
+
+---
+
+# Analytics Layout
+
+Analytics always follows
+
+Filters
+
+↓
+
+KPIs
+
+↓
+
+Trend Charts
+
+↓
+
+Distribution Charts
+
+↓
+
+Detail Table
+
+Never mix dashboard widgets into Analytics.
+
+---
+
+# Timeline Layout
+
+Timeline
+
+Newest first.
+
+Group by
+
+Today
+
+Yesterday
+
+This Week
+
+Earlier
+
+Never display raw system events.
+
+Example
+
+❌
+
+ParentUpdated
+
+✓
+
+Primary Contact Updated
+
+---
+
+# Empty Layout
+
+When there is no data
+
+Illustration
+
+↓
+
+Title
+
+↓
+
+Description
+
+↓
+
+Primary Action
+
+Never leave blank space.
+
+---
+
+# Alignment Rules
+
+All page elements align to the same vertical grid.
+
+Never
+
+Shift cards by a few pixels.
+
+Never
+
+Center one section while left-aligning another.
+
+Alignment errors are considered layout defects.
+
+---
+
+# White Space Rules
+
+White space is intentional.
+
+Do not fill empty space with more widgets.
+
+Empty space improves readability.
+
+---
+
+# Responsive Rules
+
+Compact
+
+Hide secondary panels.
+
+Wide
+
+Two-column layout.
+
+Ultra-wide
+
+Limit content width.
+
+Never stretch information.
+
+---
+
+# Scroll Rules
+
+Only one vertical scrollbar per page.
+
+Nested scrolling is prohibited.
+
+Horizontal scrolling is allowed only for large tables.
+
+Cards must never have independent scrollbars unless they contain long content.
+
+---
+
+# Layout Review Checklist
+
+Every page review should verify
+
+✓ One primary scrollbar
+
+✓ Correct hierarchy
+
+✓ Consistent spacing
+
+✓ Proper alignment
+
+✓ Predictable structure
+
+✓ Comfortable reading width
+
+✓ No duplicated navigation
+
+✓ Business-first information order
+
+If any rule is violated,
+
+the layout is considered incorrect regardless of visual appearance.
+
+================
+File: docs/UX_Design/04_PAGE_TEMPLATES.md
+================
+# CENTER DESIGN SYSTEM
+
+# 04. PAGE TEMPLATES
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+Page Templates define the standard structure of every screen in CenterManager.
+
+Developers should never invent a new page layout.
+
+Every page must reuse an existing template.
+
+If a suitable template does not exist,
+
+create the template first.
+
+Then build the page.
+
+---
+
+# Available Templates
+
+CenterManager currently defines
+
+• Dashboard Page
+
+• List Page
+
+• Detail Page
+
+• Analytics Page
+
+• Form Page
+
+• Wizard Page
+
+• Settings Page
+
+Every Workspace must reuse these templates.
+
+---
+
+# Template 1
+
+Dashboard Page
+
+Purpose
+
+Operational overview.
+
+Question answered
+
+"What requires my attention today?"
+
+Structure
+
+Page Header
+
+↓
+
+Today's Summary
+
+↓
+
+Need Attention
+
+↓
+
+Upcoming Events
+
+↓
+
+Recent Activities
+
+↓
+
+Quick Insights
+
+Rules
+
+Operational information always appears before analytical information.
+
+Charts never appear above Need Attention.
+
+No CRUD forms.
+
+No editable data.
+
+Dashboard is read-first.
+
+---
+
+# Template 2
+
+List Page
+
+Purpose
+
+Browse and locate business entities.
+
+Question answered
+
+"What record am I looking for?"
+
+Structure
+
+Page Header
+
+↓
+
+Toolbar
+
+↓
+
+Table
+
+↓
+
+Pagination
+
+Toolbar contains
+
+Search
+
+Filter
+
+Sort
+
+Export
+
+Bulk Actions
+
+Rules
+
+Table occupies the largest area.
+
+Actions are always outside the table except row actions.
+
+No charts.
+
+No timeline.
+
+---
+
+# Template 3
+
+Detail Page
+
+Purpose
+
+Manage one business entity.
+
+Question answered
+
+"Everything about this entity."
+
+Structure
+
+Entity Header
+
+↓
+
+Summary Card
+
+↓
+
+Metrics
+
+↓
+
+Tabs
+
+↓
+
+Business Content
+
+Example
+
+Student
+
+↓
+
+Overview
+
+↓
+
+Parents
+
+↓
+
+Assessment
+
+↓
+
+Timeline
+
+↓
+
+Documents
+
+Rules
+
+Timeline is never shown before Summary.
+
+Summary is always visible.
+
+Tabs separate responsibilities.
+
+---
+
+# Template 4
+
+Analytics Page
+
+Purpose
+
+Support decision making.
+
+Question answered
+
+"How is the business performing?"
+
+Structure
+
+Filters
+
+↓
+
+KPI Cards
+
+↓
+
+Trend Charts
+
+↓
+
+Distribution Charts
+
+↓
+
+Detail Table
+
+Rules
+
+Dashboard widgets are prohibited.
+
+Analytics never contains editing actions.
+
+Charts are primary.
+
+Tables support charts.
+
+---
+
+# Template 5
+
+Form Page
+
+Purpose
+
+Create or edit information.
+
+Structure
+
+Header
+
+↓
+
+General Information
+
+↓
+
+Business Information
+
+↓
+
+Advanced Settings
+
+↓
+
+Danger Zone (optional)
+
+↓
+
+Actions
+
+Rules
+
+Fields grouped logically.
+
+Labels aligned.
+
+Primary button
+
+Save
+
+Secondary button
+
+Cancel
+
+---
+
+# Template 6
+
+Wizard Page
+
+Purpose
+
+Guide users through a multi-step workflow.
+
+Structure
+
+Title
+
+↓
+
+Progress Indicator
+
+↓
+
+Current Step
+
+↓
+
+Navigation Buttons
+
+Rules
+
+Maximum
+
+7 steps
+
+Previous
+
+Left
+
+Next
+
+Right
+
+Finish
+
+Right
+
+Never skip progress indicator.
+
+---
+
+# Template 7
+
+Settings Page
+
+Purpose
+
+Configure system behavior.
+
+Structure
+
+Category Navigation
+
+↓
+
+Setting Groups
+
+↓
+
+Individual Settings
+
+↓
+
+Save
+
+Rules
+
+Never use tabs inside settings.
+
+Group related settings.
+
+Explain every option.
+
+---
+
+# Page Selection Guide
+
+Need operational overview?
+
+Dashboard
+
+Need many records?
+
+List
+
+Need one entity?
+
+Detail
+
+Need charts?
+
+Analytics
+
+Need data entry?
+
+Form
+
+Need guided process?
+
+Wizard
+
+Need configuration?
+
+Settings
+
+---
+
+# Workspace Mapping
+
+Home
+
+Dashboard Template
+
+Student Workspace
+
+Dashboard
+
+Student List
+
+Student Detail
+
+Analytics
+
+Teacher Workspace
+
+Dashboard
+
+Teacher List
+
+Teacher Detail
+
+Analytics
+
+Finance Workspace
+
+Dashboard
+
+Invoice List
+
+Invoice Detail
+
+Analytics
+
+Future Workspaces must reuse the same templates.
+
+---
+
+# Forbidden Patterns
+
+Dashboard mixed with Analytics.
+
+List mixed with Forms.
+
+Detail without Summary.
+
+Analytics without Filters.
+
+Multiple templates inside one page.
+
+If two templates appear together,
+
+the page should be split.
+
+---
+
+# Review Checklist
+
+Every page review verifies
+
+✓ Correct template selected
+
+✓ Template structure unchanged
+
+✓ Required sections present
+
+✓ No forbidden sections
+
+✓ Consistent navigation
+
+✓ Predictable user flow
+
+Pages failing these checks should be redesigned before implementation.
+
+================
+File: docs/UX_Design/05_COMPONENT_BEHAVIORS.md
+================
+# CENTER DESIGN SYSTEM
+
+# 05. COMPONENT BEHAVIORS
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+This document defines how every component behaves.
+
+It does not define appearance.
+
+Appearance belongs to Design Tokens.
+
+Structure belongs to Layout System.
+
+Behavior belongs here.
+
+Users remember behavior more than colors.
+
+---
+
+# General Principles
+
+Every component should behave consistently.
+
+Users should never need to guess.
+
+Hover
+
+Click
+
+Focus
+
+Disabled
+
+Loading
+
+Error
+
+must always behave identically.
+
+---
+
+# Button
+
+States
+
+Default
+
+Hover
+
+Pressed
+
+Disabled
+
+Loading
+
+Rules
+
+Hover
+
+Slight elevation
+
+Pressed
+
+Slightly darker
+
+Loading
+
+Spinner replaces icon
+
+Disabled
+
+Cannot receive focus
+
+---
+
+# Search Box
+
+Typing immediately updates local filtering.
+
+Global search requires
+
+Enter
+
+or
+
+Search Button.
+
+Escape clears search.
+
+Search always remembers previous keyword.
+
+---
+
+# Table
+
+Single Click
+
+Select row.
+
+Double Click
+
+Open Detail.
+
+Right Click
+
+Context Menu.
+
+Checkbox
+
+Multi-select.
+
+Ctrl
+
+Multi-selection.
+
+Shift
+
+Range selection.
+
+---
+
+# Pagination
+
+Changing page
+
+Never resets filters.
+
+Never resets sorting.
+
+Never resets search.
+
+---
+
+# Filter
+
+Filters remain active until removed.
+
+Closing the page should remember filters.
+
+Users should not need to recreate filters repeatedly.
+
+---
+
+# Sorting
+
+Sorting survives
+
+Refresh
+
+Pagination
+
+Filtering
+
+until explicitly changed.
+
+---
+
+# Dialog
+
+ESC
+
+Close
+
+Outside Click
+
+Optional
+
+Save
+
+Closes only when successful.
+
+Validation errors never close the dialog.
+
+---
+
+# Form
+
+Unsaved changes
+
+↓
+
+Warn before closing.
+
+Invalid field
+
+↓
+
+Focus automatically.
+
+First error
+
+↓
+
+Scroll into view.
+
+---
+
+# Tabs
+
+Changing tabs
+
+Never loses data.
+
+Unsaved changes
+
+↓
+
+Confirmation.
+
+Current tab
+
+Always highlighted.
+
+---
+
+# Timeline
+
+Newest first.
+
+Automatically refresh after business events.
+
+Never require manual reload.
+
+---
+
+# Dashboard Widgets
+
+Refresh automatically.
+
+No page refresh required.
+
+Loading
+
+Skeleton
+
+Never blank.
+
+---
+
+# Charts
+
+Loading
+
+Skeleton.
+
+No Data
+
+Empty State.
+
+Error
+
+Retry.
+
+---
+
+# Notifications
+
+Success
+
+Auto-hide
+
+3 seconds.
+
+Warning
+
+Manual dismiss.
+
+Error
+
+Manual dismiss.
+
+Never stack more than
+
+3 notifications.
+
+---
+
+# Empty State
+
+Every Empty State must contain
+
+Illustration
+
+↓
+
+Title
+
+↓
+
+Description
+
+↓
+
+Primary Action
+
+Never display
+
+"No Data"
+
+alone.
+
+---
+
+# Loading
+
+Every page
+
+Skeleton.
+
+Every table
+
+Skeleton.
+
+Every card
+
+Skeleton.
+
+Never freeze UI.
+
+---
+
+# Error Handling
+
+Technical errors
+
+Hidden.
+
+Business errors
+
+Readable.
+
+Example
+
+Bad
+
+SQL Error
+
+Good
+
+Unable to save student information.
+
+Please try again.
+
+---
+
+# Keyboard
+
+Tab
+
+Next Field.
+
+Shift Tab
+
+Previous.
+
+Enter
+
+Primary Action.
+
+ESC
+
+Cancel.
+
+---
+
+# Focus
+
+Every interactive control
+
+must display
+
+Focus State.
+
+Keyboard users must always know
+
+where focus is.
+
+---
+
+# Scroll
+
+Mouse Wheel
+
+Natural.
+
+Touchpad
+
+Natural.
+
+Keyboard
+
+Supported.
+
+Never scroll two panels simultaneously.
+
+---
+
+# Business Refresh Rules
+
+Creating Assessment
+
+↓
+
+Timeline
+
+↓
+
+Dashboard
+
+↓
+
+Analytics
+
+↓
+
+Notification
+
+Creating Parent
+
+↓
+
+Timeline
+
+↓
+
+Dashboard
+
+↓
+
+Student Detail
+
+No manual refresh.
+
+---
+
+# Consistency Rule
+
+If two buttons perform the same action,
+
+they must behave identically.
+
+If two tables display data,
+
+they must behave identically.
+
+Behavior consistency is mandatory.
+
+---
+
+# Review Checklist
+
+Review every component.
+
+✓ Hover
+
+✓ Focus
+
+✓ Disabled
+
+✓ Loading
+
+✓ Empty
+
+✓ Error
+
+✓ Keyboard
+
+✓ Refresh
+
+✓ Selection
+
+✓ Accessibility
+
+Behavior inconsistencies are defects.
+
+================
+File: docs/UX_Design/06_CONTENT_LANGUAGE_GUIDE.md
+================
+# CENTER DESIGN SYSTEM
+
+# 06. CONTENT LANGUAGE GUIDE
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+This document defines the writing style used throughout CenterManager.
+
+Every page.
+
+Every button.
+
+Every dialog.
+
+Every notification.
+
+Every tooltip.
+
+must use the same language.
+
+Users should feel they are using one product,
+
+not many independently developed modules.
+
+---
+
+# Writing Principles
+
+Writing should be
+
+Clear
+
+Short
+
+Professional
+
+Friendly
+
+Action-oriented
+
+Never
+
+Technical
+
+Verbose
+
+Ambiguous
+
+---
+
+# Product Voice
+
+CenterManager speaks like
+
+an experienced education administrator.
+
+Never like
+
+a software engineer.
+
+---
+
+# Tone
+
+Professional
+
+Calm
+
+Helpful
+
+Direct
+
+Respectful
+
+Never
+
+Funny
+
+Emotional
+
+Sarcastic
+
+Playful
+
+---
+
+# Terminology
+
+Always use
+
+Student
+
+Teacher
+
+Parent
+
+Course
+
+Class
+
+Invoice
+
+Payment
+
+Attendance
+
+Assessment
+
+Timeline
+
+Never invent alternatives.
+
+Bad
+
+Learner
+
+Pupil
+
+Customer
+
+Kid
+
+Good
+
+Student
+
+---
+
+# Buttons
+
+Use verbs.
+
+Good
+
+Add Student
+
+Edit
+
+Save
+
+Delete
+
+Export
+
+Import
+
+Refresh
+
+Close
+
+Cancel
+
+Bad
+
+New Student
+
+Do Save
+
+Execute
+
+Apply Now
+
+Proceed
+
+---
+
+# Primary Buttons
+
+Always
+
+Save
+
+Create
+
+Add
+
+Send
+
+Finish
+
+Never
+
+OK
+
+Yes
+
+Go
+
+Do It
+
+---
+
+# Secondary Buttons
+
+Cancel
+
+Back
+
+Close
+
+Discard
+
+Never
+
+Exit
+
+Leave
+
+Abort
+
+---
+
+# Delete Confirmation
+
+Always include
+
+Object
+
+Consequence
+
+Confirmation
+
+Example
+
+Delete Student?
+
+This action cannot be undone.
+
+Cancel
+
+Delete
+
+Never
+
+Are you sure?
+
+---
+
+# Success Messages
+
+Pattern
+
+<Action> completed successfully.
+
+Examples
+
+Student added successfully.
+
+Assessment saved successfully.
+
+Parent information updated successfully.
+
+Never
+
+Done.
+
+Success.
+
+Completed.
+
+---
+
+# Error Messages
+
+Describe
+
+Problem
+
+Reason (if known)
+
+Next Action
+
+Example
+
+Unable to save student information.
+
+Please check the required fields.
+
+Bad
+
+Operation Failed.
+
+Unknown Error.
+
+Exception.
+
+---
+
+# Validation Messages
+
+Speak to the user.
+
+Bad
+
+Field Invalid
+
+Good
+
+Student name is required.
+
+---
+
+# Empty States
+
+Always include
+
+Title
+
+Description
+
+Primary Action
+
+Example
+
+No Students Yet
+
+Create your first student to begin managing your center.
+
+Add Student
+
+Never
+
+Empty.
+
+No Data.
+
+---
+
+# Search
+
+Placeholder
+
+Search students...
+
+Search teachers...
+
+Search invoices...
+
+Never
+
+Input keyword...
+
+---
+
+# Filter
+
+Use
+
+Status
+
+Grade
+
+Course
+
+Teacher
+
+Date
+
+Never
+
+Condition
+
+Category1
+
+Option
+
+---
+
+# Table Headers
+
+Short
+
+Noun-based
+
+Student
+
+Parent
+
+Phone
+
+Course
+
+Status
+
+Last Assessment
+
+Never
+
+Student Name Information
+
+Assessment Result Status
+
+---
+
+# Dates
+
+Preferred
+
+27 Jul 2026
+
+Time
+
+09:30
+
+Date Time
+
+27 Jul 2026 • 09:30
+
+Avoid
+
+07/27/26
+
+2026-07-27T09:30
+
+---
+
+# Numbers
+
+Large Numbers
+
+1,250
+
+25,000
+
+125,000
+
+Percentages
+
+95%
+
+Scores
+
+87 / 100
+
+Currency
+
+$1,250.00
+
+---
+
+# Status
+
+Positive
+
+Active
+
+Completed
+
+Paid
+
+Negative
+
+Inactive
+
+Cancelled
+
+Overdue
+
+Pending
+
+Neutral
+
+Draft
+
+Archived
+
+Unknown
+
+---
+
+# Notifications
+
+Success
+
+Green
+
+Warning
+
+Yellow
+
+Error
+
+Red
+
+Information
+
+Blue
+
+Never use notification color for decoration.
+
+---
+
+# Tooltips
+
+Maximum
+
+2 lines.
+
+Explain
+
+Why
+
+not
+
+How.
+
+Example
+
+Export all visible students to Excel.
+
+---
+
+# Dialog Titles
+
+Always
+
+Verb + Object
+
+Delete Student
+
+Edit Teacher
+
+Create Course
+
+Never
+
+Student
+
+Teacher
+
+Course
+
+---
+
+# Page Titles
+
+Workspace
+
+↓
+
+Entity
+
+Examples
+
+Students
+
+Student Detail
+
+Teacher Dashboard
+
+Finance Analytics
+
+Never
+
+Dashboard 1
+
+Management
+
+Data
+
+---
+
+# Timeline Messages
+
+Timeline should read like history.
+
+Examples
+
+Student created.
+
+Assessment completed.
+
+Parent updated contact information.
+
+Invoice paid.
+
+Never
+
+CreateStudent()
+
+UpdateParent()
+
+SaveAssessment()
+
+---
+
+# Analytics Language
+
+Describe business,
+
+not database.
+
+Good
+
+Enrollment Trend
+
+Average Assessment Score
+
+Attendance Rate
+
+Bad
+
+Student Table Statistics
+
+SQL Result
+
+Data Count
+
+---
+
+# Accessibility
+
+Avoid abbreviations.
+
+Avoid technical jargon.
+
+Use simple language.
+
+Every message should be understandable by non-technical staff.
+
+---
+
+# Translation Ready
+
+Never concatenate sentences.
+
+Bad
+
+"Add " + Student
+
+Good
+
+"Add Student"
+
+All strings should be translation-ready.
+
+---
+
+# Review Checklist
+
+Every text review verifies
+
+✓ Correct terminology
+
+✓ Correct tone
+
+✓ Action-oriented
+
+✓ Consistent verbs
+
+✓ Human-readable
+
+✓ Business language
+
+✓ No technical wording
+
+If any text violates these rules,
+
+it should be rewritten before release.
+
+================
+File: docs/UX_Design/07_BUSINESS_COMPONENT_LIBRARY.md
+================
+# CENTER DESIGN SYSTEM
+
+# 07. BUSINESS COMPONENT LIBRARY
+
+Version: 1.0
+
+Status: Approved
+
+---
+
+# Purpose
+
+Business Components are reusable business building blocks.
+
+Unlike UI Components,
+
+Business Components already understand business meaning.
+
+Developers should assemble pages using Business Components,
+
+not individual UI controls.
+
+---
+
+# Business Component Hierarchy
+
+Business Components
+
+↓
+
+Composite Components
+
+↓
+
+UI Components
+
+↓
+
+Design Tokens
+
+Example
+
+Student Detail
+
+↓
+
+Student Summary Card
+
+↓
+
+Avatar
+
+Text
+
+Badge
+
+Button
+
+↓
+
+Spacing
+
+Typography
+
+Color
+
+Radius
+
+---
+
+# Student Components
+
+## Student Summary Card
+
+Purpose
+
+Display essential student information.
+
+Contains
+
+Avatar
+
+Student Name
+
+Student ID
+
+Status
+
+Course
+
+Grade
+
+Age
+
+Primary Contact
+
+Quick Actions
+
+Never
+
+Assessment
+
+Timeline
+
+Documents
+
+Those belong to other components.
+
+---
+
+## Student Metrics Card
+
+Purpose
+
+Display student KPIs.
+
+Contains
+
+Attendance Rate
+
+Average Assessment Score
+
+Completed Courses
+
+Last Assessment
+
+Never
+
+Editable data.
+
+Metrics are read-only.
+
+---
+
+## Parent Information Card
+
+Purpose
+
+Display parent information.
+
+Contains
+
+Primary Contact
+
+Relationship
+
+Phone
+
+Email
+
+Address
+
+Emergency Contact
+
+Quick Call
+
+Quick Email
+
+---
+
+## Assessment Summary Card
+
+Purpose
+
+Provide assessment overview.
+
+Contains
+
+Latest Score
+
+Previous Score
+
+Improvement
+
+Trend
+
+Status
+
+Quick Action
+
+View Assessment
+
+---
+
+## Timeline Component
+
+Purpose
+
+Display student history.
+
+Contains
+
+Date
+
+Time
+
+Event
+
+Description
+
+Actor
+
+Rules
+
+Newest first.
+
+Grouped by time.
+
+No raw system events.
+
+---
+
+## Document Component
+
+Purpose
+
+Display related documents.
+
+Contains
+
+File Icon
+
+Name
+
+Category
+
+Size
+
+Upload Date
+
+Actions
+
+Download
+
+Preview
+
+Delete
+
+---
+
+## Student Activity Card
+
+Purpose
+
+Display recent activities.
+
+Contains
+
+Latest Timeline Events.
+
+Maximum
+
+10 items.
+
+View All button.
+
+---
+
+# Dashboard Components
+
+## Need Attention Card
+
+Purpose
+
+Display urgent work.
+
+Priority
+
+Critical
+
+High
+
+Normal
+
+Maximum
+
+5 items.
+
+Every item clickable.
+
+---
+
+## Today's Summary Card
+
+Purpose
+
+Provide today's operational snapshot.
+
+Contains
+
+New Students
+
+Today's Classes
+
+Pending Payments
+
+Pending Assessments
+
+---
+
+## Recent Activity Card
+
+Purpose
+
+Display latest business events.
+
+Grouped by
+
+Time
+
+Entity
+
+Never show technical logs.
+
+---
+
+## Upcoming Events Card
+
+Purpose
+
+Display upcoming business events.
+
+Examples
+
+Assessment
+
+Birthday
+
+Course Start
+
+Payment Due
+
+---
+
+## Quick Insight Card
+
+Purpose
+
+Provide small analytical highlights.
+
+Maximum
+
+4 metrics.
+
+Never replace Analytics.
+
+---
+
+# Analytics Components
+
+## KPI Card
+
+Purpose
+
+Display one KPI.
+
+Contains
+
+Value
+
+Trend
+
+Delta
+
+Description
+
+Never
+
+Buttons
+
+Editable content
+
+---
+
+## Trend Chart
+
+Purpose
+
+Show change over time.
+
+Contains
+
+Title
+
+Legend
+
+Chart
+
+Summary
+
+---
+
+## Distribution Chart
+
+Purpose
+
+Display category distribution.
+
+Contains
+
+Chart
+
+Legend
+
+Percentage
+
+---
+
+## Comparison Card
+
+Purpose
+
+Compare two business values.
+
+Examples
+
+Current Month
+
+vs
+
+Last Month
+
+---
+
+# Teacher Components
+
+Teacher Summary
+
+Teacher Schedule
+
+Teaching Metrics
+
+Assigned Classes
+
+Availability
+
+Teacher Timeline
+
+Future Workspace.
+
+---
+
+# Finance Components
+
+Invoice Summary
+
+Payment Status
+
+Revenue Card
+
+Outstanding Payment
+
+Cash Flow Summary
+
+Future Workspace.
+
+---
+
+# Shared Components
+
+Metric Card
+
+Status Card
+
+Activity Card
+
+Timeline
+
+Entity Header
+
+Search Toolbar
+
+Filter Panel
+
+Pagination
+
+Empty State
+
+Notification
+
+These components are shared by every Workspace.
+
+---
+
+# Business Component Rules
+
+Every page should be composed of Business Components.
+
+Never directly assemble pages using Buttons and Labels.
+
+Bad
+
+Button
+
+Label
+
+Frame
+
+Layout
+
+Good
+
+Student Summary Card
+
+Assessment Card
+
+Timeline Component
+
+Metric Card
+
+---
+
+# Evolution Rule
+
+If three Workspaces build similar business content,
+
+extract a new Business Component.
+
+Never duplicate business layouts.
+
+---
+
+# Review Checklist
+
+Every review verifies
+
+✓ Correct Business Component selected
+
+✓ Business responsibility is clear
+
+✓ No duplicated components
+
+✓ Correct composition
+
+✓ Reusable
+
+✓ Consistent with CDS
+
+Business Components are the foundation of every Workspace.
+
+================
+File: docs/UX_Design/08_IMPLEMENTATION_CONTRACT.md
+================
+# CENTER DESIGN SYSTEM
+
+# 08. IMPLEMENTATION CONTRACT
+
+Version: 1.0
+
+Status: Mandatory
+
+---
+
+# Purpose
+
+This document defines the implementation contract between
+
+Design
+
+and
+
+Engineering.
+
+Developers do not design.
+
+Developers implement.
+
+Design decisions belong to CDS.
+
+Engineering decisions belong to implementation.
+
+---
+
+# Golden Rule
+
+If CDS already defines a solution,
+
+developers must use it.
+
+Do not invent alternatives.
+
+---
+
+# Authority Order
+
+When conflicts occur,
+
+follow this priority.
+
+1
+
+Design Philosophy
+
+↓
+
+2
+
+Page Templates
+
+↓
+
+3
+
+Layout System
+
+↓
+
+4
+
+Business Components
+
+↓
+
+5
+
+Component Behaviors
+
+↓
+
+6
+
+Content Language Guide
+
+↓
+
+7
+
+Design Tokens
+
+↓
+
+8
+
+Implementation
+
+Implementation is always the last decision.
+
+---
+
+# Developers MUST NOT
+
+Create new layouts.
+
+Create new spacing.
+
+Create new colors.
+
+Create new typography.
+
+Create new page templates.
+
+Create new business components.
+
+Create new interaction patterns.
+
+Rename standard buttons.
+
+Invent new icons.
+
+Duplicate existing components.
+
+Hard-code UI values.
+
+---
+
+# Developers MUST
+
+Use existing Page Templates.
+
+Use existing Business Components.
+
+Use Design Tokens.
+
+Use approved terminology.
+
+Follow Component Behaviors.
+
+Reuse Shared Components.
+
+Preserve visual hierarchy.
+
+Keep business workflow unchanged.
+
+---
+
+# Hard-coded Values
+
+Forbidden
+
+padding:17
+
+margin:21
+
+radius:11
+
+width:237
+
+height:53
+
+Allowed
+
+Space.LG
+
+Radius.MD
+
+Button.PRIMARY_HEIGHT
+
+Sidebar.EXPANDED
+
+---
+
+# Page Construction
+
+Every page
+
+must begin by selecting a Page Template.
+
+Never build pages from scratch.
+
+Example
+
+Student Detail
+
+↓
+
+Detail Template
+
+↓
+
+Student Summary
+
+↓
+
+Student Metrics
+
+↓
+
+Assessment
+
+↓
+
+Timeline
+
+↓
+
+Documents
+
+---
+
+# Component Construction
+
+Pages
+
+↓
+
+Business Components
+
+↓
+
+Shared Components
+
+↓
+
+UI Components
+
+↓
+
+Design Tokens
+
+Never skip layers.
+
+---
+
+# Layout Rules
+
+Only one vertical scrollbar.
+
+No nested scrolling.
+
+No duplicated navigation.
+
+No floating widgets without purpose.
+
+No inconsistent spacing.
+
+---
+
+# Business Rules
+
+Every user action
+
+must update
+
+Business Data
+
+↓
+
+Timeline
+
+↓
+
+Dashboard
+
+↓
+
+Analytics
+
+↓
+
+Notification
+
+Manual refresh is prohibited.
+
+---
+
+# Naming Rules
+
+Files
+
+StudentSummaryCard
+
+AssessmentCard
+
+NeedAttentionCard
+
+TimelineWidget
+
+Never
+
+Card1
+
+Widget2
+
+PanelNew
+
+FrameTemp
+
+---
+
+# Code Organization
+
+Workspace
+
+↓
+
+Pages
+
+↓
+
+Business Components
+
+↓
+
+Shared Components
+
+↓
+
+Infrastructure
+
+Never mix business logic into UI files.
+
+---
+
+# Reusability Rule
+
+If a UI appears
+
+three times,
+
+extract a component.
+
+If a business workflow repeats,
+
+extract a business component.
+
+---
+
+# Design Review
+
+Engineering review
+
+must answer
+
+Did the code follow CDS?
+
+Not
+
+Does it look nice?
+
+---
+
+# Change Process
+
+Developer
+
+cannot modify CDS.
+
+If CDS is insufficient
+
+↓
+
+Create Proposal
+
+↓
+
+Design Review
+
+↓
+
+Approve
+
+↓
+
+Update CDS
+
+↓
+
+Implement
+
+Never bypass CDS.
+
+---
+
+# Exceptions
+
+Temporary exceptions require
+
+Reason
+
+Owner
+
+Removal Plan
+
+Deadline
+
+Permanent exceptions are not allowed.
+
+---
+
+# Definition of Done
+
+A feature is complete only when
+
+✓ Correct Page Template
+
+✓ Correct Business Components
+
+✓ Correct Design Tokens
+
+✓ Correct Language
+
+✓ Correct Behavior
+
+✓ Correct Workflow
+
+✓ Correct Layout
+
+Passing tests alone is insufficient.
+
+---
+
+# Developer Checklist
+
+Before merging code
+
+confirm
+
+□ No hard-coded spacing
+
+□ No duplicated layouts
+
+□ Correct template
+
+□ Correct business components
+
+□ Correct terminology
+
+□ Correct interactions
+
+□ Correct empty state
+
+□ Correct loading state
+
+□ Correct error state
+
+□ Correct accessibility
+
+---
+
+# Review Checklist
+
+Every Pull Request
+
+must reference
+
+Affected Page Template
+
+Affected Business Components
+
+Affected Shared Components
+
+Affected Tokens
+
+Affected Behaviors
+
+Affected Workflows
+
+PRs without CDS references
+
+should not be approved.
+
+---
+
+# Final Principle
+
+Developers build software.
+
+CDS builds the product.
+
+The responsibility of Engineering
+
+is not to invent UI,
+
+but to implement the product consistently.
+
+================
+File: docs/UX_Design/09_PRODUCT_QUALITY_STANDARD.md
+================
+# CENTER DESIGN SYSTEM
+
+# 09. PRODUCT QUALITY STANDARD
+
+Version: 1.0
+
+Status: Mandatory
+
+---
+
+# Purpose
+
+This document defines how product quality is measured.
+
+Product quality should never rely on personal opinion.
+
+Every release should be evaluated using objective criteria.
+
+If a requirement cannot be measured,
+
+it should not become a quality standard.
+
+---
+
+# Quality Philosophy
+
+Quality is
+
+Consistency
+
+Predictability
+
+Reliability
+
+Clarity
+
+Efficiency
+
+before
+
+Beauty.
+
+Beautiful software with inconsistent behavior
+
+is not high-quality software.
+
+---
+
+# Quality Dimensions
+
+CenterManager evaluates quality in
+
+1. Visual Quality
+
+2. Interaction Quality
+
+3. Business Quality
+
+4. Technical Quality
+
+5. Accessibility
+
+6. Performance
+
+7. Consistency
+
+Every feature must satisfy all dimensions.
+
+---
+
+# Visual Quality
+
+Checklist
+
+□ Correct Page Template
+
+□ Correct Layout
+
+□ Correct Visual Hierarchy
+
+□ Correct Design Tokens
+
+□ Correct Typography
+
+□ Correct Spacing
+
+□ Correct Alignment
+
+□ No Overflow
+
+□ No Clipped Content
+
+□ No Duplicate Scrollbars
+
+Acceptance
+
+100% required.
+
+---
+
+# Interaction Quality
+
+Every interaction must include
+
+Loading
+
+↓
+
+Success
+
+↓
+
+Error
+
+↓
+
+Recovery
+
+Every user action must provide feedback.
+
+Users should never wonder
+
+whether an action succeeded.
+
+---
+
+# Business Quality
+
+Business events must automatically update
+
+Timeline
+
+Dashboard
+
+Analytics
+
+Notifications
+
+Related Views
+
+No manual refresh.
+
+No inconsistent data.
+
+---
+
+# Navigation Quality
+
+Every page must answer
+
+Where am I?
+
+What can I do?
+
+How do I go back?
+
+Navigation must always be predictable.
+
+---
+
+# Form Quality
+
+Every form must provide
+
+Validation
+
+Focus
+
+Keyboard Support
+
+Error Recovery
+
+Required Field Indicators
+
+Unsaved Change Warning
+
+Auto Scroll to Error
+
+---
+
+# Table Quality
+
+Every table must support
+
+Sorting
+
+Filtering
+
+Searching
+
+Pagination
+
+Empty State
+
+Loading State
+
+Error State
+
+Selection
+
+Responsive Columns
+
+---
+
+# Dashboard Quality
+
+Dashboard answers
+
+What happened?
+
+What needs attention?
+
+What is coming next?
+
+Dashboard should not become a report page.
+
+---
+
+# Analytics Quality
+
+Analytics answers
+
+Why?
+
+Trend?
+
+Comparison?
+
+Prediction?
+
+Analytics must support decision making.
+
+Not operational work.
+
+---
+
+# Empty State Quality
+
+Every Empty State contains
+
+Illustration
+
+↓
+
+Title
+
+↓
+
+Explanation
+
+↓
+
+Primary Action
+
+Never display blank pages.
+
+---
+
+# Error Quality
+
+Errors should explain
+
+What happened
+
+↓
+
+Why
+
+↓
+
+What to do next
+
+Never expose
+
+Stack traces
+
+Database errors
+
+Exception names
+
+Technical messages
+
+---
+
+# Performance Quality
+
+Target
+
+Page Load
+
+< 2 seconds
+
+Dialog
+
+< 300 ms
+
+Table Filtering
+
+< 200 ms
+
+Search Feedback
+
+< 300 ms
+
+Animation
+
+120–250 ms
+
+Performance degradation requires investigation.
+
+---
+
+# Accessibility Quality
+
+Keyboard Navigation
+
+100%
+
+Visible Focus
+
+100%
+
+Screen Reader Labels
+
+Required
+
+Color should never be the only indicator.
+
+---
+
+# Consistency Quality
+
+Buttons
+
+Same appearance
+
+Same behavior
+
+Same terminology
+
+Forms
+
+Same validation
+
+Same layout
+
+Same interaction
+
+Tables
+
+Same filtering
+
+Same sorting
+
+Same pagination
+
+Consistency is mandatory.
+
+---
+
+# Component Quality
+
+Every reusable component must provide
+
+Loading State
+
+Empty State
+
+Error State
+
+Disabled State
+
+Responsive Layout
+
+Keyboard Support
+
+No exceptions.
+
+---
+
+# Content Quality
+
+Every text should be
+
+Short
+
+Clear
+
+Professional
+
+Business-focused
+
+Translation-ready
+
+Never
+
+Technical
+
+Ambiguous
+
+Verbose
+
+---
+
+# Business Workflow Quality
+
+Every workflow should
+
+Reduce clicks
+
+Reduce navigation
+
+Avoid duplicate data entry
+
+Avoid unnecessary dialogs
+
+Optimize common tasks
+
+---
+
+# Review Score
+
+Visual Quality
+
+20 points
+
+Interaction Quality
+
+20 points
+
+Business Quality
+
+20 points
+
+Consistency
+
+15 points
+
+Accessibility
+
+10 points
+
+Performance
+
+10 points
+
+Content Quality
+
+5 points
+
+Total
+
+100 points
+
+---
+
+# Release Standard
+
+95–100
+
+Excellent
+
+Ready for Release
+
+90–94
+
+Acceptable
+
+Minor Improvements
+
+80–89
+
+Needs Review
+
+Below 80
+
+Rejected
+
+---
+
+# Continuous Improvement
+
+Every usability issue
+
+must be classified
+
+Root Cause
+
+↓
+
+CDS Missing Rule
+
+↓
+
+Implementation Error
+
+↓
+
+Business Requirement Change
+
+The CDS should evolve,
+
+not accumulate exceptions.
+
+---
+
+# Final Principle
+
+Quality is not achieved
+
+by polishing pixels.
+
+Quality is achieved
+
+by following standards consistently.
+
+A consistent product
+
+always feels more professional
+
+than an inconsistent beautiful interface.
+
+================
+File: docs/UX_Design/10_CDS_GOVERNANCE.md
+================
+# CENTER DESIGN SYSTEM
+
+# 10. CDS GOVERNANCE
+
+Version: 1.0
+
+Status: Mandatory
+
+---
+
+# Purpose
+
+This document defines how the Center Design System (CDS)
+is created, maintained, reviewed, and evolved.
+
+The purpose of Governance is to ensure that
+the Design System remains consistent,
+predictable,
+and scalable
+throughout the lifetime of the product.
+
+---
+
+# CDS is the Source of Truth
+
+All product interfaces must follow CDS.
+
+If implementation conflicts with CDS,
+
+CDS wins.
+
+If business requirements conflict with CDS,
+
+CDS must be reviewed before implementation.
+
+No implementation may bypass CDS.
+
+---
+
+# Ownership
+
+The CDS is owned collectively,
+but responsibilities are clearly defined.
+
+## Product Owner
+
+Responsible for
+
+Business workflow
+
+Business terminology
+
+Prioritization
+
+Approval of new business patterns
+
+---
+
+## UX Designer
+
+Responsible for
+
+Layout
+
+Page Templates
+
+Interaction
+
+Accessibility
+
+Visual consistency
+
+---
+
+## Engineering Lead
+
+Responsible for
+
+Technical feasibility
+
+Performance
+
+Implementation quality
+
+Architecture alignment
+
+---
+
+## Developers
+
+Responsible for
+
+Implementing CDS faithfully.
+
+Developers are not responsible for
+inventing UI solutions.
+
+---
+
+# Change Categories
+
+Every CDS change belongs to one category.
+
+## Patch
+
+Examples
+
+Fix typo
+
+Clarify wording
+
+Correct documentation
+
+Version
+
+1.0.x
+
+Backward compatible.
+
+---
+
+## Minor
+
+Examples
+
+New Business Component
+
+New Page Template
+
+New Interaction Pattern
+
+Version
+
+1.x.0
+
+Backward compatible.
+
+---
+
+## Major
+
+Examples
+
+Layout redesign
+
+Token redesign
+
+Navigation redesign
+
+Workflow redesign
+
+Version
+
+x.0.0
+
+May require migration.
+
+---
+
+# Proposal Process
+
+Every CDS change follows the same workflow.
+
+Proposal
+
+↓
+
+Discussion
+
+↓
+
+Prototype
+
+↓
+
+Review
+
+↓
+
+Approval
+
+↓
+
+Documentation
+
+↓
+
+Implementation
+
+↓
+
+Release
+
+No step may be skipped.
+
+---
+
+# Proposal Template
+
+Every proposal must answer
+
+Why is the current CDS insufficient?
+
+What problem does this solve?
+
+Can an existing pattern solve it?
+
+Will this increase complexity?
+
+Does it improve consistency?
+
+Does it affect other Workspaces?
+
+What migration is required?
+
+---
+
+# New Component Rules
+
+Before creating a new component,
+ask the following questions.
+
+Does an existing component already solve this?
+
+Can an existing component be extended?
+
+Has this pattern appeared at least three times?
+
+Will future Workspaces reuse it?
+
+If any answer is "No",
+
+do not create a new component.
+
+---
+
+# New Token Rules
+
+Adding a Design Token is the last resort.
+
+Before adding
+
+Space-18
+
+ask
+
+Can Space-16 or Space-24 solve the problem?
+
+Token proliferation is prohibited.
+
+---
+
+# New Template Rules
+
+A new Page Template requires
+
+Three independent use cases
+
+Business justification
+
+UX review
+
+Engineering review
+
+Approval
+
+Otherwise,
+
+reuse an existing template.
+
+---
+
+# Component Deprecation
+
+Components should not be deleted immediately.
+
+Lifecycle
+
+Active
+
+↓
+
+Deprecated
+
+↓
+
+Migration
+
+↓
+
+Removal
+
+Deprecated components remain available
+until all consumers have migrated.
+
+---
+
+# Backward Compatibility
+
+Minor updates
+
+must remain compatible.
+
+Major updates
+
+must include
+
+Migration Guide
+
+Affected Components
+
+Breaking Changes
+
+Upgrade Steps
+
+---
+
+# Versioning
+
+Use Semantic Versioning.
+
+Major
+
+2.0.0
+
+Breaking changes.
+
+Minor
+
+1.4.0
+
+New capability.
+
+Patch
+
+1.4.2
+
+Documentation or bug fix.
+
+---
+
+# Documentation Requirements
+
+Every CDS artifact must contain
+
+Purpose
+
+Responsibilities
+
+Rules
+
+Examples
+
+Anti-patterns
+
+Review Checklist
+
+Version
+
+Owner
+
+Last Updated
+
+---
+
+# Review Board
+
+Every Major Change requires review by
+
+Product
+
+UX
+
+Engineering
+
+A change is approved only
+when all three agree.
+
+---
+
+# Exception Policy
+
+Exceptions are temporary.
+
+Every exception must include
+
+Reason
+
+Owner
+
+Approval
+
+Expiration Date
+
+Removal Plan
+
+Expired exceptions must be removed.
+
+---
+
+# Compliance
+
+Every Pull Request must answer
+
+Which CDS documents apply?
+
+Which Business Components are affected?
+
+Which Design Tokens are used?
+
+Which Page Template is implemented?
+
+If these questions cannot be answered,
+
+the Pull Request is incomplete.
+
+---
+
+# Audits
+
+The product should be audited regularly.
+
+Recommended frequency
+
+Every major release
+
+or
+
+Quarterly.
+
+Audit includes
+
+Design
+
+Implementation
+
+Consistency
+
+Performance
+
+Accessibility
+
+Business Workflow
+
+---
+
+# Metrics
+
+Governance success should be measurable.
+
+Suggested KPIs
+
+Component Reuse Rate
+
+Duplicate Component Count
+
+Token Compliance Rate
+
+CDS Compliance Rate
+
+UI Defect Rate
+
+UX Review Findings
+
+Average Time to Implement New Pages
+
+---
+
+# Evolution Principle
+
+CDS should evolve through
+better abstractions,
+
+not through more exceptions.
+
+Every new rule should simplify
+future development.
+
+If a rule increases complexity
+without increasing consistency,
+
+it should not be added.
+
+---
+
+# Final Principle
+
+The Design System is not documentation.
+
+It is part of the product.
+
+Every screen,
+
+every interaction,
+
+every workflow,
+
+and every implementation
+
+must be governed by CDS.
+
+A mature product is built
+through disciplined evolution,
+
+not continuous reinvention.
 
 ================
 File: docs/ARCHITECTURE.md
@@ -16786,6 +23685,7 @@ class ActivityCard(QFrame):
 ================
 File: src/centermanager/ui/shared/chart_card.py
 ================
+# src/centermanager/ui/shared/chart_card.py
 # -*- coding: utf-8 -*-
 from typing import Optional, List, Tuple
 from PySide6.QtCore import Qt, QRectF, QPointF
@@ -16921,7 +23821,6 @@ class ChartWidget(QWidget):
             painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
             painter.setFont(QFont("Arial", 8))
             fm = QFontMetrics(painter.font())
-            # Đảm bảo label là string trước khi lấy len()
             label_str = str(label)
             label_text = label_str if len(label_str) <= 10 else label_str[:10] + "…"
             label_width = fm.horizontalAdvance(label_text)
@@ -16950,7 +23849,10 @@ class ChartWidget(QWidget):
         pie_rect = QRectF(rect.x(), rect.y(),
                           min(rect.width() * 0.6, rect.height()),
                           min(rect.width() * 0.6, rect.height()))
-        pie_rect.moveCenter(rect.center() - QPointF(rect.width() * 0.1, 0))
+        # Sửa lỗi: tính lại center bằng setX
+        center = rect.center()
+        center.setX(center.x() - rect.width() * 0.1)
+        pie_rect.moveCenter(center)
 
         for i, (label, value) in enumerate(self._data):
             angle = (value / total) * 360 * 16  # 1/16 degree
@@ -18683,7 +25585,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QLabel, QPushButton, QSizePolicy
+    QLabel, QPushButton, QSizePolicy, QListWidget, QListWidgetItem
 )
 
 from centermanager.services.student_dashboard_service import StudentDashboardService
@@ -18758,7 +25660,7 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
-        # ---- Upcoming Events (with scroll) ----
+        # ---- Upcoming Events (with QListWidget) ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -18766,21 +25668,24 @@ class StudentDashboardPage(QWidget):
         events_header = SectionHeader("Upcoming Events")
         events_layout.addWidget(events_header)
 
-        self.events_scroll = QScrollArea()
-        self.events_scroll.setWidgetResizable(True)
-        self.events_scroll.setMaximumHeight(200)
-        self.events_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.events_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        self.events_container = QWidget()
-        self.events_container.setStyleSheet("background: transparent;")
-        self.events_container_layout = QVBoxLayout(self.events_container)
-        self.events_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.events_container_layout.setSpacing(SPACING['xs'])
-        self.events_scroll.setWidget(self.events_container)
-        events_layout.addWidget(self.events_scroll)
+        self.events_list = QListWidget()
+        self.events_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.events_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.events_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.events_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.events_list.setMaximumHeight(220)
+        events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
-        # ---- Recent Activities (with scroll) ----
+        # ---- Recent Activities (with QListWidget) ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -18788,18 +25693,21 @@ class StudentDashboardPage(QWidget):
         recent_header = SectionHeader("Recent Activities")
         recent_layout.addWidget(recent_header)
 
-        self.recent_scroll = QScrollArea()
-        self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setMaximumHeight(300)
-        self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.recent_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        self.recent_container = QWidget()
-        self.recent_container.setStyleSheet("background: transparent;")
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(SPACING['xs'])
-        self.recent_scroll.setWidget(self.recent_container)
-        recent_layout.addWidget(self.recent_scroll)
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+            }
+            QListWidget::item {
+                padding: 0px;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.recent_list.setMaximumHeight(340)
+        recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
         # ---- Quick Actions ----
@@ -18884,11 +25792,11 @@ class StudentDashboardPage(QWidget):
             logger.exception("Failed to load attention students")
 
     def _refresh_events(self) -> None:
-        self._clear_layout(self.events_container_layout)
+        self.events_list.clear()
         try:
-            events = self._service.get_upcoming_events()[:5]
+            events = self._service.get_upcoming_events()
             if events:
-                for ev in events:
+                for ev in events[:10]:
                     icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
                     icon = icon_map.get(ev.event_type, "📌")
                     label_text = f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
@@ -18896,25 +25804,31 @@ class StudentDashboardPage(QWidget):
                         label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     label = QLabel(label_text)
                     label.setStyleSheet(f"""
-                        font-size: 14px;
+                        font-size: 13px;
                         color: {COLORS['text_secondary']};
                         padding: 4px 0;
                     """)
-                    self.events_container_layout.addWidget(label)
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(label.sizeHint())
+                    self.events_list.addItem(list_item)
+                    self.events_list.setItemWidget(list_item, label)
             else:
                 empty = EmptyState(
                     icon="📅",
                     title="No upcoming events",
                     description="Events will appear here when scheduled."
                 )
-                self.events_container_layout.addWidget(empty)
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.events_list.addItem(list_item)
+                self.events_list.setItemWidget(list_item, empty)
         except Exception as e:
             logger.exception("Failed to load upcoming events")
 
     def _refresh_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
+        self.recent_list.clear()
         try:
-            activities = self._service.get_recent_activities(limit=5)
+            activities = self._service.get_recent_activities(limit=10)
             if activities:
                 for act in activities:
                     card = ActivityCard(
@@ -18923,14 +25837,20 @@ class StudentDashboardPage(QWidget):
                         subtitle=f"{act.student_name} ({act.student_code})",
                         time=act.time
                     )
-                    self.recent_container_layout.addWidget(card)
+                    list_item = QListWidgetItem()
+                    list_item.setSizeHint(card.sizeHint())
+                    self.recent_list.addItem(list_item)
+                    self.recent_list.setItemWidget(list_item, card)
             else:
                 empty = EmptyState(
                     icon="📭",
                     title="No recent activities",
                     description="Activities will appear here when students are updated."
                 )
-                self.recent_container_layout.addWidget(empty)
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(empty.sizeHint())
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, empty)
         except Exception as e:
             logger.exception("Failed to load recent activities")
 
@@ -18944,8 +25864,7 @@ class StudentDashboardPage(QWidget):
 File: src/centermanager/ui/student_workspace/student_detail_page.py
 ================
 # -*- coding: utf-8 -*-
-"""
-StudentDetailPage - displays full student profile with all sections.
+"""StudentDetailPage - displays full student profile with all sections.
 Now includes Profile, Quick Actions, Parents, Assessment, Timeline, Notes, Documents.
 """
 import logging
@@ -18954,7 +25873,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSplitter
+    QScrollArea, QFrame, QSizePolicy
 )
 
 from centermanager.services.student_service import StudentService
@@ -18984,7 +25903,6 @@ from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
 )
-# THÊM IMPORT TOKENS
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
 
@@ -19051,7 +25969,8 @@ class StudentDetailPage(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(SPACING['xl'], SPACING['lg'], SPACING['xl'], SPACING['lg'])
+        # Sử dụng margin nhỏ hơn để tăng diện tích hiển thị
+        container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
         # Quick Actions
@@ -19086,17 +26005,20 @@ class StudentDetailPage(QWidget):
         self.timeline_section.layout().addWidget(self.timeline_widget)
         container_layout.addWidget(self.timeline_section)
 
-        # Notes (structured)
+        # Notes (structured) - mở rộng chiều rộng
         self.notes_section = self._create_vertical_section("📝 Notes")
         self.notes_widget = NotesWidget(self._student_note_service)
         self.notes_widget.note_changed.connect(self._on_data_changed)
+        # Chiếm toàn bộ chiều rộng
+        self.notes_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.notes_section.layout().addWidget(self.notes_widget)
         container_layout.addWidget(self.notes_section)
 
-        # Documents
+        # Documents - mở rộng chiều rộng
         self.documents_section = self._create_vertical_section("📎 Documents")
         self.documents_widget = DocumentsWidget(self._document_service)
         self.documents_widget.document_changed.connect(self._on_data_changed)
+        self.documents_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.documents_section.layout().addWidget(self.documents_widget)
         container_layout.addWidget(self.documents_section)
 
@@ -19113,7 +26035,6 @@ class StudentDetailPage(QWidget):
             on_upload_doc=self._on_upload_doc
         )
 
-    # Trong _create_vertical_section, cập nhật font size
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
         layout = QVBoxLayout(section)
@@ -19124,7 +26045,7 @@ class StudentDetailPage(QWidget):
             font-size: 16px;
             font-weight: 600;
             color: {COLORS['text_primary']};
-        """)  # Giảm từ 18px xuống 16px
+        """)
         layout.addWidget(title_label)
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -19298,7 +26219,6 @@ class StudentDetailPage(QWidget):
 
     def _on_data_changed(self) -> None:
         if self._current_student_id is not None:
-            # Reload everything
             try:
                 student = self._student_service.get_student(self._current_student_id)
                 self._populate_all(student)
@@ -22028,11 +28948,12 @@ File: src/centermanager/ui/home_page.py
 """HomePage - Command Center / Workspace Launcher for CenterManager."""
 import logging
 from typing import Optional
+from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
-    QLabel, QFrame, QSizePolicy, QPushButton
+    QLabel, QFrame, QSizePolicy, QPushButton, QListWidget, QListWidgetItem
 )
 
 from centermanager.services.home_dashboard_service import HomeDashboardService
@@ -22063,10 +28984,11 @@ class HomePage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent; border: none;")
+        # Main scroll (cho toàn bộ HomePage)
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        main_scroll.setStyleSheet("background: transparent; border: none;")
 
         container = QWidget()
         container.setStyleSheet("background: transparent;")
@@ -22108,7 +29030,7 @@ class HomePage(QWidget):
         left_col = QVBoxLayout()
         left_col.setSpacing(24)
 
-        # Recent Activities with scroll (giới hạn 5)
+        # ---- Recent Activities using QListWidget ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -22116,19 +29038,42 @@ class HomePage(QWidget):
         recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
         recent_layout.addWidget(recent_header)
 
-        # Scroll area cho recent activities
-        self.recent_scroll = QScrollArea()
-        self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setMaximumHeight(350)
-        self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.recent_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        self.recent_container = QWidget()
-        self.recent_container.setStyleSheet("background: transparent;")
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(0)
-        self.recent_scroll.setWidget(self.recent_container)
-        recent_layout.addWidget(self.recent_scroll)
+        # Tạo QListWidget với style rõ ràng và hỗ trợ scroll
+        self.recent_list = QListWidget()
+        self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.recent_list.setUniformItemSizes(True)
+        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Nhận sự kiện cuộn chuột
+        self.recent_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                background: #ffffff;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 0px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #f1f1f1;
+                width: 8px;
+                margin: 0px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c1c1c1;
+                min-height: 20px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a8a8a8;
+            }
+        """)
+        self.recent_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.recent_list.setFixedHeight(400)
+        self.recent_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        recent_layout.addWidget(self.recent_list)
 
         left_col.addWidget(self.recent_section)
 
@@ -22170,8 +29115,8 @@ class HomePage(QWidget):
         container_layout.addLayout(main_content)
         container_layout.addStretch()
 
-        scroll.setWidget(container)
-        layout.addWidget(scroll)
+        main_scroll.setWidget(container)
+        layout.addWidget(main_scroll)
 
     def refresh(self) -> None:
         self._populate_workspace_cards()
@@ -22206,26 +29151,68 @@ class HomePage(QWidget):
                 row += 1
 
     def _populate_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
-        # Chỉ lấy 5 hoạt động gần nhất
-        activities = self._service.get_recent_activities(limit=5)
+        self.recent_list.clear()
+        activities = self._service.get_recent_activities(limit=30)
+
+        # Nếu ít hơn 10, thêm dữ liệu giả để test scroll
+        if len(activities) < 10:
+            now = datetime.now()
+            for i in range(15):
+                class Dummy:
+                    def __init__(self, icon, title, student_name, student_code, time):
+                        self.icon = icon
+                        self.title = title
+                        self.student_name = student_name
+                        self.student_code = student_code
+                        self.time = time
+                act = Dummy(
+                    '📌', f'Dummy Activity {i+1}',
+                    f'Student {i+1}', f'HS{i+1:03d}',
+                    now - timedelta(minutes=i*5)
+                )
+                activities.append(act)
+
+        logger.info(f"HomePage: Total activities: {len(activities)}")
+
         if activities:
             for act in activities:
-                item = ActivityItem(
+                item_widget = ActivityItem(
                     icon=act.icon,
                     title=act.title,
                     student_name=act.student_name,
                     student_code=act.student_code,
                     time=act.time
                 )
-                self.recent_container_layout.addWidget(item)
+                # FIX: Đặt chiều cao cố định cho widget
+                item_widget.setFixedHeight(70)
+                # FIX: Dùng QSize(0,70) thay vì sizeHint()
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(QSize(0, 70))
+                self.recent_list.addItem(list_item)
+                self.recent_list.setItemWidget(list_item, item_widget)
         else:
+            # Empty state
             empty = EmptyState(
                 icon="📭",
                 title="No recent activities",
                 description="Activities will appear here as you use the system."
             )
-            self.recent_container_layout.addWidget(empty)
+            empty.setFixedHeight(200)
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(QSize(0, 200))
+            self.recent_list.addItem(list_item)
+            self.recent_list.setItemWidget(list_item, empty)
+
+        # Debug: in số lượng item
+        logger.info(f"HomePage: QListWidget item count = {self.recent_list.count()}")
+        if self.recent_list.verticalScrollBar():
+            logger.info("Scroll bar exists")
+        else:
+            logger.warning("Scroll bar is None")
+
+        # Cập nhật
+        self.recent_list.updateGeometry()
+        self.recent_list.repaint()
 
     def _populate_today_summary(self) -> None:
         self._clear_layout(self.today_container_layout)

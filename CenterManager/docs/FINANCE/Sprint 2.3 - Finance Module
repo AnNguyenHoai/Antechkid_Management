@@ -1,0 +1,648 @@
+# Sprint 2.3 - Finance Module
+Version: 1.0
+Status: Approved
+Priority: HIGH
+
+---
+
+# Objective
+
+Implement Finance Module V1 for CenterManager.
+
+Finance is an administration module responsible for:
+
+- Recording income
+- Recording expenses
+- Tracking outstanding tuition
+- Providing financial dashboard
+
+Finance is NOT the starting point of business workflows.
+
+Student remains the center of the business process.
+
+---
+
+# IMPORTANT DESIGN PRINCIPLES
+
+## Principle 1
+
+Student owns business.
+
+Finance owns money.
+
+Dashboard owns visualization.
+
+Each module must have only ONE responsibility.
+
+---
+
+## Principle 2
+
+Finance Dashboard never stores calculated values.
+
+Everything must be calculated from source data.
+
+---
+
+## Principle 3
+
+Outstanding Tuition is NOT stored.
+
+It is calculated in real time.
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+---
+
+## Principle 4
+
+Do NOT redesign existing UI.
+
+Only implement business functionality.
+
+---
+
+# Development Order
+
+Task 2.3.1
+
+↓
+
+Task 2.3.2
+
+↓
+
+Task 2.3.3
+
+↓
+
+Task 2.3.4
+
+↓
+
+Task 2.3.5
+
+↓
+
+Task 2.3.6
+
+↓
+
+Task 2.3.7
+
+↓
+
+Task 2.3.8
+
+↓
+
+Task 2.3.9
+
+↓
+
+Task 2.3.10
+
+↓
+
+Task 2.3.11
+
+↓
+
+Task 2.3.12
+
+---
+
+# TASK 2.3.1
+
+## Finance Database
+
+### Objective
+
+Create Finance database schema.
+
+### Implement
+
+Tables
+
+- Income
+- Expense
+
+Include
+
+- Primary Key
+- Foreign Key
+- Index
+- Timestamp
+
+### Deliverables
+
+- migration.sql
+- Prisma Schema
+- ER Diagram
+
+### Acceptance
+
+- Migration succeeds
+- Foreign keys correct
+- Indexes created
+
+---
+
+# TASK 2.3.2
+
+## Finance Permission
+
+### Objective
+
+Implement backend authorization.
+
+Permissions
+
+finance.view
+
+finance.income.create
+
+finance.income.update
+
+finance.income.delete
+
+finance.expense.create
+
+finance.expense.update
+
+finance.expense.delete
+
+### Middleware
+
+PermissionGuard
+
+### Acceptance
+
+Teacher
+
+403 Forbidden
+
+Reception
+
+403 Forbidden
+
+Admin
+
+200 OK
+
+---
+
+# TASK 2.3.3
+
+## Income API
+
+### Implement
+
+GET
+
+POST
+
+PUT
+
+DELETE
+
+SEARCH
+
+EXPORT
+
+### Validation
+
+Amount > 0
+
+Student exists
+
+Payment Method valid
+
+Income Type valid
+
+### Acceptance
+
+All CRUD operations work correctly.
+
+---
+
+# TASK 2.3.4
+
+## Income UI
+
+Pages
+
+- Income List
+- Income Detail
+- Create Income
+- Edit Income
+
+Functions
+
+- Search
+- Filter
+- Pagination
+- Export
+- CRUD
+
+### Acceptance
+
+UI fully functional.
+
+---
+
+# TASK 2.3.5
+
+## Expense API
+
+CRUD
+
+Validation
+
+Category
+
+Amount
+
+Method
+
+Status
+
+### Acceptance
+
+All CRUD operations work.
+
+---
+
+# TASK 2.3.6
+
+## Expense UI
+
+Pages
+
+- Expense List
+- Create Expense
+- Edit Expense
+
+Functions
+
+CRUD
+
+Search
+
+Filter
+
+Export
+
+### Acceptance
+
+Fully functional.
+
+---
+
+# TASK 2.3.7
+
+## Outstanding Service
+
+### Objective
+
+Implement Outstanding Calculation Service.
+
+Input
+
+Student
+
+↓
+
+Course
+
+↓
+
+Payment
+
+Output
+
+Expected Tuition
+
+Paid
+
+Outstanding
+
+Formula
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+### Important
+
+Never store Outstanding in database.
+
+Always calculate.
+
+### Acceptance
+
+Realtime calculation.
+
+---
+
+# TASK 2.3.8
+
+## Dashboard Service
+
+Calculate
+
+Revenue Today
+
+Revenue Month
+
+Expense Today
+
+Expense Month
+
+Current Balance
+
+Outstanding Tuition
+
+Dashboard must calculate from
+
+Income
+
++
+
+Expense
+
++
+
+Outstanding
+
+No duplicated data.
+
+---
+
+# TASK 2.3.9
+
+## Dashboard UI
+
+Widgets
+
+Revenue Today
+
+Revenue Month
+
+Expense Today
+
+Expense Month
+
+Outstanding
+
+Recent Income
+
+Recent Expense
+
+Need Attention
+
+Acceptance
+
+Dashboard loading under one second.
+
+---
+
+# TASK 2.3.10
+
+## Student Integration
+
+Student Detail
+
+↓
+
+Financial Tab
+
+Display
+
+Expected Tuition
+
+Paid
+
+Outstanding
+
+Payment History
+
+Button
+
+Collect Tuition
+
+Workflow
+
+Collect Tuition
+
+↓
+
+Create Income
+
+↓
+
+Update Outstanding
+
+↓
+
+Update Dashboard
+
+↓
+
+Create Student Timeline
+
+Everything should happen automatically.
+
+---
+
+# TASK 2.3.11
+
+## Security Test
+
+Teacher
+
+Cannot see Finance Menu
+
+Teacher API
+
+403
+
+Reception
+
+403
+
+Admin
+
+OK
+
+Backend authorization is mandatory.
+
+UI hiding is NOT security.
+
+---
+
+# TASK 2.3.12
+
+## Final Integration
+
+Verify
+
+Income
+
+↓
+
+Outstanding
+
+↓
+
+Dashboard
+
+↓
+
+Timeline
+
+↓
+
+Student Detail
+
+Everything must stay synchronized.
+
+---
+
+# Deliverables
+
+Finance Module
+
+├── Database
+
+├── Permission
+
+├── Income API
+
+├── Income UI
+
+├── Expense API
+
+├── Expense UI
+
+├── Outstanding Service
+
+├── Dashboard Service
+
+├── Dashboard UI
+
+├── Student Integration
+
+└── Testing
+
+---
+
+# Development Rules
+
+1.
+
+DO NOT redesign existing UI.
+
+---
+
+2.
+
+DO NOT modify unrelated modules.
+
+---
+
+3.
+
+DO NOT add features outside this sprint.
+
+---
+
+4.
+
+Every task must compile successfully.
+
+---
+
+5.
+
+Every task must be independently testable.
+
+---
+
+6.
+
+Every task must include API testing.
+
+---
+
+7.
+
+Every task must include UI screenshots.
+
+---
+
+8.
+
+Permission must be validated on BOTH frontend and backend.
+
+---
+
+9.
+
+If architecture problems are discovered, STOP implementation and report instead of making assumptions.
+
+---
+
+10.
+
+Priority
+
+Correct Architecture
+
+>
+
+Business Logic
+
+>
+
+UI
+
+---
+
+# Definition of Done
+
+Finance module can:
+
+✔ Record Income
+
+✔ Record Expense
+
+✔ Calculate Outstanding
+
+✔ Display Dashboard
+
+✔ Integrate with Student
+
+✔ Update Timeline
+
+✔ Pass Permission Validation
+
+✔ Pass API Testing
+
+✔ Pass Integration Testing
+
+Finance V1 is considered COMPLETE only when all acceptance criteria above are satisfied.
