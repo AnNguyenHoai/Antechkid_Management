@@ -52,9 +52,25 @@ class StudentDashboardPage(QWidget):
         container_layout.setContentsMargins(SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
+        # ---- KPI stats ----
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
+        # ---- Today Summary ----
+        self.today_section = QWidget()
+        today_layout = QVBoxLayout(self.today_section)
+        today_layout.setContentsMargins(0, 0, 0, 0)
+        today_layout.setSpacing(SPACING['sm'])
+        today_header = SectionHeader("Today's Summary")
+        today_layout.addWidget(today_header)
+        self.today_container = QWidget()
+        self.today_container_layout = QVBoxLayout(self.today_container)
+        self.today_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.today_container_layout.setSpacing(SPACING['xs'])
+        today_layout.addWidget(self.today_container)
+        container_layout.addWidget(self.today_section)
+
+        # ---- Quick Insights ----
         self.insights_section = QWidget()
         insights_layout = QVBoxLayout(self.insights_section)
         insights_layout.setContentsMargins(0, 0, 0, 0)
@@ -65,6 +81,7 @@ class StudentDashboardPage(QWidget):
         insights_layout.addWidget(self.insights_grid)
         container_layout.addWidget(self.insights_section)
 
+        # ---- Need Attention ----
         self.attention_section = QWidget()
         attention_layout = QVBoxLayout(self.attention_section)
         attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -78,6 +95,7 @@ class StudentDashboardPage(QWidget):
         attention_layout.addWidget(self.attention_container)
         container_layout.addWidget(self.attention_section)
 
+        # ---- Upcoming Events ----
         self.events_section = QWidget()
         events_layout = QVBoxLayout(self.events_section)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -102,6 +120,7 @@ class StudentDashboardPage(QWidget):
         events_layout.addWidget(self.events_list)
         container_layout.addWidget(self.events_section)
 
+        # ---- Recent Activities ----
         self.recent_section = QWidget()
         recent_layout = QVBoxLayout(self.recent_section)
         recent_layout.setContentsMargins(0, 0, 0, 0)
@@ -126,6 +145,7 @@ class StudentDashboardPage(QWidget):
         recent_layout.addWidget(self.recent_list)
         container_layout.addWidget(self.recent_section)
 
+        # ---- Quick Actions ----
         actions_section = QWidget()
         actions_layout = QHBoxLayout(actions_section)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -154,6 +174,7 @@ class StudentDashboardPage(QWidget):
     def refresh(self) -> None:
         try:
             self._refresh_kpis()
+            self._refresh_today_summary()
             self._refresh_insights()
             self._refresh_attention()
             self._refresh_events()
@@ -172,6 +193,32 @@ class StudentDashboardPage(QWidget):
             ])
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
+
+    def _refresh_today_summary(self) -> None:
+        self._clear_layout(self.today_container_layout)
+        try:
+            summary = self._service.get_today_summary()
+            items = [
+                (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
+                (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
+                (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
+                (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
+                (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
+            ]
+            for label, detail in items:
+                widget = QWidget()
+                layout = QHBoxLayout(widget)
+                layout.setContentsMargins(0, 2, 0, 2)
+                label_w = QLabel(label)
+                label_w.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {COLORS['text_primary']};")
+                detail_w = QLabel(detail)
+                detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
+                layout.addWidget(label_w)
+                layout.addWidget(detail_w)
+                layout.addStretch()
+                self.today_container_layout.addWidget(widget)
+        except Exception as e:
+            logger.exception("Failed to load today summary")
 
     def _refresh_insights(self) -> None:
         try:

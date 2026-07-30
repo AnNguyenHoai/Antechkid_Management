@@ -14,6 +14,7 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.teacher_workspace.teacher_list_page import TeacherListPage
 from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
+from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage  # <-- import
 
 
 class TeacherWorkspaceShell(QWidget):
@@ -37,14 +38,14 @@ class TeacherWorkspaceShell(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("teachers")
+        self.navigate_to("dashboard")  # <-- mặc định dashboard
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.header = WorkspaceHeader("Teacher Workspace", "Teachers")
+        self.header = WorkspaceHeader("Teacher Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
         layout.addWidget(self.header)
 
@@ -53,6 +54,7 @@ class TeacherWorkspaceShell(QWidget):
         body.setSpacing(0)
 
         pages = [
+            {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "teachers", "icon": "👨‍🏫", "label": "Teachers"},
         ]
         self.nav = WorkspaceNavigation("Teacher Workspace", pages)
@@ -61,6 +63,13 @@ class TeacherWorkspaceShell(QWidget):
 
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Dashboard
+        self.dashboard_page = TeacherDashboardPage(
+            self._teacher_service,
+            self._assignment_service
+        )
+        self.content_stack.addWidget(self.dashboard_page)
 
         # Teacher List
         self.list_page = TeacherListPage(
@@ -91,7 +100,12 @@ class TeacherWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
-        if page_id == "teachers":
+        if page_id == "dashboard":
+            self.content_stack.setCurrentWidget(self.dashboard_page)
+            self.nav.set_active_page("dashboard")
+            self.header.set_context("Teacher Workspace", "Dashboard")
+            self.dashboard_page.refresh()
+        elif page_id == "teachers":
             self.content_stack.setCurrentWidget(self.list_page)
             self.nav.set_active_page("teachers")
             self.header.set_context("Teacher Workspace", "Teachers")

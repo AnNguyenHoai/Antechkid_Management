@@ -11,6 +11,7 @@ from centermanager.models.class_ import Class
 from centermanager.models.class_timeline_event import ClassTimelineEventType
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.class_repository import ClassRepository
+from centermanager.repositories.enrollment_repository import EnrollmentRepository   # <--- thêm dòng này
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.exceptions import (
     StudentServiceError,

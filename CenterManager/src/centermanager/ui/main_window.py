@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
             class_service=class_service,
             assignment_service=teacher_assignment_service_for_class,
             timeline_service=class_timeline_service,
+            session_service=self._session_service,  # thêm nếu chưa có
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.class_workspace)
@@ -144,19 +145,21 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Permission denied: Insufficient access rights")
                 return
 
+        # Chuyển đến workspace và cập nhật navigation
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
+            self.student_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Student Workspace")
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
             self.central_stack.setCurrentWidget(self.teacher_workspace)
+            self.teacher_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Teacher Workspace")
-            self.teacher_workspace.list_page.refresh()
         elif workspace_id == "class":
             self.central_stack.setCurrentWidget(self.class_workspace)
+            self.class_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
             self.statusBar().showMessage("Class Workspace")
-            self.class_workspace.list_page.refresh()
         elif workspace_id == "finance":
             self.statusBar().showMessage("Finance Workspace coming soon")
         elif workspace_id == "reports":

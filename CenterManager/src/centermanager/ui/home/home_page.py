@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-HomePage - Command Center / Workspace Launcher for CenterManager.
-Now with workspace summaries, recent activities, today's summary, and system status.
+HomePage - Workspace Launcher for CenterManager.
+This page only displays workspace cards and allows navigation.
+No business logic or dashboard data is shown here.
 """
 import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
-    QLabel, QFrame, QSizePolicy, QPushButton
+    QWidget, QVBoxLayout, QGridLayout, QScrollArea,
+    QLabel, QFrame, QSizePolicy
 )
 
 from centermanager.services.home_dashboard_service import HomeDashboardService
-from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
-from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
-from centermanager.ui.home.activity_item import ActivityItem
-from centermanager.core.current_user import get_current_user
-from centermanager.services.permission_service import PermissionService
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
+from centermanager.ui.design_system.tokens import COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +30,11 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
-        self._current_user = get_current_user()
-        
-        # Initialize permission service
-        engine = create_production_engine()
-        session_factory = sessionmaker(bind=engine)
-        self._permission_service = PermissionService(session_factory)
-        
         self._setup_ui()
         self.refresh()
 
     def _setup_ui(self) -> None:
-        self.setStyleSheet("background-color: #f5f7fa;")
+        self.setStyleSheet(f"background-color: {COLORS['background']};")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -80,7 +68,7 @@ class HomePage(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         container_layout.addWidget(subtitle)
 
-        container_layout.addSpacing(8)
+        container_layout.addSpacing(16)
 
         # Workspace cards grid
         self.workspace_grid = QGridLayout()
@@ -88,75 +76,13 @@ class HomePage(QWidget):
         self.workspace_grid.setContentsMargins(0, 0, 0, 0)
         container_layout.addLayout(self.workspace_grid)
 
-        # Two-column layout for main content
-        main_content = QHBoxLayout()
-        main_content.setSpacing(24)
-
-        # Left column: Recent Activities + Today Summary
-        left_col = QVBoxLayout()
-        left_col.setSpacing(24)
-
-        # Recent Activities
-        self.recent_section = QWidget()
-        recent_layout = QVBoxLayout(self.recent_section)
-        recent_layout.setContentsMargins(0, 0, 0, 0)
-        recent_layout.setSpacing(8)
-        recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
-        recent_layout.addWidget(recent_header)
-        self.recent_container = QWidget()
-        self.recent_container_layout = QVBoxLayout(self.recent_container)
-        self.recent_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.recent_container_layout.setSpacing(0)
-        recent_layout.addWidget(self.recent_container)
-        left_col.addWidget(self.recent_section)
-
-        # Today Summary
-        self.today_section = QWidget()
-        today_layout = QVBoxLayout(self.today_section)
-        today_layout.setContentsMargins(0, 0, 0, 0)
-        today_layout.setSpacing(8)
-        today_header = SectionHeader("Today's Summary")
-        today_layout.addWidget(today_header)
-        self.today_container = QWidget()
-        self.today_container_layout = QVBoxLayout(self.today_container)
-        self.today_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.today_container_layout.setSpacing(4)
-        today_layout.addWidget(self.today_container)
-        left_col.addWidget(self.today_section)
-
-        left_col.addStretch()
-        main_content.addLayout(left_col, 2)
-
-        # Right column: System Status
-        right_col = QVBoxLayout()
-        right_col.setSpacing(24)
-        self.status_section = QWidget()
-        status_layout = QVBoxLayout(self.status_section)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(8)
-        status_header = SectionHeader("System Status")
-        status_layout.addWidget(status_header)
-        self.status_container = QWidget()
-        self.status_container_layout = QVBoxLayout(self.status_container)
-        self.status_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_container_layout.setSpacing(4)
-        status_layout.addWidget(self.status_container)
-        right_col.addWidget(self.status_section)
-        right_col.addStretch()
-        main_content.addLayout(right_col, 1)
-
-        container_layout.addLayout(main_content)
         container_layout.addStretch()
-
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        """Refresh all dashboard data."""
+        """Refresh workspace cards."""
         self._populate_workspace_cards()
-        self._populate_recent_activities()
-        self._populate_today_summary()
-        self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
         # Clear grid
@@ -184,71 +110,6 @@ class HomePage(QWidget):
             if col >= 2:
                 col = 0
                 row += 1
-
-    def _populate_recent_activities(self) -> None:
-        self._clear_layout(self.recent_container_layout)
-        activities = self._service.get_recent_activities(limit=8)
-        if activities:
-            for act in activities:
-                item = ActivityItem(
-                    icon=act.icon,
-                    title=act.title,
-                    student_name=act.student_name,
-                    student_code=act.student_code,
-                    time=act.time
-                )
-                self.recent_container_layout.addWidget(item)
-        else:
-            empty = EmptyState(
-                icon="📭",
-                title="No recent activities",
-                description="Activities will appear here as you use the system."
-            )
-            self.recent_container_layout.addWidget(empty)
-
-    def _populate_today_summary(self) -> None:
-        self._clear_layout(self.today_container_layout)
-        summary = self._service.get_today_summary()
-        items = [
-            (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
-            (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
-            (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
-            (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
-            (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
-        ]
-        for label, detail in items:
-            widget = QWidget()
-            layout = QHBoxLayout(widget)
-            layout.setContentsMargins(0, 2, 0, 2)
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {COLORS['text_primary']};")
-            detail_w = QLabel(detail)
-            detail_w.setStyleSheet(f"font-size: 12px; color: {COLORS['muted']};")
-            layout.addWidget(label_w)
-            layout.addWidget(detail_w)
-            layout.addStretch()
-            self.today_container_layout.addWidget(widget)
-
-    def _populate_system_status(self) -> None:
-        self._clear_layout(self.status_container_layout)
-        status = self._service.get_system_status()
-        items = [
-            (f"🟢 Database: {status.database_status}", ""),
-            (f"📦 Version: {status.version}", ""),
-            (f"💾 Last backup: {status.last_backup}", ""),
-            (f"👤 User: {status.current_user}", ""),
-            (f"🌍 Environment: {status.environment}", ""),
-        ]
-        for label, _ in items:
-            label_w = QLabel(label)
-            label_w.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']}; padding: 2px 0;")
-            self.status_container_layout.addWidget(label_w)
-
-    def _clear_layout(self, layout) -> None:
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
 
     def _on_workspace_clicked(self, workspace_id: str) -> None:
         self.workspace_selected.emit(workspace_id)
