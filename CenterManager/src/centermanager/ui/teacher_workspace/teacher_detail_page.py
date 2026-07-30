@@ -16,13 +16,11 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.repositories.class_repository import ClassRepository  # <-- sửa
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
-from centermanager.ui.teacher_workspace.teacher_assignment_dialog import TeacherAssignmentDialog
 from centermanager.ui.teacher_workspace.teacher_documents_widget import TeacherDocumentsWidget
 from centermanager.ui.timeline import TimelineWidget
 
@@ -129,11 +127,12 @@ class TeacherDetailPage(QWidget):
         ])
         container_layout.addWidget(self.professional_widget)
 
-        # Assigned Classes
+        # Assigned Classes - Read-only (loại bỏ nút "Manage Assignments")
         self.classes_widget = QWidget()
         classes_layout = QVBoxLayout(self.classes_widget)
         classes_layout.setContentsMargins(0, 0, 0, 0)
-        classes_header = SectionHeader("Assigned Classes", action_text="Manage Assignments", action_callback=self._on_manage_assignments)
+        # Chỉ hiển thị tiêu đề, không có nút hành động
+        classes_header = SectionHeader("Assigned Classes")  # Không có action_text
         classes_layout.addWidget(classes_header)
         self.classes_list_label = QLabel("No classes assigned.")
         self.classes_list_label.setWordWrap(True)
@@ -238,7 +237,7 @@ class TeacherDetailPage(QWidget):
         self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
         self._field_1.setText(teacher.status or "-")
 
-        # Assigned classes
+        # Assigned classes (read-only)
         if teacher.assigned_classes:
             class_names = [c.name for c in teacher.assigned_classes]
             self.classes_list_label.setText(" • " + "\n • ".join(class_names))
@@ -257,18 +256,6 @@ class TeacherDetailPage(QWidget):
             return
         dialog = TeacherFormDialog(self._teacher_service, self._current_teacher_id, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
-            self.load_teacher(self._current_teacher_id)
-            self.teacher_updated.emit()
-
-    def _on_manage_assignments(self) -> None:
-        if self._current_teacher_id is None:
-            return
-        dialog = TeacherAssignmentDialog(
-            self._assignment_service,
-            self._current_teacher_id,
-            parent=self
-        )
-        if dialog.exec() == TeacherAssignmentDialog.DialogCode.Accepted:
             self.load_teacher(self._current_teacher_id)
             self.teacher_updated.emit()
 

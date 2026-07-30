@@ -67,7 +67,8 @@ class ClassWorkspaceShell(QWidget):
         # Dashboard
         self.dashboard_page = ClassDashboardPage(
             self._class_service,
-            self._session_service
+            self._session_service,
+            self._timeline_service
         )
         self.content_stack.addWidget(self.dashboard_page)
 

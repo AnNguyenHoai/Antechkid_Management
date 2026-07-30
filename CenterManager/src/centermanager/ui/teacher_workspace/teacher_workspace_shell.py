@@ -67,7 +67,8 @@ class TeacherWorkspaceShell(QWidget):
         # Dashboard
         self.dashboard_page = TeacherDashboardPage(
             self._teacher_service,
-            self._assignment_service
+            self._assignment_service,
+            self._timeline_service
         )
         self.content_stack.addWidget(self.dashboard_page)
 
