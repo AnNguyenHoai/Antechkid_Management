@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 08eb936fda35
+Revision ID: 3a7a76ecb339
 Revises: 
-Create Date: 2026-07-29 15:25:55.776300
+Create Date: 2026-07-30 09:56:37.163697
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '08eb936fda35'
+revision: str = '3a7a76ecb339'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -32,6 +32,29 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('permissions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('category', sa.String(length=50), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name'),
+    sa.UniqueConstraint('name', name='uq_permission_name')
+    )
+    op.create_table('roles',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=50), nullable=False),
+    sa.Column('display_name', sa.String(length=100), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('is_system', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name'),
+    sa.UniqueConstraint('name', name='uq_role_name')
+    )
     op.create_table('students',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_code', sa.String(length=20), nullable=False),
@@ -48,6 +71,23 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('student_code')
+    )
+    op.create_table('teachers',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_code', sa.String(length=20), nullable=False),
+    sa.Column('full_name', sa.String(length=200), nullable=False),
+    sa.Column('gender', sa.String(length=20), nullable=True),
+    sa.Column('date_of_birth', sa.Date(), nullable=True),
+    sa.Column('phone', sa.String(length=50), nullable=True),
+    sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('address', sa.Text(), nullable=True),
+    sa.Column('join_date', sa.Date(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('teacher_code')
     )
     op.create_table('assessments',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -149,6 +189,17 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('role_permissions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('role_id', sa.Integer(), nullable=False),
+    sa.Column('permission_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['permission_id'], ['permissions.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('role_id', 'permission_id', name='uq_role_permission')
+    )
     op.create_table('sessions',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('class_id', sa.Integer(), nullable=False),
@@ -178,6 +229,43 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('teacher_assignments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('teacher_id', 'class_id', name='uq_teacher_class')
+    )
+    op.create_table('teacher_documents',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('file_name', sa.String(length=255), nullable=False),
+    sa.Column('file_path', sa.String(length=500), nullable=False),
+    sa.Column('document_type', sa.String(length=50), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('teacher_timeline_events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('event_type', sa.String(length=50), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('metadata_json', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.String(length=100), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('idx_teacher_timeline_created_at', 'teacher_timeline_events', ['created_at'], unique=False)
+    op.create_index('idx_teacher_timeline_teacher_id', 'teacher_timeline_events', ['teacher_id'], unique=False)
     op.create_table('timeline_events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
@@ -192,6 +280,21 @@ def upgrade() -> None:
     )
     op.create_index('idx_timeline_events_created_at', 'timeline_events', ['created_at'], unique=False)
     op.create_index('idx_timeline_events_student_id', 'timeline_events', ['student_id'], unique=False)
+    op.create_table('users',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('username', sa.String(length=50), nullable=False),
+    sa.Column('password_hash', sa.String(length=255), nullable=False),
+    sa.Column('full_name', sa.String(length=200), nullable=False),
+    sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.Column('role_id', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('username'),
+    sa.UniqueConstraint('username', name='uq_user_username')
+    )
     op.create_table('session_notes',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('session_id', sa.Integer(), nullable=False),
@@ -228,11 +331,18 @@ def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_table('student_highlights')
     op.drop_table('session_notes')
+    op.drop_table('users')
     op.drop_index('idx_timeline_events_student_id', table_name='timeline_events')
     op.drop_index('idx_timeline_events_created_at', table_name='timeline_events')
     op.drop_table('timeline_events')
+    op.drop_index('idx_teacher_timeline_teacher_id', table_name='teacher_timeline_events')
+    op.drop_index('idx_teacher_timeline_created_at', table_name='teacher_timeline_events')
+    op.drop_table('teacher_timeline_events')
+    op.drop_table('teacher_documents')
+    op.drop_table('teacher_assignments')
     op.drop_table('student_products')
     op.drop_table('sessions')
+    op.drop_table('role_permissions')
     op.drop_table('progress')
     op.drop_table('parents')
     op.drop_table('notes')
@@ -240,6 +350,9 @@ def downgrade() -> None:
     op.drop_table('documents')
     op.drop_table('attachments')
     op.drop_table('assessments')
+    op.drop_table('teachers')
     op.drop_table('students')
+    op.drop_table('roles')
+    op.drop_table('permissions')
     op.drop_table('classes')
     # ### end Alembic commands ###

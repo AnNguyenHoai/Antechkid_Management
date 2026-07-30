@@ -57,8 +57,11 @@ docs/
   Enginnering/
     ENGINEERING_GUIDELINES.md
   FINANCE/
+    Finance Architecture.md
+    FINANCE_DEVELOPMENT_CONTRACT.md
     FINANCE_MODULE_DESIGN.md
     Sprint 2.3 - Finance Module
+    TASK-001_RBAC_SYSTEM.md
   Software/
     APPLICATION_ARCHITECTURE.md
     TECHNICAL_ARCHITECTURE.md
@@ -82,7 +85,7 @@ docs/
 migrations/
   versions/
     __init__.py
-    08eb936fda35_initial_schema.py
+    3a7a76ecb339_initial_schema.py
   env.py
   README
   script.py.mako
@@ -94,13 +97,16 @@ src/
     core/
       __init__.py
       config.py
+      current_user.py
       logging.py
       paths.py
+      permission_guard.py
       permissions.py
     database/
       __init__.py
       base.py
       engine.py
+      seed.py
       session.py
     dto/
       __init__.py
@@ -130,13 +136,21 @@ src/
       mixins.py
       note.py
       parent.py
+      permission.py
       progress.py
+      role_permission.py
+      role.py
       session_note.py
       session.py
       student_highlight.py
       student_product.py
       student.py
+      teacher_assignment.py
+      teacher_document.py
+      teacher_timeline_event.py
+      teacher.py
       timeline_event.py
+      user.py
     modules/
       __init__.py
     repositories/
@@ -148,17 +162,25 @@ src/
       enrollment_repository.py
       note_repository.py
       parent_repository.py
+      permission_repository.py
+      role_repository.py
       session_note_repository.py
       session_repository.py
       student_highlight_repository.py
       student_repository.py
+      teacher_assignment_repository.py
+      teacher_document_repository.py
+      teacher_repository.py
+      teacher_timeline_repository.py
       timeline_repository.py
+      user_repository.py
     services/
       __init__.py
       assessment_service.py
       exceptions.py
       home_dashboard_service.py
       parent_service.py
+      permission_service.py
       session_note_service.py
       session_service.py
       student_analytics_service.py
@@ -171,6 +193,10 @@ src/
       student_note_service.py
       student_service.py
       student_summary_service.py
+      teacher_assignment_service.py
+      teacher_document_service.py
+      teacher_service.py
+      teacher_timeline_service.py
       timeline_service.py
     ui/
       assessment/
@@ -247,13 +273,22 @@ src/
         __init__.py
         summary_card.py
         summary_widget.py
+      teacher_workspace/
+        teacher_assignment_dialog.py
+        teacher_detail_page.py
+        teacher_documents_widget.py
+        teacher_form_dialog.py
+        teacher_list_page.py
+        teacher_workspace_shell.py
       timeline/
         __init__.py
         timeline_card.py
         timeline_widget.py
       __init__.py
       home_page.py
+      login_dialog.py
       main_window.py
+      permission_helpers.py
       styles.py
       workspace_header.py
       workspace_navigation.py
@@ -5789,6 +5824,1139 @@ Mandatory
 YES
 
 ================
+File: docs/FINANCE/Finance Architecture.md
+================
+# Finance Architecture
+Version: 1.0
+Status: Approved
+
+---
+
+# 1. Purpose
+
+Finance Module is responsible for managing all financial activities inside CenterManager.
+
+Its responsibilities are:
+
+- Record income
+- Record expense
+- Calculate outstanding tuition
+- Generate dashboard statistics
+
+Finance is an Administration Module.
+
+It is NOT the center of business operations.
+
+Business operations always begin from Student.
+
+---
+
+# 2. Architecture Overview
+
+                    +----------------+
+                    |    Student     |
+                    +----------------+
+                            |
+                            |
+                    Collect Tuition
+                            |
+                            ▼
+                    +----------------+
+                    |     Income     |
+                    +----------------+
+                            |
+             +--------------+--------------+
+             |                             |
+             ▼                             ▼
+    Outstanding Service          Dashboard Service
+             |                             |
+             ▼                             ▼
+ Student Financial Tab         Finance Dashboard
+
+--------------------------------------------------
+
+                    +----------------+
+                    |    Expense     |
+                    +----------------+
+                            |
+                            ▼
+                   Dashboard Service
+
+---
+
+# 3. Module Responsibility
+
+## Student Module
+
+Responsible for
+
+- Student information
+- Courses
+- Enrollment
+- Tuition definition
+
+Student NEVER calculates finance.
+
+---
+
+## Finance Module
+
+Responsible for
+
+- Income
+- Expense
+- Financial reports
+
+Finance NEVER stores student profile.
+
+Only references Student ID.
+
+---
+
+## Dashboard Module
+
+Responsible only for visualization.
+
+Dashboard NEVER stores data.
+
+Dashboard NEVER owns business logic.
+
+---
+
+# 4. Data Ownership
+
+Student
+
+owns
+
+- Student Profile
+- Registered Courses
+- Tuition Fee
+
+Finance
+
+owns
+
+- Income
+- Expense
+
+Outstanding Service
+
+owns
+
+- Outstanding Calculation
+
+Dashboard
+
+owns
+
+- KPI Visualization
+
+---
+
+# 5. Data Flow
+
+Student Detail
+
+↓
+
+Financial Tab
+
+↓
+
+Collect Tuition
+
+↓
+
+Income Record Created
+
+↓
+
+Outstanding Service
+
+↓
+
+Dashboard Service
+
+↓
+
+Timeline Service
+
+↓
+
+UI Updated
+
+---
+
+# 6. Income Flow
+
+User clicks
+
+Collect Tuition
+
+↓
+
+Validate Student
+
+↓
+
+Validate Amount
+
+↓
+
+Create Income Record
+
+↓
+
+Update Timeline
+
+↓
+
+Recalculate Outstanding
+
+↓
+
+Refresh Dashboard
+
+↓
+
+Success
+
+---
+
+# 7. Expense Flow
+
+Finance
+
+↓
+
+Create Expense
+
+↓
+
+Validate
+
+↓
+
+Save Expense
+
+↓
+
+Refresh Dashboard
+
+↓
+
+Success
+
+---
+
+# 8. Outstanding Flow
+
+Outstanding is NOT stored.
+
+Outstanding is calculated.
+
+Formula
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Total Paid
+
+Expected Tuition
+
+comes from
+
+Student Course
+
+Paid
+
+comes from
+
+Income
+
+---
+
+# 9. Dashboard Flow
+
+Dashboard reads
+
+Income
+
+Expense
+
+Outstanding
+
+Dashboard calculates
+
+Revenue Today
+
+Revenue Month
+
+Expense Today
+
+Expense Month
+
+Current Balance
+
+Outstanding Tuition
+
+Dashboard NEVER updates database.
+
+---
+
+# 10. Timeline Flow
+
+Income
+
+↓
+
+Student Timeline
+
+Expense
+
+↓
+
+System Timeline
+
+Examples
+
+Paid Tuition
+
+Bought Equipment
+
+Refund Tuition
+
+Salary Payment
+
+---
+
+# 11. Database Design
+
+Income
+
+id
+
+studentId
+
+classId
+
+courseId
+
+amount
+
+incomeType
+
+paymentMethod
+
+paymentDate
+
+receivedBy
+
+note
+
+createdAt
+
+updatedAt
+
+---
+
+Expense
+
+id
+
+category
+
+description
+
+amount
+
+paymentMethod
+
+status
+
+paidBy
+
+paymentDate
+
+note
+
+createdAt
+
+updatedAt
+
+---
+
+No table
+
+Outstanding
+
+Dashboard
+
+Statistics
+
+These are calculated.
+
+---
+
+# 12. Service Layer
+
+FinanceService
+
+Responsible for
+
+CRUD
+
+IncomeService
+
+Responsible for
+
+Income CRUD
+
+ExpenseService
+
+Responsible for
+
+Expense CRUD
+
+OutstandingService
+
+Responsible for
+
+Outstanding Calculation
+
+DashboardService
+
+Responsible for
+
+Dashboard KPI
+
+TimelineService
+
+Responsible for
+
+Timeline Generation
+
+---
+
+# 13. Dependency
+
+Student
+
+↓
+
+Income
+
+↓
+
+Outstanding
+
+↓
+
+Dashboard
+
+Timeline
+
+Dashboard never calls Student directly.
+
+Dashboard only reads services.
+
+---
+
+# 14. Permission Architecture
+
+Teacher
+
+×
+
+Finance
+
+Reception (Future)
+
+Collect Tuition Only
+
+Admin
+
+Full Finance Access
+
+Permissions
+
+finance.view
+
+finance.income.create
+
+finance.income.update
+
+finance.income.delete
+
+finance.expense.create
+
+finance.expense.update
+
+finance.expense.delete
+
+---
+
+# 15. Security
+
+Permission must be verified
+
+Frontend
+
+AND
+
+Backend
+
+Never trust frontend.
+
+API always validates permission.
+
+Unauthorized request
+
+↓
+
+403 Forbidden
+
+---
+
+# 16. Error Handling
+
+Student Not Found
+
+↓
+
+404
+
+Invalid Amount
+
+↓
+
+400
+
+Permission Denied
+
+↓
+
+403
+
+Unexpected Error
+
+↓
+
+500
+
+---
+
+# 17. Performance
+
+Dashboard
+
+Response
+
+< 1 second
+
+Income Search
+
+< 500 ms
+
+Expense Search
+
+< 500 ms
+
+Outstanding Calculation
+
+Realtime
+
+---
+
+# 18. Future Extension
+
+Finance Architecture supports
+
+Multiple Branches
+
+Multiple Currencies
+
+Discount
+
+Scholarship
+
+Refund
+
+Invoice
+
+Payroll
+
+Without redesign.
+
+---
+
+# 19. Design Principles
+
+Single Responsibility
+
+One module owns one responsibility.
+
+No duplicated data.
+
+Everything has one owner.
+
+Dashboard is read-only.
+
+Outstanding is calculated.
+
+Finance is administration.
+
+Student is business center.
+
+---
+
+# 20. Architecture Rules
+
+DeepSeek MUST follow these rules.
+
+Rule 1
+
+Never redesign architecture.
+
+Rule 2
+
+Never duplicate data.
+
+Rule 3
+
+Never store calculated values.
+
+Rule 4
+
+Dashboard is visualization only.
+
+Rule 5
+
+Business starts from Student.
+
+Rule 6
+
+Finance stores transactions only.
+
+Rule 7
+
+Every transaction updates Timeline.
+
+Rule 8
+
+Every API validates permission.
+
+Rule 9
+
+Every calculation belongs to Service Layer.
+
+Rule 10
+
+When uncertain, stop implementation and report instead of making assumptions.
+
+================
+File: docs/FINANCE/FINANCE_DEVELOPMENT_CONTRACT.md
+================
+# FINANCE_DEVELOPMENT_CONTRACT.md
+
+Version: 1.0
+
+Status: Mandatory
+
+---
+
+# Purpose
+
+This document defines mandatory development rules for implementing
+Finance Module.
+
+Every developer must follow these rules.
+
+Violating these rules is considered an architecture violation.
+
+---
+
+# 1. Architecture First
+
+Never change architecture without approval.
+
+If implementation conflicts with architecture
+
+STOP
+
+Report
+
+Wait for decision.
+
+Do NOT redesign.
+
+---
+
+# 2. Single Responsibility Principle
+
+Each module owns exactly one responsibility.
+
+Student
+
+↓
+
+Business
+
+Finance
+
+↓
+
+Money
+
+Dashboard
+
+↓
+
+Visualization
+
+Timeline
+
+↓
+
+History
+
+Never mix responsibilities.
+
+---
+
+# 3. Finance Owns Transactions
+
+Finance stores only
+
+Income
+
+Expense
+
+Never store
+
+Outstanding
+
+Revenue
+
+Profit
+
+Statistics
+
+Dashboard values
+
+These values are calculated.
+
+---
+
+# 4. Student Owns Tuition
+
+Student owns
+
+Registered Course
+
+Course Fee
+
+Discount
+
+Enrollment
+
+Finance must never duplicate them.
+
+---
+
+# 5. Outstanding Rule
+
+Wrong
+
+Store Outstanding in database.
+
+Correct
+
+Outstanding
+
+=
+
+Expected Tuition
+
+-
+
+Paid Amount
+
+Realtime calculation only.
+
+---
+
+# 6. Dashboard Rule
+
+Dashboard is Read Only.
+
+Dashboard
+
+must never
+
+Insert
+
+Update
+
+Delete
+
+Dashboard only reads services.
+
+---
+
+# 7. API Rule
+
+Every API
+
+Controller
+
+↓
+
+Permission
+
+↓
+
+Validation
+
+↓
+
+Service
+
+↓
+
+Repository
+
+↓
+
+Database
+
+Controller must never access database directly.
+
+---
+
+# 8. Service Rule
+
+Business logic belongs to Service Layer.
+
+Never implement business logic inside
+
+Controller
+
+React Component
+
+Repository
+
+---
+
+# 9. Repository Rule
+
+Repository
+
+ONLY
+
+Database access.
+
+No calculation.
+
+No validation.
+
+No business logic.
+
+---
+
+# 10. Validation Rule
+
+Validate
+
+before
+
+calling Service.
+
+Examples
+
+Amount
+
+Student
+
+Payment Method
+
+Category
+
+Status
+
+---
+
+# 11. Permission Rule
+
+Never trust Frontend.
+
+Every Finance API
+
+must validate
+
+Permission.
+
+Unauthorized
+
+↓
+
+403
+
+---
+
+# 12. UI Rule
+
+Current UI has been approved.
+
+Do NOT redesign.
+
+Allowed
+
+Bug Fix
+
+CRUD
+
+Small UX improvements
+
+Not Allowed
+
+New Layout
+
+New Navigation
+
+Large Component Refactor
+
+---
+
+# 13. Timeline Rule
+
+Every financial transaction
+
+must generate
+
+Timeline Event.
+
+Income
+
+↓
+
+Student Timeline
+
+Expense
+
+↓
+
+System Timeline
+
+---
+
+# 14. Data Duplication Rule
+
+Every data has only one owner.
+
+Never duplicate
+
+Student Name
+
+Course Fee
+
+Outstanding
+
+Revenue
+
+Statistics
+
+Always reference original source.
+
+---
+
+# 15. Error Handling Rule
+
+400
+
+Validation
+
+401
+
+Authentication
+
+403
+
+Permission
+
+404
+
+Not Found
+
+409
+
+Conflict
+
+500
+
+Unexpected Error
+
+Never return ambiguous error.
+
+---
+
+# 16. Logging Rule
+
+Every financial transaction
+
+must be logged.
+
+Log
+
+User
+
+Action
+
+Time
+
+Target
+
+Success
+
+Failure
+
+---
+
+# 17. Transaction Rule
+
+Income creation
+
+must be atomic.
+
+Either
+
+Everything succeeds
+
+OR
+
+Everything rolls back.
+
+Never leave partial updates.
+
+---
+
+# 18. Testing Rule
+
+Every task must include
+
+Unit Test
+
+API Test
+
+Manual Test
+
+No feature is complete without testing.
+
+---
+
+# 19. Performance Rule
+
+Dashboard
+
+<1 second
+
+Income Search
+
+<500 ms
+
+Expense Search
+
+<500 ms
+
+Pagination mandatory.
+
+---
+
+# 20. Code Review Checklist
+
+Developer must verify
+
+Architecture
+
+Business Logic
+
+Permission
+
+Validation
+
+Performance
+
+Security
+
+Testing
+
+before creating Pull Request.
+
+---
+
+# 21. Forbidden
+
+Developer MUST NOT
+
+Store calculated data.
+
+Duplicate business data.
+
+Bypass Service Layer.
+
+Skip permission validation.
+
+Redesign UI.
+
+Modify unrelated modules.
+
+Assume missing business rules.
+
+If uncertain
+
+STOP
+
+Report
+
+Wait for clarification.
+
+---
+
+# 22. Development Philosophy
+
+Correct Architecture
+
+>
+
+Correct Business Logic
+
+>
+
+Clean Code
+
+>
+
+UI Polish
+
+A feature is only complete when
+
+Architecture
+
+Business
+
+Security
+
+Testing
+
+are all correct.
+
+================
 File: docs/FINANCE/FINANCE_MODULE_DESIGN.md
 ================
 # Finance Module Design
@@ -7009,6 +8177,457 @@ Finance module can:
 ✔ Pass Integration Testing
 
 Finance V1 is considered COMPLETE only when all acceptance criteria above are satisfied.
+
+================
+File: docs/FINANCE/TASK-001_RBAC_SYSTEM.md
+================
+# TASK-001 - Implement Role & Permission System (RBAC)
+
+Version: 1.0
+
+Priority: 🔴 Critical
+
+Estimated Time: 1~2 Days
+
+Owner: DeepSeek
+
+Status: Ready
+
+---
+
+# Background
+
+CenterManager is entering Phase 2 development.
+
+Before implementing Teacher and Finance modules, the system must support Role-Based Access Control (RBAC).
+
+This task establishes the authorization infrastructure for the entire application.
+
+No business functionality should be implemented in this task.
+
+---
+
+# Objective
+
+Implement a complete RBAC (Role-Based Access Control) system.
+
+The implementation must support:
+
+- User Role
+- Permission
+- Backend Authorization
+- Frontend Route Protection
+- Frontend Menu Protection
+
+This infrastructure will be reused by every future module.
+
+---
+
+# Scope
+
+Included
+
+✅ Role Entity
+
+✅ Permission Entity
+
+✅ Role-Permission Mapping
+
+✅ Backend Permission Middleware
+
+✅ Route Guard
+
+✅ Frontend Menu Guard
+
+✅ Seed Default Roles
+
+---
+
+Not Included
+
+❌ Finance Module
+
+❌ Student Module
+
+❌ Teacher Module
+
+❌ Reports
+
+❌ Dashboard
+
+Only infrastructure should be implemented.
+
+---
+
+# System Roles
+
+Create three default roles.
+
+ADMIN
+
+Full Access
+
+--------------------
+
+TEACHER
+
+Teaching Functions Only
+
+--------------------
+
+RECEPTION
+
+Reserved for future use
+
+(No Finance Permission)
+
+---
+
+# Permission List
+
+## Student
+
+student.view
+
+student.create
+
+student.update
+
+student.delete
+
+---
+
+## Teacher
+
+teacher.view
+
+teacher.create
+
+teacher.update
+
+teacher.delete
+
+---
+
+## Finance
+
+finance.view
+
+finance.income.create
+
+finance.income.update
+
+finance.income.delete
+
+finance.expense.create
+
+finance.expense.update
+
+finance.expense.delete
+
+---
+
+## Reports
+
+report.view
+
+---
+
+## Settings
+
+setting.update
+
+---
+
+# Database Design
+
+Create required tables.
+
+roles
+
+permissions
+
+role_permissions
+
+users.role_id
+
+If authentication already exists,
+
+extend existing schema instead of creating duplicated structures.
+
+---
+
+# Backend Requirements
+
+Implement
+
+PermissionService
+
+PermissionGuard
+
+Role Seeder
+
+Permission Seeder
+
+Every protected API must validate permission before entering business logic.
+
+Permission checking must happen before Service Layer.
+
+Never trust frontend.
+
+---
+
+# Frontend Requirements
+
+Implement Menu Guard.
+
+Example
+
+ADMIN
+
+Dashboard
+
+Students
+
+Teachers
+
+Finance
+
+Reports
+
+Settings
+
+----------------------
+
+TEACHER
+
+Dashboard
+
+Students
+
+Classes
+
+Assessment
+
+Finance menu must NOT appear.
+
+----------------------
+
+RECEPTION
+
+Dashboard
+
+Students
+
+Teachers
+
+Finance menu must NOT appear.
+
+---
+
+# Route Protection
+
+Unauthorized route
+
+/finance
+
+↓
+
+403 Page
+
+Unauthorized APIs
+
+↓
+
+403 Forbidden
+
+---
+
+# Deliverables
+
+Database Migration
+
+Role Entity
+
+Permission Entity
+
+Permission Middleware
+
+Seed Data
+
+Frontend Menu Guard
+
+Frontend Route Guard
+
+Documentation
+
+---
+
+# Acceptance Criteria
+
+ADMIN
+
+✔ Can access Finance
+
+✔ Can access Dashboard
+
+✔ Can access Settings
+
+--------------------------------
+
+TEACHER
+
+✔ Finance menu hidden
+
+✔ Finance API returns 403
+
+✔ Finance route blocked
+
+--------------------------------
+
+RECEPTION
+
+✔ Finance menu hidden
+
+✔ Finance API returns 403
+
+✔ Finance route blocked
+
+--------------------------------
+
+Backend
+
+✔ Permission checked before business logic
+
+✔ No permission hardcoded inside controllers
+
+✔ Middleware reusable
+
+---
+
+# Technical Constraints
+
+Do NOT redesign UI.
+
+Do NOT modify unrelated modules.
+
+Do NOT implement Finance.
+
+Do NOT implement Teacher features.
+
+Do NOT change project architecture.
+
+Follow existing coding style.
+
+---
+
+# Development Rules
+
+1.
+
+Every API must go through PermissionGuard.
+
+---
+
+2.
+
+Controllers must never check Role manually.
+
+Always use Permission.
+
+---
+
+3.
+
+Business logic belongs to Service Layer.
+
+---
+
+4.
+
+Repositories only access database.
+
+---
+
+5.
+
+Frontend permission is only for UX.
+
+Backend permission is mandatory.
+
+---
+
+6.
+
+No duplicated permission logic.
+
+Permission checking must be centralized.
+
+---
+
+7.
+
+If existing architecture conflicts with this task,
+
+STOP
+
+Document the issue
+
+Report instead of redesigning.
+
+---
+
+# Testing Checklist
+
+Database Migration
+
+☐ Pass
+
+Role Seeder
+
+☐ Pass
+
+Permission Seeder
+
+☐ Pass
+
+Admin Login
+
+☐ Pass
+
+Teacher Login
+
+☐ Pass
+
+Reception Login
+
+☐ Pass
+
+Menu Hidden
+
+☐ Pass
+
+Route Protection
+
+☐ Pass
+
+API Protection
+
+☐ Pass
+
+Permission Middleware
+
+☐ Pass
+
+---
+
+# Expected Output
+
+A reusable Role-Based Access Control system that becomes the foundation for all future CenterManager modules.
+
+No business module should require changes to this infrastructure.
+
+This task is considered COMPLETE only when all acceptance criteria and tests pass successfully.
 
 ================
 File: docs/Software/APPLICATION_ARCHITECTURE.md
@@ -14390,13 +16009,13 @@ File: migrations/versions/__init__.py
 
 
 ================
-File: migrations/versions/08eb936fda35_initial_schema.py
+File: migrations/versions/3a7a76ecb339_initial_schema.py
 ================
 """initial_schema
 
-Revision ID: 08eb936fda35
+Revision ID: 3a7a76ecb339
 Revises: 
-Create Date: 2026-07-29 15:25:55.776300
+Create Date: 2026-07-30 09:56:37.163697
 
 """
 from typing import Sequence, Union
@@ -14406,7 +16025,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '08eb936fda35'
+revision: str = '3a7a76ecb339'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -14426,6 +16045,29 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('permissions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('category', sa.String(length=50), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name'),
+    sa.UniqueConstraint('name', name='uq_permission_name')
+    )
+    op.create_table('roles',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=50), nullable=False),
+    sa.Column('display_name', sa.String(length=100), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('is_system', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name'),
+    sa.UniqueConstraint('name', name='uq_role_name')
+    )
     op.create_table('students',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_code', sa.String(length=20), nullable=False),
@@ -14442,6 +16084,23 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('student_code')
+    )
+    op.create_table('teachers',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_code', sa.String(length=20), nullable=False),
+    sa.Column('full_name', sa.String(length=200), nullable=False),
+    sa.Column('gender', sa.String(length=20), nullable=True),
+    sa.Column('date_of_birth', sa.Date(), nullable=True),
+    sa.Column('phone', sa.String(length=50), nullable=True),
+    sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('address', sa.Text(), nullable=True),
+    sa.Column('join_date', sa.Date(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('teacher_code')
     )
     op.create_table('assessments',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -14543,6 +16202,17 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('role_permissions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('role_id', sa.Integer(), nullable=False),
+    sa.Column('permission_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['permission_id'], ['permissions.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('role_id', 'permission_id', name='uq_role_permission')
+    )
     op.create_table('sessions',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('class_id', sa.Integer(), nullable=False),
@@ -14572,6 +16242,43 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('teacher_assignments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('teacher_id', 'class_id', name='uq_teacher_class')
+    )
+    op.create_table('teacher_documents',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('file_name', sa.String(length=255), nullable=False),
+    sa.Column('file_path', sa.String(length=500), nullable=False),
+    sa.Column('document_type', sa.String(length=50), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('teacher_timeline_events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=False),
+    sa.Column('event_type', sa.String(length=50), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('metadata_json', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.String(length=100), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('idx_teacher_timeline_created_at', 'teacher_timeline_events', ['created_at'], unique=False)
+    op.create_index('idx_teacher_timeline_teacher_id', 'teacher_timeline_events', ['teacher_id'], unique=False)
     op.create_table('timeline_events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.Integer(), nullable=False),
@@ -14586,6 +16293,21 @@ def upgrade() -> None:
     )
     op.create_index('idx_timeline_events_created_at', 'timeline_events', ['created_at'], unique=False)
     op.create_index('idx_timeline_events_student_id', 'timeline_events', ['student_id'], unique=False)
+    op.create_table('users',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('username', sa.String(length=50), nullable=False),
+    sa.Column('password_hash', sa.String(length=255), nullable=False),
+    sa.Column('full_name', sa.String(length=200), nullable=False),
+    sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.Column('role_id', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('username'),
+    sa.UniqueConstraint('username', name='uq_user_username')
+    )
     op.create_table('session_notes',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('session_id', sa.Integer(), nullable=False),
@@ -14622,11 +16344,18 @@ def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_table('student_highlights')
     op.drop_table('session_notes')
+    op.drop_table('users')
     op.drop_index('idx_timeline_events_student_id', table_name='timeline_events')
     op.drop_index('idx_timeline_events_created_at', table_name='timeline_events')
     op.drop_table('timeline_events')
+    op.drop_index('idx_teacher_timeline_teacher_id', table_name='teacher_timeline_events')
+    op.drop_index('idx_teacher_timeline_created_at', table_name='teacher_timeline_events')
+    op.drop_table('teacher_timeline_events')
+    op.drop_table('teacher_documents')
+    op.drop_table('teacher_assignments')
     op.drop_table('student_products')
     op.drop_table('sessions')
+    op.drop_table('role_permissions')
     op.drop_table('progress')
     op.drop_table('parents')
     op.drop_table('notes')
@@ -14634,7 +16363,10 @@ def downgrade() -> None:
     op.drop_table('documents')
     op.drop_table('attachments')
     op.drop_table('assessments')
+    op.drop_table('teachers')
     op.drop_table('students')
+    op.drop_table('roles')
+    op.drop_table('permissions')
     op.drop_table('classes')
     # ### end Alembic commands ###
 
@@ -14873,6 +16605,59 @@ def get_config() -> Config:
     return _config
 
 ================
+File: src/centermanager/core/current_user.py
+================
+# -*- coding: utf-8 -*-
+"""
+Current user context - thread-local storage for the currently authenticated user.
+"""
+import threading
+from typing import Optional
+
+from centermanager.models.user import User
+
+# Thread-local storage for current user
+_thread_local = threading.local()
+
+
+def get_current_user() -> Optional[User]:
+    """Get the current user from thread-local storage."""
+    return getattr(_thread_local, 'current_user', None)
+
+
+def set_current_user(user: Optional[User]) -> None:
+    """Set the current user in thread-local storage."""
+    _thread_local.current_user = user
+
+
+def clear_current_user() -> None:
+    """Clear the current user from thread-local storage."""
+    if hasattr(_thread_local, 'current_user'):
+        del _thread_local.current_user
+
+
+class CurrentUserContext:
+    """
+    Context manager for temporarily setting the current user.
+
+    Usage:
+        with CurrentUserContext(user):
+            # User is set for this block
+            ...
+    """
+    def __init__(self, user: Optional[User]):
+        self._user = user
+        self._previous_user = None
+
+    def __enter__(self):
+        self._previous_user = get_current_user()
+        set_current_user(self._user)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        set_current_user(self._previous_user)
+
+================
 File: src/centermanager/core/logging.py
 ================
 # -*- coding: utf-8 -*-
@@ -15099,13 +16884,143 @@ def logs_dir() -> Path:
     return get_paths().logs_dir
 
 ================
+File: src/centermanager/core/permission_guard.py
+================
+# -*- coding: utf-8 -*-
+"""
+Permission Guard - middleware for checking permissions before executing operations.
+"""
+import logging
+from functools import wraps
+from typing import Optional, Callable, List, Type, Any
+
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionDeniedError, PermissionService
+from centermanager.models.user import User
+
+logger = logging.getLogger(__name__)
+
+
+class PermissionGuard:
+    """
+    Permission guard for protecting operations.
+
+    Usage:
+        # As a decorator for service methods
+        @PermissionGuard.require("finance.view")
+        def get_dashboard(self):
+            ...
+
+        # As a function call
+        guard = PermissionGuard(session_factory)
+        guard.check("finance.view")
+
+        # For class methods
+        class MyService:
+            @PermissionGuard.require_permission("student.view")
+            def list_students(self):
+                ...
+    """
+
+    def __init__(self, session_factory):
+        self._session_factory = session_factory
+        self._permission_service = PermissionService(session_factory)
+
+    def check(self, permission_name: str, user: Optional[User] = None) -> bool:
+        """
+        Check a permission. Returns True if granted, False otherwise.
+        """
+        return self._permission_service.has_permission(permission_name, user)
+
+    def require(self, permission_name: str, user: Optional[User] = None) -> None:
+        """
+        Require a permission. Raises PermissionDeniedError if not granted.
+        """
+        self._permission_service.require_permission(permission_name, user)
+
+    def require_any(self, permission_names: List[str], user: Optional[User] = None) -> None:
+        """
+        Require any of the given permissions.
+        """
+        self._permission_service.require_any_permission(permission_names, user)
+
+    def get_current_user(self) -> Optional[User]:
+        """Get the current user."""
+        return get_current_user()
+
+    @classmethod
+    def require_permission(cls, permission_name: str):
+        """
+        Decorator to require a permission for a method.
+
+        Usage:
+            @PermissionGuard.require_permission("finance.view")
+            def my_method(self, *args, **kwargs):
+                ...
+        """
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(self, *args, **kwargs):
+                # Get session_factory from self if available
+                session_factory = getattr(self, '_session_factory', None)
+                if session_factory is None:
+                    # Try to get from args or kwargs
+                    session_factory = kwargs.get('session_factory')
+                    if session_factory is None:
+                        raise ValueError(
+                            "Cannot find session_factory. "
+                            "Make sure the class has _session_factory attribute "
+                            "or pass session_factory as a keyword argument."
+                        )
+
+                guard = PermissionGuard(session_factory)
+                guard.require(permission_name)
+                return func(self, *args, **kwargs)
+            return wrapper
+        return decorator
+
+    @classmethod
+    def require_any_permission(cls, permission_names: List[str]):
+        """
+        Decorator to require any of the given permissions.
+        """
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(self, *args, **kwargs):
+                session_factory = getattr(self, '_session_factory', None)
+                if session_factory is None:
+                    session_factory = kwargs.get('session_factory')
+                    if session_factory is None:
+                        raise ValueError("Cannot find session_factory")
+
+                guard = PermissionGuard(session_factory)
+                guard.require_any(permission_names)
+                return func(self, *args, **kwargs)
+            return wrapper
+        return decorator
+
+
+# Convenience functions
+def require_permission(permission_name: str):
+    """Alias for PermissionGuard.require_permission"""
+    return PermissionGuard.require_permission(permission_name)
+
+
+def require_any_permission(permission_names: List[str]):
+    """Alias for PermissionGuard.require_any_permission"""
+    return PermissionGuard.require_any_permission(permission_names)
+
+================
 File: src/centermanager/core/permissions.py
 ================
 # -*- coding: utf-8 -*-
 """
-Permission definitions and placeholder authorization.
+Permission definitions and authorization.
 """
 from enum import Enum
+from typing import Optional, List
+
+from centermanager.core.current_user import get_current_user
 
 
 class Permission(Enum):
@@ -15116,16 +17031,65 @@ class Permission(Enum):
     STUDENT_ARCHIVE = "student.archive"
     STUDENT_EXPORT = "student.export"
     STUDENT_IMPORT = "student.import"
+    
+    # RBAC permissions (aligned with PermissionDefinitions)
+    STUDENT_VIEW = "student.view"
+    STUDENT_DELETE = "student.delete"
+    TEACHER_VIEW = "teacher.view"
+    TEACHER_CREATE = "teacher.create"
+    TEACHER_UPDATE = "teacher.update"
+    TEACHER_DELETE = "teacher.delete"
+    FINANCE_VIEW = "finance.view"
+    FINANCE_INCOME_CREATE = "finance.income.create"
+    FINANCE_INCOME_UPDATE = "finance.income.update"
+    FINANCE_INCOME_DELETE = "finance.income.delete"
+    FINANCE_EXPENSE_CREATE = "finance.expense.create"
+    FINANCE_EXPENSE_UPDATE = "finance.expense.update"
+    FINANCE_EXPENSE_DELETE = "finance.expense.delete"
+    REPORT_VIEW = "report.view"
+    SETTING_UPDATE = "setting.update"
 
 
 def has_permission(permission: Permission, user=None) -> bool:
     """
-    Placeholder permission check.
-    In future, this will check the current user's roles.
-    For now, always return True.
+    Check if the current user has a permission.
+    
+    Args:
+        permission: The Permission enum value to check.
+        user: Optional user to check. If None, uses current user.
+    
+    Returns:
+        True if the user has the permission, False otherwise.
     """
-    # TODO: implement actual authorization
-    return True
+    from centermanager.services.permission_service import PermissionService
+    from centermanager.database.engine import create_production_engine
+    from sqlalchemy.orm import sessionmaker
+    
+    if user is None:
+        user = get_current_user()
+    if user is None:
+        return False
+    
+    # Use PermissionService for real checking
+    engine = create_production_engine()
+    session_factory = sessionmaker(bind=engine)
+    service = PermissionService(session_factory)
+    return service.has_permission(permission.value, user)
+
+
+def require_permission(permission: Permission, user=None) -> None:
+    """
+    Require a permission. Raises PermissionDeniedError if not granted.
+    """
+    if not has_permission(permission, user):
+        from centermanager.services.permission_service import PermissionDeniedError
+        raise PermissionDeniedError(f"Permission '{permission.value}' is required.")
+
+
+# Legacy alias
+def has_permission_legacy(permission: Permission, user=None) -> bool:
+    """Legacy function for backward compatibility."""
+    return has_permission(permission, user)
 
 ================
 File: src/centermanager/database/__init__.py
@@ -15205,6 +17169,177 @@ def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
 def create_production_engine(echo: bool = False) -> Engine:
     """Create engine for production database."""
     return create_engine_for_path(get_database_path(), echo=echo)
+
+================
+File: src/centermanager/database/seed.py
+================
+# -*- coding: utf-8 -*-
+"""
+Database seeder - creates default roles, permissions, and admin user.
+"""
+import logging
+from typing import List
+
+from sqlalchemy.orm import Session
+
+from centermanager.models.role import Role, RoleDefinitions
+from centermanager.models.permission import Permission, PermissionDefinitions
+from centermanager.models.user import User
+from centermanager.models.role_permission import RolePermission
+
+logger = logging.getLogger(__name__)
+
+
+def seed_roles_and_permissions(session: Session) -> None:
+    """
+    Seed default roles and permissions into the database.
+    This is idempotent - can be run multiple times.
+    """
+    # 1. Create permissions
+    permissions = _create_permissions(session)
+    permission_map = {p.name: p for p in permissions}
+
+    # 2. Create roles with permissions
+    admin_role = _create_role(
+        session,
+        name=RoleDefinitions.ADMIN,
+        display_name="Administrator",
+        description="Full system access",
+        is_system=True,
+        permission_names=list(permission_map.keys())  # All permissions
+    )
+
+    teacher_role = _create_role(
+        session,
+        name=RoleDefinitions.TEACHER,
+        display_name="Teacher",
+        description="Teaching functions only",
+        is_system=True,
+        permission_names=[
+            PermissionDefinitions.STUDENT_VIEW,
+            PermissionDefinitions.STUDENT_CREATE,
+            PermissionDefinitions.STUDENT_UPDATE,
+            PermissionDefinitions.STUDENT_DELETE,
+            PermissionDefinitions.TEACHER_VIEW,
+            PermissionDefinitions.TEACHER_CREATE,
+            PermissionDefinitions.TEACHER_UPDATE,
+            PermissionDefinitions.TEACHER_DELETE,
+            PermissionDefinitions.REPORT_VIEW,
+        ]
+    )
+
+    reception_role = _create_role(
+        session,
+        name=RoleDefinitions.RECEPTION,
+        display_name="Reception",
+        description="Student management only (no finance)",
+        is_system=True,
+        permission_names=[
+            PermissionDefinitions.STUDENT_VIEW,
+            PermissionDefinitions.STUDENT_CREATE,
+            PermissionDefinitions.STUDENT_UPDATE,
+            PermissionDefinitions.TEACHER_VIEW,  # reception có thể xem teacher
+        ]
+    )
+
+    # 3. Create default admin user if not exists
+    _create_admin_user(session, admin_role)
+
+    session.commit()
+    logger.info("Database seeding completed: roles, permissions, and admin user created.")
+
+
+def _create_permissions(session: Session) -> List[Permission]:
+    """Create all system permissions."""
+    created = []
+    for perm_name in PermissionDefinitions.all_permissions():
+        existing = session.query(Permission).filter(Permission.name == perm_name).first()
+        if existing:
+            created.append(existing)
+            continue
+
+        category = PermissionDefinitions.get_category(perm_name)
+        permission = Permission(
+            name=perm_name,
+            description=f"{perm_name} permission",
+            category=category,
+        )
+        session.add(permission)
+        created.append(permission)
+
+    session.flush()
+    return created
+
+
+def _create_role(
+    session: Session,
+    name: str,
+    display_name: str,
+    description: str,
+    is_system: bool,
+    permission_names: List[str],
+) -> Role:
+    """Create a role with the given permissions."""
+    existing = session.query(Role).filter(Role.name == name).first()
+    if existing:
+        # Update permissions for existing role
+        existing.display_name = display_name
+        existing.description = description
+        existing.is_system = is_system
+        # Clear existing permissions
+        existing.permissions.clear()
+        # Add new permissions
+        for perm_name in permission_names:
+            perm = session.query(Permission).filter(Permission.name == perm_name).first()
+            if perm:
+                existing.permissions.append(perm)
+        session.flush()
+        return existing
+
+    role = Role(
+        name=name,
+        display_name=display_name,
+        description=description,
+        is_system=is_system,
+    )
+    session.add(role)
+    session.flush()
+
+    # Add permissions
+    for perm_name in permission_names:
+        perm = session.query(Permission).filter(Permission.name == perm_name).first()
+        if perm:
+            role.permissions.append(perm)
+
+    session.flush()
+    return role
+
+
+def _create_admin_user(session: Session, admin_role: Role) -> None:
+    """Create default admin user if not exists."""
+    existing = session.query(User).filter(User.username == "admin").first()
+    if existing:
+        # Ensure admin has admin role
+        if existing.role_id != admin_role.id:
+            existing.role_id = admin_role.id
+            session.flush()
+        return
+
+    # Simple password hashing - in production, use proper bcrypt
+    import hashlib
+    password_hash = hashlib.sha256("admin123".encode()).hexdigest()
+
+    admin = User(
+        username="admin",
+        password_hash=password_hash,
+        full_name="System Administrator",
+        email="admin@centermanager.local",
+        role_id=admin_role.id,
+        is_active=True,
+    )
+    session.add(admin)
+    session.flush()
+    logger.info("Default admin user created: username='admin', password='admin123'")
 
 ================
 File: src/centermanager/database/session.py
@@ -15531,6 +17666,17 @@ from centermanager.models.student_highlight import StudentHighlight, HighlightTy
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
 
+# RBAC Models
+from centermanager.models.user import User
+from centermanager.models.role import Role, RoleDefinitions
+from centermanager.models.permission import Permission, PermissionDefinitions
+from centermanager.models.role_permission import RolePermission
+# Thêm các import mới
+from centermanager.models.teacher import Teacher
+from centermanager.models.teacher_document import TeacherDocument
+from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
+from centermanager.models.teacher_assignment import TeacherAssignment
+
 __all__ = [
     "Student",
     "Parent",
@@ -15548,6 +17694,12 @@ __all__ = [
     "Note",
     "NoteType",
     "Document",
+    "User",
+    "Role",
+    "RoleDefinitions",
+    "Permission",
+    "PermissionDefinitions",
+    "RolePermission",
 ]
 
 ================
@@ -15673,6 +17825,8 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.session import Session
+    from centermanager.models.teacher import Teacher
+    from centermanager.models.teacher_assignment import TeacherAssignment 
 
 
 class Class(Base, TimestampMixin):
@@ -15687,6 +17841,12 @@ class Class(Base, TimestampMixin):
 
     # Relationships
     sessions: Mapped[List[Session]] = relationship("Session", back_populates="class_", cascade="all, delete-orphan")
+    teachers: Mapped[List[Teacher]] = relationship(
+        "Teacher",
+        secondary="teacher_assignments",
+        back_populates="assigned_classes",
+        lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         return f"<Class(id={self.id}, name='{self.name}')>"
@@ -15920,6 +18080,129 @@ class Parent(Base, TimestampMixin):
         return f"<Parent(id={self.id}, student_id={self.student_id}, name='{self.name}')>"
 
 ================
+File: src/centermanager/models/permission.py
+================
+# -*- coding: utf-8 -*-
+"""
+Permission model - defines system permissions.
+"""
+from __future__ import annotations
+
+from typing import Optional, List, TYPE_CHECKING
+
+from sqlalchemy import String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.role import Role
+
+
+class Permission(Base, TimestampMixin):
+    __tablename__ = "permissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Relationships
+    roles: Mapped[List[Role]] = relationship(
+        "Role",
+        secondary="role_permissions",
+        back_populates="permissions"
+    )
+
+    __table_args__ = (
+        UniqueConstraint('name', name='uq_permission_name'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Permission(id={self.id}, name='{self.name}')>"
+
+
+# Permission definitions - canonical source
+class PermissionDefinitions:
+    """Central registry of all permissions in the system."""
+
+    # Student
+    STUDENT_VIEW = "student.view"
+    STUDENT_CREATE = "student.create"
+    STUDENT_UPDATE = "student.update"
+    STUDENT_DELETE = "student.delete"
+
+    # Teacher
+    TEACHER_VIEW = "teacher.view"
+    TEACHER_CREATE = "teacher.create"
+    TEACHER_UPDATE = "teacher.update"
+    TEACHER_DELETE = "teacher.delete"
+    # Finance
+    FINANCE_VIEW = "finance.view"
+    FINANCE_INCOME_CREATE = "finance.income.create"
+    FINANCE_INCOME_UPDATE = "finance.income.update"
+    FINANCE_INCOME_DELETE = "finance.income.delete"
+    FINANCE_EXPENSE_CREATE = "finance.expense.create"
+    FINANCE_EXPENSE_UPDATE = "finance.expense.update"
+    FINANCE_EXPENSE_DELETE = "finance.expense.delete"
+
+    # Reports
+    REPORT_VIEW = "report.view"
+
+    # Settings
+    SETTING_UPDATE = "setting.update"
+
+    @classmethod
+    def all_permissions(cls) -> List[str]:
+        return [
+            cls.STUDENT_VIEW,
+            cls.STUDENT_CREATE,
+            cls.STUDENT_UPDATE,
+            cls.STUDENT_DELETE,
+            cls.TEACHER_VIEW,
+            cls.TEACHER_CREATE,
+            cls.TEACHER_UPDATE,
+            cls.TEACHER_DELETE,
+            cls.FINANCE_VIEW,
+            cls.FINANCE_INCOME_CREATE,
+            cls.FINANCE_INCOME_UPDATE,
+            cls.FINANCE_INCOME_DELETE,
+            cls.FINANCE_EXPENSE_CREATE,
+            cls.FINANCE_EXPENSE_UPDATE,
+            cls.FINANCE_EXPENSE_DELETE,
+            cls.REPORT_VIEW,
+            cls.SETTING_UPDATE,
+        ]
+
+    @classmethod
+    def get_category(cls, permission_name: str) -> str:
+        category_map = {
+            cls.STUDENT_VIEW: "student",
+            cls.STUDENT_CREATE: "student",
+            cls.STUDENT_UPDATE: "student",
+            cls.STUDENT_DELETE: "student",
+            cls.TEACHER_VIEW: "teacher",
+            cls.TEACHER_CREATE: "teacher",
+            cls.TEACHER_UPDATE: "teacher",
+            cls.TEACHER_DELETE: "teacher",
+            cls.FINANCE_VIEW: "finance",
+            cls.FINANCE_INCOME_CREATE: "finance",
+            cls.FINANCE_INCOME_UPDATE: "finance",
+            cls.FINANCE_INCOME_DELETE: "finance",
+            cls.FINANCE_EXPENSE_CREATE: "finance",
+            cls.FINANCE_EXPENSE_UPDATE: "finance",
+            cls.FINANCE_EXPENSE_DELETE: "finance",
+            cls.REPORT_VIEW: "report",
+            cls.SETTING_UPDATE: "setting",
+        }
+        return category_map.get(permission_name, "other")
+
+
+# Alias for backward compatibility
+PermissionName = PermissionDefinitions
+
+================
 File: src/centermanager/models/progress.py
 ================
 # -*- coding: utf-8 -*-
@@ -15955,6 +18238,118 @@ class Progress(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<Progress(id={self.id}, student_id={self.student_id}, category='{self.category}', value={self.value})>"
+
+================
+File: src/centermanager/models/role_permission.py
+================
+# -*- coding: utf-8 -*-
+"""
+RolePermission - many-to-many association between roles and permissions.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+
+class RolePermission(Base, TimestampMixin):
+    __tablename__ = "role_permissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('role_id', 'permission_id', name='uq_role_permission'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RolePermission(role_id={self.role_id}, permission_id={self.permission_id})>"
+
+================
+File: src/centermanager/models/role.py
+================
+# -*- coding: utf-8 -*-
+"""
+Role model - defines system roles with permissions.
+"""
+from __future__ import annotations
+
+from typing import Optional, List, Set, TYPE_CHECKING
+
+from sqlalchemy import String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.user import User
+    from centermanager.models.permission import Permission
+
+
+class Role(Base, TimestampMixin):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_system: Mapped[bool] = mapped_column(default=False)
+
+    # Relationships
+    users: Mapped[List[User]] = relationship("User", back_populates="role")
+    permissions: Mapped[List[Permission]] = relationship(
+        "Permission",
+        secondary="role_permissions",
+        back_populates="roles",
+        lazy="selectin"  # lazy loading thay vì joinedload mặc định
+    )
+
+    __table_args__ = (
+        UniqueConstraint('name', name='uq_role_name'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Role(id={self.id}, name='{self.name}')>"
+
+    def has_permission(self, permission_name: str) -> bool:
+        return any(p.name == permission_name for p in self.permissions)
+
+    def has_any_permission(self, permission_names: List[str]) -> bool:
+        return any(self.has_permission(p) for p in permission_names)
+
+    def has_all_permissions(self, permission_names: List[str]) -> bool:
+        return all(self.has_permission(p) for p in permission_names)
+
+    @property
+    def permission_names(self) -> Set[str]:
+        return {p.name for p in self.permissions}
+
+
+# Role definitions
+class RoleDefinitions:
+    ADMIN = "admin"
+    TEACHER = "teacher"
+    RECEPTION = "reception"
+
+    @classmethod
+    def all_roles(cls) -> List[str]:
+        return [cls.ADMIN, cls.TEACHER, cls.RECEPTION]
+
+    @classmethod
+    def get_display_name(cls, role_name: str) -> str:
+        display_map = {
+            cls.ADMIN: "Administrator",
+            cls.TEACHER: "Teacher",
+            cls.RECEPTION: "Reception",
+        }
+        return display_map.get(role_name, role_name.capitalize())
 
 ================
 File: src/centermanager/models/session_note.py
@@ -16253,6 +18648,197 @@ class Student(Base, TimestampMixin):
         return f"<Student(id={self.id}, code='{self.student_code}', name='{self.full_name}')>"
 
 ================
+File: src/centermanager/models/teacher_assignment.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherAssignment - many-to-many association between teachers and classes.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+
+class TeacherAssignment(Base, TimestampMixin):
+    __tablename__ = "teacher_assignments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('teacher_id', 'class_id', name='uq_teacher_class'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TeacherAssignment(teacher_id={self.teacher_id}, class_id={self.class_id})>"
+
+================
+File: src/centermanager/models/teacher_document.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDocument model - documents uploaded for a teacher.
+"""
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.teacher import Teacher
+
+
+class TeacherDocument(Base, TimestampMixin):
+    __tablename__ = "teacher_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
+
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)  # relative path
+    document_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    teacher: Mapped[Teacher] = relationship("Teacher", back_populates="documents")
+
+    def __repr__(self) -> str:
+        return f"<TeacherDocument(id={self.id}, teacher_id={self.teacher_id}, file='{self.file_name}')>"
+
+================
+File: src/centermanager/models/teacher_timeline_event.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherTimelineEvent - history log for teacher actions.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Optional, TYPE_CHECKING
+
+import sqlalchemy as sa
+from sqlalchemy import String, Text, ForeignKey, DateTime, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+
+if TYPE_CHECKING:
+    from centermanager.models.teacher import Teacher
+
+
+class TeacherTimelineEventType(str, Enum):
+    TEACHER_CREATED = "TeacherCreated"
+    TEACHER_UPDATED = "TeacherUpdated"
+    TEACHER_ARCHIVED = "TeacherArchived"
+    TEACHER_RESTORED = "TeacherRestored"
+    TEACHER_ASSIGNED = "TeacherAssigned"
+    TEACHER_UNASSIGNED = "TeacherUnassigned"
+    DOCUMENT_UPLOADED = "DocumentUploaded"
+    DOCUMENT_DELETED = "DocumentDeleted"
+
+    @classmethod
+    def choices(cls):
+        return [e.value for e in cls]
+
+
+class TeacherTimelineEvent(Base):
+    __tablename__ = "teacher_timeline_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"), nullable=False)
+
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+        server_default=sa.text('(CURRENT_TIMESTAMP)')
+    )
+
+    teacher: Mapped[Teacher] = relationship("Teacher", back_populates="timeline_events")
+
+    __table_args__ = (
+        Index("idx_teacher_timeline_teacher_id", "teacher_id"),
+        Index("idx_teacher_timeline_created_at", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TeacherTimelineEvent(id={self.id}, teacher_id={self.teacher_id}, type='{self.event_type}')>"
+
+================
+File: src/centermanager/models/teacher.py
+================
+# -*- coding: utf-8 -*-
+"""
+Teacher model - manages teacher information.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional, List, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.class_ import Class
+    from centermanager.models.teacher_document import TeacherDocument
+    from centermanager.models.teacher_timeline_event import TeacherTimelineEvent
+
+
+class Teacher(Base, TimestampMixin):
+    __tablename__ = "teachers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    join_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    documents: Mapped[List[TeacherDocument]] = relationship(
+        "TeacherDocument", back_populates="teacher", cascade="all, delete-orphan"
+    )
+    timeline_events: Mapped[List[TeacherTimelineEvent]] = relationship(
+        "TeacherTimelineEvent", back_populates="teacher", cascade="all, delete-orphan"
+    )
+    # Many-to-many with Class via teacher_assignments
+    assigned_classes: Mapped[List[Class]] = relationship(
+        "Class",
+        secondary="teacher_assignments",
+        back_populates="teachers",
+        lazy="selectin"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Teacher(id={self.id}, code='{self.teacher_code}', name='{self.full_name}')>"
+
+================
 File: src/centermanager/models/timeline_event.py
 ================
 # -*- coding: utf-8 -*-
@@ -16324,6 +18910,82 @@ class TimelineEvent(Base):
         return f"<TimelineEvent(id={self.id}, student_id={self.student_id}, type='{self.event_type}')>"
 
 ================
+File: src/centermanager/models/user.py
+================
+# -*- coding: utf-8 -*-
+"""
+User model - system user with role-based permissions.
+"""
+from __future__ import annotations
+
+from typing import Optional, List, Set, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.role import Role
+
+
+class User(Base, TimestampMixin):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    role_id: Mapped[Optional[int]] = mapped_column(ForeignKey("roles.id"), nullable=True)
+
+    # Relationships
+    role: Mapped[Optional[Role]] = relationship("Role", back_populates="users", lazy="selectin")
+
+    __table_args__ = (
+        UniqueConstraint('username', name='uq_user_username'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username='{self.username}')>"
+
+    @property
+    def permissions(self) -> Set[str]:
+        """Get all permission names for this user via role."""
+        if self.role is None:
+            return set()
+        return self.role.permission_names
+
+    def has_permission(self, permission_name: str) -> bool:
+        if self.role is None:
+            return False
+        return self.role.has_permission(permission_name)
+
+    def has_any_permission(self, permission_names: List[str]) -> bool:
+        if self.role is None:
+            return False
+        return self.role.has_any_permission(permission_names)
+
+    def has_all_permissions(self, permission_names: List[str]) -> bool:
+        if self.role is None:
+            return False
+        return self.role.has_all_permissions(permission_names)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role is not None and self.role.name == "admin"
+
+    @property
+    def is_teacher(self) -> bool:
+        return self.role is not None and self.role.name == "teacher"
+
+    @property
+    def is_reception(self) -> bool:
+        return self.role is not None and self.role.name == "reception"
+
+================
 File: src/centermanager/modules/__init__.py
 ================
 # -*- coding: utf-8 -*-
@@ -16344,6 +19006,17 @@ from .class_repository import ClassRepository
 from .note_repository import NoteRepository
 from .document_repository import DocumentRepository
 
+# RBAC Repositories
+from .user_repository import UserRepository
+from .role_repository import RoleRepository
+from .permission_repository import PermissionRepository
+
+# Thêm các import mới
+from .teacher_repository import TeacherRepository
+from .teacher_document_repository import TeacherDocumentRepository
+from .teacher_timeline_repository import TeacherTimelineRepository
+from .teacher_assignment_repository import TeacherAssignmentRepository
+
 __all__ = [
     "BaseRepository",
     "StudentRepository",
@@ -16354,6 +19027,9 @@ __all__ = [
     "ClassRepository",
     "NoteRepository",
     "DocumentRepository",
+    "UserRepository",
+    "RoleRepository",
+    "PermissionRepository",
 ]
 
 ================
@@ -16618,6 +19294,88 @@ class ParentRepository(BaseRepository[Parent]):
         self._session.delete(parent)
 
 ================
+File: src/centermanager/repositories/permission_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+Permission repository - data access for Permission entity.
+"""
+from typing import Optional, List
+
+from sqlalchemy.orm import Session
+
+from centermanager.models.permission import Permission
+from centermanager.repositories.base import BaseRepository
+
+
+class PermissionRepository(BaseRepository[Permission]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, Permission)
+
+    def get_by_name(self, name: str) -> Optional[Permission]:
+        """Get permission by name."""
+        return self._session.query(Permission).filter(Permission.name == name).first()
+
+    def get_by_category(self, category: str) -> List[Permission]:
+        """Get all permissions in a category."""
+        return self._session.query(Permission).filter(Permission.category == category).all()
+
+    def list_all(self) -> List[Permission]:
+        """Get all permissions."""
+        return self._session.query(Permission).order_by(Permission.category, Permission.name).all()
+
+    def add(self, permission: Permission) -> Permission:
+        self._session.add(permission)
+        return permission
+
+    def delete(self, permission: Permission) -> None:
+        self._session.delete(permission)
+
+================
+File: src/centermanager/repositories/role_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+Role repository - data access for Role entity.
+"""
+from typing import Optional, List
+
+from sqlalchemy.orm import Session, joinedload
+
+from centermanager.models.role import Role
+from centermanager.repositories.base import BaseRepository
+
+
+class RoleRepository(BaseRepository[Role]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, Role)
+
+    def get_by_name(self, name: str) -> Optional[Role]:
+        """Get role by name with permissions loaded."""
+        return self._session.query(Role).options(
+            joinedload(Role.permissions)
+        ).filter(Role.name == name).first()
+
+    def get_by_id_with_permissions(self, role_id: int) -> Optional[Role]:
+        """Get role by ID with permissions loaded."""
+        return self._session.query(Role).options(
+            joinedload(Role.permissions)
+        ).filter(Role.id == role_id).first()
+
+    def list_all_with_permissions(self) -> List[Role]:
+        """List all roles with permissions loaded."""
+        return self._session.query(Role).options(
+            joinedload(Role.permissions)
+        ).all()
+
+    def add(self, role: Role) -> Role:
+        self._session.add(role)
+        return role
+
+    def delete(self, role: Role) -> None:
+        self._session.delete(role)
+
+================
 File: src/centermanager/repositories/session_note_repository.py
 ================
 # -*- coding: utf-8 -*-
@@ -16847,6 +19605,200 @@ class StudentRepository(BaseRepository[Student]):
         return q.all()
 
 ================
+File: src/centermanager/repositories/teacher_assignment_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherAssignment repository - data access for teacher-class assignments.
+"""
+from typing import List, Optional
+
+from sqlalchemy.orm import Session
+
+from centermanager.models.teacher_assignment import TeacherAssignment
+from centermanager.repositories.base import BaseRepository
+
+
+class TeacherAssignmentRepository(BaseRepository[TeacherAssignment]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, TeacherAssignment)
+
+    def get_by_teacher(self, teacher_id: int) -> List[TeacherAssignment]:
+        return self._session.query(TeacherAssignment).filter(
+            TeacherAssignment.teacher_id == teacher_id
+        ).all()
+
+    def get_by_class(self, class_id: int) -> List[TeacherAssignment]:
+        return self._session.query(TeacherAssignment).filter(
+            TeacherAssignment.class_id == class_id
+        ).all()
+
+    def exists(self, teacher_id: int, class_id: int) -> bool:
+        return self._session.query(TeacherAssignment).filter(
+            TeacherAssignment.teacher_id == teacher_id,
+            TeacherAssignment.class_id == class_id
+        ).first() is not None
+
+    def add(self, assignment: TeacherAssignment) -> TeacherAssignment:
+        self._session.add(assignment)
+        return assignment
+
+    def delete(self, assignment: TeacherAssignment) -> None:
+        self._session.delete(assignment)
+
+================
+File: src/centermanager/repositories/teacher_document_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDocument repository - data access for TeacherDocument entity.
+"""
+from typing import List
+
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from centermanager.models.teacher_document import TeacherDocument
+from centermanager.repositories.base import BaseRepository
+
+
+class TeacherDocumentRepository(BaseRepository[TeacherDocument]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, TeacherDocument)
+
+    def get_by_teacher(self, teacher_id: int) -> List[TeacherDocument]:
+        return self._session.query(TeacherDocument).filter(
+            TeacherDocument.teacher_id == teacher_id
+        ).order_by(desc(TeacherDocument.created_at)).all()
+
+    def add(self, document: TeacherDocument) -> TeacherDocument:
+        self._session.add(document)
+        return document
+
+    def delete(self, document: TeacherDocument) -> None:
+        self._session.delete(document)
+
+================
+File: src/centermanager/repositories/teacher_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+Teacher repository - data access for Teacher entity.
+"""
+from typing import Optional, List
+from datetime import datetime
+
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, or_
+
+from centermanager.models.teacher import Teacher
+from centermanager.repositories.base import BaseRepository
+
+
+class TeacherRepository(BaseRepository[Teacher]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, Teacher)
+
+    def get_by_code(self, teacher_code: str) -> Optional[Teacher]:
+        return self._session.query(Teacher).filter(
+            Teacher.teacher_code == teacher_code,
+            Teacher.deleted_at.is_(None)
+        ).first()
+
+    def get_by_code_including_deleted(self, teacher_code: str) -> Optional[Teacher]:
+        return self._session.query(Teacher).filter(
+            Teacher.teacher_code == teacher_code
+        ).first()
+
+    def get_by_id_with_relations(self, teacher_id: int) -> Optional[Teacher]:
+        return self._session.query(Teacher).options(
+            joinedload(Teacher.documents),
+            joinedload(Teacher.assigned_classes)
+        ).filter(Teacher.id == teacher_id).first()
+
+    def list_active(self) -> List[Teacher]:
+        return self._session.query(Teacher).filter(
+            Teacher.deleted_at.is_(None)
+        ).order_by(Teacher.teacher_code).all()
+
+    def list_all_including_deleted(self) -> List[Teacher]:
+        return self._session.query(Teacher).all()
+
+    def get_all_teacher_codes(self) -> List[str]:
+        results = self._session.query(Teacher.teacher_code).all()
+        return [r[0] for r in results]
+
+    def get_highest_teacher_number(self) -> Optional[int]:
+        import re
+        pattern = re.compile(r"^TCH(\d+)$")
+        all_codes = self.get_all_teacher_codes()
+        max_num = None
+        for code in all_codes:
+            if code is None:
+                continue
+            match = pattern.match(code)
+            if match:
+                num = int(match.group(1))
+                if max_num is None or num > max_num:
+                    max_num = num
+        return max_num
+
+    def search_teachers(self, query: str) -> List[Teacher]:
+        q = self._session.query(Teacher).filter(Teacher.deleted_at.is_(None))
+        if query:
+            q = q.filter(
+                or_(
+                    Teacher.teacher_code.ilike(f"%{query}%"),
+                    Teacher.full_name.ilike(f"%{query}%"),
+                    Teacher.phone.ilike(f"%{query}%"),
+                    Teacher.email.ilike(f"%{query}%")
+                )
+            )
+        return q.all()
+
+    def add(self, teacher: Teacher) -> Teacher:
+        self._session.add(teacher)
+        return teacher
+
+    def delete(self, teacher: Teacher) -> None:
+        self._session.delete(teacher)
+
+================
+File: src/centermanager/repositories/teacher_timeline_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherTimeline repository - data access for TeacherTimelineEvent.
+"""
+from typing import List, Optional
+
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from centermanager.models.teacher_timeline_event import TeacherTimelineEvent
+from centermanager.repositories.base import BaseRepository
+
+
+class TeacherTimelineRepository(BaseRepository[TeacherTimelineEvent]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, TeacherTimelineEvent)
+
+    def get_by_teacher(self, teacher_id: int, limit: Optional[int] = None) -> List[TeacherTimelineEvent]:
+        query = self._session.query(TeacherTimelineEvent).filter(
+            TeacherTimelineEvent.teacher_id == teacher_id
+        ).order_by(desc(TeacherTimelineEvent.created_at))
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+
+    def add(self, event: TeacherTimelineEvent) -> TeacherTimelineEvent:
+        self._session.add(event)
+        return event
+
+    def delete(self, event: TeacherTimelineEvent) -> None:
+        self._session.delete(event)
+
+================
 File: src/centermanager/repositories/timeline_repository.py
 ================
 # -*- coding: utf-8 -*-
@@ -16887,6 +19839,48 @@ class TimelineRepository(BaseRepository[TimelineEvent]):
         self._session.delete(event)
 
 ================
+File: src/centermanager/repositories/user_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+User repository - data access for User entity.
+"""
+from typing import Optional, List
+
+from sqlalchemy.orm import Session, joinedload
+
+from centermanager.models.user import User
+from centermanager.repositories.base import BaseRepository
+
+
+class UserRepository(BaseRepository[User]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, User)
+
+    def get_by_username(self, username: str) -> Optional[User]:
+        """Get user by username with role loaded."""
+        return self._session.query(User).options(
+            joinedload(User.role)  # Chỉ load role, không load permissions trực tiếp
+        ).filter(User.username == username).first()
+
+    def get_by_id_with_role(self, user_id: int) -> Optional[User]:
+        """Get user by ID with role loaded."""
+        return self._session.query(User).options(
+            joinedload(User.role)  # Chỉ load role
+        ).filter(User.id == user_id).first()
+
+    def list_active(self) -> List[User]:
+        """Get all active users."""
+        return self._session.query(User).filter(User.is_active == True).all()
+
+    def add(self, user: User) -> User:
+        self._session.add(user)
+        return user
+
+    def delete(self, user: User) -> None:
+        self._session.delete(user)
+
+================
 File: src/centermanager/services/__init__.py
 ================
 # -*- coding: utf-8 -*-
@@ -16908,6 +19902,13 @@ from centermanager.services.exceptions import (
 )
 from .session_service import SessionService
 from .session_note_service import SessionNoteService
+
+# Thêm các import mới
+from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
+from .teacher_assignment_service import TeacherAssignmentService
+from .teacher_document_service import TeacherDocumentService
+from .teacher_timeline_service import TeacherTimelineService
+
 
 __all__ = [
     "StudentService",
@@ -17680,6 +20681,196 @@ class ParentService:
                     description=f"Deleted {name or 'guardian'}",
                     metadata={"parent_id": parent_id},
                 )
+
+================
+File: src/centermanager/services/permission_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+PermissionService - business logic for permission checking and management.
+"""
+import logging
+from typing import Optional, List, Set
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.user import User
+from centermanager.models.role import Role, RoleDefinitions
+from centermanager.models.permission import Permission, PermissionDefinitions
+from centermanager.repositories.user_repository import UserRepository
+from centermanager.repositories.role_repository import RoleRepository
+from centermanager.repositories.permission_repository import PermissionRepository
+from centermanager.core.current_user import get_current_user, set_current_user
+
+logger = logging.getLogger(__name__)
+
+
+class PermissionDeniedError(Exception):
+    pass
+
+
+class UserNotFoundError(Exception):
+    pass
+
+
+class PermissionService:
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    # ===== Permission Checking =====
+
+    def has_permission(self, permission_name: str, user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.has_permission(permission_name)
+
+    def has_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.has_any_permission(permission_names)
+
+    def has_all_permissions(self, permission_names: List[str], user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.has_all_permissions(permission_names)
+
+    def require_permission(self, permission_name: str, user: Optional[User] = None) -> None:
+        if not self.has_permission(permission_name, user):
+            raise PermissionDeniedError(f"Permission '{permission_name}' is required.")
+
+    def require_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> None:
+        if not self.has_any_permission(permission_names, user):
+            raise PermissionDeniedError(f"Any of these permissions is required: {', '.join(permission_names)}")
+
+    def get_user_permissions(self, user: Optional[User] = None) -> Set[str]:
+        if user is None:
+            user = get_current_user()
+        if user is None or user.role is None:
+            return set()
+        return user.role.permission_names  # sử dụng property mới
+
+    def get_user_role(self, user: Optional[User] = None) -> Optional[str]:
+        if user is None:
+            user = get_current_user()
+        if user is None or user.role is None:
+            return None
+        return user.role.name
+
+    def is_admin(self, user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.is_admin
+
+    def is_teacher(self, user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.is_teacher
+
+    def is_reception(self, user: Optional[User] = None) -> bool:
+        if user is None:
+            user = get_current_user()
+        if user is None:
+            return False
+        return user.is_reception
+
+    # ===== User Management =====
+
+    def get_user(self, user_id: int) -> Optional[User]:
+        with self._session_factory() as session:
+            repo = UserRepository(session)
+            return repo.get_by_id_with_role(user_id)
+
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        with self._session_factory() as session:
+            repo = UserRepository(session)
+            return repo.get_by_username(username)
+
+    def get_current_user(self) -> Optional[User]:
+        return get_current_user()
+
+    def set_current_user(self, user: User) -> None:
+        set_current_user(user)
+
+    def get_all_users(self) -> List[User]:
+        with self._session_factory() as session:
+            repo = UserRepository(session)
+            return repo.list_active()
+
+    def create_user(
+        self,
+        username: str,
+        password_hash: str,
+        full_name: str,
+        email: Optional[str] = None,
+        role_name: str = RoleDefinitions.RECEPTION,
+    ) -> User:
+        with self._session_factory() as session:
+            role_repo = RoleRepository(session)
+            role = role_repo.get_by_name(role_name)
+            if role is None:
+                raise ValueError(f"Role '{role_name}' not found.")
+
+            user = User(
+                username=username,
+                password_hash=password_hash,
+                full_name=full_name,
+                email=email,
+                role_id=role.id,
+                is_active=True,
+            )
+            repo = UserRepository(session)
+            repo.add(user)
+            session.commit()
+            session.refresh(user)
+            return user
+
+    def update_user_role(self, user_id: int, role_name: str) -> User:
+        with self._session_factory() as session:
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+
+            role_repo = RoleRepository(session)
+            role = role_repo.get_by_name(role_name)
+            if role is None:
+                raise ValueError(f"Role '{role_name}' not found.")
+
+            user.role_id = role.id
+            session.commit()
+            session.refresh(user)
+            return user
+
+    def delete_user(self, user_id: int) -> None:
+        with self._session_factory() as session:
+            repo = UserRepository(session)
+            user = repo.get_by_id(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+            repo.delete(user)
+            session.commit()
+
+    # ===== Permission Management =====
+
+    def get_all_permissions(self) -> List[Permission]:
+        with self._session_factory() as session:
+            repo = PermissionRepository(session)
+            return repo.list_all()
+
+    def get_permissions_by_category(self, category: str) -> List[Permission]:
+        with self._session_factory() as session:
+            repo = PermissionRepository(session)
+            return repo.get_by_category(category)
 
 ================
 File: src/centermanager/services/session_note_service.py
@@ -18482,6 +21673,14 @@ class StudentExportService:
 
     def __init__(self, student_service: StudentService) -> None:
         self._student_service = student_service
+
+    def export_all_active(self, file_path: Optional[Path] = None) -> Path:
+        """
+        Export all active students to Excel.
+        This is a convenience method that calls export_excel with all active students.
+        """
+        students = self._student_service.list_students()
+        return self.export_excel(students, file_path)
 
     def export_excel(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
         """Export students to Excel."""
@@ -19361,6 +22560,548 @@ class StudentSummaryService:
             dto.document_count = len(documents)
 
         return dto
+
+================
+File: src/centermanager/services/teacher_assignment_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherAssignmentService - manage teacher-class assignments.
+"""
+from typing import List
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.teacher_assignment import TeacherAssignment
+from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
+from centermanager.repositories.teacher_assignment_repository import TeacherAssignmentRepository
+from centermanager.repositories.class_repository import ClassRepository
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+
+
+class TeacherAssignmentService:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: TeacherTimelineService
+    ) -> None:
+        self._session_factory = session_factory
+        self._timeline_service = timeline_service
+
+    def assign_teacher_to_class(self, teacher_id: int, class_id: int) -> TeacherAssignment:
+        with self._session_factory() as session:
+            # Check if already assigned
+            repo = TeacherAssignmentRepository(session)
+            if repo.exists(teacher_id, class_id):
+                raise ValueError(f"Teacher {teacher_id} is already assigned to class {class_id}.")
+
+            # Get class name for timeline
+            class_repo = ClassRepository(session)
+            class_obj = class_repo.get_by_id(class_id)
+            class_name = class_obj.name if class_obj else f"Class #{class_id}"
+
+            assignment = TeacherAssignment(teacher_id=teacher_id, class_id=class_id)
+            repo.add(assignment)
+            session.commit()
+            session.refresh(assignment)
+
+            self._timeline_service.log_event(
+                teacher_id=teacher_id,
+                event_type=TeacherTimelineEventType.TEACHER_ASSIGNED,
+                title="Teacher Assigned to Class",
+                description=f"Assigned to {class_name}",
+                metadata={"class_id": class_id, "class_name": class_name}
+            )
+            return assignment
+
+    def unassign_teacher_from_class(self, teacher_id: int, class_id: int) -> None:
+        with self._session_factory() as session:
+            repo = TeacherAssignmentRepository(session)
+            assignment = repo._session.query(TeacherAssignment).filter(
+                TeacherAssignment.teacher_id == teacher_id,
+                TeacherAssignment.class_id == class_id
+            ).first()
+            if assignment is None:
+                raise ValueError(f"Teacher {teacher_id} is not assigned to class {class_id}.")
+
+            # Get class name for timeline
+            class_repo = ClassRepository(session)
+            class_obj = class_repo.get_by_id(class_id)
+            class_name = class_obj.name if class_obj else f"Class #{class_id}"
+
+            repo.delete(assignment)
+            session.commit()
+
+            self._timeline_service.log_event(
+                teacher_id=teacher_id,
+                event_type=TeacherTimelineEventType.TEACHER_UNASSIGNED,
+                title="Teacher Unassigned from Class",
+                description=f"Unassigned from {class_name}",
+                metadata={"class_id": class_id, "class_name": class_name}
+            )
+
+    def get_assigned_classes(self, teacher_id: int) -> List[int]:
+        with self._session_factory() as session:
+            repo = TeacherAssignmentRepository(session)
+            assignments = repo.get_by_teacher(teacher_id)
+            return [a.class_id for a in assignments]
+
+    def get_teachers_for_class(self, class_id: int) -> List[int]:
+        with self._session_factory() as session:
+            repo = TeacherAssignmentRepository(session)
+            assignments = repo.get_by_class(class_id)
+            return [a.teacher_id for a in assignments]
+
+================
+File: src/centermanager/services/teacher_document_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDocumentService - manage teacher documents.
+"""
+import shutil
+from pathlib import Path
+from typing import Optional, List
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.teacher_document import TeacherDocument
+from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
+from centermanager.repositories.teacher_document_repository import TeacherDocumentRepository
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.core.paths import get_paths
+
+
+class TeacherDocumentService:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: TeacherTimelineService
+    ) -> None:
+        self._session_factory = session_factory
+        self._timeline_service = timeline_service
+
+    def _normalize_text(self, text: Optional[str]) -> Optional[str]:
+        if text is None:
+            return None
+        stripped = text.strip()
+        return stripped if stripped else None
+
+    def upload_document(
+        self,
+        teacher_id: int,
+        teacher_code: str,
+        source_path: Path,
+        file_name: str,
+        document_type: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> TeacherDocument:
+        attachment_root = get_paths().attachment_dir / "teachers"
+        teacher_folder = attachment_root / teacher_code
+        teacher_folder.mkdir(parents=True, exist_ok=True)
+
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = f"{timestamp}_{file_name}"
+        dest_path = teacher_folder / safe_name
+
+        shutil.copy2(source_path, dest_path)
+        relative_path = f"teachers/{teacher_code}/{safe_name}"
+
+        with self._session_factory() as session:
+            doc = TeacherDocument(
+                teacher_id=teacher_id,
+                file_name=file_name,
+                file_path=relative_path,
+                document_type=self._normalize_text(document_type),
+                description=self._normalize_text(description),
+            )
+            repo = TeacherDocumentRepository(session)
+            repo.add(doc)
+            session.commit()
+            session.refresh(doc)
+
+            self._timeline_service.log_event(
+                teacher_id=teacher_id,
+                event_type=TeacherTimelineEventType.DOCUMENT_UPLOADED,
+                title="Document Uploaded",
+                description=f"Uploaded {file_name}",
+                metadata={"document_id": doc.id, "document_type": document_type}
+            )
+            return doc
+
+    def get_documents_for_teacher(self, teacher_id: int) -> List[TeacherDocument]:
+        with self._session_factory() as session:
+            repo = TeacherDocumentRepository(session)
+            return repo.get_by_teacher(teacher_id)
+
+    def delete_document(self, document_id: int) -> None:
+        with self._session_factory() as session:
+            repo = TeacherDocumentRepository(session)
+            doc = repo.get_by_id(document_id)
+            if doc is None:
+                raise ValueError(f"Document {document_id} not found.")
+            file_path = get_paths().attachment_dir / doc.file_path
+            if file_path.exists():
+                file_path.unlink()
+            teacher_id = doc.teacher_id
+            file_name = doc.file_name
+            repo.delete(doc)
+            session.commit()
+
+            self._timeline_service.log_event(
+                teacher_id=teacher_id,
+                event_type=TeacherTimelineEventType.DOCUMENT_DELETED,
+                title="Document Deleted",
+                description=f"Deleted {file_name}",
+            )
+
+================
+File: src/centermanager/services/teacher_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherService - business logic for Teacher entity.
+"""
+import re
+from datetime import date, datetime, timezone
+from typing import Optional, List, Any
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from centermanager.models.teacher import Teacher
+from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
+from centermanager.repositories.teacher_repository import TeacherRepository
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+
+
+UNSET = object()
+
+
+class TeacherServiceError(Exception):
+    pass
+
+
+class TeacherNotFoundError(TeacherServiceError):
+    pass
+
+
+class TeacherValidationError(TeacherServiceError):
+    pass
+
+
+class TeacherAlreadyDeletedError(TeacherServiceError):
+    pass
+
+
+class TeacherNotDeletedError(TeacherServiceError):
+    pass
+
+
+class TeacherService:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TeacherTimelineService] = None
+    ) -> None:
+        self._session_factory = session_factory
+        self._timeline_service = timeline_service
+
+    def _utc_now(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _normalize_text(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped if stripped else None
+
+    def _validate_full_name(self, full_name: Optional[str]) -> str:
+        normalized = self._normalize_text(full_name)
+        if not normalized:
+            raise TeacherValidationError("Full name is required and cannot be blank.")
+        return normalized
+
+    def _validate_email(self, email: Optional[str]) -> Optional[str]:
+        if email is None:
+            return None
+        normalized = self._normalize_text(email)
+        if normalized and '@' not in normalized:
+            raise TeacherValidationError("Invalid email format.")
+        return normalized
+
+    def _generate_teacher_code(self, session: Session) -> str:
+        repo = TeacherRepository(session)
+        highest = repo.get_highest_teacher_number()
+        next_num = (highest or 0) + 1
+        return f"TCH{next_num:03d}"
+
+    # ===== CRUD =====
+
+    def create_teacher(
+        self,
+        full_name: str,
+        gender: Optional[str] = None,
+        date_of_birth: Optional[date] = None,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+        address: Optional[str] = None,
+        join_date: Optional[date] = None,
+        status: str = "ACTIVE",
+    ) -> Teacher:
+        norm_full_name = self._validate_full_name(full_name)
+        norm_gender = self._normalize_text(gender)
+        norm_phone = self._normalize_text(phone)
+        norm_email = self._validate_email(email)
+        norm_address = self._normalize_text(address)
+
+        with self._session_factory() as session:
+            teacher_code = self._generate_teacher_code(session)
+            teacher = Teacher(
+                teacher_code=teacher_code,
+                full_name=norm_full_name,
+                gender=norm_gender,
+                date_of_birth=date_of_birth,
+                phone=norm_phone,
+                email=norm_email,
+                address=norm_address,
+                join_date=join_date or date.today(),
+                status=status,
+            )
+            repo = TeacherRepository(session)
+            repo.add(teacher)
+            session.commit()
+            session.refresh(teacher)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    teacher_id=teacher.id,
+                    event_type=TeacherTimelineEventType.TEACHER_CREATED,
+                    title="Teacher Created",
+                    description=f"{teacher.full_name} ({teacher.teacher_code}) was added.",
+                    metadata={"teacher_code": teacher.teacher_code},
+                )
+            return teacher
+
+    def get_teacher(self, teacher_id: int) -> Teacher:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_id(teacher_id)
+            if teacher is None or teacher.deleted_at is not None:
+                raise TeacherNotFoundError(f"Teacher {teacher_id} not found or deleted.")
+            return teacher
+
+    def get_teacher_by_code(self, teacher_code: str) -> Teacher:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_code(teacher_code)
+            if teacher is None:
+                raise TeacherNotFoundError(f"Teacher code {teacher_code} not found.")
+            return teacher
+
+    def list_teachers(self) -> List[Teacher]:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            return repo.list_active()
+
+    def search_teachers(self, query: str) -> List[Teacher]:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            return repo.search_teachers(query)
+
+    def update_teacher(
+        self,
+        teacher_id: int,
+        full_name: Any = UNSET,
+        gender: Any = UNSET,
+        date_of_birth: Any = UNSET,
+        phone: Any = UNSET,
+        email: Any = UNSET,
+        address: Any = UNSET,
+        join_date: Any = UNSET,
+        status: Any = UNSET,
+    ) -> Teacher:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_id(teacher_id)
+            if teacher is None:
+                raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
+
+            changes = []
+
+            if full_name is not UNSET:
+                new_val = self._validate_full_name(full_name)
+                old_val = teacher.full_name
+                if old_val != new_val:
+                    changes.append(f"full_name: '{old_val}' -> '{new_val}'")
+                teacher.full_name = new_val
+
+            if gender is not UNSET:
+                new_val = self._normalize_text(gender)
+                old_val = teacher.gender or "(none)"
+                if old_val != (new_val or "(none)"):
+                    changes.append(f"gender: '{old_val}' -> '{new_val or '(none)'}'")
+                teacher.gender = new_val
+
+            if date_of_birth is not UNSET:
+                old = teacher.date_of_birth.strftime("%d/%m/%Y") if teacher.date_of_birth else "(none)"
+                new = date_of_birth.strftime("%d/%m/%Y") if date_of_birth else "(none)"
+                if old != new:
+                    changes.append(f"date_of_birth: '{old}' -> '{new}'")
+                teacher.date_of_birth = date_of_birth
+
+            if phone is not UNSET:
+                new_val = self._normalize_text(phone)
+                old_val = teacher.phone or "(none)"
+                if old_val != (new_val or "(none)"):
+                    changes.append(f"phone: '{old_val}' -> '{new_val or '(none)'}'")
+                teacher.phone = new_val
+
+            if email is not UNSET:
+                new_val = self._validate_email(email)
+                old_val = teacher.email or "(none)"
+                if old_val != (new_val or "(none)"):
+                    changes.append(f"email: '{old_val}' -> '{new_val or '(none)'}'")
+                teacher.email = new_val
+
+            if address is not UNSET:
+                new_val = self._normalize_text(address)
+                old_val = teacher.address or "(none)"
+                if old_val != (new_val or "(none)"):
+                    changes.append(f"address: '{old_val}' -> '{new_val or '(none)'}'")
+                teacher.address = new_val
+
+            if join_date is not UNSET:
+                old = teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "(none)"
+                new = join_date.strftime("%d/%m/%Y") if join_date else "(none)"
+                if old != new:
+                    changes.append(f"join_date: '{old}' -> '{new}'")
+                teacher.join_date = join_date
+
+            if status is not UNSET:
+                new_val = self._normalize_text(status) or "ACTIVE"
+                old_val = teacher.status
+                if old_val != new_val:
+                    changes.append(f"status: '{old_val}' -> '{new_val}'")
+                teacher.status = new_val
+
+            if not changes:
+                return teacher
+
+            session.commit()
+            session.refresh(teacher)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    teacher_id=teacher.id,
+                    event_type=TeacherTimelineEventType.TEACHER_UPDATED,
+                    title="Teacher Updated",
+                    description="Updated: " + "; ".join(changes),
+                    metadata={"changes": changes},
+                )
+            return teacher
+
+    def delete_teacher(self, teacher_id: int) -> None:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_id(teacher_id)
+            if teacher is None:
+                raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
+            if teacher.deleted_at is not None:
+                raise TeacherAlreadyDeletedError(f"Teacher {teacher_id} already deleted.")
+            teacher.deleted_at = self._utc_now()
+            session.commit()
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    teacher_id=teacher.id,
+                    event_type=TeacherTimelineEventType.TEACHER_ARCHIVED,
+                    title="Teacher Archived",
+                    description=f"{teacher.full_name} was archived.",
+                )
+
+    def restore_teacher(self, teacher_id: int) -> None:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_id(teacher_id)
+            if teacher is None:
+                raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
+            if teacher.deleted_at is None:
+                raise TeacherNotDeletedError(f"Teacher {teacher_id} is not deleted.")
+            teacher.deleted_at = None
+            session.commit()
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    teacher_id=teacher.id,
+                    event_type=TeacherTimelineEventType.TEACHER_RESTORED,
+                    title="Teacher Restored",
+                    description=f"{teacher.full_name} was restored.",
+                )
+
+    def get_teacher_with_details(self, teacher_id: int) -> Teacher:
+        with self._session_factory() as session:
+            repo = TeacherRepository(session)
+            teacher = repo.get_by_id_with_relations(teacher_id)
+            if teacher is None or teacher.deleted_at is not None:
+                raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
+            return teacher
+
+================
+File: src/centermanager/services/teacher_timeline_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherTimelineService - log timeline events for teachers.
+"""
+import json
+from typing import Optional, List
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
+from centermanager.repositories.teacher_timeline_repository import TeacherTimelineRepository
+
+
+class TeacherTimelineService:
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    def log_event(
+        self,
+        teacher_id: int,
+        event_type: TeacherTimelineEventType,
+        title: str,
+        description: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        created_by: Optional[str] = None,
+    ) -> TeacherTimelineEvent:
+        if isinstance(event_type, TeacherTimelineEventType):
+            event_type_str = event_type.value
+        else:
+            event_type_str = str(event_type)
+
+        metadata_json = json.dumps(metadata) if metadata else None
+
+        with self._session_factory() as session:
+            event = TeacherTimelineEvent(
+                teacher_id=teacher_id,
+                event_type=event_type_str,
+                title=title,
+                description=description,
+                metadata_json=metadata_json,
+                created_by=created_by or "system",
+            )
+            repo = TeacherTimelineRepository(session)
+            repo.add(event)
+            session.commit()
+            session.refresh(event)
+            return event
+
+    def get_teacher_timeline(self, teacher_id: int, limit: Optional[int] = None) -> List[TeacherTimelineEvent]:
+        with self._session_factory() as session:
+            repo = TeacherTimelineRepository(session)
+            return repo.get_by_teacher(teacher_id, limit)
 
 ================
 File: src/centermanager/services/timeline_service.py
@@ -28722,6 +32463,1231 @@ class SummaryWidget(QWidget):
                 item.widget().deleteLater()
 
 ================
+File: src/centermanager/ui/teacher_workspace/teacher_assignment_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherAssignmentDialog - assign/unassign teacher to classes.
+"""
+from typing import Optional, List
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QPushButton, QLabel, QMessageBox
+)
+
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.repositories.class_repository import ClassRepository  # <-- sửa
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
+
+
+class TeacherAssignmentDialog(QDialog):
+    def __init__(
+        self,
+        assignment_service: TeacherAssignmentService,
+        teacher_id: int,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._assignment_service = assignment_service
+        self._teacher_id = teacher_id
+        self._all_classes: List = []
+        self._assigned_ids: List[int] = []
+
+        self.setWindowTitle("Manage Class Assignments")
+        self.setMinimumSize(400, 300)
+        self.setModal(True)
+
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Available classes
+        layout.addWidget(QLabel("Available Classes"))
+        self.available_list = QListWidget()
+        self.available_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        layout.addWidget(self.available_list)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.assign_btn = QPushButton("→ Assign")
+        self.assign_btn.clicked.connect(self._assign_selected)
+        self.unassign_btn = QPushButton("← Unassign")
+        self.unassign_btn.clicked.connect(self._unassign_selected)
+        btn_layout.addWidget(self.assign_btn)
+        btn_layout.addWidget(self.unassign_btn)
+        layout.addLayout(btn_layout)
+
+        # Assigned classes
+        layout.addWidget(QLabel("Assigned Classes"))
+        self.assigned_list = QListWidget()
+        self.assigned_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        layout.addWidget(self.assigned_list)
+
+        # Done
+        done_btn = QPushButton("Done")
+        done_btn.clicked.connect(self.accept)
+        layout.addWidget(done_btn)
+
+    def _load_data(self) -> None:
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+
+        with session_factory() as session:
+            repo = ClassRepository(session)
+            self._all_classes = repo.list_all()
+
+        self._assigned_ids = self._assignment_service.get_assigned_classes(self._teacher_id)
+
+        self._update_lists()
+
+    def _update_lists(self) -> None:
+        self.available_list.clear()
+        self.assigned_list.clear()
+
+        assigned_set = set(self._assigned_ids)
+
+        for cls in self._all_classes:
+            if cls.id in assigned_set:
+                item = QListWidgetItem(cls.name)
+                item.setData(Qt.ItemDataRole.UserRole, cls.id)
+                self.assigned_list.addItem(item)
+            else:
+                item = QListWidgetItem(cls.name)
+                item.setData(Qt.ItemDataRole.UserRole, cls.id)
+                self.available_list.addItem(item)
+
+    def _assign_selected(self) -> None:
+        items = self.available_list.selectedItems()
+        for item in items:
+            class_id = item.data(Qt.ItemDataRole.UserRole)
+            try:
+                self._assignment_service.assign_teacher_to_class(self._teacher_id, class_id)
+                self._assigned_ids.append(class_id)
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+        self._update_lists()
+
+    def _unassign_selected(self) -> None:
+        items = self.assigned_list.selectedItems()
+        for item in items:
+            class_id = item.data(Qt.ItemDataRole.UserRole)
+            try:
+                self._assignment_service.unassign_teacher_from_class(self._teacher_id, class_id)
+                self._assigned_ids.remove(class_id)
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+        self._update_lists()
+
+================
+File: src/centermanager/ui/teacher_workspace/teacher_detail_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDetailPage - full teacher profile.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QFrame, QSizePolicy, QMessageBox
+)
+
+from centermanager.models.teacher import Teacher
+from centermanager.services.teacher_service import TeacherService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.teacher_document_service import TeacherDocumentService
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.repositories.class_repository import ClassRepository  # <-- sửa
+from centermanager.ui.design_system import (
+    Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
+)
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
+from centermanager.ui.teacher_workspace.teacher_assignment_dialog import TeacherAssignmentDialog
+from centermanager.ui.teacher_workspace.teacher_documents_widget import TeacherDocumentsWidget
+from centermanager.ui.timeline import TimelineWidget
+
+logger = logging.getLogger(__name__)
+
+
+class TeacherDetailPage(QWidget):
+    back_clicked = Signal()
+    teacher_updated = Signal()
+
+    def __init__(
+        self,
+        teacher_service: TeacherService,
+        assignment_service: TeacherAssignmentService,
+        document_service: TeacherDocumentService,
+        timeline_service: TeacherTimelineService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._teacher_service = teacher_service
+        self._assignment_service = assignment_service
+        self._document_service = document_service
+        self._timeline_service = timeline_service
+        self._current_teacher_id: Optional[int] = None
+        self._current_teacher: Optional[Teacher] = None
+
+        self._setup_ui()
+        self._show_empty()
+
+    def _setup_ui(self) -> None:
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Top bar
+        top_bar = QWidget()
+        top_bar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            border-bottom: 1px solid {COLORS['border_light']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+        """)
+        top_bar_layout = QHBoxLayout(top_bar)
+        self.back_btn = SecondaryButton("← Back")
+        self.back_btn.clicked.connect(self.back_clicked.emit)
+        top_bar_layout.addWidget(self.back_btn)
+        top_bar_layout.addStretch()
+        main_layout.addWidget(top_bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
+        container_layout.setSpacing(SPACING['xl'])
+
+        # Profile header
+        self.profile_widget = QWidget()
+        profile_layout = QHBoxLayout(self.profile_widget)
+        profile_layout.setSpacing(SPACING['lg'])
+
+        self.avatar = Avatar("", size=64)
+        self.avatar.setFixedSize(64, 64)
+        profile_layout.addWidget(self.avatar)
+
+        info = QVBoxLayout()
+        info.setSpacing(SPACING['xs'])
+        self.name_label = QLabel()
+        self.name_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {COLORS['text_primary']};")
+        info.addWidget(self.name_label)
+
+        code_status = QHBoxLayout()
+        code_status.setSpacing(SPACING['sm'])
+        self.code_label = QLabel()
+        self.code_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_muted']}; font-weight: 500;")
+        code_status.addWidget(self.code_label)
+        self.status_badge = StatusBadge("")
+        code_status.addWidget(self.status_badge)
+        code_status.addStretch()
+        info.addLayout(code_status)
+
+        self.email_phone_label = QLabel()
+        self.email_phone_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']};")
+        info.addWidget(self.email_phone_label)
+
+        profile_layout.addLayout(info)
+        profile_layout.addStretch()
+
+        # Edit button
+        self.edit_btn = PrimaryButton("✏️ Edit")
+        self.edit_btn.setFixedHeight(34)
+        self.edit_btn.clicked.connect(self._on_edit)
+        profile_layout.addWidget(self.edit_btn)
+
+        container_layout.addWidget(self.profile_widget)
+
+        # Divider
+        container_layout.addWidget(self._divider())
+
+        # Professional Info
+        self.professional_widget = self._create_info_panel("Professional Information", [
+            ("Join Date", ""),
+            ("Status", ""),
+        ])
+        container_layout.addWidget(self.professional_widget)
+
+        # Assigned Classes
+        self.classes_widget = QWidget()
+        classes_layout = QVBoxLayout(self.classes_widget)
+        classes_layout.setContentsMargins(0, 0, 0, 0)
+        classes_header = SectionHeader("Assigned Classes", action_text="Manage Assignments", action_callback=self._on_manage_assignments)
+        classes_layout.addWidget(classes_header)
+        self.classes_list_label = QLabel("No classes assigned.")
+        self.classes_list_label.setWordWrap(True)
+        self.classes_list_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']}; padding: 8px 0;")
+        classes_layout.addWidget(self.classes_list_label)
+        container_layout.addWidget(self.classes_widget)
+
+        # Documents
+        self.documents_widget = TeacherDocumentsWidget(self._document_service)
+        self.documents_widget.document_changed.connect(self._on_data_changed)
+        container_layout.addWidget(self.documents_widget)
+
+        # Timeline
+        self.timeline_widget = TimelineWidget()
+        timeline_section = self._create_section("📅 Timeline")
+        timeline_section.layout().addWidget(self.timeline_widget)
+        container_layout.addWidget(timeline_section)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+    def _divider(self) -> QFrame:
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        return line
+
+    def _create_section(self, title: str) -> QWidget:
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING['xs'])
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
+        layout.addWidget(title_label)
+        layout.addWidget(self._divider())
+        return section
+
+    def _create_info_panel(self, title: str, fields: list) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = SectionHeader(title)
+        layout.addWidget(header)
+
+        grid = QWidget()
+        grid_layout = QHBoxLayout(grid)
+        grid_layout.setSpacing(SPACING['xl'])
+
+        for i, (label, value) in enumerate(fields):
+            item = QWidget()
+            item_layout = QVBoxLayout(item)
+            item_layout.setSpacing(SPACING['xs'])
+            label_w = QLabel(label)
+            label_w.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']}; font-weight: 500; letter-spacing: 0.2px;")
+            value_w = QLabel(value)
+            value_w.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']}; font-weight: 500;")
+            setattr(self, f"_field_{i}", value_w)
+            item_layout.addWidget(label_w)
+            item_layout.addWidget(value_w)
+            grid_layout.addWidget(item)
+
+        grid_layout.addStretch()
+        layout.addWidget(grid)
+        return widget
+
+    def _show_empty(self) -> None:
+        self.profile_widget.setVisible(False)
+        self.professional_widget.setVisible(False)
+        self.classes_widget.setVisible(False)
+        self.documents_widget.setVisible(False)
+        self.timeline_widget.setVisible(False)
+
+    def _show_detail(self) -> None:
+        self.profile_widget.setVisible(True)
+        self.professional_widget.setVisible(True)
+        self.classes_widget.setVisible(True)
+        self.documents_widget.setVisible(True)
+        self.timeline_widget.setVisible(True)
+
+    def load_teacher(self, teacher_id: int) -> None:
+        try:
+            teacher = self._teacher_service.get_teacher_with_details(teacher_id)
+            self._current_teacher_id = teacher.id
+            self._current_teacher = teacher
+            self._populate(teacher)
+            self._show_detail()
+        except Exception as e:
+            logger.exception(f"Error loading teacher {teacher_id}")
+            self._show_empty()
+
+    def _populate(self, teacher: Teacher) -> None:
+        self.avatar.set_name(teacher.full_name)
+        self.name_label.setText(teacher.full_name)
+        self.code_label.setText(teacher.teacher_code)
+        self.status_badge.set_status(teacher.status or "")
+        self.email_phone_label.setText(f"{teacher.email or '-'}  •  {teacher.phone or '-'}")
+
+        # Professional info
+        self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
+        self._field_1.setText(teacher.status or "-")
+
+        # Assigned classes
+        if teacher.assigned_classes:
+            class_names = [c.name for c in teacher.assigned_classes]
+            self.classes_list_label.setText(" • " + "\n • ".join(class_names))
+        else:
+            self.classes_list_label.setText("No classes assigned.")
+
+        # Documents
+        self.documents_widget.set_teacher(teacher.id)
+
+        # Timeline
+        events = self._timeline_service.get_teacher_timeline(teacher.id)
+        self.timeline_widget.set_events(events)
+
+    def _on_edit(self) -> None:
+        if self._current_teacher_id is None:
+            return
+        dialog = TeacherFormDialog(self._teacher_service, self._current_teacher_id, parent=self)
+        if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
+            self.load_teacher(self._current_teacher_id)
+            self.teacher_updated.emit()
+
+    def _on_manage_assignments(self) -> None:
+        if self._current_teacher_id is None:
+            return
+        dialog = TeacherAssignmentDialog(
+            self._assignment_service,
+            self._current_teacher_id,
+            parent=self
+        )
+        if dialog.exec() == TeacherAssignmentDialog.DialogCode.Accepted:
+            self.load_teacher(self._current_teacher_id)
+            self.teacher_updated.emit()
+
+    def _on_data_changed(self) -> None:
+        if self._current_teacher_id:
+            self.load_teacher(self._current_teacher_id)
+            self.teacher_updated.emit()
+
+================
+File: src/centermanager/ui/teacher_workspace/teacher_documents_widget.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherDocumentsWidget - display and manage teacher documents.
+"""
+import os
+import sys
+import subprocess
+from pathlib import Path
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QFrame, QFileDialog, QMessageBox, QDialog,
+    QFormLayout, QLineEdit, QDialogButtonBox
+)
+
+from centermanager.models.teacher_document import TeacherDocument
+from centermanager.services.teacher_document_service import TeacherDocumentService
+from centermanager.services.teacher_service import TeacherService
+from centermanager.core.paths import get_paths
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+
+
+class TeacherDocumentCard(QFrame):
+    def __init__(self, doc: TeacherDocument, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._doc = doc
+        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        self.setStyleSheet("""
+            QFrame {
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+                background: white;
+                padding: 6px 10px;
+                margin: 2px 0;
+            }
+            QFrame:hover { background: #f5f5f5; }
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(2)
+
+        header = QHBoxLayout()
+        name_label = QLabel(doc.file_name)
+        name_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        header.addWidget(name_label)
+
+        if doc.document_type:
+            type_label = QLabel(doc.document_type)
+            type_label.setStyleSheet("color: #888; font-size: 12px;")
+            header.addWidget(type_label)
+
+        header.addStretch()
+        time_label = QLabel(doc.created_at.strftime("%d/%m/%Y"))
+        time_label.setStyleSheet("color: #888; font-size: 11px;")
+        header.addWidget(time_label)
+
+        self.delete_btn = QPushButton("✕")
+        self.delete_btn.setStyleSheet("background: transparent; border: none; color: red; font-size: 14px;")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.clicked.connect(self._delete)
+        header.addWidget(self.delete_btn)
+        layout.addLayout(header)
+
+        if doc.description:
+            desc = QLabel(doc.description)
+            desc.setWordWrap(True)
+            desc.setStyleSheet("font-size: 12px; color: #555;")
+            layout.addWidget(desc)
+
+    def _delete(self) -> None:
+        parent = self.parent()
+        while parent and not isinstance(parent, TeacherDocumentsWidget):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_delete_document'):
+            parent._delete_document(self._doc.id)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        file_path = get_paths().attachment_dir / self._doc.file_path
+        if file_path.exists():
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(str(file_path))
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', str(file_path)])
+                else:
+                    subprocess.run(['xdg-open', str(file_path)])
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Could not open file: {e}")
+        else:
+            QMessageBox.warning(self, "File not found", f"File {self._doc.file_name} not found.")
+
+
+class TeacherDocumentsWidget(QWidget):
+    document_changed = Signal()
+
+    def __init__(self, doc_service: TeacherDocumentService, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._service = doc_service
+        self._teacher_id: Optional[int] = None
+        self._documents: List[TeacherDocument] = []
+
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING['sm'])
+
+        header = QHBoxLayout()
+        title = QLabel("📎 Documents")
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        header.addWidget(title)
+        header.addStretch()
+
+        self.upload_btn = QPushButton("+ Upload")
+        self.upload_btn.setFixedHeight(32)
+        self.upload_btn.clicked.connect(self._on_upload)
+        header.addWidget(self.upload_btn)
+        layout.addLayout(header)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        layout.addWidget(line)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout(self.container)
+        self.container_layout.setContentsMargins(0, SPACING['xs'], 0, 0)
+        self.container_layout.setSpacing(SPACING['xs'])
+        self.scroll.setWidget(self.container)
+        layout.addWidget(self.scroll)
+
+    def set_teacher(self, teacher_id: int) -> None:
+        self._teacher_id = teacher_id
+        self._load_documents()
+
+    def _load_documents(self) -> None:
+        if self._teacher_id is None:
+            return
+        try:
+            self._documents = self._service.get_documents_for_teacher(self._teacher_id)
+        except Exception:
+            self._documents = []
+        self._update_ui()
+
+    def _update_ui(self) -> None:
+        self._clear_container()
+        if not self._documents:
+            empty = QLabel("No documents yet.")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet("color: #999; padding: 20px;")
+            self.container_layout.addWidget(empty)
+            self.container_layout.addStretch()
+            return
+
+        for doc in self._documents:
+            card = TeacherDocumentCard(doc)
+            self.container_layout.addWidget(card)
+        self.container_layout.addStretch()
+
+    def _clear_container(self) -> None:
+        while self.container_layout.count():
+            item = self.container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _on_upload(self) -> None:
+        if self._teacher_id is None:
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Document",
+            "",
+            "All Files (*.*)"
+        )
+        if not file_path:
+            return
+
+        # Ask for document type and description
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Upload Document")
+        dialog.setMinimumWidth(350)
+        dialog.setModal(True)
+
+        form = QFormLayout(dialog)
+        type_edit = QLineEdit()
+        type_edit.setPlaceholderText("e.g., CV, Contract")
+        form.addRow("Document Type", type_edit)
+        desc_edit = QLineEdit()
+        desc_edit.setPlaceholderText("Optional description")
+        form.addRow("Description", desc_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        doc_type = type_edit.text().strip() or None
+        description = desc_edit.text().strip() or None
+
+        try:
+            # Get teacher code
+            from centermanager.database.engine import create_production_engine
+            from sqlalchemy.orm import sessionmaker
+            from centermanager.repositories.teacher_repository import TeacherRepository
+
+            engine = create_production_engine()
+            session_factory = sessionmaker(bind=engine)
+            with session_factory() as session:
+                repo = TeacherRepository(session)
+                teacher = repo.get_by_id(self._teacher_id)
+                if teacher is None:
+                    raise ValueError("Teacher not found")
+                teacher_code = teacher.teacher_code
+
+            self._service.upload_document(
+                teacher_id=self._teacher_id,
+                teacher_code=teacher_code,
+                source_path=Path(file_path),
+                file_name=Path(file_path).name,
+                document_type=doc_type,
+                description=description,
+            )
+            self._load_documents()
+            self.document_changed.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "Upload Error", str(e))
+
+    def _delete_document(self, document_id: int) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            "Delete this document?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._service.delete_document(document_id)
+                self._load_documents()
+                self.document_changed.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+================
+File: src/centermanager/ui/teacher_workspace/teacher_form_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherFormDialog - create or edit a teacher.
+"""
+import logging
+from datetime import date
+from typing import Optional
+
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
+    QComboBox, QPlainTextEdit, QPushButton, QHBoxLayout,
+    QMessageBox, QWidget
+)
+
+from centermanager.services.teacher_service import TeacherService, TeacherValidationError
+
+
+logger = logging.getLogger(__name__)
+
+
+class TeacherFormDialog(QDialog):
+    def __init__(
+        self,
+        teacher_service: TeacherService,
+        teacher_id: Optional[int] = None,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._service = teacher_service
+        self._teacher_id = teacher_id
+        self._is_edit = teacher_id is not None
+
+        self.setWindowTitle("Edit Teacher" if self._is_edit else "Add Teacher")
+        self.setMinimumWidth(450)
+        self.setModal(True)
+
+        self._setup_ui()
+        if self._is_edit:
+            self._load_teacher()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        # Full Name
+        self.full_name_edit = QLineEdit()
+        self.full_name_edit.setPlaceholderText("Enter full name")
+        form.addRow("Full Name *", self.full_name_edit)
+
+        # Gender
+        self.gender_combo = QComboBox()
+        self.gender_combo.addItems(["", "Male", "Female", "Other"])
+        form.addRow("Gender", self.gender_combo)
+
+        # Date of Birth
+        self.dob_edit = QDateEdit()
+        self.dob_edit.setCalendarPopup(True)
+        self.dob_edit.setDisplayFormat("dd/MM/yyyy")
+        self.dob_edit.setSpecialValueText("")
+        self.dob_edit.setDate(QDate(2000, 1, 1))
+        form.addRow("Date of Birth", self.dob_edit)
+
+        # Phone
+        self.phone_edit = QLineEdit()
+        self.phone_edit.setPlaceholderText("Phone number")
+        form.addRow("Phone", self.phone_edit)
+
+        # Email
+        self.email_edit = QLineEdit()
+        self.email_edit.setPlaceholderText("Email address")
+        form.addRow("Email", self.email_edit)
+
+        # Address
+        self.address_edit = QPlainTextEdit()
+        self.address_edit.setPlaceholderText("Address (optional)")
+        self.address_edit.setMaximumHeight(80)
+        form.addRow("Address", self.address_edit)
+
+        # Join Date
+        self.join_date_edit = QDateEdit()
+        self.join_date_edit.setCalendarPopup(True)
+        self.join_date_edit.setDisplayFormat("dd/MM/yyyy")
+        self.join_date_edit.setDate(QDate.currentDate())
+        form.addRow("Join Date *", self.join_date_edit)
+
+        # Status
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["ACTIVE", "INACTIVE"])
+        form.addRow("Status", self.status_combo)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setFixedWidth(100)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self.save_btn.clicked.connect(self._save)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def _load_teacher(self) -> None:
+        try:
+            teacher = self._service.get_teacher(self._teacher_id)
+            self.full_name_edit.setText(teacher.full_name)
+            gender_idx = self.gender_combo.findText(teacher.gender or "")
+            if gender_idx >= 0:
+                self.gender_combo.setCurrentIndex(gender_idx)
+            if teacher.date_of_birth:
+                qdate = QDate(teacher.date_of_birth.year, teacher.date_of_birth.month, teacher.date_of_birth.day)
+                self.dob_edit.setDate(qdate)
+            self.phone_edit.setText(teacher.phone or "")
+            self.email_edit.setText(teacher.email or "")
+            self.address_edit.setPlainText(teacher.address or "")
+            if teacher.join_date:
+                qdate = QDate(teacher.join_date.year, teacher.join_date.month, teacher.join_date.day)
+                self.join_date_edit.setDate(qdate)
+            status_idx = self.status_combo.findText(teacher.status or "ACTIVE")
+            if status_idx >= 0:
+                self.status_combo.setCurrentIndex(status_idx)
+        except Exception as e:
+            logger.exception("Error loading teacher")
+            QMessageBox.critical(self, "Error", "Could not load teacher data.")
+            self.reject()
+
+    def _save(self) -> None:
+        full_name = self.full_name_edit.text().strip()
+        gender = self.gender_combo.currentText().strip() or None
+        dob = self.dob_edit.date().toPython() if self.dob_edit.date().isValid() else None
+        phone = self.phone_edit.text().strip() or None
+        email = self.email_edit.text().strip() or None
+        address = self.address_edit.toPlainText().strip() or None
+        join_date = self.join_date_edit.date().toPython()
+        status = self.status_combo.currentText()
+
+        try:
+            if self._is_edit:
+                self._service.update_teacher(
+                    teacher_id=self._teacher_id,
+                    full_name=full_name,
+                    gender=gender,
+                    date_of_birth=dob,
+                    phone=phone,
+                    email=email,
+                    address=address,
+                    join_date=join_date,
+                    status=status,
+                )
+            else:
+                self._service.create_teacher(
+                    full_name=full_name,
+                    gender=gender,
+                    date_of_birth=dob,
+                    phone=phone,
+                    email=email,
+                    address=address,
+                    join_date=join_date,
+                    status=status,
+                )
+            self.accept()
+        except TeacherValidationError as e:
+            QMessageBox.warning(self, "Validation Error", str(e))
+        except Exception as e:
+            logger.exception("Error saving teacher")
+            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+
+================
+File: src/centermanager/ui/teacher_workspace/teacher_list_page.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherListPage - list of teachers with search, filter, CRUD.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFrame, QMessageBox, QMenu, QSizePolicy
+)
+from PySide6.QtGui import QAction
+
+from centermanager.models.teacher import Teacher
+from centermanager.services.teacher_service import TeacherService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.teacher_document_service import TeacherDocumentService
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.ui.design_system import (
+    Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton
+)
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
+from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
+
+
+logger = logging.getLogger(__name__)
+
+
+class TeacherListPage(QWidget):
+    teacher_selected = Signal(int)
+
+    def __init__(
+        self,
+        teacher_service: TeacherService,
+        assignment_service: TeacherAssignmentService,
+        document_service: TeacherDocumentService,
+        timeline_service: TeacherTimelineService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._teacher_service = teacher_service
+        self._assignment_service = assignment_service
+        self._document_service = document_service
+        self._timeline_service = timeline_service
+        self._teachers: List[Teacher] = []
+        self._filtered: List[Teacher] = []
+        self._sort_key: Optional[str] = None
+        self._sort_asc: bool = True
+        self._selected_ids: List[int] = []
+
+        self._setup_ui()
+        self.refresh()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Toolbar
+        toolbar = QWidget()
+        toolbar.setStyleSheet(f"""
+            background: {COLORS['surface']};
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
+        toolbar_layout = QVBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(SPACING['xs'])
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(SPACING['sm'])
+
+        self.search_bar = SearchBar("Search by code, name, phone, email...")
+        self.search_bar.text_changed.connect(self._on_search)
+        top_row.addWidget(self.search_bar)
+
+        self.refresh_btn = SecondaryButton("🔄 Refresh")
+        self.refresh_btn.setFixedHeight(34)
+        self.refresh_btn.clicked.connect(self.refresh)
+        top_row.addWidget(self.refresh_btn)
+
+        self.add_btn = PrimaryButton("+ Add Teacher")
+        self.add_btn.setFixedHeight(34)
+        self.add_btn.clicked.connect(self.show_add_dialog)
+        top_row.addWidget(self.add_btn)
+
+        toolbar_layout.addLayout(top_row)
+        layout.addWidget(toolbar)
+
+        # Bulk actions bar
+        self.bulk_bar = QWidget()
+        self.bulk_bar.setStyleSheet(f"""
+            background: {COLORS['primary_hover']};
+            padding: {SPACING['xs']}px {SPACING['md']}px;
+            border-bottom: 1px solid {COLORS['border_light']};
+        """)
+        self.bulk_bar.setVisible(False)
+        bulk_layout = QHBoxLayout(self.bulk_bar)
+        bulk_layout.setContentsMargins(0, 0, 0, 0)
+        self.bulk_count_label = QLabel("0 selected")
+        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
+        bulk_layout.addWidget(self.bulk_count_label)
+        bulk_layout.addStretch()
+        self.bulk_archive_btn = QPushButton("Archive Selected")
+        self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
+        self.bulk_archive_btn.clicked.connect(self._bulk_archive)
+        bulk_layout.addWidget(self.bulk_archive_btn)
+        self.bulk_clear_btn = QPushButton("Clear")
+        self.bulk_clear_btn.clicked.connect(self._clear_selection)
+        bulk_layout.addWidget(self.bulk_clear_btn)
+        layout.addWidget(self.bulk_bar)
+
+        # Data Table
+        columns = [
+            {"key": "teacher_code", "label": "Code", "sortable": True},
+            {"key": "full_name", "label": "Name", "sortable": True},
+            {"key": "phone", "label": "Phone", "sortable": True},
+            {"key": "email", "label": "Email", "sortable": True},
+            {"key": "status", "label": "Status", "sortable": True},
+            {"key": "classes", "label": "Assigned Classes", "sortable": False},
+        ]
+        self.data_table = DataTable(columns, page_size=20)
+        self.data_table.sort_requested.connect(self._on_sort)
+        self.data_table.selection_changed.connect(self._on_selection_changed)
+        self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
+        self.data_table.context_menu_requested.connect(self._on_context_menu)
+        layout.addWidget(self.data_table)
+
+        self.loading = LoadingWidget()
+        self.loading.setVisible(False)
+        layout.addWidget(self.loading)
+
+    def refresh(self) -> None:
+        self.loading.setVisible(True)
+        try:
+            self._teachers = self._teacher_service.list_teachers()
+            self._apply_filters_and_sort()
+        except Exception as e:
+            logger.exception("Failed to refresh teacher list")
+            QMessageBox.critical(self, "Error", "Failed to load teachers.")
+        finally:
+            self.loading.setVisible(False)
+
+    def _apply_filters_and_sort(self) -> None:
+        filtered = self._filter_teachers(self.search_bar.text())
+        if self._sort_key:
+            filtered.sort(key=lambda t: getattr(t, self._sort_key, ""), reverse=not self._sort_asc)
+        self._filtered = filtered
+        self._populate_table()
+
+    def _filter_teachers(self, text: str) -> List[Teacher]:
+        if not text.strip():
+            return self._teachers[:]
+        try:
+            return self._teacher_service.search_teachers(text.strip())
+        except Exception:
+            lower = text.strip().lower()
+            return [t for t in self._teachers
+                    if lower in t.teacher_code.lower() or lower in t.full_name.lower()]
+
+    def _populate_table(self) -> None:
+        data = []
+        for t in self._filtered:
+            classes = ", ".join([c.name for c in t.assigned_classes]) if t.assigned_classes else "-"
+            data.append({
+                "teacher_code": t.teacher_code,
+                "full_name": t.full_name,
+                "phone": t.phone or "-",
+                "email": t.email or "-",
+                "status": t.status or "-",
+                "classes": classes,
+                "_id": t.id,
+            })
+        self.data_table.set_data(data, len(data))
+
+    def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_sort(self, key: str, ascending: bool) -> None:
+        self._sort_key = key
+        self._sort_asc = ascending
+        self._apply_filters_and_sort()
+
+    def _on_selection_changed(self, indices: List[int]) -> None:
+        self._selected_ids = []
+        for idx in indices:
+            if idx < len(self._filtered):
+                self._selected_ids.append(self._filtered[idx].id)
+        self._update_bulk_bar()
+
+    def _update_bulk_bar(self) -> None:
+        count = len(self._selected_ids)
+        self.bulk_bar.setVisible(count > 0)
+        self.bulk_count_label.setText(f"{count} selected")
+
+    def _clear_selection(self) -> None:
+        self.data_table.clear_selection()
+        self._selected_ids = []
+        self._update_bulk_bar()
+
+    def _bulk_archive(self) -> None:
+        if not self._selected_ids:
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Archive",
+            f"Archive {len(self._selected_ids)} teachers?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                for tid in self._selected_ids:
+                    self._teacher_service.delete_teacher(tid)
+                self._clear_selection()
+                self.refresh()
+            except Exception as e:
+                logger.exception("Bulk archive failed")
+                QMessageBox.critical(self, "Error", "Failed to archive teachers.")
+
+    def _on_row_double_clicked(self, row: int) -> None:
+        if row < len(self._filtered):
+            self.teacher_selected.emit(self._filtered[row].id)
+
+    def _on_context_menu(self, pos, row: int) -> None:
+        if row < 0 or row >= len(self._filtered):
+            return
+        teacher = self._filtered[row]
+        menu = QMenu(self)
+        view_action = QAction("View Teacher", self)
+        view_action.triggered.connect(lambda: self.teacher_selected.emit(teacher.id))
+        menu.addAction(view_action)
+
+        edit_action = QAction("Edit Teacher", self)
+        edit_action.triggered.connect(lambda: self._edit_teacher(teacher.id))
+        menu.addAction(edit_action)
+
+        menu.addSeparator()
+        archive_action = QAction("Archive Teacher", self)
+        archive_action.triggered.connect(lambda: self._archive_teacher(teacher.id))
+        menu.addAction(archive_action)
+
+        menu.exec(pos)
+
+    def _edit_teacher(self, teacher_id: int) -> None:
+        dialog = TeacherFormDialog(self._teacher_service, teacher_id=teacher_id, parent=self)
+        if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _archive_teacher(self, teacher_id: int) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Archive",
+            "Archive this teacher?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._teacher_service.delete_teacher(teacher_id)
+                self.refresh()
+            except Exception as e:
+                logger.exception("Archive failed")
+                QMessageBox.critical(self, "Error", "Failed to archive teacher.")
+
+    def show_add_dialog(self) -> None:
+        dialog = TeacherFormDialog(self._teacher_service, parent=self)
+        if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
+            self.refresh()
+
+================
+File: src/centermanager/ui/teacher_workspace/teacher_workspace_shell.py
+================
+# -*- coding: utf-8 -*-
+"""
+TeacherWorkspaceShell - main shell for Teacher Workspace.
+"""
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QFrame, QSizePolicy
+)
+
+from centermanager.ui.workspace_navigation import WorkspaceNavigation
+from centermanager.ui.workspace_header import WorkspaceHeader
+from centermanager.ui.teacher_workspace.teacher_list_page import TeacherListPage
+from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
+
+
+class TeacherWorkspaceShell(QWidget):
+    go_home = Signal()
+
+    def __init__(
+        self,
+        teacher_service,
+        assignment_service,
+        document_service,
+        timeline_service,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._teacher_service = teacher_service
+        self._assignment_service = assignment_service
+        self._document_service = document_service
+        self._timeline_service = timeline_service
+
+        self._current_teacher_id: Optional[int] = None
+
+        self._setup_ui()
+        self._connect_signals()
+        self.navigate_to("teachers")
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.header = WorkspaceHeader("Teacher Workspace", "Teachers")
+        self.header.back_home_clicked.connect(self.go_home.emit)
+        layout.addWidget(self.header)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        pages = [
+            {"id": "teachers", "icon": "👨‍🏫", "label": "Teachers"},
+        ]
+        self.nav = WorkspaceNavigation("Teacher Workspace", pages)
+        self.nav.page_selected.connect(self.navigate_to)
+        body.addWidget(self.nav)
+
+        self.content_stack = QStackedWidget()
+        self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Teacher List
+        self.list_page = TeacherListPage(
+            self._teacher_service,
+            self._assignment_service,
+            self._document_service,
+            self._timeline_service,
+        )
+        self.list_page.teacher_selected.connect(self._on_teacher_selected)
+        self.content_stack.addWidget(self.list_page)
+
+        # Teacher Detail
+        self.detail_page = TeacherDetailPage(
+            self._teacher_service,
+            self._assignment_service,
+            self._document_service,
+            self._timeline_service,
+        )
+        self.detail_page.back_clicked.connect(self._on_back_from_detail)
+        self.detail_page.teacher_updated.connect(self._on_teacher_updated)
+        self.content_stack.addWidget(self.detail_page)
+
+        body.addWidget(self.content_stack, 1)
+        layout.addLayout(body)
+
+    def _connect_signals(self) -> None:
+        self.nav.page_selected.connect(self.navigate_to)
+        self.header.back_home_clicked.connect(self.go_home.emit)
+
+    def navigate_to(self, page_id: str) -> None:
+        if page_id == "teachers":
+            self.content_stack.setCurrentWidget(self.list_page)
+            self.nav.set_active_page("teachers")
+            self.header.set_context("Teacher Workspace", "Teachers")
+            self.list_page.refresh()
+
+    def _on_teacher_selected(self, teacher_id: int) -> None:
+        self._current_teacher_id = teacher_id
+        self.detail_page.load_teacher(teacher_id)
+        self.content_stack.setCurrentWidget(self.detail_page)
+        self.nav.set_active_page("teachers")
+        self.header.set_context("Teacher Workspace", "Teacher Detail")
+
+    def _on_back_from_detail(self) -> None:
+        self.navigate_to("teachers")
+        self.list_page.refresh()
+
+    def _on_teacher_updated(self) -> None:
+        self.list_page.refresh()
+
+================
 File: src/centermanager/ui/timeline/__init__.py
 ================
 # -*- coding: utf-8 -*-
@@ -28945,10 +33911,12 @@ File: src/centermanager/ui/__init__.py
 File: src/centermanager/ui/home_page.py
 ================
 # -*- coding: utf-8 -*-
-"""HomePage - Command Center / Workspace Launcher for CenterManager."""
+"""
+HomePage - Command Center / Workspace Launcher for CenterManager.
+Now with permission-based workspace filtering.
+"""
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
@@ -28961,6 +33929,10 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
 from centermanager.ui.home.activity_item import ActivityItem
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionService
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -28975,6 +33947,13 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
+        self._current_user = get_current_user()
+        
+        # Initialize permission service
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+        self._permission_service = PermissionService(session_factory)
+        
         self._setup_ui()
         self.refresh()
 
@@ -28984,7 +33963,6 @@ class HomePage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Main scroll (cho toàn bộ HomePage)
         main_scroll = QScrollArea()
         main_scroll.setWidgetResizable(True)
         main_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -29038,11 +34016,10 @@ class HomePage(QWidget):
         recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
         recent_layout.addWidget(recent_header)
 
-        # Tạo QListWidget với style rõ ràng và hỗ trợ scroll
         self.recent_list = QListWidget()
         self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.recent_list.setUniformItemSizes(True)
-        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Nhận sự kiện cuộn chuột
+        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.recent_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #e0e0e0;
@@ -29125,14 +34102,32 @@ class HomePage(QWidget):
         self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
+        """Populate workspace cards with permission filtering."""
         while self.workspace_grid.count():
             item = self.workspace_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        summaries = self._service.get_workspace_summaries()
+        # Get all workspace summaries
+        all_summaries = self._service.get_workspace_summaries()
+
+        # Filter by permission
+        permission_map = {
+            "student": None,  # Always visible
+            "teacher": "teacher.view",
+            "finance": "finance.view",
+        }
+
+        filtered_summaries = []
+        for ws in all_summaries:
+            required_perm = permission_map.get(ws.workspace_id)
+            if required_perm is None:
+                filtered_summaries.append(ws)
+            elif self._permission_service.has_permission(required_perm):
+                filtered_summaries.append(ws)
+
         row, col = 0, 0
-        for ws in summaries:
+        for ws in filtered_summaries:
             card = WorkspaceCard(
                 workspace_id=ws.workspace_id,
                 name=ws.name,
@@ -29154,26 +34149,6 @@ class HomePage(QWidget):
         self.recent_list.clear()
         activities = self._service.get_recent_activities(limit=30)
 
-        # Nếu ít hơn 10, thêm dữ liệu giả để test scroll
-        if len(activities) < 10:
-            now = datetime.now()
-            for i in range(15):
-                class Dummy:
-                    def __init__(self, icon, title, student_name, student_code, time):
-                        self.icon = icon
-                        self.title = title
-                        self.student_name = student_name
-                        self.student_code = student_code
-                        self.time = time
-                act = Dummy(
-                    '📌', f'Dummy Activity {i+1}',
-                    f'Student {i+1}', f'HS{i+1:03d}',
-                    now - timedelta(minutes=i*5)
-                )
-                activities.append(act)
-
-        logger.info(f"HomePage: Total activities: {len(activities)}")
-
         if activities:
             for act in activities:
                 item_widget = ActivityItem(
@@ -29183,15 +34158,12 @@ class HomePage(QWidget):
                     student_code=act.student_code,
                     time=act.time
                 )
-                # FIX: Đặt chiều cao cố định cho widget
                 item_widget.setFixedHeight(70)
-                # FIX: Dùng QSize(0,70) thay vì sizeHint()
                 list_item = QListWidgetItem()
                 list_item.setSizeHint(QSize(0, 70))
                 self.recent_list.addItem(list_item)
                 self.recent_list.setItemWidget(list_item, item_widget)
         else:
-            # Empty state
             empty = EmptyState(
                 icon="📭",
                 title="No recent activities",
@@ -29203,14 +34175,6 @@ class HomePage(QWidget):
             self.recent_list.addItem(list_item)
             self.recent_list.setItemWidget(list_item, empty)
 
-        # Debug: in số lượng item
-        logger.info(f"HomePage: QListWidget item count = {self.recent_list.count()}")
-        if self.recent_list.verticalScrollBar():
-            logger.info("Scroll bar exists")
-        else:
-            logger.warning("Scroll bar is None")
-
-        # Cập nhật
         self.recent_list.updateGeometry()
         self.recent_list.repaint()
 
@@ -29262,6 +34226,173 @@ class HomePage(QWidget):
         self.workspace_selected.emit(workspace_id)
 
 ================
+File: src/centermanager/ui/login_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+LoginDialog - simple login dialog for authentication.
+"""
+import hashlib
+import logging
+import traceback
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QLineEdit, QPushButton, QLabel, QWidget
+)
+
+from centermanager.models.user import User
+from centermanager.services.permission_service import PermissionService
+from centermanager.core.current_user import set_current_user
+
+logger = logging.getLogger(__name__)
+
+
+class LoginDialog(QDialog):
+    login_successful = Signal(User)
+
+    def __init__(
+        self,
+        permission_service: PermissionService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._permission_service = permission_service
+        self._user: Optional[User] = None
+
+        self.setWindowTitle("CenterManager - Login")
+        self.setMinimumSize(350, 220)
+        self.setModal(True)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
+
+        self._setup_ui()
+        self._connect_signals()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        header = QLabel("🏛️ CenterManager")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976d2;")
+        layout.addWidget(header)
+
+        subheader = QLabel("Please sign in to continue")
+        subheader.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subheader.setStyleSheet("font-size: 13px; color: #666;")
+        layout.addWidget(subheader)
+
+        layout.addSpacing(8)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self.username_edit = QLineEdit()
+        self.username_edit.setPlaceholderText("Enter username")
+        self.username_edit.setFixedHeight(32)
+        form.addRow("Username:", self.username_edit)
+
+        self.password_edit = QLineEdit()
+        self.password_edit.setPlaceholderText("Enter password")
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setFixedHeight(32)
+        form.addRow("Password:", self.password_edit)
+
+        layout.addLayout(form)
+
+        self.error_label = QLabel()
+        self.error_label.setStyleSheet("color: #d32f2f; font-size: 12px;")
+        self.error_label.setVisible(False)
+        layout.addWidget(self.error_label)
+
+        layout.addSpacing(8)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.login_btn = QPushButton("Sign In")
+        self.login_btn.setFixedWidth(100)
+        self.login_btn.setDefault(True)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+
+        btn_layout.addWidget(self.login_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self.username_edit.setFocus()
+
+    def _connect_signals(self) -> None:
+        self.login_btn.clicked.connect(self._login)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.username_edit.returnPressed.connect(self.password_edit.setFocus)
+        self.password_edit.returnPressed.connect(self._login)
+
+    def _login(self) -> None:
+        username = self.username_edit.text().strip()
+        password = self.password_edit.text()
+
+        if not username:
+            self._show_error("Please enter username.")
+            self.username_edit.setFocus()
+            return
+
+        if not password:
+            self._show_error("Please enter password.")
+            self.password_edit.setFocus()
+            return
+
+        try:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+        except Exception as e:
+            logger.exception("Hashing error")
+            self._show_error("Internal error during login.")
+            return
+
+        try:
+            logger.info(f"Attempting login for user: {username}")
+            user = self._permission_service.get_user_by_username(username)
+            if user is None:
+                self._show_error("Invalid username or password.")
+                return
+
+            if not user.is_active:
+                self._show_error("Account is deactivated.")
+                return
+
+            if user.password_hash != password_hash:
+                self._show_error("Invalid username or password.")
+                return
+
+            # Login successful
+            self._user = user
+            set_current_user(user)
+            logger.info(f"User logged in: {username} (role: {user.role.name if user.role else 'none'})")
+            
+            self.error_label.setVisible(False)
+            self.login_successful.emit(user)
+            self.accept()
+
+        except Exception as e:
+            logger.exception(f"Login error for user {username}: {e}")
+            # Log stack trace to file
+            logger.error(traceback.format_exc())
+            self._show_error(f"Login error: {str(e)}")
+
+    def _show_error(self, message: str) -> None:
+        self.error_label.setText(message)
+        self.error_label.setVisible(True)
+
+    def get_user(self) -> Optional[User]:
+        return self._user
+
+================
 File: src/centermanager/ui/main_window.py
 ================
 # -*- coding: utf-8 -*-
@@ -29273,6 +34404,11 @@ from PySide6.QtCore import Qt
 
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
+from centermanager.services.permission_service import PermissionService
+from centermanager.core.current_user import get_current_user
+from centermanager.ui.permission_helpers import UIPermissionHelper, get_menu_items_for_role
+from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
+
 
 logger = logging.getLogger(__name__)
 
@@ -29296,6 +34432,11 @@ class MainWindow(QMainWindow):
         filter_service,
         export_service,
         import_service,
+        teacher_service,
+        teacher_assignment_service,
+        teacher_document_service,
+        teacher_timeline_service,
+        permission_service: PermissionService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -29315,6 +34456,8 @@ class MainWindow(QMainWindow):
         self._filter_service = filter_service
         self._export_service = export_service
         self._import_service = import_service
+        self._permission_service = permission_service
+        self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
@@ -29322,6 +34465,10 @@ class MainWindow(QMainWindow):
         # Central stacked widget
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
+
+        # Get current user for menu filtering
+        self._current_user = get_current_user()
+        self._role_name = self._current_user.role.name if self._current_user and self._current_user.role else None
 
         # Home Page
         self.home_page = HomePage(home_service=self._home_service, parent=self)
@@ -29347,13 +34494,59 @@ class MainWindow(QMainWindow):
             import_service=self._import_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
-        self.central_stack.addWidget(self.student_workspace)
 
+        self.central_stack.addWidget(self.student_workspace)
+        self.teacher_workspace = TeacherWorkspaceShell(
+            teacher_service=teacher_service,
+            assignment_service=teacher_assignment_service,
+            document_service=teacher_document_service,
+            timeline_service=teacher_timeline_service,
+        )
+        self.teacher_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.teacher_workspace)
+        
+        # Initially show Home
         self.central_stack.setCurrentWidget(self.home_page)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
+
+        # Apply permission-based menu visibility
+        self._apply_menu_permissions()
+
         self._refresh_student_list()
 
+    def _apply_menu_permissions(self) -> None:
+        """
+        Apply permission-based visibility to menu items.
+        This will be called after the UI is fully constructed.
+        """
+        # Get visible menu items for current role
+        visible_items = get_menu_items_for_role(self._role_name)
+        visible_ids = {item["id"] for item in visible_items}
+
+        # Filter workspace cards on home page
+        # The home page will be refreshed with only visible workspaces
+        self.home_page.refresh()
+
+        # Note: The actual workspace cards filtering is done in HomePage._populate_workspace_cards()
+        # which uses the permission service
+
     def _on_workspace_selected(self, workspace_id: str) -> None:
+        """Handle workspace selection from Home page."""
+        # Check permission for workspace access
+        permission_map = {
+            "student": None,  # Always accessible
+            "teacher": "teacher.view",
+            "finance": "finance.view",
+            "reports": "report.view",
+            "settings": "setting.update",
+        }
+
+        required_perm = permission_map.get(workspace_id)
+        if required_perm:
+            if not self._permission_helper.has_permission(required_perm):
+                self.statusBar().showMessage("Permission denied: Insufficient access rights")
+                return
+
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
             self.statusBar().showMessage("Student Workspace")
@@ -29363,21 +34556,154 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Teacher Workspace coming soon")
         elif workspace_id == "finance":
             self.statusBar().showMessage("Finance Workspace coming soon")
+        elif workspace_id == "reports":
+            self.statusBar().showMessage("Reports Workspace coming soon")
+        elif workspace_id == "settings":
+            self.statusBar().showMessage("Settings coming soon")
+        elif workspace_id == "teacher":
+            self.central_stack.setCurrentWidget(self.teacher_workspace)
+            self.statusBar().showMessage("Teacher Workspace")
+            self.teacher_workspace.list_page.refresh()
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
     def _go_home(self) -> None:
+        """Navigate back to Home."""
         self.central_stack.setCurrentWidget(self.home_page)
         self.home_page.refresh()
         self.statusBar().showMessage("Home")
 
     def _refresh_student_list(self) -> None:
+        """Refresh student list in the student workspace."""
         try:
             students = self._student_service.list_students()
             self.student_workspace.list_page._students = students
             self.student_workspace.list_page.refresh()
         except Exception as e:
             logger.exception("Failed to refresh student list")
+
+================
+File: src/centermanager/ui/permission_helpers.py
+================
+# -*- coding: utf-8 -*-
+"""
+Permission helpers for UI components - menu visibility, route guards, etc.
+"""
+from typing import Optional, List, Callable
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QWidget, QMenu, QPushButton
+
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionService
+from centermanager.models.user import User
+
+
+class UIPermissionHelper:
+    """
+    Helper for UI permission checking.
+    
+    Usage:
+        helper = UIPermissionHelper(session_factory)
+        
+        # Hide a menu item if user doesn't have permission
+        helper.control_visibility(menu_item, "finance.view")
+        
+        # Check permission for conditional rendering
+        if helper.has_permission("finance.view"):
+            show_finance_tab()
+    """
+
+    def __init__(self, session_factory):
+        self._session_factory = session_factory
+        self._permission_service = PermissionService(session_factory)
+
+    def has_permission(self, permission_name: str, user: Optional[User] = None) -> bool:
+        """Check if the current user has a permission."""
+        return self._permission_service.has_permission(permission_name, user)
+
+    def has_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> bool:
+        """Check if the user has any of the given permissions."""
+        return self._permission_service.has_any_permission(permission_names, user)
+
+    def get_current_user(self) -> Optional[User]:
+        """Get the current user."""
+        return get_current_user()
+
+    def control_visibility(self, widget: QWidget, permission_name: str) -> None:
+        """Set widget visibility based on permission. Hidden if permission is not granted."""
+        widget.setVisible(self.has_permission(permission_name))
+
+    def control_action_visibility(self, action: QAction, permission_name: str) -> None:
+        """Set QAction visibility based on permission."""
+        action.setVisible(self.has_permission(permission_name))
+
+    def control_menu_visibility(self, menu: QMenu, permission_name: str) -> None:
+        """Set QMenu visibility based on permission."""
+        menu.menuAction().setVisible(self.has_permission(permission_name))
+
+    def control_button_visibility(self, button: QPushButton, permission_name: str) -> None:
+        """Set QPushButton visibility based on permission."""
+        button.setVisible(self.has_permission(permission_name))
+
+    def require_for_callback(self, permission_name: str, callback: Callable) -> Optional[Callable]:
+        """
+        Wrap a callback with permission check.
+        Returns the wrapped callback or None if permission not granted.
+        """
+        if not self.has_permission(permission_name):
+            return None
+
+        def wrapped(*args, **kwargs):
+            if not self.has_permission(permission_name):
+                return
+            return callback(*args, **kwargs)
+        return wrapped
+
+
+def get_menu_items_for_role(role_name: Optional[str]) -> List[dict]:
+    """
+    Get the menu items visible for a given role.
+    
+    Returns:
+        List of dicts with keys: id, icon, label, permission
+    """
+    # Define all menu items with their required permissions
+    all_items = [
+        {"id": "dashboard", "icon": "📊", "label": "Dashboard", "permission": None},
+        {"id": "student", "icon": "👨‍🎓", "label": "Student Workspace", "permission": None},
+        {"id": "teacher", "icon": "👨‍🏫", "label": "Teacher Workspace", "permission": "teacher.view"},
+        {"id": "finance", "icon": "💰", "label": "Finance Workspace", "permission": "finance.view"},
+        {"id": "reports", "icon": "📈", "label": "Reports", "permission": "report.view"},
+        {"id": "settings", "icon": "⚙️", "label": "Settings", "permission": "setting.update"},
+    ]
+
+    if role_name is None:
+        # No role - only dashboard and student
+        return [item for item in all_items if item["permission"] is None]
+
+    # For ADMIN, show everything
+    if role_name == "admin":
+        return all_items
+
+    # For TEACHER, show dashboard, student, teacher, reports
+    if role_name == "teacher":
+        return [
+            item for item in all_items
+            if item["permission"] is None
+            or item["permission"] in ["teacher.view", "report.view"]
+        ]
+
+    # For RECEPTION, show dashboard, student
+    if role_name == "reception":
+        return [
+            item for item in all_items
+            if item["permission"] is None
+        ]
+
+    # Default: only dashboard and student
+    return [item for item in all_items if item["permission"] is None]
 
 ================
 File: src/centermanager/ui/styles.py
@@ -29915,7 +35241,9 @@ from PySide6.QtWidgets import QApplication
 from centermanager.core.paths import get_paths
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
+from centermanager.core.current_user import set_current_user
 from centermanager.database.engine import create_production_engine
+from centermanager.database.seed import seed_roles_and_permissions
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
@@ -29931,11 +35259,18 @@ from centermanager.services.student_import_service import StudentImportService
 from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.services.student_analytics_service import StudentAnalyticsService
+from centermanager.services.permission_service import PermissionService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.ui.main_window import MainWindow
 from centermanager.services.home_dashboard_service import HomeDashboardService
+from centermanager.ui.login_dialog import LoginDialog
+from centermanager.services.teacher_service import TeacherService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.teacher_document_service import TeacherDocumentService
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
 
 
 logger = logging.getLogger(__name__)
@@ -29967,6 +35302,7 @@ def main() -> int:
     logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
     logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
+    # Ensure database schema is up to date
     ensure_schema()
 
     qapp = QApplication(sys.argv)
@@ -29977,7 +35313,29 @@ def main() -> int:
     engine = create_production_engine(echo=False)
     session_factory = sessionmaker(bind=engine)
 
-    # Services
+    # Seed roles and permissions
+    with session_factory() as session:
+        seed_roles_and_permissions(session)
+
+    # --- Initialize PermissionService ---
+    permission_service = PermissionService(session_factory)
+
+    # --- Show Login Dialog ---
+    login_dialog = LoginDialog(permission_service)
+    if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
+        logger.info("Login cancelled. Exiting.")
+        return 0
+
+    # Get authenticated user
+    current_user = login_dialog.get_user()
+    if current_user is None:
+        logger.warning("No user after login. Exiting.")
+        return 1
+
+    set_current_user(current_user)
+    logger.info(f"User authenticated: {current_user.username} (role: {current_user.role.name if current_user.role else 'none'})")
+
+    # --- Initialize Services ---
     timeline_service = TimelineService(session_factory)
     student_service = StudentService(session_factory, timeline_service)
     parent_service = ParentService(session_factory, timeline_service)
@@ -30012,9 +35370,14 @@ def main() -> int:
     home_service = HomeDashboardService(session_factory)
     analytics_service = StudentAnalyticsService(session_factory)
 
+    teacher_timeline_service = TeacherTimelineService(session_factory)
+    teacher_service = TeacherService(session_factory, teacher_timeline_service)
+    teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
+    teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
+
     logger.info("All services initialized")
 
-    # Tạo MainWindow với tất cả dịch vụ cần thiết
+    # --- Create MainWindow with permission service ---
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -30032,6 +35395,11 @@ def main() -> int:
         filter_service=filter_service,
         export_service=export_service,
         import_service=import_service,
+        permission_service=permission_service,
+        teacher_service=teacher_service,
+        teacher_assignment_service=teacher_assignment_service,
+        teacher_document_service=teacher_document_service,
+        teacher_timeline_service=teacher_timeline_service,
     )
     window.show()
     logger.info("Main window initialized")
@@ -32501,6 +37869,7 @@ SQLAlchemy>=2.0.0
 reportlab>=4.0.0
 openpyxl>=3.1.0
 alembic>=1.13.0
+bcrypt>=4.0.0
 
 ================
 File: run.py

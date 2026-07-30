@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""HomePage - Command Center / Workspace Launcher for CenterManager."""
+"""
+HomePage - Command Center / Workspace Launcher for CenterManager.
+Now with permission-based workspace filtering.
+"""
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
@@ -15,6 +17,10 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 from centermanager.ui.design_system.components import SectionHeader, EmptyState, SecondaryButton
 from centermanager.ui.home.workspace_card import WorkspaceCard
 from centermanager.ui.home.activity_item import ActivityItem
+from centermanager.core.current_user import get_current_user
+from centermanager.services.permission_service import PermissionService
+from centermanager.database.engine import create_production_engine
+from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,13 @@ class HomePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = home_service
+        self._current_user = get_current_user()
+        
+        # Initialize permission service
+        engine = create_production_engine()
+        session_factory = sessionmaker(bind=engine)
+        self._permission_service = PermissionService(session_factory)
+        
         self._setup_ui()
         self.refresh()
 
@@ -38,7 +51,6 @@ class HomePage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Main scroll (cho toàn bộ HomePage)
         main_scroll = QScrollArea()
         main_scroll.setWidgetResizable(True)
         main_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -92,11 +104,10 @@ class HomePage(QWidget):
         recent_header = SectionHeader("Recent Activities", subtitle="Latest across all workspaces")
         recent_layout.addWidget(recent_header)
 
-        # Tạo QListWidget với style rõ ràng và hỗ trợ scroll
         self.recent_list = QListWidget()
         self.recent_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.recent_list.setUniformItemSizes(True)
-        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Nhận sự kiện cuộn chuột
+        self.recent_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.recent_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #e0e0e0;
@@ -179,14 +190,32 @@ class HomePage(QWidget):
         self._populate_system_status()
 
     def _populate_workspace_cards(self) -> None:
+        """Populate workspace cards with permission filtering."""
         while self.workspace_grid.count():
             item = self.workspace_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        summaries = self._service.get_workspace_summaries()
+        # Get all workspace summaries
+        all_summaries = self._service.get_workspace_summaries()
+
+        # Filter by permission
+        permission_map = {
+            "student": None,  # Always visible
+            "teacher": "teacher.view",
+            "finance": "finance.view",
+        }
+
+        filtered_summaries = []
+        for ws in all_summaries:
+            required_perm = permission_map.get(ws.workspace_id)
+            if required_perm is None:
+                filtered_summaries.append(ws)
+            elif self._permission_service.has_permission(required_perm):
+                filtered_summaries.append(ws)
+
         row, col = 0, 0
-        for ws in summaries:
+        for ws in filtered_summaries:
             card = WorkspaceCard(
                 workspace_id=ws.workspace_id,
                 name=ws.name,
@@ -208,26 +237,6 @@ class HomePage(QWidget):
         self.recent_list.clear()
         activities = self._service.get_recent_activities(limit=30)
 
-        # Nếu ít hơn 10, thêm dữ liệu giả để test scroll
-        if len(activities) < 10:
-            now = datetime.now()
-            for i in range(15):
-                class Dummy:
-                    def __init__(self, icon, title, student_name, student_code, time):
-                        self.icon = icon
-                        self.title = title
-                        self.student_name = student_name
-                        self.student_code = student_code
-                        self.time = time
-                act = Dummy(
-                    '📌', f'Dummy Activity {i+1}',
-                    f'Student {i+1}', f'HS{i+1:03d}',
-                    now - timedelta(minutes=i*5)
-                )
-                activities.append(act)
-
-        logger.info(f"HomePage: Total activities: {len(activities)}")
-
         if activities:
             for act in activities:
                 item_widget = ActivityItem(
@@ -237,15 +246,12 @@ class HomePage(QWidget):
                     student_code=act.student_code,
                     time=act.time
                 )
-                # FIX: Đặt chiều cao cố định cho widget
                 item_widget.setFixedHeight(70)
-                # FIX: Dùng QSize(0,70) thay vì sizeHint()
                 list_item = QListWidgetItem()
                 list_item.setSizeHint(QSize(0, 70))
                 self.recent_list.addItem(list_item)
                 self.recent_list.setItemWidget(list_item, item_widget)
         else:
-            # Empty state
             empty = EmptyState(
                 icon="📭",
                 title="No recent activities",
@@ -257,14 +263,6 @@ class HomePage(QWidget):
             self.recent_list.addItem(list_item)
             self.recent_list.setItemWidget(list_item, empty)
 
-        # Debug: in số lượng item
-        logger.info(f"HomePage: QListWidget item count = {self.recent_list.count()}")
-        if self.recent_list.verticalScrollBar():
-            logger.info("Scroll bar exists")
-        else:
-            logger.warning("Scroll bar is None")
-
-        # Cập nhật
         self.recent_list.updateGeometry()
         self.recent_list.repaint()
 

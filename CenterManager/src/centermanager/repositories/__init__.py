@@ -10,6 +10,17 @@ from .class_repository import ClassRepository
 from .note_repository import NoteRepository
 from .document_repository import DocumentRepository
 
+# RBAC Repositories
+from .user_repository import UserRepository
+from .role_repository import RoleRepository
+from .permission_repository import PermissionRepository
+
+# Thêm các import mới
+from .teacher_repository import TeacherRepository
+from .teacher_document_repository import TeacherDocumentRepository
+from .teacher_timeline_repository import TeacherTimelineRepository
+from .teacher_assignment_repository import TeacherAssignmentRepository
+
 __all__ = [
     "BaseRepository",
     "StudentRepository",
@@ -20,4 +31,7 @@ __all__ = [
     "ClassRepository",
     "NoteRepository",
     "DocumentRepository",
+    "UserRepository",
+    "RoleRepository",
+    "PermissionRepository",
 ]

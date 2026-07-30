@@ -17,6 +17,17 @@ from centermanager.models.student_highlight import StudentHighlight, HighlightTy
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
 
+# RBAC Models
+from centermanager.models.user import User
+from centermanager.models.role import Role, RoleDefinitions
+from centermanager.models.permission import Permission, PermissionDefinitions
+from centermanager.models.role_permission import RolePermission
+# Thêm các import mới
+from centermanager.models.teacher import Teacher
+from centermanager.models.teacher_document import TeacherDocument
+from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
+from centermanager.models.teacher_assignment import TeacherAssignment
+
 __all__ = [
     "Student",
     "Parent",
@@ -34,4 +45,10 @@ __all__ = [
     "Note",
     "NoteType",
     "Document",
+    "User",
+    "Role",
+    "RoleDefinitions",
+    "Permission",
+    "PermissionDefinitions",
+    "RolePermission",
 ]

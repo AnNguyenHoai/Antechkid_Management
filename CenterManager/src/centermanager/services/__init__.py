@@ -18,6 +18,13 @@ from centermanager.services.exceptions import (
 from .session_service import SessionService
 from .session_note_service import SessionNoteService
 
+# Thêm các import mới
+from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
+from .teacher_assignment_service import TeacherAssignmentService
+from .teacher_document_service import TeacherDocumentService
+from .teacher_timeline_service import TeacherTimelineService
+
+
 __all__ = [
     "StudentService",
     "ParentService",

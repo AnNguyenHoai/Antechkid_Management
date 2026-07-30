@@ -15,6 +15,8 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.session import Session
+    from centermanager.models.teacher import Teacher
+    from centermanager.models.teacher_assignment import TeacherAssignment 
 
 
 class Class(Base, TimestampMixin):
@@ -29,6 +31,12 @@ class Class(Base, TimestampMixin):
 
     # Relationships
     sessions: Mapped[List[Session]] = relationship("Session", back_populates="class_", cascade="all, delete-orphan")
+    teachers: Mapped[List[Teacher]] = relationship(
+        "Teacher",
+        secondary="teacher_assignments",
+        back_populates="assigned_classes",
+        lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         return f"<Class(id={self.id}, name='{self.name}')>"

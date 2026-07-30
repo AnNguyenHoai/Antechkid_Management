@@ -21,6 +21,14 @@ class StudentExportService:
     def __init__(self, student_service: StudentService) -> None:
         self._student_service = student_service
 
+    def export_all_active(self, file_path: Optional[Path] = None) -> Path:
+        """
+        Export all active students to Excel.
+        This is a convenience method that calls export_excel with all active students.
+        """
+        students = self._student_service.list_students()
+        return self.export_excel(students, file_path)
+
     def export_excel(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
         """Export students to Excel."""
         if file_path is None:

@@ -10,7 +10,9 @@ from PySide6.QtWidgets import QApplication
 from centermanager.core.paths import get_paths
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
+from centermanager.core.current_user import set_current_user
 from centermanager.database.engine import create_production_engine
+from centermanager.database.seed import seed_roles_and_permissions
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
@@ -26,11 +28,18 @@ from centermanager.services.student_import_service import StudentImportService
 from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.services.student_analytics_service import StudentAnalyticsService
+from centermanager.services.permission_service import PermissionService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.ui.main_window import MainWindow
 from centermanager.services.home_dashboard_service import HomeDashboardService
+from centermanager.ui.login_dialog import LoginDialog
+from centermanager.services.teacher_service import TeacherService
+from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.teacher_document_service import TeacherDocumentService
+from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +71,7 @@ def main() -> int:
     logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
     logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
+    # Ensure database schema is up to date
     ensure_schema()
 
     qapp = QApplication(sys.argv)
@@ -72,7 +82,29 @@ def main() -> int:
     engine = create_production_engine(echo=False)
     session_factory = sessionmaker(bind=engine)
 
-    # Services
+    # Seed roles and permissions
+    with session_factory() as session:
+        seed_roles_and_permissions(session)
+
+    # --- Initialize PermissionService ---
+    permission_service = PermissionService(session_factory)
+
+    # --- Show Login Dialog ---
+    login_dialog = LoginDialog(permission_service)
+    if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
+        logger.info("Login cancelled. Exiting.")
+        return 0
+
+    # Get authenticated user
+    current_user = login_dialog.get_user()
+    if current_user is None:
+        logger.warning("No user after login. Exiting.")
+        return 1
+
+    set_current_user(current_user)
+    logger.info(f"User authenticated: {current_user.username} (role: {current_user.role.name if current_user.role else 'none'})")
+
+    # --- Initialize Services ---
     timeline_service = TimelineService(session_factory)
     student_service = StudentService(session_factory, timeline_service)
     parent_service = ParentService(session_factory, timeline_service)
@@ -107,9 +139,14 @@ def main() -> int:
     home_service = HomeDashboardService(session_factory)
     analytics_service = StudentAnalyticsService(session_factory)
 
+    teacher_timeline_service = TeacherTimelineService(session_factory)
+    teacher_service = TeacherService(session_factory, teacher_timeline_service)
+    teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
+    teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
+
     logger.info("All services initialized")
 
-    # Tạo MainWindow với tất cả dịch vụ cần thiết
+    # --- Create MainWindow with permission service ---
     window = MainWindow(
         student_service=student_service,
         parent_service=parent_service,
@@ -127,6 +164,11 @@ def main() -> int:
         filter_service=filter_service,
         export_service=export_service,
         import_service=import_service,
+        permission_service=permission_service,
+        teacher_service=teacher_service,
+        teacher_assignment_service=teacher_assignment_service,
+        teacher_document_service=teacher_document_service,
+        teacher_timeline_service=teacher_timeline_service,
     )
     window.show()
     logger.info("Main window initialized")
