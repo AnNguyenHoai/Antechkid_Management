@@ -51,6 +51,10 @@ class SessionNote(Base, TimestampMixin):
     difficulties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     next_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # NEW FIELDS
+    lesson_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    homework: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     session: Mapped[Session] = relationship("Session", back_populates="note")

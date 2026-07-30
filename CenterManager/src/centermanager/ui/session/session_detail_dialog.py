@@ -97,6 +97,9 @@ class SessionDetailDialog(QDialog):
         btn_layout.addWidget(self.close_btn)
         self.container_layout.addLayout(btn_layout)
 
+        #highlight connection
+        self.highlight_widget.highlight_changed.connect(self._on_highlight_changed)
+        
     def _divider(self) -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)

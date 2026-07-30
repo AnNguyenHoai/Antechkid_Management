@@ -9,7 +9,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, QPlainTextEdit,
-    QPushButton, QHBoxLayout, QLabel, QFrame, QMessageBox
+    QPushButton, QHBoxLayout, QLabel, QFrame, QMessageBox,
+    QStackedWidget  # <-- IMPORT THÊM
 )
 
 from centermanager.models.session_note import TeachingProgress, ClassAtmosphere, SessionNote
@@ -114,6 +115,18 @@ class SessionNoteWidget(QWidget):
         self.remark_edit.setMaximumHeight(80)
         self.form.addRow("Remark", self.remark_edit)
 
+        # NEW: Lesson Content
+        self.lesson_content_edit = QPlainTextEdit()
+        self.lesson_content_edit.setPlaceholderText("Lesson content (optional)")
+        self.lesson_content_edit.setMaximumHeight(80)
+        self.form.addRow("Lesson Content", self.lesson_content_edit)
+
+        # NEW: Homework
+        self.homework_edit = QPlainTextEdit()
+        self.homework_edit.setPlaceholderText("Homework (optional)")
+        self.homework_edit.setMaximumHeight(80)
+        self.form.addRow("Homework", self.homework_edit)
+
         form_layout.addLayout(self.form)
 
         # Buttons
@@ -126,7 +139,7 @@ class SessionNoteWidget(QWidget):
         self.delete_btn.setVisible(False)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setFixedWidth(80)
-        self.cancel_btn.clicked.connect(self._load_note)  # reload to return to summary
+        self.cancel_btn.clicked.connect(self._load_note)
         btn_layout.addStretch()
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
@@ -138,7 +151,6 @@ class SessionNoteWidget(QWidget):
         self.save_btn.clicked.connect(self._save)
         self.delete_btn.clicked.connect(self._delete)
 
-        # Default: show empty
         self.stacked.setCurrentIndex(0)
 
     def _load_note(self) -> None:
@@ -149,15 +161,14 @@ class SessionNoteWidget(QWidget):
                 self._is_edit_mode = True
                 self._populate_form(self._note)
                 self.delete_btn.setVisible(True)
-                self.stacked.setCurrentIndex(1)  # show form
+                self.stacked.setCurrentIndex(1)
             else:
                 self._is_edit_mode = False
                 self._clear_form()
                 self.delete_btn.setVisible(False)
-                self.stacked.setCurrentIndex(0)  # show empty
+                self.stacked.setCurrentIndex(0)
         except Exception as e:
             logger.exception("Error loading session note")
-            # Show empty state with error message?
             self.stacked.setCurrentIndex(0)
 
     def _populate_form(self, note: SessionNote) -> None:
@@ -170,6 +181,8 @@ class SessionNoteWidget(QWidget):
         self.difficulties_edit.setPlainText(note.difficulties or "")
         self.next_plan_edit.setPlainText(note.next_plan or "")
         self.remark_edit.setPlainText(note.remark or "")
+        self.lesson_content_edit.setPlainText(note.lesson_content or "")
+        self.homework_edit.setPlainText(note.homework or "")
 
     def _clear_form(self) -> None:
         self.teaching_combo.setCurrentIndex(0)
@@ -177,6 +190,8 @@ class SessionNoteWidget(QWidget):
         self.difficulties_edit.clear()
         self.next_plan_edit.clear()
         self.remark_edit.clear()
+        self.lesson_content_edit.clear()
+        self.homework_edit.clear()
 
     def _show_form(self) -> None:
         self._clear_form()
@@ -190,6 +205,8 @@ class SessionNoteWidget(QWidget):
         difficulties = self.difficulties_edit.toPlainText().strip() or None
         next_plan = self.next_plan_edit.toPlainText().strip() or None
         remark = self.remark_edit.toPlainText().strip() or None
+        lesson_content = self.lesson_content_edit.toPlainText().strip() or None
+        homework = self.homework_edit.toPlainText().strip() or None
 
         try:
             if self._is_edit_mode and self._note:
@@ -200,6 +217,8 @@ class SessionNoteWidget(QWidget):
                     difficulties=difficulties,
                     next_plan=next_plan,
                     remark=remark,
+                    lesson_content=lesson_content,
+                    homework=homework,
                 )
                 QMessageBox.information(self, "Success", "Teaching Note updated.")
             else:
@@ -210,11 +229,12 @@ class SessionNoteWidget(QWidget):
                     difficulties=difficulties,
                     next_plan=next_plan,
                     remark=remark,
+                    lesson_content=lesson_content,
+                    homework=homework,
                 )
                 QMessageBox.information(self, "Success", "Teaching Note created.")
                 self._is_edit_mode = True
 
-            # Refresh to show note
             self._load_note()
             self.note_saved.emit()
         except SessionNoteValidationError as e:

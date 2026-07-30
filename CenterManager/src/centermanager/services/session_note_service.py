@@ -51,6 +51,8 @@ class SessionNoteService:
         difficulties: Optional[str] = None,
         next_plan: Optional[str] = None,
         remark: Optional[str] = None,
+        lesson_content: Optional[str] = None,
+        homework: Optional[str] = None,
     ) -> SessionNote:
         # Validate session exists and is COMPLETED
         try:
@@ -76,6 +78,8 @@ class SessionNoteService:
             norm_difficulties = self._normalize_text(difficulties)
             norm_next_plan = self._normalize_text(next_plan)
             norm_remark = self._normalize_text(remark)
+            norm_lesson_content = self._normalize_text(lesson_content)
+            norm_homework = self._normalize_text(homework)
 
             note = SessionNote(
                 session_id=session_id,
@@ -84,6 +88,8 @@ class SessionNoteService:
                 difficulties=norm_difficulties,
                 next_plan=norm_next_plan,
                 remark=norm_remark,
+                lesson_content=norm_lesson_content,
+                homework=norm_homework,
             )
             repo.add(note)
             db_session.commit()
@@ -103,6 +109,8 @@ class SessionNoteService:
         difficulties: Optional[str] = None,
         next_plan: Optional[str] = None,
         remark: Optional[str] = None,
+        lesson_content: Optional[str] = None,
+        homework: Optional[str] = None,
     ) -> SessionNote:
         with self._session_factory() as db_session:
             repo = SessionNoteRepository(db_session)
@@ -147,6 +155,22 @@ class SessionNoteService:
                 if old != new:
                     changed.append(f"remark: '{old}' -> '{new}'")
                 note.remark = new_val
+
+            if lesson_content is not None:
+                new_val = self._normalize_text(lesson_content)
+                old = note.lesson_content or "(none)"
+                new = new_val or "(none)"
+                if old != new:
+                    changed.append(f"lesson_content: '{old}' -> '{new}'")
+                note.lesson_content = new_val
+
+            if homework is not None:
+                new_val = self._normalize_text(homework)
+                old = note.homework or "(none)"
+                new = new_val or "(none)"
+                if old != new:
+                    changed.append(f"homework: '{old}' -> '{new}'")
+                note.homework = new_val
 
             if not changed:
                 return note

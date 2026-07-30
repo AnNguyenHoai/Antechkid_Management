@@ -14,7 +14,7 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.class_workspace.class_list_page import ClassListPage
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
-from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage  # <-- import mới
+from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage
 
 
 class ClassWorkspaceShell(QWidget):
@@ -25,7 +25,10 @@ class ClassWorkspaceShell(QWidget):
         class_service,
         assignment_service,
         timeline_service,
-        session_service,  # <-- thêm session_service
+        session_service,
+        note_service,
+        highlight_service,
+        student_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -33,12 +36,15 @@ class ClassWorkspaceShell(QWidget):
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
         self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._student_service = student_service
 
         self._current_class_id: Optional[int] = None
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("dashboard")  # <-- mặc định vào dashboard
+        self.navigate_to("dashboard")
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -86,6 +92,10 @@ class ClassWorkspaceShell(QWidget):
             self._class_service,
             self._assignment_service,
             self._timeline_service,
+            self._session_service,
+            self._note_service,
+            self._highlight_service,
+            self._student_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.class_updated.connect(self._on_class_updated)

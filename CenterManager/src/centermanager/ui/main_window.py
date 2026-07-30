@@ -113,9 +113,12 @@ class MainWindow(QMainWindow):
         # Class
         self.class_workspace = ClassWorkspaceShell(
             class_service=class_service,
-            assignment_service=teacher_assignment_service_for_class,
+            assignment_service=teacher_assignment_service,
             timeline_service=class_timeline_service,
-            session_service=self._session_service,  # thêm nếu chưa có
+            session_service=session_service,
+            note_service=note_service,
+            highlight_service=highlight_service,
+            student_service=student_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.class_workspace)

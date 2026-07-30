@@ -17,6 +17,10 @@ from centermanager.models.student import Student
 from centermanager.services.class_service import ClassService
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
+from centermanager.services.session_service import SessionService
+from centermanager.services.session_note_service import SessionNoteService
+from centermanager.services.student_highlight_service import StudentHighlightService
+from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
@@ -26,7 +30,6 @@ from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssign
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
 from centermanager.ui.timeline import TimelineWidget
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +43,20 @@ class ClassDetailPage(QWidget):
         class_service: ClassService,
         assignment_service: TeacherAssignmentService,
         timeline_service: ClassTimelineService,
+        session_service: SessionService,
+        note_service: SessionNoteService,
+        highlight_service: StudentHighlightService,
+        student_service: StudentService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
+        self._session_service = session_service
+        self._note_service = note_service
+        self._highlight_service = highlight_service
+        self._student_service = student_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -144,9 +155,15 @@ class ClassDetailPage(QWidget):
         self.student_section.layout().addWidget(self.student_container)
         container_layout.addWidget(self.student_section)
 
-        # Schedule
-        self.schedule_widget = ClassScheduleWidget()
-        schedule_section = self._create_section("📅 Weekly Schedule")
+        # Schedule + Assessment
+        schedule_section = self._create_section("📅 Weekly Schedule & Assessment")
+        self.schedule_widget = ClassScheduleWidget(
+            self._session_service,
+            self._note_service,
+            self._highlight_service,
+            self._student_service
+        )
+        self.schedule_widget.session_updated.connect(self._on_data_changed)
         schedule_section.layout().addWidget(self.schedule_widget)
         container_layout.addWidget(schedule_section)
 
@@ -220,7 +237,7 @@ class ClassDetailPage(QWidget):
 
     def _populate(self, class_obj: Class) -> None:
         self.name_label.setText(class_obj.name)
-        self.code_label.setText(class_obj.name)  # or use a generated code if added
+        self.code_label.setText(class_obj.name)
         self.status_badge.set_status(class_obj.status or "")
         self.course_label.setText(f"Course: {class_obj.course or '-'}")
         self.students_label.setText(f"{class_obj.student_count} students")
