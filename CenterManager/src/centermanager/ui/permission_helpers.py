@@ -76,44 +76,34 @@ class UIPermissionHelper:
 
 
 def get_menu_items_for_role(role_name: Optional[str]) -> List[dict]:
-    """
-    Get the menu items visible for a given role.
-    
-    Returns:
-        List of dicts with keys: id, icon, label, permission
-    """
-    # Define all menu items with their required permissions
     all_items = [
         {"id": "dashboard", "icon": "📊", "label": "Dashboard", "permission": None},
         {"id": "student", "icon": "👨‍🎓", "label": "Student Workspace", "permission": None},
         {"id": "teacher", "icon": "👨‍🏫", "label": "Teacher Workspace", "permission": "teacher.view"},
+        {"id": "class", "icon": "📚", "label": "Class Workspace", "permission": "class.view"},
         {"id": "finance", "icon": "💰", "label": "Finance Workspace", "permission": "finance.view"},
         {"id": "reports", "icon": "📈", "label": "Reports", "permission": "report.view"},
         {"id": "settings", "icon": "⚙️", "label": "Settings", "permission": "setting.update"},
     ]
 
     if role_name is None:
-        # No role - only dashboard and student
         return [item for item in all_items if item["permission"] is None]
 
-    # For ADMIN, show everything
     if role_name == "admin":
         return all_items
 
-    # For TEACHER, show dashboard, student, teacher, reports
     if role_name == "teacher":
         return [
             item for item in all_items
             if item["permission"] is None
-            or item["permission"] in ["teacher.view", "report.view"]
+            or item["permission"] in ["teacher.view", "class.view", "report.view"]
         ]
 
-    # For RECEPTION, show dashboard, student
     if role_name == "reception":
         return [
             item for item in all_items
             if item["permission"] is None
+            or item["permission"] in ["class.view"]
         ]
 
-    # Default: only dashboard and student
     return [item for item in all_items if item["permission"] is None]

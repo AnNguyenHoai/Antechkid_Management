@@ -1,8 +1,8 @@
+# src/centermanager/ui/home/home_page.py
 # -*- coding: utf-8 -*-
 """
 HomePage - Workspace Launcher for CenterManager.
-This page only displays workspace cards and allows navigation.
-No business logic or dashboard data is shown here.
+All workspace cards have equal size and expand to fit window.
 """
 import logging
 from typing import Optional
@@ -51,7 +51,7 @@ class HomePage(QWidget):
         container_layout.setSpacing(24)
 
         # Header
-        header = QLabel("🏛️ CenterManager")
+        header = QLabel("AN TECHKIDS")
         header.setStyleSheet(f"""
             font-size: 28px;
             font-weight: 700;
@@ -60,7 +60,7 @@ class HomePage(QWidget):
         header.setAlignment(Qt.AlignCenter)
         container_layout.addWidget(header)
 
-        subtitle = QLabel("Your education center command center")
+        subtitle = QLabel("CHẠM CÔNG NGHỆ - MỞ TƯƠNG LAI")
         subtitle.setStyleSheet(f"""
             font-size: 16px;
             color: {COLORS['muted']};
@@ -74,6 +74,9 @@ class HomePage(QWidget):
         self.workspace_grid = QGridLayout()
         self.workspace_grid.setSpacing(16)
         self.workspace_grid.setContentsMargins(0, 0, 0, 0)
+        # Make columns stretch equally
+        self.workspace_grid.setColumnStretch(0, 1)
+        self.workspace_grid.setColumnStretch(1, 1)
         container_layout.addLayout(self.workspace_grid)
 
         container_layout.addStretch()
@@ -105,11 +108,17 @@ class HomePage(QWidget):
                 quick_action_label=ws.quick_action_label,
             )
             card.clicked.connect(self._on_workspace_clicked)
+            # Cho phép card co dãn
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.workspace_grid.addWidget(card, row, col)
             col += 1
             if col >= 2:
                 col = 0
                 row += 1
+
+        # Đặt tỷ lệ co dãn cho các hàng để các card chiếm đều không gian
+        for r in range(row + 1):
+            self.workspace_grid.setRowStretch(r, 1)
 
     def _on_workspace_clicked(self, workspace_id: str) -> None:
         self.workspace_selected.emit(workspace_id)

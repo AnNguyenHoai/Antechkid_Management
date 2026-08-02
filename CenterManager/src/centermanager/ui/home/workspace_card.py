@@ -1,6 +1,8 @@
+# src/centermanager/ui/home/workspace_card.py
 # -*- coding: utf-8 -*-
 """
 WorkspaceCard - card for Home Workspace with summary and health status.
+Now with flexible sizing.
 """
 from typing import Optional
 
@@ -47,7 +49,9 @@ class WorkspaceCard(QFrame):
                 background: {COLORS['gray_100']};
             }}
         """)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Set size policy to expand both directions
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(180)  # ensure minimum height
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -83,11 +87,13 @@ class WorkspaceCard(QFrame):
         # Description
         desc_label = QLabel(description)
         desc_label.setStyleSheet(f"font-size: 13px; color: {COLORS['muted']};")
+        desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
         # Summary text
         summary_label = QLabel(summary_text)
         summary_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
+        summary_label.setWordWrap(True)
         layout.addWidget(summary_label)
 
         # Quick action button

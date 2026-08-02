@@ -46,7 +46,7 @@ class LoginDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        header = QLabel("🏛️ CenterManager")
+        header = QLabel("AN TECHKIDS")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976d2;")
         layout.addWidget(header)

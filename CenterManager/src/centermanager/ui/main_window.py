@@ -12,6 +12,7 @@ from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper, get_menu_items_for_role
 from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
+from centermanager.ui.finance_workspace import FinanceWorkspaceShell
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ class MainWindow(QMainWindow):
         class_timeline_service,
         teacher_assignment_service_for_class,
         permission_service: PermissionService,
+        finance_service,
+        income_service,
+        expense_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -64,6 +68,11 @@ class MainWindow(QMainWindow):
         self._import_service = import_service
         self._permission_service = permission_service
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
+
+        # Finance services
+        self._finance_service = finance_service
+        self._income_service = income_service
+        self._expense_service = expense_service
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
@@ -123,6 +132,15 @@ class MainWindow(QMainWindow):
         self.class_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.class_workspace)
 
+        # Finance
+        self.finance_workspace = FinanceWorkspaceShell(
+            income_service=income_service,
+            student_service=student_service,
+            class_service=class_service,
+        )
+        self.finance_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.finance_workspace)
+
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
 
@@ -148,23 +166,24 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Permission denied: Insufficient access rights")
                 return
 
-        # Chuyển đến workspace và cập nhật navigation
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
-            self.student_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
+            self.student_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Student Workspace")
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
         elif workspace_id == "teacher":
             self.central_stack.setCurrentWidget(self.teacher_workspace)
-            self.teacher_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
+            self.teacher_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Teacher Workspace")
         elif workspace_id == "class":
             self.central_stack.setCurrentWidget(self.class_workspace)
-            self.class_workspace.navigate_to("dashboard")  # <-- CẬP NHẬT CONTEXT
+            self.class_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Class Workspace")
         elif workspace_id == "finance":
-            self.statusBar().showMessage("Finance Workspace coming soon")
+            self.central_stack.setCurrentWidget(self.finance_workspace)
+            self.finance_workspace.navigate_to("dashboard")
+            self.statusBar().showMessage("Finance Workspace")
         elif workspace_id == "reports":
             self.statusBar().showMessage("Reports Workspace coming soon")
         elif workspace_id == "settings":

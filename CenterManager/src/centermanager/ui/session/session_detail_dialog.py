@@ -144,21 +144,12 @@ class SessionDetailDialog(QDialog):
         return widget
 
     def _create_note_section(self) -> QWidget:
-        """Teaching Note section."""
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # Header
-        header = QHBoxLayout()
-        title = QLabel("📝 Teaching Note")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        header.addWidget(title)
-        header.addStretch()
-        layout.addLayout(header)
-
-        # Note widget (will be populated after session load)
+        # Không thêm header nữa, vì widget đã có header
         self.note_widget = SessionNoteWidget(
             self._note_service,
             self._session_id,

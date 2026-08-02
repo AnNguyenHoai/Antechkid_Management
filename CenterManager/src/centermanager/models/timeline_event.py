@@ -32,7 +32,9 @@ class TimelineEventType(str, Enum):
     NOTE_ADDED = "NoteAdded"
     DOCUMENT_UPLOADED = "DocumentUploaded"
     SYSTEM = "System"
-
+    INCOME_CREATED = "IncomeCreated"
+    INCOME_UPDATED = "IncomeUpdated"
+    INCOME_DELETED = "IncomeDeleted"
     @classmethod
     def choices(cls):
         return [e.value for e in cls]

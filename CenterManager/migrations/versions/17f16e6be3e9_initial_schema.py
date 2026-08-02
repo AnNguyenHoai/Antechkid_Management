@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 40a7ffec9940
+Revision ID: 17f16e6be3e9
 Revises: 
-Create Date: 2026-07-30 13:52:17.663663
+Create Date: 2026-07-31 12:10:07.794239
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '40a7ffec9940'
+revision: str = '17f16e6be3e9'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -31,6 +31,20 @@ def upgrade() -> None:
     sa.Column('capacity', sa.Integer(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('expenses',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('category', sa.String(length=50), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('amount', sa.Float(), nullable=False),
+    sa.Column('payment_method', sa.String(length=50), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('paid_by', sa.String(length=100), nullable=True),
+    sa.Column('payment_date', sa.Date(), nullable=False),
+    sa.Column('note', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id')
@@ -163,6 +177,24 @@ def upgrade() -> None:
     sa.Column('start_date', sa.Date(), nullable=True),
     sa.Column('end_date', sa.Date(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
+    sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('incomes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('amount', sa.Float(), nullable=False),
+    sa.Column('income_type', sa.String(length=50), nullable=False),
+    sa.Column('payment_method', sa.String(length=50), nullable=False),
+    sa.Column('payment_date', sa.Date(), nullable=False),
+    sa.Column('payment_period', sa.String(length=50), nullable=True),
+    sa.Column('received_by', sa.String(length=100), nullable=True),
+    sa.Column('note', sa.Text(), nullable=True),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
@@ -365,6 +397,7 @@ def downgrade() -> None:
     op.drop_table('progress')
     op.drop_table('parents')
     op.drop_table('notes')
+    op.drop_table('incomes')
     op.drop_table('enrollments')
     op.drop_table('documents')
     op.drop_index('idx_class_timeline_created_at', table_name='class_timeline_events')
@@ -376,5 +409,6 @@ def downgrade() -> None:
     op.drop_table('students')
     op.drop_table('roles')
     op.drop_table('permissions')
+    op.drop_table('expenses')
     op.drop_table('classes')
     # ### end Alembic commands ###

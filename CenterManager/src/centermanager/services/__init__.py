@@ -28,6 +28,11 @@ from .teacher_timeline_service import TeacherTimelineService
 from .class_service import ClassService, ClassNotFoundError, ClassValidationError, ClassFullError, StudentAlreadyEnrolledError
 from .class_timeline_service import ClassTimelineService
 
+# Finance
+from .finance_service import FinanceService
+from .income_service import IncomeService
+from .expense_service import ExpenseService
+
 __all__ = [
     "StudentService",
     "ParentService",
@@ -52,4 +57,7 @@ __all__ = [
     "ClassFullError",
     "StudentAlreadyEnrolledError",
     "ClassTimelineService",
+    "FinanceService",
+    "IncomeService",
+    "ExpenseService",
 ]

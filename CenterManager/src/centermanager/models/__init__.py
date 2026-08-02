@@ -32,6 +32,10 @@ from centermanager.models.teacher_assignment import TeacherAssignment
 # Class Timeline
 from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
 
+# Finance
+from centermanager.models.income import Income
+from centermanager.models.expense import Expense
+
 __all__ = [
     "Student",
     "Parent",
@@ -62,4 +66,6 @@ __all__ = [
     "TeacherAssignment",
     "ClassTimelineEvent",
     "ClassTimelineEventType",
+    "Income",
+    "Expense",
 ]

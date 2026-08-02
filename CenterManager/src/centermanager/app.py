@@ -41,7 +41,9 @@ from centermanager.services.teacher_document_service import TeacherDocumentServi
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
 from centermanager.services.class_service import ClassService
 from centermanager.services.class_timeline_service import ClassTimelineService
-
+from centermanager.services.finance_service import FinanceService
+from centermanager.services.income_service import IncomeService
+from centermanager.services.expense_service import ExpenseService
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,19 @@ def main() -> int:
         timeline_service=class_timeline_service,
     )
 
+    # Finance Services
+    finance_service = FinanceService(session_factory)
+    expense_service = ExpenseService(session_factory)
+
+    # Income Service - requires additional dependencies
+    income_service = IncomeService(
+        session_factory=session_factory,
+        student_service=student_service,
+        class_service=class_service,
+        timeline_service=timeline_service,
+        permission_service=permission_service,
+    )
+
     logger.info("All services initialized")
 
     window = MainWindow(
@@ -166,14 +181,17 @@ def main() -> int:
         filter_service=filter_service,
         export_service=export_service,
         import_service=import_service,
-        permission_service=permission_service,
         teacher_service=teacher_service,
         teacher_assignment_service=teacher_assignment_service,
         teacher_document_service=teacher_document_service,
         teacher_timeline_service=teacher_timeline_service,
         class_service=class_service,
         class_timeline_service=class_timeline_service,
-        teacher_assignment_service_for_class=teacher_assignment_service,  # same as above
+        teacher_assignment_service_for_class=teacher_assignment_service,
+        permission_service=permission_service,
+        finance_service=finance_service,
+        income_service=income_service,
+        expense_service=expense_service,
     )
     window.show()
     logger.info("Main window initialized")

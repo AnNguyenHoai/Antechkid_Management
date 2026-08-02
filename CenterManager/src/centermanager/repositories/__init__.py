@@ -24,6 +24,10 @@ from .teacher_assignment_repository import TeacherAssignmentRepository
 # Class Timeline
 from .class_timeline_repository import ClassTimelineRepository
 
+# Finance
+from .income_repository import IncomeRepository
+from .expense_repository import ExpenseRepository
+
 __all__ = [
     "BaseRepository",
     "StudentRepository",
@@ -42,4 +46,6 @@ __all__ = [
     "TeacherTimelineRepository",
     "TeacherAssignmentRepository",
     "ClassTimelineRepository",
+    "IncomeRepository",
+    "ExpenseRepository",
 ]
