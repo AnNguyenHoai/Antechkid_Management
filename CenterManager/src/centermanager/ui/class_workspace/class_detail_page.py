@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ClassDetailPage - full class profile with teacher assignment, student enrollment, schedule, timeline.
+Now with Attendance tab.
 """
 import logging
 from typing import Optional, List
@@ -8,7 +9,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMessageBox
+    QScrollArea, QFrame, QSizePolicy, QMessageBox, QTabWidget
 )
 
 from centermanager.models.class_ import Class
@@ -21,6 +22,7 @@ from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
+from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
@@ -29,6 +31,7 @@ from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
+from centermanager.ui.class_workspace.attendance_widget import AttendanceWidget  # <-- THÊM
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
 
@@ -48,6 +51,7 @@ class ClassDetailPage(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
+        attendance_service: AttendanceService,  # <-- THÊM
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -58,6 +62,7 @@ class ClassDetailPage(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
+        self._attendance_service = attendance_service  # <-- LƯU
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -82,6 +87,46 @@ class ClassDetailPage(QWidget):
         top_bar_layout.addWidget(self.back_btn)
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
+
+        # Tab widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background: white;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+            QTabBar::tab:selected {
+                font-weight: bold;
+                color: #1976d2;
+            }
+        """)
+
+        # Tab 1: Overview
+        overview_tab = self._create_overview_tab()
+        self.tab_widget.addTab(overview_tab, "Overview")
+
+        # Tab 2: Attendance
+        self.attendance_widget = AttendanceWidget(
+            self._attendance_service,
+            self._session_service,
+            self._class_service,
+            parent=self
+        )
+        self.attendance_widget.attendance_changed.connect(self._on_data_changed)
+        self.tab_widget.addTab(self.attendance_widget, "Attendance")
+
+        main_layout.addWidget(self.tab_widget)
+
+    def _create_overview_tab(self) -> QWidget:
+        """Create the Overview tab content."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -161,7 +206,7 @@ class ClassDetailPage(QWidget):
         schedule_layout = QVBoxLayout(schedule_section)
         schedule_layout.setContentsMargins(0, 0, 0, 0)
         schedule_layout.setSpacing(SPACING['xs'])
-        
+
         # Header with Add button
         schedule_header = QHBoxLayout()
         title_label = QLabel("📅 Weekly Schedule & Assessment")
@@ -174,7 +219,7 @@ class ClassDetailPage(QWidget):
         schedule_header.addWidget(self.add_session_btn)
         schedule_layout.addLayout(schedule_header)
         schedule_layout.addWidget(self._divider())
-        
+
         self.schedule_widget = ClassScheduleWidget(
             self._session_service,
             self._note_service,
@@ -193,7 +238,9 @@ class ClassDetailPage(QWidget):
 
         container_layout.addStretch()
         scroll.setWidget(container)
-        main_layout.addWidget(scroll)
+        layout.addWidget(scroll)
+
+        return tab
 
     def _divider(self) -> QFrame:
         line = QFrame()
@@ -227,22 +274,10 @@ class ClassDetailPage(QWidget):
         return widget
 
     def _show_empty(self) -> None:
-        self.profile_widget.setVisible(False)
-        self.stats_widget.setVisible(False)
-        self.teacher_section.setVisible(False)
-        self.student_section.setVisible(False)
-        self.schedule_widget.setVisible(False)
-        self.timeline_widget.setVisible(False)
-        self.add_session_btn.setVisible(False)
+        self.tab_widget.setVisible(False)
 
     def _show_detail(self) -> None:
-        self.profile_widget.setVisible(True)
-        self.stats_widget.setVisible(True)
-        self.teacher_section.setVisible(True)
-        self.student_section.setVisible(True)
-        self.schedule_widget.setVisible(True)
-        self.timeline_widget.setVisible(True)
-        self.add_session_btn.setVisible(True)
+        self.tab_widget.setVisible(True)
 
     def load_class(self, class_id: int) -> None:
         try:
@@ -250,6 +285,7 @@ class ClassDetailPage(QWidget):
             self._current_class_id = class_obj.id
             self._current_class = class_obj
             self._populate(class_obj)
+            self.attendance_widget.set_class(class_id)  # <-- GỌI ĐỂ LOAD ATTENDANCE
             self._show_detail()
         except Exception as e:
             logger.exception(f"Error loading class {class_id}")

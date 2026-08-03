@@ -44,6 +44,10 @@ from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.finance_service import FinanceService
 from centermanager.services.income_service import IncomeService
 from centermanager.services.expense_service import ExpenseService
+from centermanager.services.expense_timeline_service import ExpenseTimelineService
+from centermanager.services.finance_dashboard_service import FinanceDashboardService
+from centermanager.services.outstanding_service import OutstandingService
+from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
 
 logger = logging.getLogger(__name__)
 
@@ -151,13 +155,30 @@ def main() -> int:
 
     # Finance Services
     finance_service = FinanceService(session_factory)
-    expense_service = ExpenseService(session_factory)
+    expense_timeline_service = ExpenseTimelineService(session_factory)
+    expense_service = ExpenseService(
+        session_factory=session_factory,
+        timeline_service=expense_timeline_service,
+        permission_service=permission_service,
+    )
 
-    # Income Service - requires additional dependencies
     income_service = IncomeService(
         session_factory=session_factory,
         student_service=student_service,
         class_service=class_service,
+        timeline_service=timeline_service,
+        permission_service=permission_service,
+    )
+
+    # Dashboard service
+    finance_dashboard_service = FinanceDashboardService(income_service, expense_service)
+
+    # Outstanding service
+    outstanding_service = OutstandingService(session_factory)
+
+    # Attendance service
+    attendance_service = AttendanceService(
+        session_factory=session_factory,
         timeline_service=timeline_service,
         permission_service=permission_service,
     )
@@ -192,6 +213,9 @@ def main() -> int:
         finance_service=finance_service,
         income_service=income_service,
         expense_service=expense_service,
+        finance_dashboard_service=finance_dashboard_service,
+        outstanding_service=outstanding_service,
+        attendance_service=attendance_service,  # <-- TRUYỀN
     )
     window.show()
     logger.info("Main window initialized")

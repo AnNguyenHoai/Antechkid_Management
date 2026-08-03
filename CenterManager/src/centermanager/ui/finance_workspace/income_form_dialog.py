@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-IncomeFormDialog - create or edit income.
+IncomeFormDialog - create or edit income, supporting both student and other sources.
 """
 import logging
 from datetime import date
@@ -38,7 +38,7 @@ class IncomeFormDialog(QDialog):
         self._is_edit = income_id is not None
 
         self.setWindowTitle("Edit Income" if self._is_edit else "Add Income")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(550)
         self.setModal(True)
 
         self._setup_ui()
@@ -53,74 +53,72 @@ class IncomeFormDialog(QDialog):
         form.setSpacing(8)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        # Student (combo) - only for create
+        # ---- Source selection ----
+        self.source_combo = QComboBox()
+        self.source_combo.addItems(["Từ học sinh", "Nguồn khác"])
+        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+        form.addRow("Nguồn thu *", self.source_combo)
+
+        # ---- Student and Class ----
         self.student_combo = QComboBox()
         self._load_students()
-        form.addRow("Student *", self.student_combo)
-        if self._is_edit:
-            self.student_combo.setEnabled(False)
+        form.addRow("Học sinh *", self.student_combo)
 
-        # Class (combo) - only for create
         self.class_combo = QComboBox()
         self._load_classes()
-        form.addRow("Class *", self.class_combo)
-        if self._is_edit:
-            self.class_combo.setEnabled(False)
+        form.addRow("Lớp học *", self.class_combo)
 
-        # Income Type (combo) - only for create
+        # ---- Other source description ----
+        self.other_source_edit = QLineEdit()
+        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng, Tiền bán đồ cũ...")
+        self.other_source_edit.setVisible(False)
+        form.addRow("Mô tả nguồn khác", self.other_source_edit)
+
+        # ---- Income fields (common) ----
         self.type_combo = QComboBox()
         for t in ["Tuition", "Book", "Robot Kit", "Material", "Other"]:
             self.type_combo.addItem(t)
-        form.addRow("Income Type *", self.type_combo)
-        if self._is_edit:
-            self.type_combo.setEnabled(False)
+        form.addRow("Loại thu *", self.type_combo)
 
-        # Amount
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0.01, 999999999.99)
         self.amount_spin.setPrefix("VND ")
         self.amount_spin.setDecimals(0)
-        form.addRow("Amount *", self.amount_spin)
+        form.addRow("Số tiền *", self.amount_spin)
 
-        # Payment Method
         self.method_combo = QComboBox()
         self.method_combo.addItems(["Cash", "Bank Transfer"])
-        form.addRow("Payment Method *", self.method_combo)
+        form.addRow("Hình thức thanh toán *", self.method_combo)
 
-        # Payment Date
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("dd/MM/yyyy")
         self.date_edit.setDate(QDate.currentDate())
-        form.addRow("Payment Date *", self.date_edit)
+        form.addRow("Ngày thu *", self.date_edit)
 
-        # Payment Period (NEW)
         self.period_combo = QComboBox()
         self.period_combo.addItem("", "")  # empty
-        # Tạo danh sách các kỳ: từ tháng 1 đến tháng 12 của năm hiện tại và năm trước
         current_year = date.today().year
         for year in range(current_year - 1, current_year + 1):
             for month in range(1, 13):
                 period = f"Tháng {month}/{year}"
                 self.period_combo.addItem(period, period)
-        form.addRow("Payment Period", self.period_combo)
+        form.addRow("Kỳ thanh toán", self.period_combo)
 
-        # Received By (auto-filled)
         self.received_by_edit = QLineEdit()
         current_user = get_current_user()
         if current_user:
             self.received_by_edit.setText(current_user.full_name)
-        self.received_by_edit.setPlaceholderText("Received by")
-        form.addRow("Received By", self.received_by_edit)
+        self.received_by_edit.setPlaceholderText("Người thu")
+        form.addRow("Người thu", self.received_by_edit)
 
-        # Note
         self.note_edit = QLineEdit()
-        self.note_edit.setPlaceholderText("Optional note")
-        form.addRow("Note", self.note_edit)
+        self.note_edit.setPlaceholderText("Ghi chú (tùy chọn)")
+        form.addRow("Ghi chú", self.note_edit)
 
         layout.addLayout(form)
 
-        # Buttons
+        # ---- Buttons ----
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.save_btn = QPushButton("Save")
@@ -133,6 +131,21 @@ class IncomeFormDialog(QDialog):
 
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
+
+        # Initial state
+        self._on_source_changed(0)
+
+    def _on_source_changed(self, index: int) -> None:
+        is_student = (index == 0)  # "Từ học sinh"
+        self.student_combo.setVisible(is_student)
+        self.class_combo.setVisible(is_student)
+        self.other_source_edit.setVisible(not is_student)
+        if not is_student:
+            self.student_combo.setCurrentIndex(-1)
+            self.class_combo.setCurrentIndex(-1)
+            self.other_source_edit.clear()
+        else:
+            self.other_source_edit.clear()
 
     def _load_students(self) -> None:
         try:
@@ -155,15 +168,21 @@ class IncomeFormDialog(QDialog):
     def _load_income(self) -> None:
         try:
             income = self._income_service.get_income(self._income_id)
-            # Set student
-            idx = self.student_combo.findData(income.student_id)
-            if idx >= 0:
-                self.student_combo.setCurrentIndex(idx)
-            # Set class
-            idx2 = self.class_combo.findData(income.class_id)
-            if idx2 >= 0:
-                self.class_combo.setCurrentIndex(idx2)
-            # Set type
+            # Source
+            if income.student_id is not None:
+                self.source_combo.setCurrentIndex(0)  # "Từ học sinh"
+                idx = self.student_combo.findData(income.student_id)
+                if idx >= 0:
+                    self.student_combo.setCurrentIndex(idx)
+                idx2 = self.class_combo.findData(income.class_id)
+                if idx2 >= 0:
+                    self.class_combo.setCurrentIndex(idx2)
+            else:
+                self.source_combo.setCurrentIndex(1)  # "Nguồn khác"
+                self.other_source_edit.setText(income.note or "")
+            self._on_source_changed(self.source_combo.currentIndex())
+
+            # Common fields
             idx3 = self.type_combo.findText(income.income_type)
             if idx3 >= 0:
                 self.type_combo.setCurrentIndex(idx3)
@@ -173,32 +192,52 @@ class IncomeFormDialog(QDialog):
                 self.method_combo.setCurrentIndex(idx4)
             qdate = QDate(income.payment_date.year, income.payment_date.month, income.payment_date.day)
             self.date_edit.setDate(qdate)
-            # Set period
             if income.payment_period:
                 idx5 = self.period_combo.findData(income.payment_period)
                 if idx5 >= 0:
                     self.period_combo.setCurrentIndex(idx5)
                 else:
-                    # If not in list, add it
                     self.period_combo.addItem(income.payment_period, income.payment_period)
                     self.period_combo.setCurrentIndex(self.period_combo.count() - 1)
             self.received_by_edit.setText(income.received_by or "")
-            self.note_edit.setText(income.note or "")
+            # For other source, note is used for description
+            if income.student_id is None:
+                self.note_edit.setText("")  # note will be saved as description
+            else:
+                self.note_edit.setText(income.note or "")
         except Exception as e:
             logger.exception("Error loading income")
             QMessageBox.critical(self, "Error", "Could not load income data.")
             self.reject()
 
     def _save(self) -> None:
-        student_id = self.student_combo.currentData()
-        class_id = self.class_combo.currentData()
+        source_type = self.source_combo.currentText()
+        if source_type == "Từ học sinh":
+            student_id = self.student_combo.currentData()
+            class_id = self.class_combo.currentData()
+            note = self.note_edit.text().strip() or None
+            if not student_id or not class_id:
+                QMessageBox.warning(self, "Lỗi", "Vui lòng chọn học sinh và lớp học.")
+                return
+        else:  # "Nguồn khác"
+            student_id = None
+            class_id = None
+            description = self.other_source_edit.text().strip()
+            if not description:
+                QMessageBox.warning(self, "Lỗi", "Vui lòng nhập mô tả nguồn thu.")
+                return
+            note = f"Nguồn khác: {description}"
+            # Optionally, allow user to add extra note
+            extra_note = self.note_edit.text().strip()
+            if extra_note:
+                note += f" ({extra_note})"
+
         income_type = self.type_combo.currentText()
         amount = self.amount_spin.value()
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         payment_period = self.period_combo.currentData() or None
         received_by = self.received_by_edit.text().strip() or None
-        note = self.note_edit.text().strip() or None
 
         try:
             if self._is_edit:
@@ -224,7 +263,7 @@ class IncomeFormDialog(QDialog):
                 )
             self.accept()
         except IncomeValidationError as e:
-            QMessageBox.warning(self, "Validation Error", str(e))
+            QMessageBox.warning(self, "Lỗi xác thực", str(e))
         except Exception as e:
             logger.exception("Error saving income")
-            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+            QMessageBox.critical(self, "Lỗi", "Đã xảy ra lỗi không mong muốn.")

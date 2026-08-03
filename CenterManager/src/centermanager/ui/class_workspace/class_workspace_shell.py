@@ -19,6 +19,7 @@ from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboard
 
 class ClassWorkspaceShell(QWidget):
     go_home = Signal()
+    attendance_updated = Signal()  # <-- THÊM
 
     def __init__(
         self,
@@ -29,6 +30,7 @@ class ClassWorkspaceShell(QWidget):
         note_service,
         highlight_service,
         student_service,
+        attendance_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -39,6 +41,7 @@ class ClassWorkspaceShell(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
+        self._attendance_service = attendance_service
 
         self._current_class_id: Optional[int] = None
 
@@ -89,16 +92,17 @@ class ClassWorkspaceShell(QWidget):
 
         # Class Detail
         self.detail_page = ClassDetailPage(
-            self._class_service,
-            self._assignment_service,
-            self._timeline_service,
-            self._session_service,
-            self._note_service,
-            self._highlight_service,
-            self._student_service,
+            class_service=self._class_service,
+            assignment_service=self._assignment_service,
+            timeline_service=self._timeline_service,
+            session_service=self._session_service,
+            note_service=self._note_service,
+            highlight_service=self._highlight_service,
+            student_service=self._student_service,
+            attendance_service=self._attendance_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
-        self.detail_page.class_updated.connect(self._on_class_updated)
+        self.detail_page.class_updated.connect(self._on_class_updated)  # <-- ĐÃ KẾT NỐI
         self.content_stack.addWidget(self.detail_page)
 
         body.addWidget(self.content_stack, 1)
@@ -132,4 +136,6 @@ class ClassWorkspaceShell(QWidget):
         self.list_page.refresh()
 
     def _on_class_updated(self) -> None:
+        """Emit signal when class data (including attendance) is updated."""
         self.list_page.refresh()
+        self.attendance_updated.emit()  # <-- EMIT KHI ATTENDANCE THAY ĐỔI

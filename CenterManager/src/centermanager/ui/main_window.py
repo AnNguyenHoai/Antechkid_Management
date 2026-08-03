@@ -9,7 +9,7 @@ from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
-from centermanager.ui.permission_helpers import UIPermissionHelper, get_menu_items_for_role
+from centermanager.ui.permission_helpers import UIPermissionHelper
 from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 from centermanager.ui.finance_workspace import FinanceWorkspaceShell
@@ -47,9 +47,14 @@ class MainWindow(QMainWindow):
         finance_service,
         income_service,
         expense_service,
+        finance_dashboard_service,
+        outstanding_service,
+        attendance_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
+
+        # Lưu tất cả services
         self._student_service = student_service
         self._parent_service = parent_service
         self._timeline_service = timeline_service
@@ -66,13 +71,22 @@ class MainWindow(QMainWindow):
         self._filter_service = filter_service
         self._export_service = export_service
         self._import_service = import_service
+        self._teacher_service = teacher_service
+        self._teacher_assignment_service = teacher_assignment_service
+        self._teacher_document_service = teacher_document_service
+        self._teacher_timeline_service = teacher_timeline_service
+        self._class_service = class_service
+        self._class_timeline_service = class_timeline_service
+        self._teacher_assignment_service_for_class = teacher_assignment_service_for_class
         self._permission_service = permission_service
-        self._permission_helper = UIPermissionHelper(permission_service._session_factory)
-
-        # Finance services
         self._finance_service = finance_service
         self._income_service = income_service
         self._expense_service = expense_service
+        self._finance_dashboard_service = finance_dashboard_service
+        self._outstanding_service = outstanding_service
+        self._attendance_service = attendance_service
+
+        self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
         self.setWindowTitle("CenterManager")
         self.setMinimumSize(1000, 700)
@@ -88,7 +102,7 @@ class MainWindow(QMainWindow):
         self.home_page.workspace_selected.connect(self._on_workspace_selected)
         self.central_stack.addWidget(self.home_page)
 
-        # Student
+        # Student Workspace
         self.student_workspace = StudentWorkspaceShell(
             student_service=self._student_service,
             parent_service=self._parent_service,
@@ -105,38 +119,48 @@ class MainWindow(QMainWindow):
             filter_service=self._filter_service,
             export_service=self._export_service,
             import_service=self._import_service,
+            income_service=self._income_service,
+            class_service=self._class_service,
+            permission_service=self._permission_service,
+            outstanding_service=self._outstanding_service,
+            attendance_service=self._attendance_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
 
-        # Teacher
+        # Teacher Workspace
         self.teacher_workspace = TeacherWorkspaceShell(
-            teacher_service=teacher_service,
-            assignment_service=teacher_assignment_service,
-            document_service=teacher_document_service,
-            timeline_service=teacher_timeline_service,
+            teacher_service=self._teacher_service,
+            assignment_service=self._teacher_assignment_service,
+            document_service=self._teacher_document_service,
+            timeline_service=self._teacher_timeline_service,
         )
         self.teacher_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.teacher_workspace)
 
-        # Class
+        # Class Workspace
         self.class_workspace = ClassWorkspaceShell(
-            class_service=class_service,
-            assignment_service=teacher_assignment_service,
-            timeline_service=class_timeline_service,
-            session_service=session_service,
-            note_service=note_service,
-            highlight_service=highlight_service,
-            student_service=student_service,
+            class_service=self._class_service,
+            assignment_service=self._teacher_assignment_service_for_class,
+            timeline_service=self._class_timeline_service,
+            session_service=self._session_service,
+            note_service=self._note_service,
+            highlight_service=self._highlight_service,
+            student_service=self._student_service,
+            attendance_service=self._attendance_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
+        self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
         self.central_stack.addWidget(self.class_workspace)
 
-        # Finance
+        # Finance Workspace
         self.finance_workspace = FinanceWorkspaceShell(
-            income_service=income_service,
-            student_service=student_service,
-            class_service=class_service,
+            income_service=self._income_service,
+            student_service=self._student_service,
+            class_service=self._class_service,
+            expense_service=self._expense_service,
+            dashboard_service=self._finance_dashboard_service,
+            outstanding_service=self._outstanding_service,
         )
         self.finance_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.finance_workspace)
@@ -163,12 +187,16 @@ class MainWindow(QMainWindow):
         required_perm = permission_map.get(workspace_id)
         if required_perm:
             if not self._permission_helper.has_permission(required_perm):
-                self.statusBar().showMessage("Permission denied: Insufficient access rights")
+                self.statusBar().showMessage(f"Permission denied: Insufficient access rights for {workspace_id}")
+                logger.warning(f"Permission denied for {workspace_id}")
                 return
 
         if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
-            self.student_workspace.navigate_to("dashboard")
+            if self.student_workspace.current_student_id is not None:
+                self.student_workspace.show_student(self.student_workspace.current_student_id)
+            else:
+                self.student_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Student Workspace")
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
@@ -203,3 +231,7 @@ class MainWindow(QMainWindow):
             self.student_workspace.list_page.refresh()
         except Exception as e:
             logger.exception("Failed to refresh student list")
+
+    def _on_attendance_updated(self) -> None:
+        """Refresh student detail when attendance is updated from class workspace."""
+        self.student_workspace.refresh_current_student()

@@ -36,6 +36,11 @@ class StudentWorkspaceShell(QWidget):
         filter_service,
         export_service,
         import_service,
+        income_service,
+        class_service,
+        permission_service,
+        outstanding_service,
+        attendance_service,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -54,6 +59,11 @@ class StudentWorkspaceShell(QWidget):
         self._filter_service = filter_service
         self._export_service = export_service
         self._import_service = import_service
+        self._income_service = income_service
+        self._class_service = class_service
+        self._permission_service = permission_service
+        self._outstanding_service = outstanding_service
+        self._attendance_service = attendance_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
@@ -86,7 +96,7 @@ class StudentWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        # Dashboard (không cần analytics_service)
+        # Dashboard
         self.dashboard_page = StudentDashboardPage(self._dashboard_service)
         self.dashboard_page.add_student_clicked.connect(self._on_add_action)
         self.dashboard_page.import_students_clicked.connect(self._on_import_action)
@@ -110,16 +120,21 @@ class StudentWorkspaceShell(QWidget):
 
         # Student Detail
         self.detail_page = StudentDetailPage(
-            self._student_service,
-            self._parent_service,
-            self._timeline_service,
-            self._assessment_service,
-            self._summary_service,
-            self._session_service,
-            self._note_service,
-            self._highlight_service,
-            self._student_note_service,
-            self._document_service,
+            student_service=self._student_service,
+            parent_service=self._parent_service,
+            timeline_service=self._timeline_service,
+            assessment_service=self._assessment_service,
+            summary_service=self._summary_service,
+            session_service=self._session_service,
+            note_service=self._note_service,
+            highlight_service=self._highlight_service,
+            student_note_service=self._student_note_service,
+            document_service=self._document_service,
+            income_service=self._income_service,
+            class_service=self._class_service,
+            permission_service=self._permission_service,
+            outstanding_service=self._outstanding_service,
+            attendance_service=self._attendance_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
@@ -185,3 +200,21 @@ class StudentWorkspaceShell(QWidget):
 
     def _on_filter_clicked(self) -> None:
         self.list_page.show_filter_dialog()
+
+    # ====== PHƯƠNG THỨC MỚI ======
+    def refresh_current_student(self) -> None:
+        """Refresh the currently displayed student detail."""
+        if self._current_student_id is not None:
+            self.detail_page.load_student(self._current_student_id)
+            # Ghi log nếu cần
+            import logging
+            logging.getLogger(__name__).info(f"Refreshed student detail for student {self._current_student_id}")
+
+    @property
+    def current_student_id(self) -> Optional[int]:
+        """Return the ID of the student currently being viewed, or None."""
+        return self._current_student_id
+
+    def show_student(self, student_id: int) -> None:
+        """Navigate to Detail Page and load the specified student."""
+        self._on_student_selected(student_id)

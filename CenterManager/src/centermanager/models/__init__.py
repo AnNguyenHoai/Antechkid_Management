@@ -35,7 +35,8 @@ from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassT
 # Finance
 from centermanager.models.income import Income
 from centermanager.models.expense import Expense
-
+from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
+from centermanager.models.attendance import Attendance, AttendanceStatus
 __all__ = [
     "Student",
     "Parent",

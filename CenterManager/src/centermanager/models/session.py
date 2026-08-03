@@ -13,12 +13,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
 from centermanager.models.mixins import TimestampMixin
+from centermanager.models.attendance import Attendance
 
 if TYPE_CHECKING:
     from centermanager.models.class_ import Class
     from centermanager.models.session_note import SessionNote
     from centermanager.models.student_highlight import StudentHighlight
-
+    from centermanager.models.attendance import Attendance
 
 class SessionStatus(str, Enum):
     SCHEDULED = "Scheduled"
@@ -49,7 +50,8 @@ class Session(Base, TimestampMixin):
     class_: Mapped[Class] = relationship("Class", back_populates="sessions")
     note: Mapped[Optional[SessionNote]] = relationship("SessionNote", back_populates="session", uselist=False, cascade="all, delete-orphan")
     highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="session", cascade="all, delete-orphan")
-
+    # trong class Session, thêm dòng:
+    attendances: Mapped[List[Attendance]] = relationship("Attendance", back_populates="session", cascade="all, delete-orphan")
     __table_args__ = (
         UniqueConstraint('class_id', 'session_number', name='uq_session_number_per_class'),
     )

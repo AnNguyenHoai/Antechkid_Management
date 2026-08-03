@@ -76,6 +76,10 @@ class PermissionDefinitions:
     # Settings
     SETTING_UPDATE = "setting.update"
 
+    ATTENDANCE_VIEW = "attendance.view"
+    ATTENDANCE_CREATE = "attendance.create"
+    ATTENDANCE_UPDATE = "attendance.update"
+
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -100,6 +104,9 @@ class PermissionDefinitions:
             cls.FINANCE_EXPENSE_DELETE,
             cls.REPORT_VIEW,
             cls.SETTING_UPDATE,
+            cls.ATTENDANCE_VIEW,
+            cls.ATTENDANCE_CREATE,
+            cls.ATTENDANCE_UPDATE,
         ]
 
     @classmethod
@@ -126,7 +133,11 @@ class PermissionDefinitions:
             cls.FINANCE_EXPENSE_DELETE: "finance",
             cls.REPORT_VIEW: "report",
             cls.SETTING_UPDATE: "setting",
+            cls.ATTENDANCE_VIEW: "attendance",
+            cls.ATTENDANCE_CREATE: "attendance",
+            cls.ATTENDANCE_UPDATE: "attendance",
         }
+
         return category_map.get(permission_name, "other")
 
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""StudentDetailPage - displays full student profile with all sections.
-Now includes Profile, Quick Actions, Parents, Assessment, Timeline, Notes, Documents.
+"""
+StudentDetailPage - displays full student profile with all sections.
+Now includes Financial Tab with Outstanding and Attendance Tab.
 """
 import logging
 from typing import Optional
@@ -8,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy
+    QScrollArea, QFrame, QSizePolicy, QTabWidget
 )
 
 from centermanager.services.student_service import StudentService
@@ -21,6 +22,11 @@ from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
+from centermanager.services.income_service import IncomeService
+from centermanager.services.class_service import ClassService
+from centermanager.services.permission_service import PermissionService
+from centermanager.services.outstanding_service import OutstandingService
+from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
 from centermanager.services.exceptions import StudentNotFoundError
 from centermanager.models.student import Student
 from centermanager.dto import StudentSummaryDTO
@@ -34,6 +40,8 @@ from centermanager.ui.student_workspace.profile_widget import ProfileWidget
 from centermanager.ui.student_workspace.quick_actions_widget import QuickActionsWidget
 from centermanager.ui.student_workspace.notes_widget import NotesWidget
 from centermanager.ui.student_workspace.documents_widget import DocumentsWidget
+from centermanager.ui.student_workspace.student_financial_widget import StudentFinancialWidget
+from centermanager.ui.student_workspace.student_attendance_widget import StudentAttendanceWidget  # <-- THÊM
 from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
@@ -60,6 +68,11 @@ class StudentDetailPage(QWidget):
         highlight_service: StudentHighlightService,
         student_note_service: StudentNoteService,
         document_service: StudentDocumentService,
+        income_service: IncomeService,
+        class_service: ClassService,
+        permission_service: PermissionService,
+        outstanding_service: OutstandingService,
+        attendance_service: AttendanceService,  # <-- THÊM
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -73,6 +86,11 @@ class StudentDetailPage(QWidget):
         self._highlight_service = highlight_service
         self._student_note_service = student_note_service
         self._document_service = document_service
+        self._income_service = income_service
+        self._class_service = class_service
+        self._permission_service = permission_service
+        self._outstanding_service = outstanding_service
+        self._attendance_service = attendance_service  # <-- LƯU
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
 
@@ -98,13 +116,59 @@ class StudentDetailPage(QWidget):
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
 
-        # Scroll area
+        # Main content with tabs
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background: white;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+            QTabBar::tab:selected {
+                font-weight: bold;
+                color: #1976d2;
+            }
+        """)
+
+        # Tab 1: Student Profile
+        self.profile_tab = self._create_profile_tab()
+        self.tab_widget.addTab(self.profile_tab, "Profile")
+
+        # Tab 2: Financial
+        self.financial_tab = StudentFinancialWidget(
+            self._income_service,
+            self._student_service,
+            self._class_service,
+            self._permission_service,
+            self._outstanding_service,
+            parent=self
+        )
+        self.tab_widget.addTab(self.financial_tab, "💰 Financial")
+
+        # Tab 3: Attendance
+        self.attendance_widget = StudentAttendanceWidget(
+            self._attendance_service,
+            parent=self
+        )
+        self.tab_widget.addTab(self.attendance_widget, "📋 Attendance")
+
+        main_layout.addWidget(self.tab_widget)
+
+    def _create_profile_tab(self) -> QWidget:
+        """Create the profile tab content."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        # Sử dụng margin nhỏ hơn để tăng diện tích hiển thị
         container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
@@ -140,16 +204,15 @@ class StudentDetailPage(QWidget):
         self.timeline_section.layout().addWidget(self.timeline_widget)
         container_layout.addWidget(self.timeline_section)
 
-        # Notes (structured) - mở rộng chiều rộng
+        # Notes
         self.notes_section = self._create_vertical_section("📝 Notes")
         self.notes_widget = NotesWidget(self._student_note_service)
         self.notes_widget.note_changed.connect(self._on_data_changed)
-        # Chiếm toàn bộ chiều rộng
         self.notes_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.notes_section.layout().addWidget(self.notes_widget)
         container_layout.addWidget(self.notes_section)
 
-        # Documents - mở rộng chiều rộng
+        # Documents
         self.documents_section = self._create_vertical_section("📎 Documents")
         self.documents_widget = DocumentsWidget(self._document_service)
         self.documents_widget.document_changed.connect(self._on_data_changed)
@@ -159,7 +222,7 @@ class StudentDetailPage(QWidget):
 
         container_layout.addStretch()
         scroll.setWidget(container)
-        main_layout.addWidget(scroll)
+        layout.addWidget(scroll)
 
         # Connect quick actions
         self.quick_actions.set_actions(
@@ -169,6 +232,8 @@ class StudentDetailPage(QWidget):
             on_add_note=self._on_add_note,
             on_upload_doc=self._on_upload_doc
         )
+
+        return tab
 
     def _create_vertical_section(self, title: str) -> QWidget:
         section = QWidget()
@@ -190,25 +255,10 @@ class StudentDetailPage(QWidget):
         return section
 
     def _show_empty(self) -> None:
-        # Hide all sections
-        self.quick_actions.setVisible(False)
-        self.profile_widget.setVisible(False)
-        self.summary_widget.setVisible(False)
-        self.parents_section.setVisible(False)
-        self.assessment_section.setVisible(False)
-        self.timeline_section.setVisible(False)
-        self.notes_section.setVisible(False)
-        self.documents_section.setVisible(False)
+        self.tab_widget.setVisible(False)
 
     def _show_detail(self) -> None:
-        self.quick_actions.setVisible(True)
-        self.profile_widget.setVisible(True)
-        self.summary_widget.setVisible(True)
-        self.parents_section.setVisible(True)
-        self.assessment_section.setVisible(True)
-        self.timeline_section.setVisible(True)
-        self.notes_section.setVisible(True)
-        self.documents_section.setVisible(True)
+        self.tab_widget.setVisible(True)
 
     def load_student(self, student_id: int) -> None:
         try:
@@ -224,10 +274,12 @@ class StudentDetailPage(QWidget):
 
         self._current_student_id = student.id
         self._current_student = student
-        self._populate_all(student)
+        self._populate_profile(student)
+        self._populate_financial(student.id)
+        self._populate_attendance(student.id)  # <-- THÊM
         self._show_detail()
 
-    def _populate_all(self, student: Student) -> None:
+    def _populate_profile(self, student: Student) -> None:
         # Profile
         parents = self._parent_service.get_parents_for_student(student.id)
         primary = next((p for p in parents if p.is_primary_contact), parents[0] if parents else None)
@@ -254,6 +306,12 @@ class StudentDetailPage(QWidget):
 
         # Documents
         self.documents_widget.set_student(student.id)
+
+    def _populate_financial(self, student_id: int) -> None:
+        self.financial_tab.set_student(student_id)
+
+    def _populate_attendance(self, student_id: int) -> None:  # <-- THÊM
+        self.attendance_widget.set_student(student_id)
 
     def _load_parents(self, student_id: int) -> None:
         self._clear_parents()
@@ -356,7 +414,9 @@ class StudentDetailPage(QWidget):
         if self._current_student_id is not None:
             try:
                 student = self._student_service.get_student(self._current_student_id)
-                self._populate_all(student)
+                self._populate_profile(student)
+                self._populate_financial(self._current_student_id)
+                self._populate_attendance(self._current_student_id)  # <-- THÊM
             except Exception as e:
                 logger.exception("Error refreshing student data")
             self.student_updated.emit()

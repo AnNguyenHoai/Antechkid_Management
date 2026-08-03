@@ -32,7 +32,7 @@ class Class(Base, TimestampMixin):
     capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=20)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
+    fee: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)  # Course fee in VND
     # Relationships
     sessions: Mapped[List[Session]] = relationship("Session", back_populates="class_", cascade="all, delete-orphan")
     teachers: Mapped[List[Teacher]] = relationship(

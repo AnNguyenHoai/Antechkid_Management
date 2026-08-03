@@ -37,6 +37,9 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        # Admin luôn có mọi quyền (bỏ qua kiểm tra chi tiết)
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_permission(permission_name)
 
     def has_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> bool:
@@ -44,6 +47,8 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_any_permission(permission_names)
 
     def has_all_permissions(self, permission_names: List[str], user: Optional[User] = None) -> bool:
@@ -51,6 +56,8 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_all_permissions(permission_names)
 
     def require_permission(self, permission_name: str, user: Optional[User] = None) -> None:
@@ -66,7 +73,7 @@ class PermissionService:
             user = get_current_user()
         if user is None or user.role is None:
             return set()
-        return user.role.permission_names  # sử dụng property mới
+        return user.role.permission_names
 
     def get_user_role(self, user: Optional[User] = None) -> Optional[str]:
         if user is None:

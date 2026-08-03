@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 IncomeService - business logic for Income entity.
+Now supports income without student/class.
 """
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
@@ -64,7 +65,7 @@ class IncomeService:
         return income_type
 
     def _validate_payment_method(self, payment_method: str) -> str:
-        valid = ["Cash", "Bank Transfer"]
+        valid = ["Cash", "Bank Transfer", "TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]
         if payment_method not in valid:
             raise IncomeValidationError(f"Payment method must be one of: {', '.join(valid)}")
         return payment_method
@@ -77,25 +78,19 @@ class IncomeService:
     @require_permission("finance.income.create")
     def create_income(
         self,
-        student_id: int,
-        class_id: int,
         amount: float,
         income_type: str,
         payment_method: str,
         payment_date: date,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
         payment_period: Optional[str] = None,
         received_by: Optional[str] = None,
         note: Optional[str] = None,
     ) -> Income:
-        # Validate student exists
-        student = self._student_service.get_student(student_id)
-        # Validate class exists
-        class_obj = self._class_service.get_class(class_id)
-
-        # Tạm thời bỏ kiểm tra enrollment để tránh lỗi (có thể mở lại sau)
-        # if not self._check_student_enrolled(student_id, class_id):
-        #     raise IncomeValidationError("Student is not enrolled in the selected class.")
-
+        """
+        Create an income record. If student_id and class_id are None, treat as other income source.
+        """
         # Validate fields
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
@@ -105,6 +100,17 @@ class IncomeService:
         payment_period = self._normalize_text(payment_period)
         received_by = self._normalize_text(received_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
+
+        # Validate student/class if provided
+        if student_id is not None:
+            self._student_service.get_student(student_id)  # raises if not found
+        if class_id is not None:
+            self._class_service.get_class(class_id)  # raises if not found
+
+        # If both student and class are provided, check enrollment
+        if student_id is not None and class_id is not None:
+            if not self._check_student_enrolled(student_id, class_id):
+                raise IncomeValidationError("Student is not enrolled in the selected class.")
 
         with self._session_factory() as session:
             repo = IncomeRepository(session)
@@ -123,21 +129,27 @@ class IncomeService:
             session.commit()
             session.refresh(income)
 
-            # Log timeline event
-            self._timeline_service.log_event(
-                student_id=student_id,
-                event_type=TimelineEventType.INCOME_CREATED,
-                title=f"Income Created: {income_type}",
-                description=f"Amount: {amount:,.0f} VND, Payment Method: {payment_method}, Class: {class_obj.name}, Period: {payment_period or 'N/A'}",
-                metadata={
-                    "income_id": income.id,
-                    "class_id": class_id,
-                    "amount": amount,
-                    "income_type": income_type,
-                    "payment_method": payment_method,
-                    "payment_period": payment_period,
-                }
-            )
+            # Log timeline if student exists
+            if student_id is not None:
+                class_name = self._class_service.get_class(class_id).name if class_id else "N/A"
+                self._timeline_service.log_event(
+                    student_id=student_id,
+                    event_type=TimelineEventType.INCOME_CREATED,
+                    title=f"Income Created: {income_type}",
+                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {payment_period or 'N/A'}",
+                    metadata={
+                        "income_id": income.id,
+                        "class_id": class_id,
+                        "amount": amount,
+                        "income_type": income_type,
+                        "payment_method": payment_method,
+                        "payment_period": payment_period,
+                    }
+                )
+            else:
+                # Optionally log to system timeline if you have one
+                pass
+
             return income
 
     @require_permission("finance.view")
@@ -162,7 +174,7 @@ class IncomeService:
         search_text: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
-    ) -> tuple[List[Income], int]:
+    ) -> Tuple[List[Income], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
             repo = IncomeRepository(session)
@@ -242,14 +254,15 @@ class IncomeService:
             session.commit()
             session.refresh(income)
 
-            # Log timeline
-            self._timeline_service.log_event(
-                student_id=income.student_id,
-                event_type=TimelineEventType.INCOME_UPDATED,
-                title="Income Updated",
-                description="Updated: " + "; ".join(changed),
-                metadata={"income_id": income.id, "changes": changed}
-            )
+            # Log timeline if student exists
+            if income.student_id is not None:
+                self._timeline_service.log_event(
+                    student_id=income.student_id,
+                    event_type=TimelineEventType.INCOME_UPDATED,
+                    title="Income Updated",
+                    description="Updated: " + "; ".join(changed),
+                    metadata={"income_id": income.id, "changes": changed}
+                )
             return income
 
     @require_permission("finance.income.delete")
@@ -265,11 +278,12 @@ class IncomeService:
             income.deleted_at = datetime.now()
             session.commit()
 
-            # Log timeline
-            self._timeline_service.log_event(
-                student_id=student_id,
-                event_type=TimelineEventType.INCOME_DELETED,
-                title="Income Deleted",
-                description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
-                metadata={"income_id": income_id}
-            )
+            # Log timeline if student exists
+            if student_id is not None:
+                self._timeline_service.log_event(
+                    student_id=student_id,
+                    event_type=TimelineEventType.INCOME_DELETED,
+                    title="Income Deleted",
+                    description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
+                    metadata={"income_id": income_id}
+                )

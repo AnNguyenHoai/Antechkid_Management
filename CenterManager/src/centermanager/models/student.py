@@ -15,6 +15,7 @@ from centermanager.models.mixins import TimestampMixin
 
 from centermanager.models.note import Note
 from centermanager.models.document import Document
+from centermanager.models.attendance import Attendance
 
 if TYPE_CHECKING:
     from centermanager.models.parent import Parent
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from centermanager.models.student_highlight import StudentHighlight
     from centermanager.models.note import Note
     from centermanager.models.document import Document
-
+    from centermanager.models.attendance import Attendance
 
 class Student(Base, TimestampMixin):
     __tablename__ = "students"
@@ -43,7 +44,8 @@ class Student(Base, TimestampMixin):
     enrollment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)   # NEW
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)              # legacy free-text notes
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
+    # trong class Student, thêm dòng:
+    attendances: Mapped[List[Attendance]] = relationship("Attendance", back_populates="student")
     # Relationships
     parents: Mapped[List[Parent]] = relationship(
         "Parent",
