@@ -2,6 +2,7 @@
 """
 StudentHighlightWidget - Compact UI for adding/viewing student highlights.
 Each highlight occupies only one line.
+Fixed: combo box default empty, empty state shows correctly.
 """
 import logging
 from typing import List, Optional
@@ -49,7 +50,9 @@ class StudentHighlightWidget(QWidget):
 
         self.student_combo = QComboBox()
         self.student_combo.setMinimumWidth(150)
+        self.student_combo.addItem("Select student...", None)  # placeholder
         self._load_students()
+        self.student_combo.setCurrentIndex(0)  # placeholder
         form_row.addWidget(self.student_combo)
 
         self.type_combo = QComboBox()
@@ -86,11 +89,15 @@ class StudentHighlightWidget(QWidget):
         layout.addWidget(self.list_widget)
 
     def _load_students(self) -> None:
+        """Load students into combo box, keeping placeholder at index 0."""
         try:
             students = self._student_service.list_students()
-            self.student_combo.clear()
+            # Keep the placeholder at index 0
+            while self.student_combo.count() > 1:
+                self.student_combo.removeItem(1)
             for s in students:
                 self.student_combo.addItem(f"{s.full_name} ({s.student_code})", s.id)
+            self.student_combo.setCurrentIndex(0)  # placeholder
         except Exception as e:
             logger.exception("Error loading students")
 
@@ -105,7 +112,7 @@ class StudentHighlightWidget(QWidget):
     def _update_list(self) -> None:
         self.list_widget.clear()
         if not self._highlights:
-            # Empty state (inline)
+            # Empty state
             empty_item = QListWidgetItem("No highlights yet")
             empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -182,7 +189,7 @@ class StudentHighlightWidget(QWidget):
         highlight_type = self.type_combo.currentData()
         title = self.title_edit.text().strip()
 
-        if not student_id:
+        if student_id is None:
             QMessageBox.warning(self, "Error", "Please select a student.")
             return
         if not highlight_type:
@@ -198,7 +205,7 @@ class StudentHighlightWidget(QWidget):
                 student_id=student_id,
                 highlight_type=highlight_type,
                 title=title,
-                description=None,  # optional, can be added later
+                description=None,
             )
             self.title_edit.clear()
             self._load_highlights()

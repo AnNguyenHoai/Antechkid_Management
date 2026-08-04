@@ -139,3 +139,10 @@ class ClassWorkspaceShell(QWidget):
     def _on_class_updated(self) -> None:
         self.list_page.refresh()
         self.attendance_updated.emit()
+
+    def show_class(self, class_id: int) -> None:
+        self._current_class_id = class_id
+        self.detail_page.load_class(class_id)
+        self.content_stack.setCurrentWidget(self.detail_page)
+        self.nav.set_active_page("classes")
+        self.header.set_context("Class Workspace", "Class Detail")

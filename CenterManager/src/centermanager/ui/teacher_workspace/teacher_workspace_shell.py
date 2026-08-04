@@ -1,6 +1,8 @@
+# src/centermanager/ui/teacher_workspace/teacher_workspace_shell.py
 # -*- coding: utf-8 -*-
 """
 TeacherWorkspaceShell - main shell for Teacher Workspace.
+Now forwards class_clicked signal to parent.
 """
 from typing import Optional
 
@@ -14,11 +16,12 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.teacher_workspace.teacher_list_page import TeacherListPage
 from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
-from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage  # <-- import
+from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage
 
 
 class TeacherWorkspaceShell(QWidget):
     go_home = Signal()
+    navigate_to_class = Signal(int)  # <-- thêm signal để điều hướng đến class
 
     def __init__(
         self,
@@ -38,7 +41,7 @@ class TeacherWorkspaceShell(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("dashboard")  # <-- mặc định dashboard
+        self.navigate_to("dashboard")
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -91,6 +94,7 @@ class TeacherWorkspaceShell(QWidget):
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.teacher_updated.connect(self._on_teacher_updated)
+        self.detail_page.class_clicked.connect(self.navigate_to_class.emit)  # <-- forward signal
         self.content_stack.addWidget(self.detail_page)
 
         body.addWidget(self.content_stack, 1)

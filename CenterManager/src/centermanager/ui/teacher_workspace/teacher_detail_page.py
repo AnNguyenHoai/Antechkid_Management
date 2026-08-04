@@ -1,6 +1,8 @@
+# src/centermanager/ui/teacher_workspace/teacher_detail_page.py
 # -*- coding: utf-8 -*-
 """
 TeacherDetailPage - full teacher profile.
+Now with clickable class names to navigate to class detail.
 """
 import logging
 from typing import Optional
@@ -8,7 +10,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMessageBox
+    QScrollArea, QFrame, QSizePolicy, QMessageBox, QButtonGroup
 )
 
 from centermanager.models.teacher import Teacher
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 class TeacherDetailPage(QWidget):
     back_clicked = Signal()
     teacher_updated = Signal()
+    class_clicked = Signal(int)  # <-- thêm signal khi click vào một lớp
 
     def __init__(
         self,
@@ -127,17 +130,17 @@ class TeacherDetailPage(QWidget):
         ])
         container_layout.addWidget(self.professional_widget)
 
-        # Assigned Classes - Read-only (loại bỏ nút "Manage Assignments")
+        # Assigned Classes - now clickable buttons
         self.classes_widget = QWidget()
         classes_layout = QVBoxLayout(self.classes_widget)
         classes_layout.setContentsMargins(0, 0, 0, 0)
-        # Chỉ hiển thị tiêu đề, không có nút hành động
-        classes_header = SectionHeader("Assigned Classes")  # Không có action_text
+        classes_header = SectionHeader("Assigned Classes")
         classes_layout.addWidget(classes_header)
-        self.classes_list_label = QLabel("No classes assigned.")
-        self.classes_list_label.setWordWrap(True)
-        self.classes_list_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']}; padding: 8px 0;")
-        classes_layout.addWidget(self.classes_list_label)
+        self.classes_container = QWidget()
+        self.classes_container_layout = QVBoxLayout(self.classes_container)
+        self.classes_container_layout.setSpacing(SPACING['sm'])
+        self.classes_container_layout.setContentsMargins(0, 0, 0, 0)
+        classes_layout.addWidget(self.classes_container)
         container_layout.addWidget(self.classes_widget)
 
         # Documents
@@ -237,12 +240,8 @@ class TeacherDetailPage(QWidget):
         self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
         self._field_1.setText(teacher.status or "-")
 
-        # Assigned classes (read-only)
-        if teacher.assigned_classes:
-            class_names = [c.name for c in teacher.assigned_classes]
-            self.classes_list_label.setText(" • " + "\n • ".join(class_names))
-        else:
-            self.classes_list_label.setText("No classes assigned.")
+        # Assigned classes - clickable buttons
+        self._update_classes(teacher.assigned_classes)
 
         # Documents
         self.documents_widget.set_teacher(teacher.id)
@@ -250,6 +249,40 @@ class TeacherDetailPage(QWidget):
         # Timeline
         events = self._timeline_service.get_teacher_timeline(teacher.id)
         self.timeline_widget.set_events(events)
+
+    def _update_classes(self, classes) -> None:
+        # Xóa nội dung cũ
+        while self.classes_container_layout.count():
+            child = self.classes_container_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        if not classes:
+            label = QLabel("No classes assigned.")
+            label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']}; padding: 8px 0;")
+            self.classes_container_layout.addWidget(label)
+            return
+
+        for cls in classes:
+            btn = QPushButton(f"📚 {cls.name}")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left;
+                    background: {COLORS['surface_hover']};
+                    border: 1px solid {COLORS['border_light']};
+                    border-radius: 4px;
+                    padding: 8px 12px;
+                    font-size: 14px;
+                    color: {COLORS['primary']};
+                }}
+                QPushButton:hover {{
+                    background: {COLORS['primary_hover']};
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, cid=cls.id: self.class_clicked.emit(cid))
+            self.classes_container_layout.addWidget(btn)
 
     def _on_edit(self) -> None:
         if self._current_teacher_id is None:

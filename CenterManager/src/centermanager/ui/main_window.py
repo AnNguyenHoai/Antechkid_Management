@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
             timeline_service=self._teacher_timeline_service,
         )
         self.teacher_workspace.go_home.connect(self._go_home)
+        self.teacher_workspace.navigate_to_class.connect(self._on_navigate_to_class)  # <-- thêm
         self.central_stack.addWidget(self.teacher_workspace)
 
         # Class Workspace
@@ -239,3 +240,9 @@ class MainWindow(QMainWindow):
 
     def _on_go_to_finance(self) -> None:
         self._on_workspace_selected("finance")
+    def _on_navigate_to_class(self, class_id: int) -> None:
+        """Switch to Class Workspace and show the specified class."""
+        # Chuyển sang Class Workspace
+        self._on_workspace_selected("class")
+        # Gọi method show_class trong ClassWorkspaceShell
+        self.class_workspace.show_class(class_id)
