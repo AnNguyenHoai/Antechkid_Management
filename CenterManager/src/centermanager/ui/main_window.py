@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
-
+        self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         # Teacher Workspace
         self.teacher_workspace = TeacherWorkspaceShell(
             teacher_service=self._teacher_service,
@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
             outstanding_service=self._outstanding_service,
         )
         self.finance_workspace.go_home.connect(self._go_home)
+        self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         self.central_stack.addWidget(self.finance_workspace)
 
         self.central_stack.setCurrentWidget(self.home_page)
@@ -235,3 +236,5 @@ class MainWindow(QMainWindow):
     def _on_attendance_updated(self) -> None:
         """Refresh student detail when attendance is updated from class workspace."""
         self.student_workspace.refresh_current_student()
+    def _on_go_to_finance(self) -> None:
+        self._on_workspace_selected("finance")

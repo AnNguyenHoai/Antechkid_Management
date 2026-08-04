@@ -58,16 +58,20 @@ class ExpenseFormDialog(QDialog):
         self.desc_edit.setMaximumHeight(80)
         form.addRow("Description *", self.desc_edit)
 
-        # Amount
+        # Amount with improved UX
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0.01, 999999999.99)
         self.amount_spin.setPrefix("VND ")
         self.amount_spin.setDecimals(0)
+        self.amount_spin.setValue(0.00)
+        self.amount_spin.lineEdit().setPlaceholderText("0")
+        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
+        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Amount *", self.amount_spin)
 
         # Payment Method
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["","TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"])
+        self.method_combo.addItems(["TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"])
         form.addRow("Payment Method *", self.method_combo)
 
         # Payment Date
@@ -84,7 +88,7 @@ class ExpenseFormDialog(QDialog):
 
         # Status
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["","ĐÃ HOÀN TRẢ", "CHƯA HOÀN TRẢ"])
+        self.status_combo.addItems(["ĐÃ HOÀN TRẢ", "CHƯA HOÀN TRẢ"])
         form.addRow("Status", self.status_combo)
 
         # Note
@@ -108,6 +112,19 @@ class ExpenseFormDialog(QDialog):
 
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def _on_amount_focus_in(self, event):
+        spin = self.amount_spin
+        if spin.value() == 0:
+            spin.lineEdit().clear()
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusInEvent(event)
+
+    def _on_amount_focus_out(self, event):
+        spin = self.amount_spin
+        text = spin.lineEdit().text().strip()
+        if text == "":
+            spin.setValue(0)
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusOutEvent(event)
 
     def _load_expense(self):
         try:
@@ -136,6 +153,9 @@ class ExpenseFormDialog(QDialog):
         category = self.category_combo.currentText()
         description = self.desc_edit.toPlainText().strip()
         amount = self.amount_spin.value()
+        if amount <= 0:
+            QMessageBox.warning(self, "Error", "Amount must be greater than 0.")
+            return
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         paid_by = self.paid_by_edit.text().strip() or None

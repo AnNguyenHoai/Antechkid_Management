@@ -65,7 +65,7 @@ class IncomeService:
         return income_type
 
     def _validate_payment_method(self, payment_method: str) -> str:
-        valid = ["Cash", "Bank Transfer", "TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]
+        valid = ["Cash", "Bank Transfer"]
         if payment_method not in valid:
             raise IncomeValidationError(f"Payment method must be one of: {', '.join(valid)}")
         return payment_method

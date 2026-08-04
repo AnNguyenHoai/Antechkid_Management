@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 IncomeFormDialog - create or edit income, supporting both student and other sources.
+Now with improved amount input UX (clear on focus, restore on blur if empty).
 """
 import logging
 from datetime import date
@@ -70,7 +71,7 @@ class IncomeFormDialog(QDialog):
 
         # ---- Other source description ----
         self.other_source_edit = QLineEdit()
-        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng, Tiền bán đồ cũ...")
+        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng...")
         self.other_source_edit.setVisible(False)
         form.addRow("Mô tả nguồn khác", self.other_source_edit)
 
@@ -80,10 +81,16 @@ class IncomeFormDialog(QDialog):
             self.type_combo.addItem(t)
         form.addRow("Loại thu *", self.type_combo)
 
+        # Amount with improved UX
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0.01, 999999999.99)
         self.amount_spin.setPrefix("VND ")
         self.amount_spin.setDecimals(0)
+        self.amount_spin.setValue(0.00)
+        # Clear on focus, restore 0 on blur if empty
+        self.amount_spin.lineEdit().setPlaceholderText("0")
+        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
+        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Số tiền *", self.amount_spin)
 
         self.method_combo = QComboBox()
@@ -135,8 +142,23 @@ class IncomeFormDialog(QDialog):
         # Initial state
         self._on_source_changed(0)
 
+    def _on_amount_focus_in(self, event):
+        """Clear amount field when focused."""
+        spin = self.amount_spin
+        if spin.value() == 0:
+            spin.lineEdit().clear()
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusInEvent(event)
+
+    def _on_amount_focus_out(self, event):
+        """Restore 0 if amount is empty or blank."""
+        spin = self.amount_spin
+        text = spin.lineEdit().text().strip()
+        if text == "":
+            spin.setValue(0)
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusOutEvent(event)
+
     def _on_source_changed(self, index: int) -> None:
-        is_student = (index == 0)  # "Từ học sinh"
+        is_student = (index == 0)
         self.student_combo.setVisible(is_student)
         self.class_combo.setVisible(is_student)
         self.other_source_edit.setVisible(not is_student)
@@ -170,7 +192,7 @@ class IncomeFormDialog(QDialog):
             income = self._income_service.get_income(self._income_id)
             # Source
             if income.student_id is not None:
-                self.source_combo.setCurrentIndex(0)  # "Từ học sinh"
+                self.source_combo.setCurrentIndex(0)
                 idx = self.student_combo.findData(income.student_id)
                 if idx >= 0:
                     self.student_combo.setCurrentIndex(idx)
@@ -178,7 +200,7 @@ class IncomeFormDialog(QDialog):
                 if idx2 >= 0:
                     self.class_combo.setCurrentIndex(idx2)
             else:
-                self.source_combo.setCurrentIndex(1)  # "Nguồn khác"
+                self.source_combo.setCurrentIndex(1)
                 self.other_source_edit.setText(income.note or "")
             self._on_source_changed(self.source_combo.currentIndex())
 
@@ -200,7 +222,7 @@ class IncomeFormDialog(QDialog):
                     self.period_combo.addItem(income.payment_period, income.payment_period)
                     self.period_combo.setCurrentIndex(self.period_combo.count() - 1)
             self.received_by_edit.setText(income.received_by or "")
-            # For other source, note is used for description
+            # Note
             if income.student_id is None:
                 self.note_edit.setText("")  # note will be saved as description
             else:
@@ -219,7 +241,7 @@ class IncomeFormDialog(QDialog):
             if not student_id or not class_id:
                 QMessageBox.warning(self, "Lỗi", "Vui lòng chọn học sinh và lớp học.")
                 return
-        else:  # "Nguồn khác"
+        else:
             student_id = None
             class_id = None
             description = self.other_source_edit.text().strip()
@@ -227,13 +249,15 @@ class IncomeFormDialog(QDialog):
                 QMessageBox.warning(self, "Lỗi", "Vui lòng nhập mô tả nguồn thu.")
                 return
             note = f"Nguồn khác: {description}"
-            # Optionally, allow user to add extra note
             extra_note = self.note_edit.text().strip()
             if extra_note:
                 note += f" ({extra_note})"
 
         income_type = self.type_combo.currentText()
         amount = self.amount_spin.value()
+        if amount <= 0:
+            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
+            return
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         payment_period = self.period_combo.currentData() or None

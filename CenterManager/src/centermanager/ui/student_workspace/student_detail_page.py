@@ -55,7 +55,8 @@ logger = logging.getLogger(__name__)
 class StudentDetailPage(QWidget):
     back_clicked = Signal()
     student_updated = Signal()
-
+    go_to_finance = Signal()
+    
     def __init__(
         self,
         student_service: StudentService,
@@ -147,6 +148,7 @@ class StudentDetailPage(QWidget):
             self._outstanding_service,
             parent=self
         )
+        self.financial_tab.open_finance_clicked.connect(self._on_open_finance)
         self.tab_widget.addTab(self.financial_tab, "💰 Financial")
 
         # Tab 3: Attendance
@@ -157,6 +159,12 @@ class StudentDetailPage(QWidget):
         self.tab_widget.addTab(self.attendance_widget, "📋 Attendance")
 
         main_layout.addWidget(self.tab_widget)
+
+    def _on_open_finance(self) -> None:
+        """Switch to Finance Workspace when user clicks 'Open Finance'."""
+        # Emit signal to parent (StudentWorkspaceShell) to switch workspace
+        # We'll use a signal from StudentDetailPage to parent
+        self.go_to_finance.emit()
 
     def _create_profile_tab(self) -> QWidget:
         """Create the profile tab content."""

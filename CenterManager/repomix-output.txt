@@ -249,7 +249,6 @@ src/
         tokens.py
       finance_workspace/
         __init__.py
-        collect_tuition_dialog.py
         expense_detail_dialog.py
         expense_form_dialog.py
         expense_list_page.py
@@ -19651,10 +19650,11 @@ File: src/centermanager/repositories/attendance_repository.py
 ================
 # -*- coding: utf-8 -*-
 from typing import List, Optional, Dict
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func
 
 from centermanager.models.attendance import Attendance
+from centermanager.models.session import Session  # Import Session để dùng trong joinedload
 from centermanager.repositories.base import BaseRepository
 
 
@@ -19665,6 +19665,9 @@ class AttendanceRepository(BaseRepository[Attendance]):
     def get_by_session(self, session_id: int) -> List[Attendance]:
         return (
             self._session.query(Attendance)
+            .options(
+                joinedload(Attendance.session).joinedload(Session.class_)
+            )
             .filter(Attendance.session_id == session_id)
             .order_by(Attendance.student_id)
             .all()
@@ -19673,6 +19676,9 @@ class AttendanceRepository(BaseRepository[Attendance]):
     def get_by_student(self, student_id: int) -> List[Attendance]:
         return (
             self._session.query(Attendance)
+            .options(
+                joinedload(Attendance.session).joinedload(Session.class_)
+            )
             .filter(Attendance.student_id == student_id)
             .order_by(desc(Attendance.created_at))
             .all()
@@ -19681,6 +19687,9 @@ class AttendanceRepository(BaseRepository[Attendance]):
     def get_by_session_and_student(self, session_id: int, student_id: int) -> Optional[Attendance]:
         return (
             self._session.query(Attendance)
+            .options(
+                joinedload(Attendance.session).joinedload(Session.class_)
+            )
             .filter(
                 Attendance.session_id == session_id,
                 Attendance.student_id == student_id
@@ -22484,7 +22493,7 @@ class IncomeService:
         return income_type
 
     def _validate_payment_method(self, payment_method: str) -> str:
-        valid = ["Cash", "Bank Transfer", "TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]
+        valid = ["Cash", "Bank Transfer"]
         if payment_method not in valid:
             raise IncomeValidationError(f"Payment method must be one of: {', '.join(valid)}")
         return payment_method
@@ -22720,6 +22729,7 @@ import logging
 from typing import List, Optional, Tuple, Dict
 
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import or_
 
 from centermanager.dto.outstanding_dto import OutstandingDTO, StudentOutstandingSummary
 from centermanager.repositories.student_repository import StudentRepository
@@ -22728,6 +22738,7 @@ from centermanager.repositories.enrollment_repository import EnrollmentRepositor
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
+from centermanager.models.student import Student
 
 logger = logging.getLogger(__name__)
 
@@ -22774,13 +22785,18 @@ class OutstandingService:
                     Enrollment.class_id == class_id
                 ).first()
                 if enrollment is None:
+                    logger.warning(f"No enrollment found for student {student_id}, class {class_id}")
                     return None
 
             # Get class
             class_repo = ClassRepository(session)
             class_obj = class_repo.get_by_id(class_id)
-            if class_obj is None or class_obj.fee is None or class_obj.fee == 0:
+            if class_obj is None:
+                logger.warning(f"Class {class_id} not found")
+                return None
+            if class_obj.fee is None or class_obj.fee == 0:
                 # No fee defined, skip
+                logger.debug(f"Class {class_id} has no fee, skipping")
                 return None
 
             expected = class_obj.fee
@@ -22790,6 +22806,7 @@ class OutstandingService:
             student_repo = StudentRepository(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
+                logger.warning(f"Student {student_id} not found")
                 return None
 
             return OutstandingDTO.create(
@@ -22816,9 +22833,8 @@ class OutstandingService:
         """
         with self._session_factory() as session:
             enroll_repo = EnrollmentRepository(session)
-            query = session.query(Enrollment).filter(
-                Enrollment.status == "active"  # or 'ACTIVE'
-            )
+            # Lấy tất cả enrollment (không filter status để lấy cả inactive nếu có)
+            query = session.query(Enrollment).filter(Enrollment.class_id.isnot(None))
 
             # Filter by class
             if class_id is not None:
@@ -22826,16 +22842,17 @@ class OutstandingService:
 
             # Filter by search text (student name/code)
             if search_text:
-                from sqlalchemy import or_
+                search = f"%{search_text}%"
                 query = query.join(Enrollment.student).filter(
                     or_(
-                        Student.full_name.ilike(f"%{search_text}%"),
-                        Student.student_code.ilike(f"%{search_text}%")
+                        Student.full_name.ilike(search),
+                        Student.student_code.ilike(search)
                     )
                 )
 
             total = query.count()
             enrollments = query.offset(offset).limit(limit).all()
+            logger.debug(f"Found {len(enrollments)} enrollments (total {total})")
 
             results = []
             for enrollment in enrollments:
@@ -22861,6 +22878,7 @@ class OutstandingService:
             student_repo = StudentRepository(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
+                logger.warning(f"Student {student_id} not found")
                 return None
 
             enroll_repo = EnrollmentRepository(session)
@@ -23188,6 +23206,9 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        # Admin luôn có mọi quyền (bỏ qua kiểm tra chi tiết)
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_permission(permission_name)
 
     def has_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> bool:
@@ -23195,6 +23216,8 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_any_permission(permission_names)
 
     def has_all_permissions(self, permission_names: List[str], user: Optional[User] = None) -> bool:
@@ -23202,6 +23225,8 @@ class PermissionService:
             user = get_current_user()
         if user is None:
             return False
+        if user.role and user.role.name == RoleDefinitions.ADMIN:
+            return True
         return user.has_all_permissions(permission_names)
 
     def require_permission(self, permission_name: str, user: Optional[User] = None) -> None:
@@ -23217,7 +23242,7 @@ class PermissionService:
             user = get_current_user()
         if user is None or user.role is None:
             return set()
-        return user.role.permission_names  # sử dụng property mới
+        return user.role.permission_names
 
     def get_user_role(self, user: Optional[User] = None) -> Optional[str]:
         if user is None:
@@ -26424,7 +26449,7 @@ class AttendanceWidget(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setDefaultSectionSize(40)  # Tăng chiều cao để chứa QLineEdit
+        self.table.verticalHeader().setDefaultSectionSize(40)
         layout.addWidget(self.table)
 
         # Summary
@@ -26433,6 +26458,7 @@ class AttendanceWidget(QWidget):
         layout.addWidget(self.summary_label)
 
     def _show_empty(self):
+        self.table.clearSpans()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No sessions available"))
         self.table.setSpan(0, 0, 1, 4)
@@ -26440,6 +26466,7 @@ class AttendanceWidget(QWidget):
         self.session_combo.clear()
 
     def _show_no_students(self):
+        self.table.clearSpans()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No students enrolled in this class"))
         self.table.setSpan(0, 0, 1, 4)
@@ -26496,12 +26523,15 @@ class AttendanceWidget(QWidget):
             att_map = {a.student_id: a for a in attendances}
             self._populate_table(att_map)
             self._update_summary(attendances)
+            logger.info(f"Loaded attendance for session {session_id}: {len(attendances)} records")
         except Exception as e:
             logger.exception("Failed to load attendance")
             QMessageBox.warning(self, "Error", f"Could not load attendance data: {str(e)}")
             self._show_no_students()
 
     def _populate_table(self, att_map: Dict[int, any]):
+        # Xóa span cũ trước khi điền dữ liệu
+        self.table.clearSpans()
         self.table.setRowCount(len(self._students))
         self._status_combos.clear()
         self._time_edits.clear()
@@ -26532,7 +26562,6 @@ class AttendanceWidget(QWidget):
             time_edit = QLineEdit()
             time_edit.setPlaceholderText("HH:MM")
             if att and att.arrival_time:
-                # att.arrival_time có thể là string hoặc time object
                 time_edit.setText(str(att.arrival_time))
             self.table.setCellWidget(row, 2, time_edit)
             self._time_edits[row] = time_edit
@@ -26576,7 +26605,6 @@ class AttendanceWidget(QWidget):
             if row < len(self._students):
                 student = self._students[row]
                 status = combo.currentText()
-                # Lấy arrival time và teacher note từ QLineEdit
                 arrival_time = self._time_edits.get(row, QLineEdit()).text().strip() or None
                 teacher_note = self._note_edits.get(row, QLineEdit()).text().strip() or None
                 student_statuses[student.id] = {
@@ -26590,19 +26618,30 @@ class AttendanceWidget(QWidget):
             return
 
         try:
-            # Cập nhật từng học sinh với đầy đủ thông tin
+            # Cập nhật từng học sinh
+            success_count = 0
             for student_id, data in student_statuses.items():
-                self._attendance_service.create_or_update_attendance(
-                    session_id=self._current_session_id,
-                    student_id=student_id,
-                    status=data["status"],
-                    arrival_time=data["arrival_time"],
-                    teacher_note=data["teacher_note"]
-                )
-            QMessageBox.information(self, "Success", "Attendance saved successfully.")
-            self.attendance_changed.emit()
-            # Reload để cập nhật summary và hiển thị mới
-            self._load_attendance(self._current_session_id)
+                try:
+                    self._attendance_service.create_or_update_attendance(
+                        session_id=self._current_session_id,
+                        student_id=student_id,
+                        status=data["status"],
+                        arrival_time=data["arrival_time"],
+                        teacher_note=data["teacher_note"]
+                    )
+                    success_count += 1
+                except ValueError as e:
+                    logger.warning(f"Failed to save attendance for student {student_id}: {e}")
+                    # Hiển thị lỗi nhưng tiếp tục với các student khác
+                    QMessageBox.warning(self, "Attendance Error", f"Student {student_id}: {str(e)}")
+
+            if success_count > 0:
+                QMessageBox.information(self, "Success", f"Saved attendance for {success_count} students.")
+                self.attendance_changed.emit()
+                # Reload để cập nhật summary và hiển thị mới
+                self._load_attendance(self._current_session_id)
+            else:
+                QMessageBox.critical(self, "Error", "No attendance records were saved.")
         except Exception as e:
             logger.exception("Failed to save attendance")
             QMessageBox.critical(self, "Error", str(e))
@@ -29688,7 +29727,7 @@ from .finance_dashboard_page import FinanceDashboardPage
 from .income_list_page import IncomeListPage
 from .income_form_dialog import IncomeFormDialog
 from .income_detail_dialog import IncomeDetailDialog
-from .collect_tuition_dialog import CollectTuitionDialog
+# from .collect_tuition_dialog import CollectTuitionDialog
 from .expense_list_page import ExpenseListPage
 from .expense_form_dialog import ExpenseFormDialog
 from .expense_detail_dialog import ExpenseDetailDialog
@@ -29703,197 +29742,6 @@ __all__ = [
     "StudentFinancialWidget",
     "CollectTuitionDialog",
 ]
-
-================
-File: src/centermanager/ui/finance_workspace/collect_tuition_dialog.py
-================
-# -*- coding: utf-8 -*-
-"""
-CollectTuitionDialog - dialog for collecting tuition from student detail.
-"""
-import logging
-from typing import Optional
-from datetime import date
-
-from PySide6.QtCore import Qt, QDate
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
-    QComboBox, QDoubleSpinBox, QPushButton, QHBoxLayout,
-    QMessageBox, QLabel, QWidget
-)
-
-from centermanager.services.income_service import IncomeService, IncomeValidationError
-from centermanager.services.student_service import StudentService
-from centermanager.services.class_service import ClassService
-from centermanager.services.permission_service import PermissionService
-from centermanager.core.current_user import get_current_user
-
-logger = logging.getLogger(__name__)
-
-
-class CollectTuitionDialog(QDialog):
-    def __init__(
-        self,
-        income_service: IncomeService,
-        student_service: StudentService,
-        class_service: ClassService,
-        permission_service: PermissionService,
-        student_id: int,
-        parent: Optional[QWidget] = None
-    ) -> None:
-        super().__init__(parent)
-        self._income_service = income_service
-        self._student_service = student_service
-        self._class_service = class_service
-        self._permission_service = permission_service
-        self._student_id = student_id
-
-        self.setWindowTitle("Collect Tuition")
-        self.setMinimumWidth(500)
-        self.setModal(True)
-
-        self._setup_ui()
-        self._load_student_info()
-
-    def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-
-        form = QFormLayout()
-        form.setSpacing(8)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-
-        # Student (read-only)
-        self.student_label = QLabel()
-        self.student_label.setStyleSheet("font-weight: bold;")
-        form.addRow("Student:", self.student_label)
-
-        # Class (auto-filter enrolled classes)
-        self.class_combo = QComboBox()
-        self._load_classes()
-        form.addRow("Class *", self.class_combo)
-
-        # Income Type
-        self.type_combo = QComboBox()
-        for t in ["Tuition", "Book", "Robot Kit", "Material", "Other"]:
-            self.type_combo.addItem(t)
-        self.type_combo.setCurrentText("Tuition")
-        form.addRow("Income Type *", self.type_combo)
-
-        # Amount
-        self.amount_spin = QDoubleSpinBox()
-        self.amount_spin.setRange(0.01, 999999999.99)
-        self.amount_spin.setPrefix("VND ")
-        self.amount_spin.setDecimals(0)
-        form.addRow("Amount *", self.amount_spin)
-
-        # Payment Method
-        self.method_combo = QComboBox()
-        self.method_combo.addItems(["Cash", "Bank Transfer"])
-        form.addRow("Payment Method *", self.method_combo)
-
-        # Payment Date
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("dd/MM/yyyy")
-        self.date_edit.setDate(QDate.currentDate())
-        form.addRow("Payment Date *", self.date_edit)
-
-        # Received By (auto-filled)
-        self.received_by_edit = QLineEdit()
-        current_user = get_current_user()
-        if current_user:
-            self.received_by_edit.setText(current_user.full_name)
-        self.received_by_edit.setPlaceholderText("Received by")
-        form.addRow("Received By", self.received_by_edit)
-
-        # Note
-        self.note_edit = QLineEdit()
-        self.note_edit.setPlaceholderText("Optional note")
-        form.addRow("Note", self.note_edit)
-
-        layout.addLayout(form)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self.collect_btn = QPushButton("💰 Collect")
-        self.collect_btn.setFixedWidth(120)
-        self.collect_btn.setStyleSheet("""
-            QPushButton {
-                background: #1976d2;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #1565c0;
-            }
-        """)
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedWidth(100)
-        btn_layout.addWidget(self.collect_btn)
-        btn_layout.addWidget(self.cancel_btn)
-        layout.addLayout(btn_layout)
-
-        self.collect_btn.clicked.connect(self._collect)
-        self.cancel_btn.clicked.connect(self.reject)
-
-    def _load_student_info(self) -> None:
-        try:
-            student = self._student_service.get_student(self._student_id)
-            self.student_label.setText(f"{student.full_name} ({student.student_code})")
-        except Exception as e:
-            logger.exception("Error loading student")
-            QMessageBox.critical(self, "Error", "Could not load student data.")
-            self.reject()
-
-    def _load_classes(self) -> None:
-        """Load classes that the student is enrolled in."""
-        try:
-            # Get all classes
-            classes = self._class_service.list_classes()
-            self.class_combo.clear()
-            # TODO: Filter only enrolled classes for this student
-            # For now, show all classes
-            for c in classes:
-                self.class_combo.addItem(c.name, c.id)
-        except Exception as e:
-            logger.exception("Error loading classes")
-
-    def _collect(self) -> None:
-        class_id = self.class_combo.currentData()
-        income_type = self.type_combo.currentText()
-        amount = self.amount_spin.value()
-        payment_method = self.method_combo.currentText()
-        payment_date = self.date_edit.date().toPython()
-        received_by = self.received_by_edit.text().strip() or None
-        note = self.note_edit.text().strip() or None
-
-        if not class_id:
-            QMessageBox.warning(self, "Validation Error", "Please select a class.")
-            return
-
-        try:
-            self._income_service.create_income(
-                student_id=self._student_id,
-                class_id=class_id,
-                amount=amount,
-                income_type=income_type,
-                payment_method=payment_method,
-                payment_date=payment_date,
-                received_by=received_by,
-                note=note,
-            )
-            QMessageBox.information(self, "Success", "Tuition collected successfully!")
-            self.accept()
-        except IncomeValidationError as e:
-            QMessageBox.warning(self, "Validation Error", str(e))
-        except Exception as e:
-            logger.exception("Error collecting tuition")
-            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
 
 ================
 File: src/centermanager/ui/finance_workspace/expense_detail_dialog.py
@@ -30044,16 +29892,20 @@ class ExpenseFormDialog(QDialog):
         self.desc_edit.setMaximumHeight(80)
         form.addRow("Description *", self.desc_edit)
 
-        # Amount
+        # Amount with improved UX
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0.01, 999999999.99)
         self.amount_spin.setPrefix("VND ")
         self.amount_spin.setDecimals(0)
+        self.amount_spin.setValue(0.00)
+        self.amount_spin.lineEdit().setPlaceholderText("0")
+        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
+        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Amount *", self.amount_spin)
 
         # Payment Method
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["","TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"])
+        self.method_combo.addItems(["TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"])
         form.addRow("Payment Method *", self.method_combo)
 
         # Payment Date
@@ -30070,7 +29922,7 @@ class ExpenseFormDialog(QDialog):
 
         # Status
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["","ĐÃ HOÀN TRẢ", "CHƯA HOÀN TRẢ"])
+        self.status_combo.addItems(["ĐÃ HOÀN TRẢ", "CHƯA HOÀN TRẢ"])
         form.addRow("Status", self.status_combo)
 
         # Note
@@ -30094,6 +29946,19 @@ class ExpenseFormDialog(QDialog):
 
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def _on_amount_focus_in(self, event):
+        spin = self.amount_spin
+        if spin.value() == 0:
+            spin.lineEdit().clear()
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusInEvent(event)
+
+    def _on_amount_focus_out(self, event):
+        spin = self.amount_spin
+        text = spin.lineEdit().text().strip()
+        if text == "":
+            spin.setValue(0)
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusOutEvent(event)
 
     def _load_expense(self):
         try:
@@ -30122,6 +29987,9 @@ class ExpenseFormDialog(QDialog):
         category = self.category_combo.currentText()
         description = self.desc_edit.toPlainText().strip()
         amount = self.amount_spin.value()
+        if amount <= 0:
+            QMessageBox.warning(self, "Error", "Amount must be greater than 0.")
+            return
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         paid_by = self.paid_by_edit.text().strip() or None
@@ -30886,6 +30754,7 @@ File: src/centermanager/ui/finance_workspace/income_form_dialog.py
 # -*- coding: utf-8 -*-
 """
 IncomeFormDialog - create or edit income, supporting both student and other sources.
+Now with improved amount input UX (clear on focus, restore on blur if empty).
 """
 import logging
 from datetime import date
@@ -30955,7 +30824,7 @@ class IncomeFormDialog(QDialog):
 
         # ---- Other source description ----
         self.other_source_edit = QLineEdit()
-        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng, Tiền bán đồ cũ...")
+        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng...")
         self.other_source_edit.setVisible(False)
         form.addRow("Mô tả nguồn khác", self.other_source_edit)
 
@@ -30965,10 +30834,16 @@ class IncomeFormDialog(QDialog):
             self.type_combo.addItem(t)
         form.addRow("Loại thu *", self.type_combo)
 
+        # Amount with improved UX
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0.01, 999999999.99)
         self.amount_spin.setPrefix("VND ")
         self.amount_spin.setDecimals(0)
+        self.amount_spin.setValue(0.00)
+        # Clear on focus, restore 0 on blur if empty
+        self.amount_spin.lineEdit().setPlaceholderText("0")
+        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
+        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Số tiền *", self.amount_spin)
 
         self.method_combo = QComboBox()
@@ -31020,8 +30895,23 @@ class IncomeFormDialog(QDialog):
         # Initial state
         self._on_source_changed(0)
 
+    def _on_amount_focus_in(self, event):
+        """Clear amount field when focused."""
+        spin = self.amount_spin
+        if spin.value() == 0:
+            spin.lineEdit().clear()
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusInEvent(event)
+
+    def _on_amount_focus_out(self, event):
+        """Restore 0 if amount is empty or blank."""
+        spin = self.amount_spin
+        text = spin.lineEdit().text().strip()
+        if text == "":
+            spin.setValue(0)
+        super(spin.lineEdit().__class__, spin.lineEdit()).focusOutEvent(event)
+
     def _on_source_changed(self, index: int) -> None:
-        is_student = (index == 0)  # "Từ học sinh"
+        is_student = (index == 0)
         self.student_combo.setVisible(is_student)
         self.class_combo.setVisible(is_student)
         self.other_source_edit.setVisible(not is_student)
@@ -31055,7 +30945,7 @@ class IncomeFormDialog(QDialog):
             income = self._income_service.get_income(self._income_id)
             # Source
             if income.student_id is not None:
-                self.source_combo.setCurrentIndex(0)  # "Từ học sinh"
+                self.source_combo.setCurrentIndex(0)
                 idx = self.student_combo.findData(income.student_id)
                 if idx >= 0:
                     self.student_combo.setCurrentIndex(idx)
@@ -31063,7 +30953,7 @@ class IncomeFormDialog(QDialog):
                 if idx2 >= 0:
                     self.class_combo.setCurrentIndex(idx2)
             else:
-                self.source_combo.setCurrentIndex(1)  # "Nguồn khác"
+                self.source_combo.setCurrentIndex(1)
                 self.other_source_edit.setText(income.note or "")
             self._on_source_changed(self.source_combo.currentIndex())
 
@@ -31085,7 +30975,7 @@ class IncomeFormDialog(QDialog):
                     self.period_combo.addItem(income.payment_period, income.payment_period)
                     self.period_combo.setCurrentIndex(self.period_combo.count() - 1)
             self.received_by_edit.setText(income.received_by or "")
-            # For other source, note is used for description
+            # Note
             if income.student_id is None:
                 self.note_edit.setText("")  # note will be saved as description
             else:
@@ -31104,7 +30994,7 @@ class IncomeFormDialog(QDialog):
             if not student_id or not class_id:
                 QMessageBox.warning(self, "Lỗi", "Vui lòng chọn học sinh và lớp học.")
                 return
-        else:  # "Nguồn khác"
+        else:
             student_id = None
             class_id = None
             description = self.other_source_edit.text().strip()
@@ -31112,13 +31002,15 @@ class IncomeFormDialog(QDialog):
                 QMessageBox.warning(self, "Lỗi", "Vui lòng nhập mô tả nguồn thu.")
                 return
             note = f"Nguồn khác: {description}"
-            # Optionally, allow user to add extra note
             extra_note = self.note_edit.text().strip()
             if extra_note:
                 note += f" ({extra_note})"
 
         income_type = self.type_combo.currentText()
         amount = self.amount_spin.value()
+        if amount <= 0:
+            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
+            return
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         payment_period = self.period_combo.currentData() or None
@@ -31259,7 +31151,7 @@ class IncomeListPage(QWidget):
 
         self.method_combo = QComboBox()
         self.method_combo.addItem("Tất cả hình thức", "")
-        for m in ["Cash", "Bank Transfer", "TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]:
+        for m in ["Cash", "Bank Transfer"]:
             self.method_combo.addItem(m, m)
         self.method_combo.currentIndexChanged.connect(self._apply_filters)
         filter_layout.addWidget(QLabel("Hình thức:"))
@@ -31490,6 +31382,8 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingListPage(QWidget):
+    student_selected = Signal(int)
+
     def __init__(
         self,
         outstanding_service: OutstandingService,
@@ -31594,6 +31488,7 @@ class OutstandingListPage(QWidget):
             )
             self._items = items
             self._populate_table()
+            logger.info(f"Loaded {len(items)} outstanding items")
         except Exception as e:
             logger.exception("Filter error")
             QMessageBox.critical(self, "Lỗi", str(e))
@@ -31617,7 +31512,6 @@ class OutstandingListPage(QWidget):
         self._apply_filters()
 
     def _on_sort(self, key: str, ascending: bool):
-        # Implement sorting in memory
         if key == "student_code":
             self._items.sort(key=lambda x: x.student_code, reverse=not ascending)
         elif key == "student_name":
@@ -31637,10 +31531,7 @@ class OutstandingListPage(QWidget):
     def _on_row_double_clicked(self, row: int):
         if row < len(self._items):
             student_id = self._items[row].student_id
-            # Emit signal to navigate to student detail
             self.student_selected.emit(student_id)
-
-    student_selected = Signal(int)
 
     def _clear_filters(self):
         self.search_bar.clear()
@@ -35805,17 +35696,16 @@ class StudentAttendanceWidget(QWidget):
         layout.addWidget(self.rate_label)
 
     def _show_empty(self):
+        self.table.clearSpans()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No attendance records"))
         self.table.setSpan(0, 0, 1, 4)
         self.rate_label.setText("Attendance Rate: N/A")
+        logger.debug("Attendance widget set to empty state")
 
-
-        
     def set_student(self, student_id: int):
         self._student_id = student_id
         self._load_data()
-
 
     def _load_data(self):
         if self._student_id is None:
@@ -35823,9 +35713,13 @@ class StudentAttendanceWidget(QWidget):
             return
         try:
             attendances = self._attendance_service.get_attendance_for_student(self._student_id)
+            logger.info(f"Loaded {len(attendances)} attendance records for student {self._student_id}")
             if not attendances:
                 self._show_empty()
                 return
+
+            # Xóa span cũ trước khi điền dữ liệu
+            self.table.clearSpans()
             self.table.setRowCount(len(attendances))
             for row, att in enumerate(attendances):
                 # Date
@@ -35841,12 +35735,16 @@ class StudentAttendanceWidget(QWidget):
                 # Status
                 status_item = QTableWidgetItem(att.status)
                 self.table.setItem(row, 3, status_item)
+
             # Rate
             rate = self._attendance_service.get_attendance_rate_for_student(self._student_id)
             self.rate_label.setText(f"Attendance Rate: {rate:.1f}%")
+            logger.debug(f"Attendance table populated with {len(attendances)} rows")
         except Exception as e:
             logger.exception("Failed to load student attendance")
             self._show_empty()
+            # Có thể hiển thị lỗi trên UI nếu cần
+            self.rate_label.setText(f"Error: {str(e)}")
 
 ================
 File: src/centermanager/ui/student_workspace/student_dashboard_page.py
@@ -36238,7 +36136,8 @@ logger = logging.getLogger(__name__)
 class StudentDetailPage(QWidget):
     back_clicked = Signal()
     student_updated = Signal()
-
+    go_to_finance = Signal()
+    
     def __init__(
         self,
         student_service: StudentService,
@@ -36330,6 +36229,7 @@ class StudentDetailPage(QWidget):
             self._outstanding_service,
             parent=self
         )
+        self.financial_tab.open_finance_clicked.connect(self._on_open_finance)
         self.tab_widget.addTab(self.financial_tab, "💰 Financial")
 
         # Tab 3: Attendance
@@ -36340,6 +36240,12 @@ class StudentDetailPage(QWidget):
         self.tab_widget.addTab(self.attendance_widget, "📋 Attendance")
 
         main_layout.addWidget(self.tab_widget)
+
+    def _on_open_finance(self) -> None:
+        """Switch to Finance Workspace when user clicks 'Open Finance'."""
+        # Emit signal to parent (StudentWorkspaceShell) to switch workspace
+        # We'll use a signal from StudentDetailPage to parent
+        self.go_to_finance.emit()
 
     def _create_profile_tab(self) -> QWidget:
         """Create the profile tab content."""
@@ -36610,7 +36516,7 @@ File: src/centermanager/ui/student_workspace/student_financial_widget.py
 # -*- coding: utf-8 -*-
 """
 StudentFinancialWidget - displays financial summary and payment history for a student.
-Now includes Outstanding summary.
+Now uses real data from OutstandingService, supports multi-class, and is read-only.
 """
 import logging
 from typing import Optional, List
@@ -36627,17 +36533,17 @@ from centermanager.services.income_service import IncomeService
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.permission_service import PermissionService
-from centermanager.services.outstanding_service import OutstandingService  # <-- THÊM
+from centermanager.services.outstanding_service import OutstandingService
 from centermanager.models.income import Income
-from centermanager.dto.outstanding_dto import StudentOutstandingSummary
+from centermanager.dto.outstanding_dto import StudentOutstandingSummary, OutstandingDTO
 from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
-from centermanager.ui.finance_workspace.collect_tuition_dialog import CollectTuitionDialog
 
 logger = logging.getLogger(__name__)
 
 
 class StudentFinancialWidget(QWidget):
     financial_updated = Signal()
+    open_finance_clicked = Signal()  # Signal to switch to Finance Workspace
 
     def __init__(
         self,
@@ -36645,7 +36551,7 @@ class StudentFinancialWidget(QWidget):
         student_service: StudentService,
         class_service: ClassService,
         permission_service: PermissionService,
-        outstanding_service: OutstandingService,  # <-- THÊM
+        outstanding_service: OutstandingService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -36653,7 +36559,7 @@ class StudentFinancialWidget(QWidget):
         self._student_service = student_service
         self._class_service = class_service
         self._permission_service = permission_service
-        self._outstanding_service = outstanding_service  # <-- LƯU
+        self._outstanding_service = outstanding_service
         self._student_id: Optional[int] = None
         self._incomes: List[Income] = []
         self._summary: Optional[StudentOutstandingSummary] = None
@@ -36666,7 +36572,7 @@ class StudentFinancialWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['md'])
 
-        # Summary cards - thêm Outstanding
+        # Summary cards
         summary_layout = QHBoxLayout()
         summary_layout.setSpacing(SPACING['md'])
 
@@ -36685,10 +36591,21 @@ class StudentFinancialWidget(QWidget):
         summary_layout.addStretch()
         layout.addLayout(summary_layout)
 
-        # Collect Tuition button
+        # Detail table for each class (multi-class)
+        self.detail_table = QTableWidget()
+        self.detail_table.setColumnCount(4)
+        self.detail_table.setHorizontalHeaderLabels(["Lớp", "Học phí dự kiến", "Đã đóng", "Còn nợ"])
+        self.detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.detail_table.verticalHeader().setVisible(False)
+        self.detail_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.detail_table.setAlternatingRowColors(True)
+        self.detail_table.setMaximumHeight(150)
+        layout.addWidget(self.detail_table)
+
+        # Open Finance button (replaces Collect Tuition)
         btn_layout = QHBoxLayout()
-        self.collect_btn = QPushButton("💰 Collect Tuition")
-        self.collect_btn.setStyleSheet(f"""
+        self.open_finance_btn = QPushButton("💰 Mở Finance Workspace")
+        self.open_finance_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['primary']};
                 color: white;
@@ -36705,14 +36622,14 @@ class StudentFinancialWidget(QWidget):
                 background: {COLORS['muted']};
             }}
         """)
-        self.collect_btn.setFixedHeight(40)
-        self.collect_btn.clicked.connect(self._on_collect_tuition)
+        self.open_finance_btn.setFixedHeight(40)
+        self.open_finance_btn.clicked.connect(self.open_finance_clicked.emit)
         btn_layout.addStretch()
-        btn_layout.addWidget(self.collect_btn)
+        btn_layout.addWidget(self.open_finance_btn)
         layout.addLayout(btn_layout)
 
         # Payment history table
-        history_label = QLabel("Payment History")
+        history_label = QLabel("Lịch sử thanh toán")
         history_label.setStyleSheet(f"""
             font-size: {TYPOGRAPHY['section_title']}px;
             font-weight: 600;
@@ -36724,7 +36641,7 @@ class StudentFinancialWidget(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "Date", "Class", "Type", "Amount", "Method", "Received By"
+            "Ngày", "Lớp", "Loại", "Số tiền", "Hình thức", "Người thu"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
@@ -36732,10 +36649,8 @@ class StudentFinancialWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
-        # Check permission
-        if not self._permission_service.has_permission("finance.income.create"):
-            self.collect_btn.setEnabled(False)
-            self.collect_btn.setToolTip("You don't have permission to collect tuition.")
+        # Check permission (only to show/hide button? But we keep button always visible)
+        # No need to disable because we removed collect tuition.
 
     def _create_summary_card(self, label: str, value: str) -> QFrame:
         card = QFrame()
@@ -36755,7 +36670,6 @@ class StudentFinancialWidget(QWidget):
         value_w.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLORS['text_primary']};")
         layout.addWidget(label_w)
         layout.addWidget(value_w)
-        # Lưu value_w để cập nhật sau
         card._value_widget = value_w
         return card
 
@@ -36763,7 +36677,9 @@ class StudentFinancialWidget(QWidget):
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No payment records"))
         self.table.setSpan(0, 0, 1, 6)
-        # Hide summary
+        self.detail_table.setRowCount(1)
+        self.detail_table.setItem(0, 0, QTableWidgetItem("No class enrollment"))
+        self.detail_table.setSpan(0, 0, 1, 4)
         self.total_expected_label.setVisible(False)
         self.total_paid_label.setVisible(False)
         self.outstanding_label.setVisible(False)
@@ -36802,6 +36718,9 @@ class StudentFinancialWidget(QWidget):
             return
         try:
             self._summary = self._outstanding_service.get_student_summary(self._student_id)
+            if self._summary:
+                logger.info(f"Loaded outstanding summary for student {self._student_id}: "
+                            f"expected={self._summary.total_expected}, paid={self._summary.total_paid}")
         except Exception as e:
             logger.exception("Failed to load outstanding summary")
             self._summary = None
@@ -36813,7 +36732,8 @@ class StudentFinancialWidget(QWidget):
 
         self._show_data()
         self._update_summary()
-        self._update_table()
+        self._update_detail_table()
+        self._update_payment_history()
 
     def _update_summary(self) -> None:
         if self._summary:
@@ -36838,7 +36758,23 @@ class StudentFinancialWidget(QWidget):
             self.outstanding_label._value_widget.setText("0 VND")
             self.status_label._value_widget.setText("Chưa có dữ liệu")
 
-    def _update_table(self) -> None:
+    def _update_detail_table(self) -> None:
+        self.detail_table.clearSpans()
+        if self._summary and self._summary.details:
+            self.detail_table.setRowCount(len(self._summary.details))
+            for row, detail in enumerate(self._summary.details):
+                self.detail_table.setItem(row, 0, QTableWidgetItem(detail.class_name))
+                self.detail_table.setItem(row, 1, QTableWidgetItem(f"{detail.expected_tuition:,.0f}"))
+                self.detail_table.setItem(row, 2, QTableWidgetItem(f"{detail.paid:,.0f}"))
+                self.detail_table.setItem(row, 3, QTableWidgetItem(f"{detail.outstanding:,.0f}"))
+            self.detail_table.setVisible(True)
+        else:
+            self.detail_table.setRowCount(1)
+            self.detail_table.setItem(0, 0, QTableWidgetItem("Không có lớp học"))
+            self.detail_table.setSpan(0, 0, 1, 4)
+
+    def _update_payment_history(self) -> None:
+        self.table.clearSpans()
         self.table.setRowCount(len(self._incomes))
         self.table.setVisible(len(self._incomes) > 0)
 
@@ -36850,21 +36786,6 @@ class StudentFinancialWidget(QWidget):
             self.table.setItem(row, 3, QTableWidgetItem(f"{income.amount:,.0f}"))
             self.table.setItem(row, 4, QTableWidgetItem(income.payment_method))
             self.table.setItem(row, 5, QTableWidgetItem(income.received_by or "-"))
-
-    def _on_collect_tuition(self) -> None:
-        if self._student_id is None:
-            return
-        dialog = CollectTuitionDialog(
-            self._income_service,
-            self._student_service,
-            self._class_service,
-            self._permission_service,
-            student_id=self._student_id,
-            parent=self
-        )
-        if dialog.exec() == CollectTuitionDialog.DialogCode.Accepted:
-            self.set_student(self._student_id)
-            self.financial_updated.emit()
 
     def refresh(self) -> None:
         if self._student_id is not None:
@@ -37249,6 +37170,7 @@ from centermanager.ui.student_workspace.student_analytics_page import StudentAna
 
 class StudentWorkspaceShell(QWidget):
     go_home = Signal()
+    go_to_finance = Signal()
     student_selected = Signal(int)
 
     def __init__(
@@ -37370,6 +37292,8 @@ class StudentWorkspaceShell(QWidget):
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
+        # Kết nối signal go_to_finance từ detail_page
+        self.detail_page.go_to_finance.connect(self._on_go_to_finance)
         self.content_stack.addWidget(self.detail_page)
 
         # Analytics
@@ -37433,25 +37357,25 @@ class StudentWorkspaceShell(QWidget):
     def _on_filter_clicked(self) -> None:
         self.list_page.show_filter_dialog()
 
+    def _on_go_to_finance(self) -> None:
+        self.go_to_finance.emit()
+
     # ====== PHƯƠNG THỨC MỚI ======
     def refresh_current_student(self) -> None:
         """Refresh the currently displayed student detail."""
         if self._current_student_id is not None:
             self.detail_page.load_student(self._current_student_id)
-            logger.info(f"Refreshed student detail for student {self._current_student_id}")
+            import logging
+            logging.getLogger(__name__).info(f"Refreshed student detail for student {self._current_student_id}")
+
     @property
     def current_student_id(self) -> Optional[int]:
-        """Trả về ID của student đang được xem trong Detail Page, hoặc None."""
+        """Return the ID of the student currently being viewed, or None."""
         return self._current_student_id
 
     def show_student(self, student_id: int) -> None:
-        """Chuyển đến Detail Page và load student."""
+        """Navigate to Detail Page and load the specified student."""
         self._on_student_selected(student_id)
-
-    def refresh_current_student(self) -> None:
-        """Refresh dữ liệu của student đang hiển thị."""
-        if self._current_student_id is not None:
-            self.detail_page.load_student(self._current_student_id)
 
 ================
 File: src/centermanager/ui/students/__init__.py
@@ -41313,7 +41237,7 @@ class MainWindow(QMainWindow):
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
-
+        self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         # Teacher Workspace
         self.teacher_workspace = TeacherWorkspaceShell(
             teacher_service=self._teacher_service,
@@ -41336,8 +41260,7 @@ class MainWindow(QMainWindow):
             attendance_service=self._attendance_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
-        self.class_workspace.attendance_updated.connect(self._on_attendance_updated)  # <-- KẾT NỐI
-
+        self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
         self.central_stack.addWidget(self.class_workspace)
 
         # Finance Workspace
@@ -41350,6 +41273,7 @@ class MainWindow(QMainWindow):
             outstanding_service=self._outstanding_service,
         )
         self.finance_workspace.go_home.connect(self._go_home)
+        self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         self.central_stack.addWidget(self.finance_workspace)
 
         self.central_stack.setCurrentWidget(self.home_page)
@@ -41374,10 +41298,11 @@ class MainWindow(QMainWindow):
         required_perm = permission_map.get(workspace_id)
         if required_perm:
             if not self._permission_helper.has_permission(required_perm):
-                self.statusBar().showMessage("Permission denied: Insufficient access rights")
+                self.statusBar().showMessage(f"Permission denied: Insufficient access rights for {workspace_id}")
+                logger.warning(f"Permission denied for {workspace_id}")
                 return
 
-        elif workspace_id == "student":
+        if workspace_id == "student":
             self.central_stack.setCurrentWidget(self.student_workspace)
             if self.student_workspace.current_student_id is not None:
                 self.student_workspace.show_student(self.student_workspace.current_student_id)
@@ -41421,6 +41346,8 @@ class MainWindow(QMainWindow):
     def _on_attendance_updated(self) -> None:
         """Refresh student detail when attendance is updated from class workspace."""
         self.student_workspace.refresh_current_student()
+    def _on_go_to_finance(self) -> None:
+        self._on_workspace_selected("finance")
 
 ================
 File: src/centermanager/ui/permission_helpers.py

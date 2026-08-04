@@ -17,6 +17,7 @@ from centermanager.ui.student_workspace.student_analytics_page import StudentAna
 
 class StudentWorkspaceShell(QWidget):
     go_home = Signal()
+    go_to_finance = Signal()
     student_selected = Signal(int)
 
     def __init__(
@@ -138,6 +139,8 @@ class StudentWorkspaceShell(QWidget):
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
+        # Kết nối signal go_to_finance từ detail_page
+        self.detail_page.go_to_finance.connect(self._on_go_to_finance)
         self.content_stack.addWidget(self.detail_page)
 
         # Analytics
@@ -201,12 +204,14 @@ class StudentWorkspaceShell(QWidget):
     def _on_filter_clicked(self) -> None:
         self.list_page.show_filter_dialog()
 
+    def _on_go_to_finance(self) -> None:
+        self.go_to_finance.emit()
+
     # ====== PHƯƠNG THỨC MỚI ======
     def refresh_current_student(self) -> None:
         """Refresh the currently displayed student detail."""
         if self._current_student_id is not None:
             self.detail_page.load_student(self._current_student_id)
-            # Ghi log nếu cần
             import logging
             logging.getLogger(__name__).info(f"Refreshed student detail for student {self._current_student_id}")
 

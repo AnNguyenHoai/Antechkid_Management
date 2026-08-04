@@ -101,7 +101,7 @@ class IncomeListPage(QWidget):
 
         self.method_combo = QComboBox()
         self.method_combo.addItem("Tất cả hình thức", "")
-        for m in ["Cash", "Bank Transfer", "TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]:
+        for m in ["Cash", "Bank Transfer"]:
             self.method_combo.addItem(m, m)
         self.method_combo.currentIndexChanged.connect(self._apply_filters)
         filter_layout.addWidget(QLabel("Hình thức:"))

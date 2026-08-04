@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingListPage(QWidget):
+    student_selected = Signal(int)
+
     def __init__(
         self,
         outstanding_service: OutstandingService,
@@ -126,6 +128,7 @@ class OutstandingListPage(QWidget):
             )
             self._items = items
             self._populate_table()
+            logger.info(f"Loaded {len(items)} outstanding items")
         except Exception as e:
             logger.exception("Filter error")
             QMessageBox.critical(self, "Lỗi", str(e))
@@ -149,7 +152,6 @@ class OutstandingListPage(QWidget):
         self._apply_filters()
 
     def _on_sort(self, key: str, ascending: bool):
-        # Implement sorting in memory
         if key == "student_code":
             self._items.sort(key=lambda x: x.student_code, reverse=not ascending)
         elif key == "student_name":
@@ -169,10 +171,7 @@ class OutstandingListPage(QWidget):
     def _on_row_double_clicked(self, row: int):
         if row < len(self._items):
             student_id = self._items[row].student_id
-            # Emit signal to navigate to student detail
             self.student_selected.emit(student_id)
-
-    student_selected = Signal(int)
 
     def _clear_filters(self):
         self.search_bar.clear()

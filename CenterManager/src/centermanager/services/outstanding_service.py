@@ -8,6 +8,7 @@ import logging
 from typing import List, Optional, Tuple, Dict
 
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import or_
 
 from centermanager.dto.outstanding_dto import OutstandingDTO, StudentOutstandingSummary
 from centermanager.repositories.student_repository import StudentRepository
@@ -16,6 +17,7 @@ from centermanager.repositories.enrollment_repository import EnrollmentRepositor
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
+from centermanager.models.student import Student
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +64,18 @@ class OutstandingService:
                     Enrollment.class_id == class_id
                 ).first()
                 if enrollment is None:
+                    logger.warning(f"No enrollment found for student {student_id}, class {class_id}")
                     return None
 
             # Get class
             class_repo = ClassRepository(session)
             class_obj = class_repo.get_by_id(class_id)
-            if class_obj is None or class_obj.fee is None or class_obj.fee == 0:
+            if class_obj is None:
+                logger.warning(f"Class {class_id} not found")
+                return None
+            if class_obj.fee is None or class_obj.fee == 0:
                 # No fee defined, skip
+                logger.debug(f"Class {class_id} has no fee, skipping")
                 return None
 
             expected = class_obj.fee
@@ -78,6 +85,7 @@ class OutstandingService:
             student_repo = StudentRepository(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
+                logger.warning(f"Student {student_id} not found")
                 return None
 
             return OutstandingDTO.create(
@@ -104,9 +112,8 @@ class OutstandingService:
         """
         with self._session_factory() as session:
             enroll_repo = EnrollmentRepository(session)
-            query = session.query(Enrollment).filter(
-                Enrollment.status == "active"  # or 'ACTIVE'
-            )
+            # Lấy tất cả enrollment (không filter status để lấy cả inactive nếu có)
+            query = session.query(Enrollment).filter(Enrollment.class_id.isnot(None))
 
             # Filter by class
             if class_id is not None:
@@ -114,16 +121,17 @@ class OutstandingService:
 
             # Filter by search text (student name/code)
             if search_text:
-                from sqlalchemy import or_
+                search = f"%{search_text}%"
                 query = query.join(Enrollment.student).filter(
                     or_(
-                        Student.full_name.ilike(f"%{search_text}%"),
-                        Student.student_code.ilike(f"%{search_text}%")
+                        Student.full_name.ilike(search),
+                        Student.student_code.ilike(search)
                     )
                 )
 
             total = query.count()
             enrollments = query.offset(offset).limit(limit).all()
+            logger.debug(f"Found {len(enrollments)} enrollments (total {total})")
 
             results = []
             for enrollment in enrollments:
@@ -149,6 +157,7 @@ class OutstandingService:
             student_repo = StudentRepository(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
+                logger.warning(f"Student {student_id} not found")
                 return None
 
             enroll_repo = EnrollmentRepository(session)
