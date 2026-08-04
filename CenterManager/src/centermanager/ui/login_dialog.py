@@ -5,6 +5,7 @@ LoginDialog - simple login dialog for authentication.
 import hashlib
 import logging
 import traceback
+from datetime import datetime  # <-- đã thêm
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -112,7 +113,6 @@ class LoginDialog(QDialog):
             self._show_error("Please enter username.")
             self.username_edit.setFocus()
             return
-
         if not password:
             self._show_error("Please enter password.")
             self.password_edit.setFocus()
@@ -127,6 +127,8 @@ class LoginDialog(QDialog):
 
         try:
             logger.info(f"Attempting login for user: {username}")
+            
+            # Lấy user từ service (detached)
             user = self._permission_service.get_user_by_username(username)
             if user is None:
                 self._show_error("Invalid username or password.")
@@ -136,23 +138,70 @@ class LoginDialog(QDialog):
                 self._show_error("Account is deactivated.")
                 return
 
-            if user.password_hash != password_hash:
-                self._show_error("Invalid username or password.")
+            # Sử dụng một session mới để kiểm tra lock và cập nhật
+            with self._permission_service._session_factory() as session:
+                # Gắn user vào session hiện tại bằng merge
+                user = session.merge(user)
+                
+                # Kiểm tra locked
+                if user.is_locked:
+                    self._show_error("Account is locked. Please try again later.")
+                    return
+
+                # Kiểm tra password
+                if user.password_hash != password_hash:
+                    user.increment_login_attempts()
+                    session.commit()
+                    remaining = 5 - user.login_attempts
+                    if remaining > 0:
+                        self._show_error(f"Invalid username or password. {remaining} attempts remaining.")
+                    else:
+                        self._show_error("Account locked due to too many failed attempts.")
+                    return
+
+                # Login thành công: reset attempts, update last_login
+                user.reset_login_attempts()
+                user.last_login = datetime.now()
+                session.commit()
+
+                # Lấy lại user đã được refresh từ session
+                # (session.refresh(user) là không cần thiết vì commit đã làm mới)
+                # Nhưng để an toàn, lấy lại user_id
+                user_id = user.id
+
+            # Sau khi session đóng, user lại detached, nhưng chúng ta đã có user_id
+            # Lấy lại user mới nhất từ service (sẽ mở session mới)
+            user = self._permission_service.get_user(user_id)
+            if user is None:
+                self._show_error("User not found after login.")
                 return
 
-            # Login successful
-            self._user = user
-            set_current_user(user)
-            logger.info(f"User logged in: {username} (role: {user.role.name if user.role else 'none'})")
-            
             self.error_label.setVisible(False)
-            self.login_successful.emit(user)
-            self.accept()
+
+            # Kiểm tra force_password_change
+            if user.force_password_change:
+                from centermanager.ui.change_password_dialog import ChangePasswordDialog
+                self.hide()
+                change_dialog = ChangePasswordDialog(user, self._permission_service, parent=self.parent())
+                if change_dialog.exec() == ChangePasswordDialog.DialogCode.Accepted:
+                    # Sau khi đổi mật khẩu, reload user từ DB
+                    user = self._permission_service.get_user_by_username(username)
+                    set_current_user(user)
+                    self.login_successful.emit(user)
+                    self.accept()
+                else:
+                    self.show()
+                    self.password_edit.clear()
+                    self.password_edit.setFocus()
+                    return
+            else:
+                set_current_user(user)
+                logger.info(f"User logged in: {username} (role: {user.role.name if user.role else 'none'})")
+                self.login_successful.emit(user)
+                self.accept()
 
         except Exception as e:
             logger.exception(f"Login error for user {username}: {e}")
-            # Log stack trace to file
-            logger.error(traceback.format_exc())
             self._show_error(f"Login error: {str(e)}")
 
     def _show_error(self, message: str) -> None:

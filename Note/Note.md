@@ -6,11 +6,11 @@ python -m venv .venv
 rm runtime/Database/center.db
  ---> xóa database để test
 
- rm migrations/versions/*.py
+rm migrations/versions/*.py
  --> xóa các migration version db
 
 
- touch migrations/versions/__init__.py
+touch migrations/versions/__init__.py
 ->>>giữ lại file init
 
 alembic revision --autogenerate -m "initial_schema"
@@ -38,3 +38,5 @@ Current status:
 
 28/7: GPT đã review xong, tiếp theo sẽ giao tiếp với GPT để có định hướng tiếp theo
 28/7: Deepseek mới fix bug xong, chưa copy bản fix vô code, tiếp theo cần copy vô code rồi test
+
+4/8: Đã yêu cầu deepseek code để deploy, chưa merge vào

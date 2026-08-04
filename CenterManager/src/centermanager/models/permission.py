@@ -84,7 +84,12 @@ class PermissionDefinitions:
     LESSON_CREATE = "lesson.create"
     LESSON_UPDATE = "lesson.update"
     LESSON_CANCEL = "lesson.cancel"
-
+    USER_MANAGE = "user.manage"
+    USER_VIEW = "user.view"
+    USER_CREATE = "user.create"
+    USER_UPDATE = "user.update"
+    USER_DELETE = "user.delete"
+    USER_RESET_PASSWORD = "user.reset_password"
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -116,6 +121,12 @@ class PermissionDefinitions:
             cls.LESSON_CREATE,
             cls.LESSON_UPDATE,
             cls.LESSON_CANCEL,
+            cls.USER_MANAGE,
+            cls.USER_VIEW,
+            cls.USER_CREATE,
+            cls.USER_UPDATE,
+            cls.USER_DELETE,
+            cls.USER_RESET_PASSWORD,
         ]
 
     @classmethod
@@ -149,6 +160,12 @@ class PermissionDefinitions:
             cls.LESSON_CREATE: "lesson",
             cls.LESSON_UPDATE: "lesson",
             cls.LESSON_CANCEL: "lesson",
+            cls.USER_MANAGE: "admin",
+            cls.USER_VIEW: "admin",
+            cls.USER_CREATE: "admin",
+            cls.USER_UPDATE: "admin",
+            cls.USER_DELETE: "admin",
+            cls.USER_RESET_PASSWORD: "admin",
         }
 
         return category_map.get(permission_name, "other")

@@ -191,3 +191,139 @@ class PermissionService:
         with self._session_factory() as session:
             repo = PermissionRepository(session)
             return repo.get_by_category(category)
+
+# src/centermanager/services/permission_service.py (thêm các method)
+
+    def create_user_with_temp_password(
+        self,
+        username: str,
+        full_name: str,
+        role_name: str,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+        temp_password: Optional[str] = None,
+    ) -> User:
+        """Create a new user with a temporary password."""
+        import hashlib
+        from centermanager.models.role import RoleDefinitions
+
+        # Validate role
+        valid_roles = [RoleDefinitions.ADMIN, RoleDefinitions.TEACHER,
+                       RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE]
+        if role_name not in valid_roles:
+            raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+
+        with self._session_factory() as session:
+            role_repo = RoleRepository(session)
+            role = role_repo.get_by_name(role_name)
+            if role is None:
+                raise ValueError(f"Role '{role_name}' not found.")
+
+            # Check username uniqueness
+            user_repo = UserRepository(session)
+            existing = user_repo.get_by_username(username)
+            if existing:
+                raise ValueError(f"Username '{username}' already exists.")
+
+            # Generate temp password if not provided
+            if temp_password is None:
+                import secrets
+                import string
+                alphabet = string.ascii_letters + string.digits
+                temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+
+            password_hash = hashlib.sha256(temp_password.encode()).hexdigest()
+
+            user = User(
+                username=username,
+                password_hash=password_hash,
+                full_name=full_name,
+                email=email,
+                phone=phone,
+                role_id=role.id,
+                is_active=True,
+                force_password_change=True,
+                login_attempts=0,
+            )
+            user_repo.add(user)
+            session.commit()
+            session.refresh(user)
+
+            # Log user creation (could use timeline or separate audit)
+            logger.info(f"User created: {username} with role {role_name}")
+
+            return user
+
+    def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:
+        """Reset user password, return the new temporary password."""
+        import hashlib
+        import secrets
+        import string
+
+        with self._session_factory() as session:
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+
+            if temp_password is None:
+                alphabet = string.ascii_letters + string.digits
+                temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+
+            user.password_hash = hashlib.sha256(temp_password.encode()).hexdigest()
+            user.force_password_change = True
+            user.login_attempts = 0
+            user.locked_until = None
+
+            session.commit()
+            logger.info(f"Password reset for user {user.username}")
+            return temp_password
+
+    def set_user_active(self, user_id: int, active: bool) -> User:
+        with self._session_factory() as session:
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+            user.is_active = active
+            session.commit()
+            session.refresh(user)
+            return user
+
+    def update_user(self, user_id: int, full_name: Optional[str] = None,
+                    email: Optional[str] = None, phone: Optional[str] = None,
+                    role_name: Optional[str] = None) -> User:
+        with self._session_factory() as session:
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+
+            if full_name is not None:
+                user.full_name = full_name
+            if email is not None:
+                user.email = email
+            if phone is not None:
+                user.phone = phone
+            if role_name is not None:
+                role_repo = RoleRepository(session)
+                role = role_repo.get_by_name(role_name)
+                if role is None:
+                    raise ValueError(f"Role '{role_name}' not found.")
+                user.role_id = role.id
+
+            session.commit()
+            session.refresh(user)
+            return user
+
+    def unlock_user(self, user_id: int) -> User:
+        with self._session_factory() as session:
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+            user.login_attempts = 0
+            user.locked_until = None
+            session.commit()
+            session.refresh(user)
+            return user

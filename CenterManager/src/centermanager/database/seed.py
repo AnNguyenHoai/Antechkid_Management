@@ -15,25 +15,24 @@ from centermanager.models.role_permission import RolePermission
 logger = logging.getLogger(__name__)
 
 
+# src/centermanager/database/seed.py
 def seed_roles_and_permissions(session: Session) -> None:
-    """
-    Seed default roles and permissions into the database.
-    This is idempotent - can be run multiple times.
-    """
     # 1. Create permissions
     permissions = _create_permissions(session)
     permission_map = {p.name: p for p in permissions}
 
-    # 2. Create roles with permissions
+    # 2. Roles
+    # Admin: tất cả permissions
     admin_role = _create_role(
         session,
         name=RoleDefinitions.ADMIN,
         display_name="Administrator",
         description="Full system access",
         is_system=True,
-        permission_names=list(permission_map.keys())  # All permissions
+        permission_names=list(permission_map.keys())
     )
 
+    # Teacher
     teacher_role = _create_role(
         session,
         name=RoleDefinitions.TEACHER,
@@ -44,11 +43,7 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.STUDENT_VIEW,
             PermissionDefinitions.STUDENT_CREATE,
             PermissionDefinitions.STUDENT_UPDATE,
-            PermissionDefinitions.STUDENT_DELETE,
             PermissionDefinitions.TEACHER_VIEW,
-            PermissionDefinitions.TEACHER_CREATE,
-            PermissionDefinitions.TEACHER_UPDATE,
-            PermissionDefinitions.TEACHER_DELETE,
             PermissionDefinitions.CLASS_VIEW,
             PermissionDefinitions.CLASS_CREATE,
             PermissionDefinitions.CLASS_UPDATE,
@@ -56,10 +51,14 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.LESSON_VIEW,
             PermissionDefinitions.LESSON_CREATE,
             PermissionDefinitions.LESSON_UPDATE,
-            # Teacher có thể không có cancel? Tùy business, tạm thêm cancel
             PermissionDefinitions.LESSON_CANCEL,
+            PermissionDefinitions.ATTENDANCE_VIEW,
+            PermissionDefinitions.ATTENDANCE_CREATE,
+            PermissionDefinitions.ATTENDANCE_UPDATE,
         ]
     )
+
+    # Reception
     reception_role = _create_role(
         session,
         name=RoleDefinitions.RECEPTION,
@@ -72,14 +71,32 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.STUDENT_UPDATE,
             PermissionDefinitions.TEACHER_VIEW,
             PermissionDefinitions.CLASS_VIEW,
+            PermissionDefinitions.ATTENDANCE_VIEW,
         ]
     )
 
-    # 3. Create default admin user if not exists
-    _create_admin_user(session, admin_role)
+    # Finance
+    finance_role = _create_role(
+        session,
+        name=RoleDefinitions.FINANCE,
+        display_name="Finance",
+        description="Finance operations only",
+        is_system=True,
+        permission_names=[
+            PermissionDefinitions.FINANCE_VIEW,
+            PermissionDefinitions.FINANCE_INCOME_CREATE,
+            PermissionDefinitions.FINANCE_INCOME_UPDATE,
+            PermissionDefinitions.FINANCE_INCOME_DELETE,
+            PermissionDefinitions.FINANCE_EXPENSE_CREATE,
+            PermissionDefinitions.FINANCE_EXPENSE_UPDATE,
+            PermissionDefinitions.FINANCE_EXPENSE_DELETE,
+            PermissionDefinitions.REPORT_VIEW,
+        ]
+    )
 
+    # 3. Admin user
+    _create_admin_user(session, admin_role)
     session.commit()
-    logger.info("Database seeding completed: roles, permissions, and admin user created.")
 
 
 def _create_permissions(session: Session) -> List[Permission]:
@@ -148,17 +165,18 @@ def _create_role(
     return role
 
 
+# src/centermanager/database/seed.py (sửa _create_admin_user)
 def _create_admin_user(session: Session, admin_role: Role) -> None:
-    """Create default admin user if not exists."""
     existing = session.query(User).filter(User.username == "admin").first()
     if existing:
-        # Ensure admin has admin role
         if existing.role_id != admin_role.id:
             existing.role_id = admin_role.id
+            existing.force_password_change = False
+            existing.login_attempts = 0
+            existing.locked_until = None
             session.flush()
         return
 
-    # Simple password hashing - in production, use proper bcrypt
     import hashlib
     password_hash = hashlib.sha256("admin123".encode()).hexdigest()
 
@@ -169,6 +187,8 @@ def _create_admin_user(session: Session, admin_role: Role) -> None:
         email="admin@centermanager.local",
         role_id=admin_role.id,
         is_active=True,
+        force_password_change=False,
+        login_attempts=0,
     )
     session.add(admin)
     session.flush()

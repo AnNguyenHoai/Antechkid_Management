@@ -13,6 +13,7 @@ from centermanager.ui.permission_helpers import UIPermissionHelper
 from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWorkspaceShell
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 from centermanager.ui.finance_workspace import FinanceWorkspaceShell
+from centermanager.ui.admin_workspace import AdminWorkspaceShell
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,6 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
 
-        # Lưu tất cả services
         self._student_service = student_service
         self._parent_service = parent_service
         self._timeline_service = timeline_service
@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
             timeline_service=self._teacher_timeline_service,
         )
         self.teacher_workspace.go_home.connect(self._go_home)
-        self.teacher_workspace.navigate_to_class.connect(self._on_navigate_to_class)  # <-- thêm
+        self.teacher_workspace.navigate_to_class.connect(self._on_navigate_to_class)
         self.central_stack.addWidget(self.teacher_workspace)
 
         # Class Workspace
@@ -167,6 +167,13 @@ class MainWindow(QMainWindow):
         self.finance_workspace.go_home.connect(self._go_home)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         self.central_stack.addWidget(self.finance_workspace)
+
+        # Admin Workspace
+        self.admin_workspace = AdminWorkspaceShell(
+            permission_service=self._permission_service,
+        )
+        self.admin_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.admin_workspace)
 
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
@@ -219,6 +226,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Reports Workspace coming soon")
         elif workspace_id == "settings":
             self.statusBar().showMessage("Settings coming soon")
+        elif workspace_id == "admin":
+            self.central_stack.setCurrentWidget(self.admin_workspace)
+            self.admin_workspace.navigate_to("users")
+            self.statusBar().showMessage("Admin Workspace")
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
@@ -240,9 +251,7 @@ class MainWindow(QMainWindow):
 
     def _on_go_to_finance(self) -> None:
         self._on_workspace_selected("finance")
+
     def _on_navigate_to_class(self, class_id: int) -> None:
-        """Switch to Class Workspace and show the specified class."""
-        # Chuyển sang Class Workspace
         self._on_workspace_selected("class")
-        # Gọi method show_class trong ClassWorkspaceShell
         self.class_workspace.show_class(class_id)

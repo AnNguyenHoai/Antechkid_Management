@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 08eab9c81363
+Revision ID: 1106e900d880
 Revises: 
-Create Date: 2026-08-04 14:19:24.675819
+Create Date: 2026-08-04 21:33:49.280783
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '08eab9c81363'
+revision: str = '1106e900d880'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -354,8 +354,13 @@ def upgrade() -> None:
     sa.Column('password_hash', sa.String(length=255), nullable=False),
     sa.Column('full_name', sa.String(length=200), nullable=False),
     sa.Column('email', sa.String(length=100), nullable=True),
+    sa.Column('phone', sa.String(length=20), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('role_id', sa.Integer(), nullable=True),
+    sa.Column('force_password_change', sa.Boolean(), nullable=False),
+    sa.Column('last_login', sa.DateTime(), nullable=True),
+    sa.Column('login_attempts', sa.Integer(), nullable=False),
+    sa.Column('locked_until', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),

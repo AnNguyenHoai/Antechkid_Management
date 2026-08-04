@@ -16,22 +16,23 @@ from PySide6.QtWidgets import (
 from centermanager.services.home_dashboard_service import HomeDashboardService
 from centermanager.ui.home.workspace_card import WorkspaceCard
 from centermanager.ui.design_system.tokens import COLORS
-
+from centermanager.services.home_dashboard_service import WorkspaceSummary
 logger = logging.getLogger(__name__)
 
 
 class HomePage(QWidget):
     workspace_selected = Signal(str)
 
-    def __init__(
-        self,
-        home_service: HomeDashboardService,
-        parent: Optional[QWidget] = None
-    ) -> None:
-        super().__init__(parent)
-        self._service = home_service
-        self._setup_ui()
-        self.refresh()
+    def __init__(self, home_service, parent=None):
+        try:
+            super().__init__(parent)
+            self._service = home_service
+            self._setup_ui()
+            self.refresh()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _setup_ui(self) -> None:
         self.setStyleSheet(f"background-color: {COLORS['background']};")
@@ -84,16 +85,23 @@ class HomePage(QWidget):
         layout.addWidget(scroll)
 
     def refresh(self) -> None:
-        """Refresh workspace cards."""
-        self._populate_workspace_cards()
-
+        try:
+            self._populate_workspace_cards()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
     def _populate_workspace_cards(self) -> None:
         # Clear grid
-        while self.workspace_grid.count():
-            item = self.workspace_grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
+        try:
+            while self.workspace_grid.count():
+                item = self.workspace_grid.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
         summaries = self._service.get_workspace_summaries()
         row, col = 0, 0
         for ws in summaries:
@@ -119,6 +127,25 @@ class HomePage(QWidget):
         # Đặt tỷ lệ co dãn cho các hàng để các card chiếm đều không gian
         for r in range(row + 1):
             self.workspace_grid.setRowStretch(r, 1)
+        # Kiểm tra permission admin
+        from centermanager.core.current_user import get_current_user
+        user = get_current_user()
+        has_admin = user and user.has_permission("user.manage")
+        
+        # Thêm admin workspace nếu có quyền
+        if has_admin:
+            admin_ws = WorkspaceSummary(
+                workspace_id="admin",
+                name="Admin Workspace",
+                icon="⚙️",
+                description="User management and system settings",
+                summary_text="Manage users and configuration",
+                health_status="good",
+                health_details="",
+                quick_action_label="Open →",
+                quick_action_target="admin"
+            )
+            summaries.append(admin_ws)
 
     def _on_workspace_clicked(self, workspace_id: str) -> None:
         self.workspace_selected.emit(workspace_id)

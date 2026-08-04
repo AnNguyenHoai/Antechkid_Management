@@ -18,6 +18,7 @@ from centermanager.models.teacher import Teacher
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
+from centermanager.core.current_user import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,8 @@ class HomeDashboardService:
 
             summary_text = f"{total_students} students, {parent_count} parents, {assessment_count} assessments"
 
+            summaries = []
+
             student_ws = WorkspaceSummary(
                 workspace_id="student",
                 name="Student Workspace",
@@ -81,6 +84,7 @@ class HomeDashboardService:
                 quick_action_label="Open →",
                 quick_action_target="student"
             )
+            summaries.append(student_ws)
 
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
@@ -97,6 +101,7 @@ class HomeDashboardService:
                 quick_action_label="Open →",
                 quick_action_target="teacher"
             )
+            summaries.append(teacher_ws)
 
             class_ws = WorkspaceSummary(
                 workspace_id="class",
@@ -109,8 +114,8 @@ class HomeDashboardService:
                 quick_action_label="Open →",
                 quick_action_target="class"
             )
+            summaries.append(class_ws)
 
-            # Finance placeholder (always visible but no data yet)
             finance_ws = WorkspaceSummary(
                 workspace_id="finance",
                 name="Finance Workspace",
@@ -122,5 +127,21 @@ class HomeDashboardService:
                 quick_action_label="Open →",
                 quick_action_target="finance"
             )
+            summaries.append(finance_ws)
 
-            return [student_ws, teacher_ws, class_ws, finance_ws]
+            user = get_current_user()
+            if user and user.has_permission("user.manage"):
+                admin_ws = WorkspaceSummary(
+                    workspace_id="admin",
+                    name="Admin Workspace",
+                    icon="⚙️",
+                    description="User management and system settings",
+                    summary_text="Manage users and configuration",
+                    health_status="good",
+                    health_details="",
+                    quick_action_label="Open →",
+                    quick_action_target="admin"
+                )
+                summaries.append(admin_ws)
+
+            return summaries
