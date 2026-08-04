@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ClassWorkspaceShell - main shell for Class Workspace.
+Attendance removed from Class Workspace.
 """
 from typing import Optional
 
@@ -30,7 +31,7 @@ class ClassWorkspaceShell(QWidget):
         note_service,
         highlight_service,
         student_service,
-        attendance_service,
+        attendance_service,   # <-- thêm tham số
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -99,7 +100,7 @@ class ClassWorkspaceShell(QWidget):
             note_service=self._note_service,
             highlight_service=self._highlight_service,
             student_service=self._student_service,
-            attendance_service=self._attendance_service,
+            attendance_service=self._attendance_service,   # <-- truyền vào
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.class_updated.connect(self._on_class_updated)

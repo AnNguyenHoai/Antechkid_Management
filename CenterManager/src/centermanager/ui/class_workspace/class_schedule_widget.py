@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ClassScheduleWidget - display weekly schedule with assessment view.
+Now with attendance_service for SessionDetailDialog.
 """
 import logging
 from typing import Optional, List
@@ -17,6 +18,8 @@ from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
+from centermanager.services.class_service import ClassService
+from centermanager.services.attendance_service import AttendanceService
 from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,8 @@ class ClassScheduleWidget(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
+        class_service: ClassService,
+        attendance_service: AttendanceService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -38,6 +43,8 @@ class ClassScheduleWidget(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
+        self._class_service = class_service
+        self._attendance_service = attendance_service
         self._class_id: Optional[int] = None
         self._sessions: List[Session] = []
 
@@ -49,7 +56,7 @@ class ClassScheduleWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Table: Session, Date, Time, Topic, Assessment Status, Actions
+        # Table: Session, Date, Time, Topic, Assessment, Actions
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
@@ -140,6 +147,8 @@ class ClassScheduleWidget(QWidget):
                 self._note_service,
                 self._highlight_service,
                 self._student_service,
+                self._class_service,
+                self._attendance_service,
                 session_id,
                 parent=self
             )
@@ -151,6 +160,5 @@ class ClassScheduleWidget(QWidget):
             QMessageBox.critical(self, "Error", f"Could not open session: {str(e)}")
 
     def refresh(self) -> None:
-        """External refresh method."""
         if self._class_id:
             self._load_sessions()

@@ -8,7 +8,7 @@ from typing import List, Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame
+    QScrollArea, QFrame, QMessageBox
 )
 
 from centermanager.models.session import Session
@@ -16,6 +16,8 @@ from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
+from centermanager.services.class_service import ClassService
+from centermanager.services.attendance_service import AttendanceService
 from centermanager.ui.session.session_card import SessionCard
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
@@ -32,6 +34,8 @@ class SessionList(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
+        class_service: ClassService,
+        attendance_service: AttendanceService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -39,6 +43,8 @@ class SessionList(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
+        self._class_service = class_service
+        self._attendance_service = attendance_service
         self._class_id: Optional[int] = None
         self._sessions: List[Session] = []
         self._setup_ui()
@@ -102,7 +108,6 @@ class SessionList(QWidget):
                 item.widget().deleteLater()
 
     def set_class(self, class_id: int) -> None:
-        """Load sessions for a class."""
         self._class_id = class_id
         self._load_data()
 
@@ -144,6 +149,8 @@ class SessionList(QWidget):
             self._note_service,
             self._highlight_service,
             self._student_service,
+            self._class_service,
+            self._attendance_service,
             session_id,
             parent=self
         )
@@ -158,7 +165,6 @@ class SessionList(QWidget):
             self.session_changed.emit()
 
     def _on_delete(self, session_id: int) -> None:
-        from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             self,
             "Confirm Delete",

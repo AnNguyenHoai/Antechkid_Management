@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ClassDetailPage - full class profile with teacher assignment, student enrollment, schedule, timeline.
-Now with Attendance tab.
+Attendance removed - now only in Teaching Workspace.
 """
 import logging
 from typing import Optional, List
@@ -31,7 +31,6 @@ from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
-from centermanager.ui.class_workspace.attendance_widget import AttendanceWidget
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
 
@@ -51,7 +50,7 @@ class ClassDetailPage(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
-        attendance_service: AttendanceService,
+        attendance_service: AttendanceService,   # <-- thêm
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -62,7 +61,7 @@ class ClassDetailPage(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
-        self._attendance_service = attendance_service
+        self._attendance_service = attendance_service  # lưu để truyền cho schedule widget
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -88,39 +87,9 @@ class ClassDetailPage(QWidget):
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
 
-        # Tab widget (chỉ có 2 tab: Overview và Attendance)
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setDocumentMode(True)
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background: white;
-            }
-            QTabBar::tab {
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-            QTabBar::tab:selected {
-                font-weight: bold;
-                color: #1976d2;
-            }
-        """)
-
-        # Tab 1: Overview
-        overview_tab = self._create_overview_tab()
-        self.tab_widget.addTab(overview_tab, "Overview")
-
-        # Tab 2: Attendance
-        self.attendance_widget = AttendanceWidget(
-            self._attendance_service,
-            self._session_service,
-            self._class_service,
-            parent=self
-        )
-        self.attendance_widget.attendance_changed.connect(self._on_data_changed)
-        self.tab_widget.addTab(self.attendance_widget, "Attendance")
-
-        main_layout.addWidget(self.tab_widget)
+        # No tab widget now - chỉ có Overview
+        self.overview_tab = self._create_overview_tab()
+        main_layout.addWidget(self.overview_tab)
 
     def _create_overview_tab(self) -> QWidget:
         """Create the Overview tab content."""
@@ -224,7 +193,9 @@ class ClassDetailPage(QWidget):
             self._session_service,
             self._note_service,
             self._highlight_service,
-            self._student_service
+            self._student_service,
+            self._class_service,
+            self._attendance_service,   # <-- truyền attendance_service
         )
         self.schedule_widget.session_updated.connect(self._on_data_changed)
         schedule_layout.addWidget(self.schedule_widget)
@@ -274,10 +245,10 @@ class ClassDetailPage(QWidget):
         return widget
 
     def _show_empty(self) -> None:
-        self.tab_widget.setVisible(False)
+        self.overview_tab.setVisible(False)
 
     def _show_detail(self) -> None:
-        self.tab_widget.setVisible(True)
+        self.overview_tab.setVisible(True)
 
     def load_class(self, class_id: int) -> None:
         try:
@@ -285,7 +256,6 @@ class ClassDetailPage(QWidget):
             self._current_class_id = class_obj.id
             self._current_class = class_obj
             self._populate(class_obj)
-            self.attendance_widget.set_class(class_id)
             self._show_detail()
         except Exception as e:
             logger.exception(f"Error loading class {class_id}")
@@ -449,7 +419,6 @@ class ClassDetailPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _on_add_session(self) -> None:
-        """Open dialog to add a new session."""
         if self._current_class_id is None:
             QMessageBox.warning(self, "Error", "No class selected.")
             return

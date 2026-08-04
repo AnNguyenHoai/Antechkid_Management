@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
     QTimeEdit, QComboBox, QPushButton, QHBoxLayout,
-    QMessageBox, QPlainTextEdit
+    QMessageBox, QPlainTextEdit, QWidget
 )
 
 from centermanager.models.session import SessionStatus
@@ -65,13 +65,13 @@ class SessionDialog(QDialog):
         self.date_edit.setDate(QDate.currentDate())
         form.addRow("Scheduled Date *", self.date_edit)
 
-        # Start Time (NEW)
+        # Start Time
         self.start_time_edit = QTimeEdit()
         self.start_time_edit.setDisplayFormat("HH:mm")
         self.start_time_edit.setTime(QTime(8, 0))
         form.addRow("Start Time", self.start_time_edit)
 
-        # End Time (NEW)
+        # End Time
         self.end_time_edit = QTimeEdit()
         self.end_time_edit.setDisplayFormat("HH:mm")
         self.end_time_edit.setTime(QTime(9, 0))
@@ -91,7 +91,7 @@ class SessionDialog(QDialog):
             self.status_combo.addItem(s)
         form.addRow("Status", self.status_combo)
 
-        # Note (NEW)
+        # Note
         self.note_edit = QPlainTextEdit()
         self.note_edit.setPlaceholderText("Optional note")
         self.note_edit.setMaximumHeight(80)
@@ -148,7 +148,6 @@ class SessionDialog(QDialog):
         status = self.status_combo.currentText()
         note = self.note_edit.toPlainText().strip() or None
 
-        # Validate
         if not title:
             QMessageBox.warning(self, "Validation Error", "Title is required.")
             return
