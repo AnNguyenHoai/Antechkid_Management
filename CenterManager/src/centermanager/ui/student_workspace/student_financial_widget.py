@@ -221,7 +221,7 @@ class StudentFinancialWidget(QWidget):
         self._update_payment_history()
 
     def _update_summary(self) -> None:
-        if self._summary:
+        if self._summary and (self._summary.total_expected > 0 or self._summary.total_paid > 0):
             self.total_expected_label._value_widget.setText(f"{self._summary.total_expected:,.0f} VND")
             self.total_paid_label._value_widget.setText(f"{self._summary.total_paid:,.0f} VND")
             outstanding = self._summary.total_outstanding
@@ -238,10 +238,16 @@ class StudentFinancialWidget(QWidget):
             self.outstanding_label._value_widget.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.status_label._value_widget.setText(status_text)
         else:
-            self.total_expected_label._value_widget.setText("0 VND")
-            self.total_paid_label._value_widget.setText("0 VND")
-            self.outstanding_label._value_widget.setText("0 VND")
-            self.status_label._value_widget.setText("Chưa có dữ liệu")
+            # Hiển thị thông báo không có dữ liệu
+            self.total_expected_label._value_widget.setText("Chưa có dữ liệu")
+            self.total_expected_label._value_widget.setStyleSheet("color: #999;")
+            self.total_paid_label._value_widget.setText("Chưa có dữ liệu")
+            self.total_paid_label._value_widget.setStyleSheet("color: #999;")
+            self.outstanding_label._value_widget.setText("Chưa có dữ liệu")
+            self.outstanding_label._value_widget.setStyleSheet("color: #999;")
+            self.status_label._value_widget.setText("Chưa có lớp học hoặc học phí")
+            self.status_label._value_widget.setStyleSheet("color: #999;")
+            self._show_data()
 
     def _update_detail_table(self) -> None:
         self.detail_table.clearSpans()

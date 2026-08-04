@@ -21452,6 +21452,7 @@ class ClassService:
         end_date: Optional[date] = None,
         capacity: Optional[int] = None,
         status: str = "ACTIVE",
+        fee: Optional[int] = None,
     ) -> Class:
         norm_name = self._validate_name(name)
         norm_course = self._normalize_text(course)
@@ -21465,6 +21466,7 @@ class ClassService:
                 end_date=end_date,
                 capacity=capacity,
                 status=status,
+                fee=fee,
             )
             repo = ClassRepository(session)
             repo.add(class_obj)
@@ -21518,6 +21520,7 @@ class ClassService:
         end_date: Any = UNSET,
         capacity: Any = UNSET,
         status: Any = UNSET,
+        fee: Any = UNSET,
     ) -> Class:
         with self._session_factory() as session:
             repo = ClassRepository(session)
@@ -21568,7 +21571,12 @@ class ClassService:
                 if old_val != new_val:
                     changes.append(f"status: '{old_val}' -> '{new_val}'")
                 class_obj.status = new_val
-
+            if fee is not UNSET:
+                new_val = fee
+                old_val = class_obj.fee if class_obj.fee is not None else "(none)"
+                if str(old_val) != str(new_val if new_val is not None else "(none)"):
+                    changes.append(f"fee: '{old_val}' -> '{new_val if new_val is not None else '(none)'}'")
+                class_obj.fee = new_val
             if not changes:
                 return class_obj
 
@@ -22265,18 +22273,48 @@ class FinanceDashboardService:
         return expenses
 
     # ---- Aggregated Dashboard Data ----
+    def get_revenue_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
+        """Return revenue breakdown by payment method."""
+        incomes, _ = self._income_service.list_incomes(
+            date_from=date_from,
+            date_to=date_to,
+            page=1,
+            per_page=10000
+        )
+        result = {}
+        for inc in incomes:
+            method = inc.payment_method or "Other"
+            result[method] = result.get(method, 0.0) + inc.amount
+        return result
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
-        """Return all dashboard data in one call."""
-        return {
-            "revenue_today": self.get_revenue_today(),
-            "revenue_month": self.get_revenue_this_month(),
-            "expense_today": self.get_expense_today(),
-            "expense_month": self.get_expense_this_month(),
-            "net_cash_flow": self.get_net_cash_flow(),
-            "recent_income": self.get_recent_income(),
-            "recent_expense": self.get_recent_expense(),
-        }
+    def get_expense_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
+        """Return expense breakdown by payment method."""
+        expenses, _ = self._expense_service.list_expenses(
+            date_from=date_from,
+            date_to=date_to,
+            page=1,
+            per_page=10000
+        )
+        result = {}
+        for exp in expenses:
+            method = exp.payment_method or "Other"
+            result[method] = result.get(method, 0.0) + exp.amount
+        return result
+
+def get_dashboard_data(self) -> Dict[str, Any]:
+    today = self._get_today_date()
+    start_month = self._get_first_day_of_month()
+    return {
+        "revenue_today": self.get_revenue_today(),
+        "revenue_month": self.get_revenue_this_month(),
+        "expense_today": self.get_expense_today(),
+        "expense_month": self.get_expense_this_month(),
+        "net_cash_flow": self.get_net_cash_flow(),
+        "recent_income": self.get_recent_income(),
+        "recent_expense": self.get_recent_expense(),
+        "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
+        "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
+    }
 
 ================
 File: src/centermanager/services/finance_service.py
@@ -27719,7 +27757,13 @@ class ClassFormDialog(QDialog):
         self.status_combo = QComboBox()
         self.status_combo.addItems(["ACTIVE", "INACTIVE"])
         form.addRow("Status", self.status_combo)
-
+        # Fee
+        self.fee_spin = QSpinBox()
+        self.fee_spin.setRange(0, 99999999)          # giới hạn 99.999.999 VND
+        self.fee_spin.setSuffix(" VND")
+        self.fee_spin.setSpecialValueText("No fee")   # khi giá trị = 0
+        self.fee_spin.setValue(0)
+        form.addRow("Tuition Fee", self.fee_spin)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -27740,6 +27784,7 @@ class ClassFormDialog(QDialog):
             class_obj = self._service.get_class(self._class_id)
             self.name_edit.setText(class_obj.name)
             self.course_edit.setText(class_obj.course or "")
+            self.fee_spin.setValue(class_obj.fee or 0)
             if class_obj.start_date:
                 qdate = QDate(class_obj.start_date.year, class_obj.start_date.month, class_obj.start_date.day)
                 self.start_date_edit.setDate(qdate)
@@ -27762,7 +27807,9 @@ class ClassFormDialog(QDialog):
         end_date = self.end_date_edit.date().toPython() if self.end_date_edit.date().isValid() else None
         capacity = self.capacity_spin.value() or None
         status = self.status_combo.currentText()
-
+        fee = self.fee_spin.value()
+        if fee == 0:
+            fee = None
         try:
             if self._is_edit:
                 self._service.update_class(
@@ -27773,6 +27820,7 @@ class ClassFormDialog(QDialog):
                     end_date=end_date,
                     capacity=capacity,
                     status=status,
+                    fee=fee,
                 )
             else:
                 self._service.create_class(
@@ -27782,6 +27830,7 @@ class ClassFormDialog(QDialog):
                     end_date=end_date,
                     capacity=capacity,
                     status=status,
+                    fee=fee,
                 )
             self.accept()
         except ClassValidationError as e:
@@ -28811,7 +28860,7 @@ Design System Components - Reusable UI components for CenterManager.
 """
 from typing import Optional, Callable, List, Dict, Any
 from datetime import datetime
-
+from PySide6.QtWidgets import QDoubleSpinBox
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -29591,6 +29640,32 @@ class InfoPanel(QWidget):
                     value_widget.setText(new_value)
                     break
 
+class AutoClearDoubleSpinBox(QDoubleSpinBox):
+    """Double spin box that auto-clears zero on focus and restores on blur."""
+    
+    def __init__(self, prefix: str = "", suffix: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        if prefix:
+            self.setPrefix(prefix)
+        if suffix:
+            self.setSuffix(suffix)
+        self.setRange(0.01, 999999999.99)
+        self.setDecimals(0)
+        self.setValue(0.00)
+        self.lineEdit().setPlaceholderText("0")
+    
+    def focusInEvent(self, event):
+        if self.value() == 0:
+            self.lineEdit().clear()
+        else:
+            self.lineEdit().selectAll()
+        super().focusInEvent(event)
+    
+    def focusOutEvent(self, event):
+        if self.lineEdit().text().strip() == "":
+            self.setValue(0)
+        super().focusOutEvent(event)
+
 ================
 File: src/centermanager/ui/design_system/tokens.py
 ================
@@ -29844,7 +29919,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.services.expense_service import ExpenseService, ExpenseValidationError
-
+from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 logger = logging.getLogger(__name__)
 
 
@@ -29893,14 +29968,8 @@ class ExpenseFormDialog(QDialog):
         form.addRow("Description *", self.desc_edit)
 
         # Amount with improved UX
-        self.amount_spin = QDoubleSpinBox()
+        self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
-        self.amount_spin.setPrefix("VND ")
-        self.amount_spin.setDecimals(0)
-        self.amount_spin.setValue(0.00)
-        self.amount_spin.lineEdit().setPlaceholderText("0")
-        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
-        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Amount *", self.amount_spin)
 
         # Payment Method
@@ -30293,7 +30362,7 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.ui.shared import StatisticGrid, DataTable, EmptyState, LoadingWidget
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.design_system.components import SectionHeader
-
+from centermanager.ui.shared import ChartCard
 logger = logging.getLogger(__name__)
 
 
@@ -30347,7 +30416,12 @@ class FinanceDashboardPage(QWidget):
         self.income_table.setMaximumHeight(300)
         income_layout.addWidget(self.income_table)
         container_layout.addWidget(income_section)
+        #Load chart
+        self.revenue_method_chart = ChartCard("Revenue by Payment Method (This Month)", "pie")
+        container_layout.addWidget(self.revenue_method_chart)
 
+        self.expense_method_chart = ChartCard("Expense by Payment Method (This Month)", "pie")
+        container_layout.addWidget(self.expense_method_chart)
         # ---- Recent Expense ----
         expense_section = QWidget()
         expense_layout = QVBoxLayout(expense_section)
@@ -30377,13 +30451,28 @@ class FinanceDashboardPage(QWidget):
         layout.addWidget(self.loading)
 
     def refresh(self):
-        """Load and display dashboard data."""
         self.loading.setVisible(True)
         try:
             data = self._service.get_dashboard_data()
             self._update_kpis(data)
             self._update_income_table(data.get("recent_income", []))
             self._update_expense_table(data.get("recent_expense", []))
+            
+            # Cập nhật biểu đồ
+            revenue_method = data.get("revenue_by_method_month", {})
+            if revenue_method:
+                chart_data = [(method, amount) for method, amount in revenue_method.items()]
+                self.revenue_method_chart.set_data(chart_data)
+            else:
+                self.revenue_method_chart.set_data([("No data", 0)])
+            
+            expense_method = data.get("expense_by_method_month", {})
+            if expense_method:
+                chart_data2 = [(method, amount) for method, amount in expense_method.items()]
+                self.expense_method_chart.set_data(chart_data2)
+            else:
+                self.expense_method_chart.set_data([("No data", 0)])
+                
         except Exception as e:
             logger.exception("Failed to refresh finance dashboard")
             self._show_error()
@@ -30771,7 +30860,7 @@ from centermanager.services.income_service import IncomeService, IncomeValidatio
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.core.current_user import get_current_user
-
+from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 logger = logging.getLogger(__name__)
 
 
@@ -30835,15 +30924,8 @@ class IncomeFormDialog(QDialog):
         form.addRow("Loại thu *", self.type_combo)
 
         # Amount with improved UX
-        self.amount_spin = QDoubleSpinBox()
+        self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
-        self.amount_spin.setPrefix("VND ")
-        self.amount_spin.setDecimals(0)
-        self.amount_spin.setValue(0.00)
-        # Clear on focus, restore 0 on blur if empty
-        self.amount_spin.lineEdit().setPlaceholderText("0")
-        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
-        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Số tiền *", self.amount_spin)
 
         self.method_combo = QComboBox()
@@ -30981,8 +31063,8 @@ class IncomeFormDialog(QDialog):
             else:
                 self.note_edit.setText(income.note or "")
         except Exception as e:
-            logger.exception("Error loading income")
-            QMessageBox.critical(self, "Error", "Could not load income data.")
+            logger.exception(f"Error loading income {self._income_id} for edit")
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải dữ liệu thu nhập: {str(e)}")
             self.reject()
 
     def _save(self) -> None:
@@ -36753,10 +36835,16 @@ class StudentFinancialWidget(QWidget):
             self.outstanding_label._value_widget.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.status_label._value_widget.setText(status_text)
         else:
-            self.total_expected_label._value_widget.setText("0 VND")
-            self.total_paid_label._value_widget.setText("0 VND")
-            self.outstanding_label._value_widget.setText("0 VND")
-            self.status_label._value_widget.setText("Chưa có dữ liệu")
+            # Hiển thị thông báo không có dữ liệu
+            self.total_expected_label._value_widget.setText("Chưa có dữ liệu")
+            self.total_expected_label._value_widget.setStyleSheet("color: #999;")
+            self.total_paid_label._value_widget.setText("Chưa có dữ liệu")
+            self.total_paid_label._value_widget.setStyleSheet("color: #999;")
+            self.outstanding_label._value_widget.setText("Chưa có dữ liệu")
+            self.outstanding_label._value_widget.setStyleSheet("color: #999;")
+            self.status_label._value_widget.setText("Chưa có lớp học hoặc học phí")
+            self.status_label._value_widget.setStyleSheet("color: #999;")
+            self._show_data()
 
     def _update_detail_table(self) -> None:
         self.detail_table.clearSpans()

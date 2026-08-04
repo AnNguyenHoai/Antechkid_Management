@@ -85,6 +85,7 @@ class ClassService:
         end_date: Optional[date] = None,
         capacity: Optional[int] = None,
         status: str = "ACTIVE",
+        fee: Optional[int] = None,
     ) -> Class:
         norm_name = self._validate_name(name)
         norm_course = self._normalize_text(course)
@@ -98,6 +99,7 @@ class ClassService:
                 end_date=end_date,
                 capacity=capacity,
                 status=status,
+                fee=fee,
             )
             repo = ClassRepository(session)
             repo.add(class_obj)
@@ -151,6 +153,7 @@ class ClassService:
         end_date: Any = UNSET,
         capacity: Any = UNSET,
         status: Any = UNSET,
+        fee: Any = UNSET,
     ) -> Class:
         with self._session_factory() as session:
             repo = ClassRepository(session)
@@ -201,7 +204,12 @@ class ClassService:
                 if old_val != new_val:
                     changes.append(f"status: '{old_val}' -> '{new_val}'")
                 class_obj.status = new_val
-
+            if fee is not UNSET:
+                new_val = fee
+                old_val = class_obj.fee if class_obj.fee is not None else "(none)"
+                if str(old_val) != str(new_val if new_val is not None else "(none)"):
+                    changes.append(f"fee: '{old_val}' -> '{new_val if new_val is not None else '(none)'}'")
+                class_obj.fee = new_val
             if not changes:
                 return class_obj
 

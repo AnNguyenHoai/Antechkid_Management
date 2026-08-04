@@ -18,7 +18,7 @@ from centermanager.services.income_service import IncomeService, IncomeValidatio
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.core.current_user import get_current_user
-
+from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 logger = logging.getLogger(__name__)
 
 
@@ -82,15 +82,8 @@ class IncomeFormDialog(QDialog):
         form.addRow("Loại thu *", self.type_combo)
 
         # Amount with improved UX
-        self.amount_spin = QDoubleSpinBox()
+        self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
-        self.amount_spin.setPrefix("VND ")
-        self.amount_spin.setDecimals(0)
-        self.amount_spin.setValue(0.00)
-        # Clear on focus, restore 0 on blur if empty
-        self.amount_spin.lineEdit().setPlaceholderText("0")
-        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
-        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Số tiền *", self.amount_spin)
 
         self.method_combo = QComboBox()
@@ -228,8 +221,8 @@ class IncomeFormDialog(QDialog):
             else:
                 self.note_edit.setText(income.note or "")
         except Exception as e:
-            logger.exception("Error loading income")
-            QMessageBox.critical(self, "Error", "Could not load income data.")
+            logger.exception(f"Error loading income {self._income_id} for edit")
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải dữ liệu thu nhập: {str(e)}")
             self.reject()
 
     def _save(self) -> None:

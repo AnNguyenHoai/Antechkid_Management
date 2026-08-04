@@ -15,7 +15,7 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.ui.shared import StatisticGrid, DataTable, EmptyState, LoadingWidget
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.design_system.components import SectionHeader
-
+from centermanager.ui.shared import ChartCard
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +69,12 @@ class FinanceDashboardPage(QWidget):
         self.income_table.setMaximumHeight(300)
         income_layout.addWidget(self.income_table)
         container_layout.addWidget(income_section)
+        #Load chart
+        self.revenue_method_chart = ChartCard("Revenue by Payment Method (This Month)", "pie")
+        container_layout.addWidget(self.revenue_method_chart)
 
+        self.expense_method_chart = ChartCard("Expense by Payment Method (This Month)", "pie")
+        container_layout.addWidget(self.expense_method_chart)
         # ---- Recent Expense ----
         expense_section = QWidget()
         expense_layout = QVBoxLayout(expense_section)
@@ -99,13 +104,28 @@ class FinanceDashboardPage(QWidget):
         layout.addWidget(self.loading)
 
     def refresh(self):
-        """Load and display dashboard data."""
         self.loading.setVisible(True)
         try:
             data = self._service.get_dashboard_data()
             self._update_kpis(data)
             self._update_income_table(data.get("recent_income", []))
             self._update_expense_table(data.get("recent_expense", []))
+            
+            # Cập nhật biểu đồ
+            revenue_method = data.get("revenue_by_method_month", {})
+            if revenue_method:
+                chart_data = [(method, amount) for method, amount in revenue_method.items()]
+                self.revenue_method_chart.set_data(chart_data)
+            else:
+                self.revenue_method_chart.set_data([("No data", 0)])
+            
+            expense_method = data.get("expense_by_method_month", {})
+            if expense_method:
+                chart_data2 = [(method, amount) for method, amount in expense_method.items()]
+                self.expense_method_chart.set_data(chart_data2)
+            else:
+                self.expense_method_chart.set_data([("No data", 0)])
+                
         except Exception as e:
             logger.exception("Failed to refresh finance dashboard")
             self._show_error()

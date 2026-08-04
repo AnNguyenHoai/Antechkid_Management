@@ -4,7 +4,7 @@ Design System Components - Reusable UI components for CenterManager.
 """
 from typing import Optional, Callable, List, Dict, Any
 from datetime import datetime
-
+from PySide6.QtWidgets import QDoubleSpinBox
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -783,3 +783,29 @@ class InfoPanel(QWidget):
                 if value_widget and isinstance(value_widget, QLabel):
                     value_widget.setText(new_value)
                     break
+
+class AutoClearDoubleSpinBox(QDoubleSpinBox):
+    """Double spin box that auto-clears zero on focus and restores on blur."""
+    
+    def __init__(self, prefix: str = "", suffix: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        if prefix:
+            self.setPrefix(prefix)
+        if suffix:
+            self.setSuffix(suffix)
+        self.setRange(0.01, 999999999.99)
+        self.setDecimals(0)
+        self.setValue(0.00)
+        self.lineEdit().setPlaceholderText("0")
+    
+    def focusInEvent(self, event):
+        if self.value() == 0:
+            self.lineEdit().clear()
+        else:
+            self.lineEdit().selectAll()
+        super().focusInEvent(event)
+    
+    def focusOutEvent(self, event):
+        if self.lineEdit().text().strip() == "":
+            self.setValue(0)
+        super().focusOutEvent(event)

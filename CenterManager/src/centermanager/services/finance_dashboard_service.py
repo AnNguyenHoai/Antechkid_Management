@@ -105,9 +105,37 @@ class FinanceDashboardService:
         return expenses
 
     # ---- Aggregated Dashboard Data ----
+    def get_revenue_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
+        """Return revenue breakdown by payment method."""
+        incomes, _ = self._income_service.list_incomes(
+            date_from=date_from,
+            date_to=date_to,
+            page=1,
+            per_page=10000
+        )
+        result = {}
+        for inc in incomes:
+            method = inc.payment_method or "Other"
+            result[method] = result.get(method, 0.0) + inc.amount
+        return result
+
+    def get_expense_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
+        """Return expense breakdown by payment method."""
+        expenses, _ = self._expense_service.list_expenses(
+            date_from=date_from,
+            date_to=date_to,
+            page=1,
+            per_page=10000
+        )
+        result = {}
+        for exp in expenses:
+            method = exp.payment_method or "Other"
+            result[method] = result.get(method, 0.0) + exp.amount
+        return result
 
     def get_dashboard_data(self) -> Dict[str, Any]:
-        """Return all dashboard data in one call."""
+        today = self._get_today_date()
+        start_month = self._get_first_day_of_month()
         return {
             "revenue_today": self.get_revenue_today(),
             "revenue_month": self.get_revenue_this_month(),
@@ -116,4 +144,6 @@ class FinanceDashboardService:
             "net_cash_flow": self.get_net_cash_flow(),
             "recent_income": self.get_recent_income(),
             "recent_expense": self.get_recent_expense(),
+            "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
+            "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
         }

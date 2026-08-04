@@ -83,7 +83,13 @@ class ClassFormDialog(QDialog):
         self.status_combo = QComboBox()
         self.status_combo.addItems(["ACTIVE", "INACTIVE"])
         form.addRow("Status", self.status_combo)
-
+        # Fee
+        self.fee_spin = QSpinBox()
+        self.fee_spin.setRange(0, 99999999)          # giới hạn 99.999.999 VND
+        self.fee_spin.setSuffix(" VND")
+        self.fee_spin.setSpecialValueText("No fee")   # khi giá trị = 0
+        self.fee_spin.setValue(0)
+        form.addRow("Tuition Fee", self.fee_spin)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -104,6 +110,7 @@ class ClassFormDialog(QDialog):
             class_obj = self._service.get_class(self._class_id)
             self.name_edit.setText(class_obj.name)
             self.course_edit.setText(class_obj.course or "")
+            self.fee_spin.setValue(class_obj.fee or 0)
             if class_obj.start_date:
                 qdate = QDate(class_obj.start_date.year, class_obj.start_date.month, class_obj.start_date.day)
                 self.start_date_edit.setDate(qdate)
@@ -126,7 +133,9 @@ class ClassFormDialog(QDialog):
         end_date = self.end_date_edit.date().toPython() if self.end_date_edit.date().isValid() else None
         capacity = self.capacity_spin.value() or None
         status = self.status_combo.currentText()
-
+        fee = self.fee_spin.value()
+        if fee == 0:
+            fee = None
         try:
             if self._is_edit:
                 self._service.update_class(
@@ -137,6 +146,7 @@ class ClassFormDialog(QDialog):
                     end_date=end_date,
                     capacity=capacity,
                     status=status,
+                    fee=fee,
                 )
             else:
                 self._service.create_class(
@@ -146,6 +156,7 @@ class ClassFormDialog(QDialog):
                     end_date=end_date,
                     capacity=capacity,
                     status=status,
+                    fee=fee,
                 )
             self.accept()
         except ClassValidationError as e:

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.services.expense_service import ExpenseService, ExpenseValidationError
-
+from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 logger = logging.getLogger(__name__)
 
 
@@ -59,14 +59,8 @@ class ExpenseFormDialog(QDialog):
         form.addRow("Description *", self.desc_edit)
 
         # Amount with improved UX
-        self.amount_spin = QDoubleSpinBox()
+        self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
-        self.amount_spin.setPrefix("VND ")
-        self.amount_spin.setDecimals(0)
-        self.amount_spin.setValue(0.00)
-        self.amount_spin.lineEdit().setPlaceholderText("0")
-        self.amount_spin.lineEdit().focusInEvent = self._on_amount_focus_in
-        self.amount_spin.lineEdit().focusOutEvent = self._on_amount_focus_out
         form.addRow("Amount *", self.amount_spin)
 
         # Payment Method
