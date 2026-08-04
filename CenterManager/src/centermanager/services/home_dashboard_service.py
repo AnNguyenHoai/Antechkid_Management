@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HomeDashboardService - provides aggregated data for Home Workspace (Workspace Launcher).
-Now simplified: only provides workspace summaries for the launcher.
+Now with permission filtering.
 """
 import logging
 from dataclasses import dataclass
@@ -19,6 +19,7 @@ from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.core.current_user import get_current_user
+from centermanager.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class HomeDashboardService:
 
             summaries = []
 
+            # Student Workspace - always visible
             student_ws = WorkspaceSummary(
                 workspace_id="student",
                 name="Student Workspace",
@@ -86,51 +88,65 @@ class HomeDashboardService:
             )
             summaries.append(student_ws)
 
+            # Teacher Workspace - requires teacher.view or admin
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
             teacher_count = session.query(Teacher).count()
 
-            teacher_ws = WorkspaceSummary(
-                workspace_id="teacher",
-                name="Teacher Workspace",
-                icon="👨‍🏫",
-                description="Teaching activities and classes",
-                summary_text=f"{teacher_count} teachers, {class_count} classes, {session_count} upcoming sessions",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="teacher"
-            )
-            summaries.append(teacher_ws)
-
-            class_ws = WorkspaceSummary(
-                workspace_id="class",
-                name="Class Workspace",
-                icon="📚",
-                description="Manage classes, enrollments, schedules",
-                summary_text=f"{class_count} classes",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="class"
-            )
-            summaries.append(class_ws)
-
-            finance_ws = WorkspaceSummary(
-                workspace_id="finance",
-                name="Finance Workspace",
-                icon="💰",
-                description="Invoices, payments, revenue",
-                summary_text="Revenue: $0, Outstanding: $0",
-                health_status="good",
-                health_details="",
-                quick_action_label="Open →",
-                quick_action_target="finance"
-            )
-            summaries.append(finance_ws)
-
             user = get_current_user()
-            if user and user.has_permission("user.manage"):
+            if user and (user.has_permission("teacher.view") or user.is_admin):
+                teacher_ws = WorkspaceSummary(
+                    workspace_id="teacher",
+                    name="Teacher Workspace",
+                    icon="👨‍🏫",
+                    description="Teaching activities and classes",
+                    summary_text=f"{teacher_count} teachers, {class_count} classes, {session_count} upcoming sessions",
+                    health_status="good",
+                    health_details="",
+                    quick_action_label="Open →",
+                    quick_action_target="teacher"
+                )
+                summaries.append(teacher_ws)
+
+            # Class Workspace - requires class.view or admin
+            if user and (user.has_permission("class.view") or user.is_admin):
+                class_ws = WorkspaceSummary(
+                    workspace_id="class",
+                    name="Class Workspace",
+                    icon="📚",
+                    description="Manage classes, enrollments, schedules",
+                    summary_text=f"{class_count} classes",
+                    health_status="good",
+                    health_details="",
+                    quick_action_label="Open →",
+                    quick_action_target="class"
+                )
+                summaries.append(class_ws)
+
+            # Finance Workspace - requires finance.view or admin
+            if user and (user.has_permission("finance.view") or user.is_admin):
+                # Tính revenue và outstanding (placeholder)
+                from centermanager.services.outstanding_service import OutstandingService
+                outstanding_service = OutstandingService(self._session_factory)
+                stats = outstanding_service.get_outstanding_stats()
+                revenue = stats.get('total_paid', 0)
+                outstanding = stats.get('total_outstanding', 0)
+
+                finance_ws = WorkspaceSummary(
+                    workspace_id="finance",
+                    name="Finance Workspace",
+                    icon="💰",
+                    description="Invoices, payments, revenue",
+                    summary_text=f"Revenue: {revenue:,.0f} VND, Outstanding: {outstanding:,.0f} VND",
+                    health_status="good",
+                    health_details="",
+                    quick_action_label="Open →",
+                    quick_action_target="finance"
+                )
+                summaries.append(finance_ws)
+
+            # Admin Workspace - requires user.manage or admin
+            if user and (user.has_permission("user.manage") or user.is_admin):
                 admin_ws = WorkspaceSummary(
                     workspace_id="admin",
                     name="Admin Workspace",

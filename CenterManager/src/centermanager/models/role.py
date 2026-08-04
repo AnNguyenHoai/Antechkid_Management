@@ -61,11 +61,12 @@ class RoleDefinitions:
     ADMIN = "admin"
     TEACHER = "teacher"
     RECEPTION = "reception"
-    FINANCE = "finance"   # thêm
+    FINANCE = "finance"
+    MANAGER = "manager"   # Thêm
 
     @classmethod
     def all_roles(cls) -> List[str]:
-        return [cls.ADMIN, cls.TEACHER, cls.RECEPTION]
+        return [cls.ADMIN, cls.TEACHER, cls.RECEPTION, cls.FINANCE, cls.MANAGER]
 
     @classmethod
     def get_display_name(cls, role_name: str) -> str:
@@ -73,8 +74,7 @@ class RoleDefinitions:
             cls.ADMIN: "Administrator",
             cls.TEACHER: "Teacher",
             cls.RECEPTION: "Reception",
+            cls.FINANCE: "Finance",
+            cls.MANAGER: "Manager",   # Thêm
         }
         return display_map.get(role_name, role_name.capitalize())
-    @classmethod
-    def all_roles(cls) -> List[str]:
-        return [cls.ADMIN, cls.TEACHER, cls.RECEPTION, cls.FINANCE]

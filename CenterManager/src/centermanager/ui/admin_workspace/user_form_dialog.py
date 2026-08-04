@@ -75,6 +75,7 @@ class UserFormDialog(QDialog):
             (RoleDefinitions.TEACHER, "Teacher"),
             (RoleDefinitions.RECEPTION, "Reception"),
             (RoleDefinitions.FINANCE, "Finance"),
+            (RoleDefinitions.MANAGER, "Manager"),
         ]
         for name, display in roles:
             self.role_combo.addItem(display, name)

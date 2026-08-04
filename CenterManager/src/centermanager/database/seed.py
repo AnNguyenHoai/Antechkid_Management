@@ -17,12 +17,11 @@ logger = logging.getLogger(__name__)
 
 # src/centermanager/database/seed.py
 def seed_roles_and_permissions(session: Session) -> None:
-    # 1. Create permissions
+    # Create permissions
     permissions = _create_permissions(session)
     permission_map = {p.name: p for p in permissions}
 
-    # 2. Roles
-    # Admin: tất cả permissions
+    # Admin: full access
     admin_role = _create_role(
         session,
         name=RoleDefinitions.ADMIN,
@@ -94,7 +93,30 @@ def seed_roles_and_permissions(session: Session) -> None:
         ]
     )
 
-    # 3. Admin user
+    # ---- Thêm role MANAGER ----
+    # Manager: tất cả quyền trừ setting.update và user.manage (tức là không vào Admin/Settings)
+    manager_permissions = [
+        p.name for p in permissions
+        if p.name not in [
+            PermissionDefinitions.SETTING_UPDATE,
+            PermissionDefinitions.USER_MANAGE,
+            PermissionDefinitions.USER_VIEW,
+            PermissionDefinitions.USER_CREATE,
+            PermissionDefinitions.USER_UPDATE,
+            PermissionDefinitions.USER_DELETE,
+            PermissionDefinitions.USER_RESET_PASSWORD,
+        ]
+    ]
+    manager_role = _create_role(
+        session,
+        name=RoleDefinitions.MANAGER,
+        display_name="Manager",
+        description="Full access except settings and user management",
+        is_system=True,
+        permission_names=manager_permissions
+    )
+
+    # Admin user
     _create_admin_user(session, admin_role)
     session.commit()
 

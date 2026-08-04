@@ -203,7 +203,7 @@ class StudentDashboardPage(QWidget):
                 (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
                 (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
                 (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
-                (f"⚠️ {len(summary.pending_tasks)} pending tasks", "Students needing attention"),
+                (f"⚠️ {summary.pending_tasks} pending tasks", "Students needing attention"),
             ]
             for label, detail in items:
                 widget = QWidget()

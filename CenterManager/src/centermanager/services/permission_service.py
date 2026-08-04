@@ -209,7 +209,7 @@ class PermissionService:
 
         # Validate role
         valid_roles = [RoleDefinitions.ADMIN, RoleDefinitions.TEACHER,
-                       RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE]
+                       RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE,RoleDefinitions.MANAGER, ]
         if role_name not in valid_roles:
             raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
 

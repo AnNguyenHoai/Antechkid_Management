@@ -17,6 +17,7 @@ from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.timeline_repository import TimelineRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.parent_repository import ParentRepository
+from centermanager.models.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -238,4 +239,61 @@ class StudentDashboardService:
                 avg_age=round(avg_age, 1),
                 total_parents=parent_count,
                 assessment_completion_rate=round(completion_rate * 100, 1)
+            )
+
+    def get_today_summary(self):
+        """Return a summary of today's activities."""
+        from dataclasses import dataclass
+        from datetime import date, timedelta
+
+        @dataclass
+        class TodaySummary:
+            today_classes: int = 0
+            today_assessments: int = 0
+            today_birthdays: list = None
+            upcoming_sessions: int = 0
+            pending_tasks: int = 0
+
+        today = date.today()
+        with self._session_factory() as session:
+            # Số lớp học hôm nay
+            sessions_today = session.query(Session).filter(
+                Session.scheduled_date == today,
+                Session.status == 'Scheduled'
+            ).count()
+
+            # Số đánh giá hôm nay
+            assessments_today = session.query(Assessment).filter(
+                Assessment.assessment_date == today
+            ).count()
+
+            # Sinh nhật hôm nay
+            students = session.query(Student).all()
+            today_birthdays = [
+                s.full_name for s in students
+                if s.date_of_birth and s.date_of_birth.month == today.month and s.date_of_birth.day == today.day
+            ]
+
+            # Số buổi học sắp tới (7 ngày)
+            upcoming = session.query(Session).filter(
+                Session.scheduled_date > today,
+                Session.scheduled_date <= today + timedelta(days=7),
+                Session.status == 'Scheduled'
+            ).count()
+
+            # Số học sinh cần chú ý (thiếu phụ huynh hoặc đánh giá)
+            students_without_parent = session.query(Student).filter(
+                ~Student.id.in_(session.query(Parent.student_id).distinct())
+            ).count()
+            students_without_assessment = session.query(Student).filter(
+                ~Student.id.in_(session.query(Assessment.student_id).distinct())
+            ).count()
+            pending_tasks = students_without_parent + students_without_assessment
+
+            return TodaySummary(
+                today_classes=sessions_today,
+                today_assessments=assessments_today,
+                today_birthdays=today_birthdays,
+                upcoming_sessions=upcoming,
+                pending_tasks=pending_tasks
             )

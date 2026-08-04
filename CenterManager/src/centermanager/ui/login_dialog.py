@@ -4,8 +4,7 @@ LoginDialog - simple login dialog for authentication.
 """
 import hashlib
 import logging
-import traceback
-from datetime import datetime  # <-- đã thêm
+from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -164,9 +163,7 @@ class LoginDialog(QDialog):
                 user.last_login = datetime.now()
                 session.commit()
 
-                # Lấy lại user đã được refresh từ session
-                # (session.refresh(user) là không cần thiết vì commit đã làm mới)
-                # Nhưng để an toàn, lấy lại user_id
+                # Lấy lại user_id
                 user_id = user.id
 
             # Sau khi session đóng, user lại detached, nhưng chúng ta đã có user_id
@@ -177,6 +174,7 @@ class LoginDialog(QDialog):
                 return
 
             self.error_label.setVisible(False)
+            self._user = user  # <--- QUAN TRỌNG: set _user
 
             # Kiểm tra force_password_change
             if user.force_password_change:
@@ -186,6 +184,7 @@ class LoginDialog(QDialog):
                 if change_dialog.exec() == ChangePasswordDialog.DialogCode.Accepted:
                     # Sau khi đổi mật khẩu, reload user từ DB
                     user = self._permission_service.get_user_by_username(username)
+                    self._user = user
                     set_current_user(user)
                     self.login_successful.emit(user)
                     self.accept()
