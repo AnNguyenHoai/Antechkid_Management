@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import time
 from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import String, Text, ForeignKey, Time, DateTime, UniqueConstraint, Index
+from sqlalchemy import String, Text, ForeignKey, Time, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base

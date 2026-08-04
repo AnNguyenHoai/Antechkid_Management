@@ -80,6 +80,11 @@ class PermissionDefinitions:
     ATTENDANCE_CREATE = "attendance.create"
     ATTENDANCE_UPDATE = "attendance.update"
 
+    LESSON_VIEW = "lesson.view"
+    LESSON_CREATE = "lesson.create"
+    LESSON_UPDATE = "lesson.update"
+    LESSON_CANCEL = "lesson.cancel"
+
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -107,6 +112,10 @@ class PermissionDefinitions:
             cls.ATTENDANCE_VIEW,
             cls.ATTENDANCE_CREATE,
             cls.ATTENDANCE_UPDATE,
+            cls.LESSON_VIEW,
+            cls.LESSON_CREATE,
+            cls.LESSON_UPDATE,
+            cls.LESSON_CANCEL,
         ]
 
     @classmethod
@@ -136,6 +145,10 @@ class PermissionDefinitions:
             cls.ATTENDANCE_VIEW: "attendance",
             cls.ATTENDANCE_CREATE: "attendance",
             cls.ATTENDANCE_UPDATE: "attendance",
+            cls.LESSON_VIEW: "lesson",
+            cls.LESSON_CREATE: "lesson",
+            cls.LESSON_UPDATE: "lesson",
+            cls.LESSON_CANCEL: "lesson",
         }
 
         return category_map.get(permission_name, "other")

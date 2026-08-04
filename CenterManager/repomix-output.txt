@@ -85,7 +85,7 @@ docs/
 migrations/
   versions/
     __init__.py
-    c7457bd041df_initial_schema.py
+    6e350141c70e_initial_schema.py
   env.py
   README
   script.py.mako
@@ -139,6 +139,7 @@ src/
       expense_timeline_event.py
       expense.py
       income.py
+      lesson_session.py
       mixins.py
       note.py
       parent.py
@@ -171,6 +172,7 @@ src/
       expense_repository.py
       expense_timeline_repository.py
       income_repository.py
+      lesson_session_repository.py
       note_repository.py
       parent_repository.py
       permission_repository.py
@@ -198,6 +200,7 @@ src/
       finance_service.py
       home_dashboard_service.py
       income_service.py
+      lesson_session_service.py
       outstanding_service.py
       parent_service.py
       permission_service.py
@@ -235,6 +238,10 @@ src/
         class_list_page.py
         class_schedule_widget.py
         class_workspace_shell.py
+        lesson_session_card.py
+        lesson_session_detail.py
+        lesson_session_dialog.py
+        lesson_session_list.py
       common/
         __init__.py
         activity_item.py
@@ -16054,13 +16061,13 @@ File: migrations/versions/__init__.py
 
 
 ================
-File: migrations/versions/c7457bd041df_initial_schema.py
+File: migrations/versions/6e350141c70e_initial_schema.py
 ================
 """initial_schema
 
-Revision ID: c7457bd041df
+Revision ID: 6e350141c70e
 Revises: 
-Create Date: 2026-08-03 17:53:31.824635
+Create Date: 2026-08-04 12:34:39.721816
 
 """
 from typing import Sequence, Union
@@ -16070,7 +16077,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'c7457bd041df'
+revision: str = '6e350141c70e'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -16274,6 +16281,25 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
     sa.ForeignKeyConstraint(['student_id'], ['students.id'], ),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('lesson_sessions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('class_id', sa.Integer(), nullable=False),
+    sa.Column('session_number', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('topic', sa.String(length=200), nullable=True),
+    sa.Column('lesson_date', sa.Date(), nullable=False),
+    sa.Column('start_time', sa.Time(), nullable=False),
+    sa.Column('end_time', sa.Time(), nullable=False),
+    sa.Column('teacher_id', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('note', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['class_id'], ['classes.id'], ),
+    sa.ForeignKeyConstraint(['teacher_id'], ['teachers.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('class_id', 'session_number', name='uq_lesson_session_class_number')
     )
     op.create_table('notes',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -16490,6 +16516,7 @@ def downgrade() -> None:
     op.drop_table('progress')
     op.drop_table('parents')
     op.drop_table('notes')
+    op.drop_table('lesson_sessions')
     op.drop_table('incomes')
     op.drop_index('idx_expense_timeline_expense_id', table_name='expense_timeline_events')
     op.drop_index('idx_expense_timeline_created_at', table_name='expense_timeline_events')
@@ -17367,9 +17394,13 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.CLASS_CREATE,
             PermissionDefinitions.CLASS_UPDATE,
             PermissionDefinitions.REPORT_VIEW,
+            PermissionDefinitions.LESSON_VIEW,
+            PermissionDefinitions.LESSON_CREATE,
+            PermissionDefinitions.LESSON_UPDATE,
+            # Teacher có thể không có cancel? Tùy business, tạm thêm cancel
+            PermissionDefinitions.LESSON_CANCEL,
         ]
     )
-
     reception_role = _create_role(
         session,
         name=RoleDefinitions.RECEPTION,
@@ -17894,6 +17925,8 @@ from centermanager.models.income import Income
 from centermanager.models.expense import Expense
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.models.attendance import Attendance, AttendanceStatus
+from .lesson_session import LessonSession, LessonSessionStatus
+# Thêm vào __all__
 __all__ = [
     "Student",
     "Parent",
@@ -17926,6 +17959,11 @@ __all__ = [
     "ClassTimelineEventType",
     "Income",
     "Expense",
+    "ExpenseTimelineEvent",
+    "Attendance",
+    "LessonSession",
+    "AttendanceStatus",
+    "LessonSessionStatus"
 ]
 
 ================
@@ -18119,6 +18157,7 @@ if TYPE_CHECKING:
     from centermanager.models.teacher import Teacher
     from centermanager.models.enrollment import Enrollment
     from centermanager.models.class_timeline_event import ClassTimelineEvent
+    from .lesson_session import LessonSession
 
 
 class Class(Base, TimestampMixin):
@@ -18134,6 +18173,9 @@ class Class(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     fee: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)  # Course fee in VND
+    lesson_sessions: Mapped[List["LessonSession"]] = relationship(
+        "LessonSession", back_populates="class_", cascade="all, delete-orphan"
+    )
     # Relationships
     sessions: Mapped[List[Session]] = relationship("Session", back_populates="class_", cascade="all, delete-orphan")
     teachers: Mapped[List[Teacher]] = relationship(
@@ -18430,6 +18472,67 @@ class Income(Base, TimestampMixin):
         return f"<Income(id={self.id}, student_id={self.student_id}, amount={self.amount})>"
 
 ================
+File: src/centermanager/models/lesson_session.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSession model - represents an actual teaching session of a class.
+"""
+from __future__ import annotations
+
+from datetime import date, time
+from enum import Enum
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Text, Date, Time, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from centermanager.database.base import Base
+from centermanager.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from centermanager.models.class_ import Class
+    from centermanager.models.teacher import Teacher
+
+
+class LessonSessionStatus(str, Enum):
+    SCHEDULED = "Scheduled"
+    COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
+
+    @classmethod
+    def choices(cls):
+        return [e.value for e in cls]
+
+
+class LessonSession(Base, TimestampMixin):
+    __tablename__ = "lesson_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+
+    session_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    topic: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    lesson_date: Mapped[date] = mapped_column(Date, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    teacher_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teachers.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=LessonSessionStatus.SCHEDULED.value)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    class_: Mapped[Class] = relationship("Class", back_populates="lesson_sessions")
+    teacher: Mapped[Optional[Teacher]] = relationship("Teacher", lazy="selectin")
+
+    __table_args__ = (
+        UniqueConstraint('class_id', 'session_number', name='uq_lesson_session_class_number'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LessonSession(id={self.id}, class_id={self.class_id}, number={self.session_number})>"
+
+================
 File: src/centermanager/models/mixins.py
 ================
 # -*- coding: utf-8 -*-
@@ -18663,6 +18766,11 @@ class PermissionDefinitions:
     ATTENDANCE_CREATE = "attendance.create"
     ATTENDANCE_UPDATE = "attendance.update"
 
+    LESSON_VIEW = "lesson.view"
+    LESSON_CREATE = "lesson.create"
+    LESSON_UPDATE = "lesson.update"
+    LESSON_CANCEL = "lesson.cancel"
+
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -18690,6 +18798,10 @@ class PermissionDefinitions:
             cls.ATTENDANCE_VIEW,
             cls.ATTENDANCE_CREATE,
             cls.ATTENDANCE_UPDATE,
+            cls.LESSON_VIEW,
+            cls.LESSON_CREATE,
+            cls.LESSON_UPDATE,
+            cls.LESSON_CANCEL,
         ]
 
     @classmethod
@@ -18719,6 +18831,10 @@ class PermissionDefinitions:
             cls.ATTENDANCE_VIEW: "attendance",
             cls.ATTENDANCE_CREATE: "attendance",
             cls.ATTENDANCE_UPDATE: "attendance",
+            cls.LESSON_VIEW: "lesson",
+            cls.LESSON_CREATE: "lesson",
+            cls.LESSON_UPDATE: "lesson",
+            cls.LESSON_CANCEL: "lesson",
         }
 
         return category_map.get(permission_name, "other")
@@ -20214,6 +20330,50 @@ class IncomeRepository(BaseRepository[Income]):
     def delete(self, income: Income) -> None:
         # Soft delete
         income.deleted_at = datetime.now()
+
+================
+File: src/centermanager/repositories/lesson_session_repository.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionRepository - data access for LessonSession entity.
+"""
+from typing import List, Optional
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, asc
+
+from centermanager.models.lesson_session import LessonSession
+from centermanager.repositories.base import BaseRepository
+
+
+class LessonSessionRepository(BaseRepository[LessonSession]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, LessonSession)
+
+    def get_by_class(self, class_id: int) -> List[LessonSession]:
+        return self._session.query(LessonSession).options(
+            joinedload(LessonSession.teacher)
+        ).filter(LessonSession.class_id == class_id).order_by(
+            asc(LessonSession.session_number)
+        ).all()
+
+    def get_by_id(self, session_id: int) -> Optional[LessonSession]:
+        return self._session.query(LessonSession).options(
+            joinedload(LessonSession.teacher)
+        ).filter(LessonSession.id == session_id).first()
+
+    def get_latest_session_number(self, class_id: int) -> Optional[int]:
+        result = self._session.query(LessonSession.session_number).filter(
+            LessonSession.class_id == class_id
+        ).order_by(desc(LessonSession.session_number)).first()
+        return result[0] if result else None
+
+    def add(self, session: LessonSession) -> LessonSession:
+        self._session.add(session)
+        return session
+
+    def delete(self, session: LessonSession) -> None:
+        self._session.delete(session)
 
 ================
 File: src/centermanager/repositories/note_repository.py
@@ -22301,20 +22461,20 @@ class FinanceDashboardService:
             result[method] = result.get(method, 0.0) + exp.amount
         return result
 
-def get_dashboard_data(self) -> Dict[str, Any]:
-    today = self._get_today_date()
-    start_month = self._get_first_day_of_month()
-    return {
-        "revenue_today": self.get_revenue_today(),
-        "revenue_month": self.get_revenue_this_month(),
-        "expense_today": self.get_expense_today(),
-        "expense_month": self.get_expense_this_month(),
-        "net_cash_flow": self.get_net_cash_flow(),
-        "recent_income": self.get_recent_income(),
-        "recent_expense": self.get_recent_expense(),
-        "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
-        "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
-    }
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        today = self._get_today_date()
+        start_month = self._get_first_day_of_month()
+        return {
+            "revenue_today": self.get_revenue_today(),
+            "revenue_month": self.get_revenue_this_month(),
+            "expense_today": self.get_expense_today(),
+            "expense_month": self.get_expense_this_month(),
+            "net_cash_flow": self.get_net_cash_flow(),
+            "recent_income": self.get_recent_income(),
+            "recent_expense": self.get_recent_expense(),
+            "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
+            "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
+        }
 
 ================
 File: src/centermanager/services/finance_service.py
@@ -22753,6 +22913,261 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
+
+================
+File: src/centermanager/services/lesson_session_service.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionService - business logic for LessonSession entity.
+"""
+from datetime import date, time
+from typing import Optional, List
+
+from sqlalchemy.orm import sessionmaker
+
+from centermanager.models.lesson_session import LessonSession, LessonSessionStatus
+from centermanager.repositories.lesson_session_repository import LessonSessionRepository
+from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.core.permission_guard import require_permission
+
+
+class LessonSessionServiceError(Exception):
+    pass
+
+
+class LessonSessionNotFoundError(LessonSessionServiceError):
+    pass
+
+
+class LessonSessionValidationError(LessonSessionServiceError):
+    pass
+
+
+class LessonSessionService:
+    def __init__(self, session_factory: sessionmaker):
+        self._session_factory = session_factory
+
+    def _normalize_text(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped if stripped else None
+
+    def _validate_title(self, title: Optional[str]) -> str:
+        norm = self._normalize_text(title)
+        if not norm:
+            raise LessonSessionValidationError("Title is required.")
+        return norm
+
+    def _validate_date(self, lesson_date: date) -> date:
+        if lesson_date is None:
+            raise LessonSessionValidationError("Lesson date is required.")
+        return lesson_date
+
+    def _validate_time(self, start_time: time, end_time: time) -> tuple:
+        if start_time is None or end_time is None:
+            raise LessonSessionValidationError("Start time and end time are required.")
+        if start_time >= end_time:
+            raise LessonSessionValidationError("Start time must be before end time.")
+        return start_time, end_time
+
+    def _validate_status(self, status: str) -> str:
+        valid = LessonSessionStatus.choices()
+        if status not in valid:
+            raise LessonSessionValidationError(f"Status must be one of: {', '.join(valid)}")
+        return status
+
+    def _get_next_session_number(self, class_id: int) -> int:
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            latest = repo.get_latest_session_number(class_id)
+            return (latest or 0) + 1
+
+    @require_permission("lesson.create")
+    def create_session(
+        self,
+        class_id: int,
+        title: str,
+        lesson_date: date,
+        start_time: time,
+        end_time: time,
+        topic: Optional[str] = None,
+        teacher_id: Optional[int] = None,
+        status: str = LessonSessionStatus.SCHEDULED.value,
+        note: Optional[str] = None,
+    ) -> LessonSession:
+        norm_title = self._validate_title(title)
+        norm_topic = self._normalize_text(topic)
+        norm_note = self._normalize_text(note)
+        lesson_date = self._validate_date(lesson_date)
+        start_time, end_time = self._validate_time(start_time, end_time)
+        status = self._validate_status(status)
+
+        session_number = self._get_next_session_number(class_id)
+
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            lesson = LessonSession(
+                class_id=class_id,
+                session_number=session_number,
+                title=norm_title,
+                topic=norm_topic,
+                lesson_date=lesson_date,
+                start_time=start_time,
+                end_time=end_time,
+                teacher_id=teacher_id,
+                status=status,
+                note=norm_note,
+            )
+            repo.add(lesson)
+            session.commit()
+            session.refresh(lesson)
+
+            # Log class timeline
+            timeline_service = ClassTimelineService(self._session_factory)
+            timeline_service.log_event(
+                class_id=class_id,
+                event_type="LessonSessionCreated",
+                title=f"Lesson Session {session_number} Created",
+                description=f"Title: {norm_title}, Date: {lesson_date}",
+                metadata={"session_id": lesson.id}
+            )
+
+            return lesson
+
+    @require_permission("lesson.view")
+    def get_session(self, session_id: int) -> LessonSession:
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            lesson = repo.get_by_id(session_id)
+            if lesson is None:
+                raise LessonSessionNotFoundError(f"Session {session_id} not found.")
+            return lesson
+
+    @require_permission("lesson.view")
+    def get_sessions_for_class(self, class_id: int) -> List[LessonSession]:
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            return repo.get_by_class(class_id)
+
+    @require_permission("lesson.update")
+    def update_session(
+        self,
+        session_id: int,
+        title: Optional[str] = None,
+        topic: Optional[str] = None,
+        lesson_date: Optional[date] = None,
+        start_time: Optional[time] = None,
+        end_time: Optional[time] = None,
+        teacher_id: Optional[int] = None,
+        status: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> LessonSession:
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            lesson = repo.get_by_id(session_id)
+            if lesson is None:
+                raise LessonSessionNotFoundError(f"Session {session_id} not found.")
+
+            changes = []
+
+            if title is not None:
+                new_title = self._validate_title(title)
+                if lesson.title != new_title:
+                    changes.append(f"title: '{lesson.title}' -> '{new_title}'")
+                lesson.title = new_title
+
+            if topic is not None:
+                new_topic = self._normalize_text(topic)
+                old = lesson.topic or "(none)"
+                new = new_topic or "(none)"
+                if old != new:
+                    changes.append(f"topic: '{old}' -> '{new}'")
+                lesson.topic = new_topic
+
+            if lesson_date is not None:
+                self._validate_date(lesson_date)
+                if lesson.lesson_date != lesson_date:
+                    changes.append(f"date: {lesson.lesson_date} -> {lesson_date}")
+                lesson.lesson_date = lesson_date
+
+            if start_time is not None and end_time is not None:
+                self._validate_time(start_time, end_time)
+                if lesson.start_time != start_time or lesson.end_time != end_time:
+                    changes.append(f"time: {lesson.start_time}-{lesson.end_time} -> {start_time}-{end_time}")
+                lesson.start_time = start_time
+                lesson.end_time = end_time
+            elif start_time is not None:
+                if lesson.start_time != start_time:
+                    changes.append(f"start_time: {lesson.start_time} -> {start_time}")
+                lesson.start_time = start_time
+            elif end_time is not None:
+                if lesson.end_time != end_time:
+                    changes.append(f"end_time: {lesson.end_time} -> {end_time}")
+                lesson.end_time = end_time
+
+            if teacher_id is not None:
+                old = lesson.teacher_id or "(none)"
+                new = str(teacher_id) if teacher_id else "(none)"
+                if old != new:
+                    changes.append(f"teacher: {old} -> {new}")
+                lesson.teacher_id = teacher_id
+
+            if status is not None:
+                new_status = self._validate_status(status)
+                if lesson.status != new_status:
+                    changes.append(f"status: '{lesson.status}' -> '{new_status}'")
+                lesson.status = new_status
+
+            if note is not None:
+                new_note = self._normalize_text(note)
+                old = lesson.note or "(none)"
+                new = new_note or "(none)"
+                if old != new:
+                    changes.append(f"note: '{old}' -> '{new}'")
+                lesson.note = new_note
+
+            if not changes:
+                return lesson
+
+            session.commit()
+            session.refresh(lesson)
+
+            timeline_service = ClassTimelineService(self._session_factory)
+            timeline_service.log_event(
+                class_id=lesson.class_id,
+                event_type="LessonSessionUpdated",
+                title=f"Lesson Session {lesson.session_number} Updated",
+                description="; ".join(changes),
+                metadata={"session_id": lesson.id}
+            )
+
+            return lesson
+
+    @require_permission("lesson.cancel")
+    def cancel_session(self, session_id: int) -> LessonSession:
+        with self._session_factory() as session:
+            repo = LessonSessionRepository(session)
+            lesson = repo.get_by_id(session_id)
+            if lesson is None:
+                raise LessonSessionNotFoundError(f"Session {session_id} not found.")
+            if lesson.status == LessonSessionStatus.CANCELLED.value:
+                raise LessonSessionValidationError("Session already cancelled.")
+            lesson.status = LessonSessionStatus.CANCELLED.value
+            session.commit()
+            session.refresh(lesson)
+
+            timeline_service = ClassTimelineService(self._session_factory)
+            timeline_service.log_event(
+                class_id=lesson.class_id,
+                event_type="LessonSessionCancelled",
+                title=f"Lesson Session {lesson.session_number} Cancelled",
+                description=f"Session {lesson.title} was cancelled.",
+                metadata={"session_id": lesson.id}
+            )
+
+            return lesson
 
 ================
 File: src/centermanager/services/outstanding_service.py
@@ -27063,6 +27478,9 @@ from centermanager.ui.class_workspace.class_schedule_widget import ClassSchedule
 from centermanager.ui.class_workspace.attendance_widget import AttendanceWidget  # <-- THÊM
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
+from centermanager.services.lesson_session_service import LessonSessionService
+from centermanager.ui.class_workspace.lesson_session_list import LessonSessionList
+
 
 logger = logging.getLogger(__name__)
 
@@ -27081,6 +27499,8 @@ class ClassDetailPage(QWidget):
         highlight_service: StudentHighlightService,
         student_service: StudentService,
         attendance_service: AttendanceService,  # <-- THÊM
+        lesson_service: LessonSessionService,
+        teacher_service: TeacherService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -27092,6 +27512,8 @@ class ClassDetailPage(QWidget):
         self._highlight_service = highlight_service
         self._student_service = student_service
         self._attendance_service = attendance_service  # <-- LƯU
+        self._lesson_service = lesson_service
+        self._teacher_service = teacher_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -27148,7 +27570,14 @@ class ClassDetailPage(QWidget):
         )
         self.attendance_widget.attendance_changed.connect(self._on_data_changed)
         self.tab_widget.addTab(self.attendance_widget, "Attendance")
-
+        # Tab 3: Lesson Sessions
+        self.lesson_session_list = LessonSessionList(
+            self._lesson_service,
+            self._teacher_service,
+            parent=self
+        )
+        self.lesson_session_list.session_changed.connect(self._on_data_changed)
+        self.tab_widget.addTab(self.lesson_session_list, "📚 Sessions")
         main_layout.addWidget(self.tab_widget)
 
     def _create_overview_tab(self) -> QWidget:
@@ -27315,6 +27744,7 @@ class ClassDetailPage(QWidget):
             self._current_class = class_obj
             self._populate(class_obj)
             self.attendance_widget.set_class(class_id)  # <-- GỌI ĐỂ LOAD ATTENDANCE
+            self.lesson_session_list.set_class(class_id)
             self._show_detail()
         except Exception as e:
             logger.exception(f"Error loading class {class_id}")
@@ -28299,6 +28729,8 @@ class ClassWorkspaceShell(QWidget):
         highlight_service,
         student_service,
         attendance_service,
+        lesson_service,          # thêm
+        teacher_service,         # thêm
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -28310,6 +28742,8 @@ class ClassWorkspaceShell(QWidget):
         self._highlight_service = highlight_service
         self._student_service = student_service
         self._attendance_service = attendance_service
+        self._lesson_service = lesson_service
+        self._teacher_service = teacher_service        
 
         self._current_class_id: Optional[int] = None
 
@@ -28368,6 +28802,8 @@ class ClassWorkspaceShell(QWidget):
             highlight_service=self._highlight_service,
             student_service=self._student_service,
             attendance_service=self._attendance_service,
+            lesson_service=self._lesson_service,
+            teacher_service=self._teacher_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.class_updated.connect(self._on_class_updated)  # <-- ĐÃ KẾT NỐI
@@ -28407,6 +28843,582 @@ class ClassWorkspaceShell(QWidget):
         """Emit signal when class data (including attendance) is updated."""
         self.list_page.refresh()
         self.attendance_updated.emit()  # <-- EMIT KHI ATTENDANCE THAY ĐỔI
+
+================
+File: src/centermanager/ui/class_workspace/lesson_session_card.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionCard - card display for a lesson session.
+"""
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
+
+from centermanager.models.lesson_session import LessonSession
+from centermanager.ui.design_system.tokens import COLORS, SPACING
+
+
+class LessonSessionCard(QFrame):
+    view_clicked = Signal(int)
+    edit_clicked = Signal(int)
+    cancel_clicked = Signal(int)
+
+    def __init__(self, session: LessonSession, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._session = session
+        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {COLORS['border_light']};
+                border-radius: 6px;
+                background: {COLORS['surface']};
+                padding: {SPACING['sm']}px {SPACING['md']}px;
+                margin: 2px 0;
+            }}
+            QFrame:hover {{
+                background: {COLORS['surface_hover']};
+            }}
+        """)
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(SPACING['xs'])
+
+        # Header
+        header = QHBoxLayout()
+        number_label = QLabel(f"Session #{self._session.session_number:02d}")
+        number_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header.addWidget(number_label)
+
+        title_label = QLabel(self._session.title)
+        title_label.setStyleSheet("font-size: 14px;")
+        header.addWidget(title_label)
+
+        header.addStretch()
+
+        status = self._session.status
+        color = {
+            "Scheduled": "#1976d2",
+            "Completed": "#2e7d32",
+            "Cancelled": "#d32f2f",
+        }.get(status, "#666")
+        status_label = QLabel(status)
+        status_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 12px;")
+        header.addWidget(status_label)
+
+        layout.addLayout(header)
+
+        # Info
+        info = QHBoxLayout()
+        date_str = self._session.lesson_date.strftime("%d/%m/%Y")
+        time_str = f"{self._session.start_time.strftime('%H:%M')} - {self._session.end_time.strftime('%H:%M')}"
+        date_label = QLabel(f"📅 {date_str}  ⏰ {time_str}")
+        date_label.setStyleSheet("color: #555; font-size: 13px;")
+        info.addWidget(date_label)
+
+        if self._session.teacher:
+            teacher_label = QLabel(f"👨‍🏫 {self._session.teacher.full_name}")
+            teacher_label.setStyleSheet("color: #555; font-size: 13px;")
+            info.addWidget(teacher_label)
+
+        if self._session.topic:
+            topic_label = QLabel(f"📖 {self._session.topic}")
+            topic_label.setStyleSheet("color: #555; font-size: 13px;")
+            info.addWidget(topic_label)
+
+        info.addStretch()
+        layout.addLayout(info)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        view_btn = QPushButton("View")
+        view_btn.setFixedWidth(60)
+        edit_btn = QPushButton("Edit")
+        edit_btn.setFixedWidth(60)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(60)
+        cancel_btn.setStyleSheet("color: #d32f2f;")
+
+        btn_layout.addWidget(view_btn)
+        btn_layout.addWidget(edit_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        view_btn.clicked.connect(lambda: self.view_clicked.emit(self._session.id))
+        edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self._session.id))
+        cancel_btn.clicked.connect(lambda: self.cancel_clicked.emit(self._session.id))
+
+================
+File: src/centermanager/ui/class_workspace/lesson_session_detail.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionDetailDialog - view lesson session details.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QFormLayout, QLabel, QPushButton,
+    QHBoxLayout, QMessageBox, QWidget
+)
+
+from centermanager.services.lesson_session_service import LessonSessionService
+
+logger = logging.getLogger(__name__)
+
+
+class LessonSessionDetailDialog(QDialog):
+    def __init__(
+        self,
+        lesson_service: LessonSessionService,
+        session_id: int,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._lesson_service = lesson_service
+        self._session_id = session_id
+
+        self.setWindowTitle("Lesson Session Detail")
+        self.setMinimumWidth(450)
+        self.setModal(True)
+
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.number_label = QLabel()
+        self.title_label = QLabel()
+        self.topic_label = QLabel()
+        self.date_label = QLabel()
+        self.time_label = QLabel()
+        self.teacher_label = QLabel()
+        self.status_label = QLabel()
+        self.note_label = QLabel()
+        self.note_label.setWordWrap(True)
+
+        form.addRow("Session #:", self.number_label)
+        form.addRow("Title:", self.title_label)
+        form.addRow("Topic:", self.topic_label)
+        form.addRow("Date:", self.date_label)
+        form.addRow("Time:", self.time_label)
+        form.addRow("Teacher:", self.teacher_label)
+        form.addRow("Status:", self.status_label)
+        form.addRow("Note:", self.note_label)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+
+    def _load_data(self) -> None:
+        try:
+            session = self._lesson_service.get_session(self._session_id)
+            self.number_label.setText(f"#{session.session_number:02d}")
+            self.title_label.setText(session.title)
+            self.topic_label.setText(session.topic or "-")
+            self.date_label.setText(session.lesson_date.strftime("%d/%m/%Y"))
+            self.time_label.setText(f"{session.start_time.strftime('%H:%M')} - {session.end_time.strftime('%H:%M')}")
+            self.teacher_label.setText(session.teacher.full_name if session.teacher else "-")
+            self.status_label.setText(session.status)
+            self.note_label.setText(session.note or "-")
+        except Exception as e:
+            logger.exception("Error loading session detail")
+            QMessageBox.critical(self, "Error", "Could not load session data.")
+            self.reject()
+
+================
+File: src/centermanager/ui/class_workspace/lesson_session_dialog.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionDialog - create or edit a lesson session.
+"""
+import logging
+from typing import Optional
+
+from PySide6.QtCore import QDate, QTime
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
+    QTimeEdit, QComboBox, QPlainTextEdit, QPushButton,
+    QHBoxLayout, QMessageBox, QWidget, QLabel
+)
+
+from centermanager.models.lesson_session import LessonSessionStatus
+from centermanager.services.lesson_session_service import LessonSessionService, LessonSessionValidationError
+from centermanager.services.teacher_service import TeacherService
+
+logger = logging.getLogger(__name__)
+
+
+class LessonSessionDialog(QDialog):
+    def __init__(
+        self,
+        lesson_service: LessonSessionService,
+        teacher_service: TeacherService,
+        class_id: int,
+        session_id: Optional[int] = None,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._lesson_service = lesson_service
+        self._teacher_service = teacher_service
+        self._class_id = class_id
+        self._session_id = session_id
+        self._is_edit = session_id is not None
+
+        self.setWindowTitle("Edit Lesson Session" if self._is_edit else "Add Lesson Session")
+        self.setMinimumWidth(500)
+        self.setModal(True)
+
+        self._setup_ui()
+        if self._is_edit:
+            self._load_session()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        # Session Number (auto)
+        self.number_label = QLabel("Auto")
+        form.addRow("Session Number", self.number_label)
+
+        # Title
+        self.title_edit = QLineEdit()
+        self.title_edit.setPlaceholderText("Session title")
+        form.addRow("Title *", self.title_edit)
+
+        # Topic
+        self.topic_edit = QLineEdit()
+        self.topic_edit.setPlaceholderText("Topic (optional)")
+        form.addRow("Topic", self.topic_edit)
+
+        # Date
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("dd/MM/yyyy")
+        self.date_edit.setDate(QDate.currentDate())
+        form.addRow("Lesson Date *", self.date_edit)
+
+        # Start Time
+        self.start_time_edit = QTimeEdit()
+        self.start_time_edit.setDisplayFormat("HH:mm")
+        self.start_time_edit.setTime(QTime(8, 0))
+        form.addRow("Start Time *", self.start_time_edit)
+
+        # End Time
+        self.end_time_edit = QTimeEdit()
+        self.end_time_edit.setDisplayFormat("HH:mm")
+        self.end_time_edit.setTime(QTime(9, 0))
+        form.addRow("End Time *", self.end_time_edit)
+
+        # Teacher
+        self.teacher_combo = QComboBox()
+        self.teacher_combo.addItem("", None)
+        self._load_teachers()
+        form.addRow("Teacher", self.teacher_combo)
+
+        # Status
+        self.status_combo = QComboBox()
+        for s in LessonSessionStatus.choices():
+            self.status_combo.addItem(s)
+        form.addRow("Status", self.status_combo)
+
+        # Note
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlaceholderText("Optional note")
+        self.note_edit.setMaximumHeight(80)
+        form.addRow("Note", self.note_edit)
+
+        layout.addLayout(form)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setFixedWidth(100)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self.save_btn.clicked.connect(self._save)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def _load_teachers(self) -> None:
+        try:
+            teachers = self._teacher_service.list_teachers()
+            for t in teachers:
+                self.teacher_combo.addItem(t.full_name, t.id)
+        except Exception as e:
+            logger.exception("Error loading teachers")
+
+    def _load_session(self) -> None:
+        try:
+            session = self._lesson_service.get_session(self._session_id)
+            self.number_label.setText(f"#{session.session_number:02d}")
+            self.title_edit.setText(session.title)
+            self.topic_edit.setText(session.topic or "")
+            self.date_edit.setDate(QDate(session.lesson_date.year, session.lesson_date.month, session.lesson_date.day))
+            self.start_time_edit.setTime(QTime(session.start_time.hour, session.start_time.minute))
+            self.end_time_edit.setTime(QTime(session.end_time.hour, session.end_time.minute))
+            if session.teacher_id:
+                idx = self.teacher_combo.findData(session.teacher_id)
+                if idx >= 0:
+                    self.teacher_combo.setCurrentIndex(idx)
+            idx_status = self.status_combo.findText(session.status)
+            if idx_status >= 0:
+                self.status_combo.setCurrentIndex(idx_status)
+            self.note_edit.setPlainText(session.note or "")
+        except Exception as e:
+            logger.exception("Error loading session")
+            QMessageBox.critical(self, "Error", "Could not load session data.")
+            self.reject()
+
+    def _save(self) -> None:
+        title = self.title_edit.text().strip()
+        topic = self.topic_edit.text().strip() or None
+        lesson_date = self.date_edit.date().toPython()
+        start_time = self.start_time_edit.time().toPython()
+        end_time = self.end_time_edit.time().toPython()
+        teacher_id = self.teacher_combo.currentData()
+        status = self.status_combo.currentText()
+        note = self.note_edit.toPlainText().strip() or None
+
+        if not title:
+            QMessageBox.warning(self, "Validation Error", "Title is required.")
+            return
+        if start_time >= end_time:
+            QMessageBox.warning(self, "Validation Error", "Start time must be before end time.")
+            return
+
+        try:
+            if self._is_edit:
+                self._lesson_service.update_session(
+                    session_id=self._session_id,
+                    title=title,
+                    topic=topic,
+                    lesson_date=lesson_date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    teacher_id=teacher_id,
+                    status=status,
+                    note=note,
+                )
+            else:
+                self._lesson_service.create_session(
+                    class_id=self._class_id,
+                    title=title,
+                    topic=topic,
+                    lesson_date=lesson_date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    teacher_id=teacher_id,
+                    status=status,
+                    note=note,
+                )
+            self.accept()
+        except LessonSessionValidationError as e:
+            QMessageBox.warning(self, "Validation Error", str(e))
+        except Exception as e:
+            logger.exception("Error saving session")
+            QMessageBox.critical(self, "Error", str(e))
+
+================
+File: src/centermanager/ui/class_workspace/lesson_session_list.py
+================
+# -*- coding: utf-8 -*-
+"""
+LessonSessionList - list of lesson sessions for a class.
+"""
+import logging
+from typing import Optional, List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QFrame, QMessageBox
+)
+
+from centermanager.models.lesson_session import LessonSession
+from centermanager.services.lesson_session_service import LessonSessionService
+from centermanager.services.teacher_service import TeacherService
+from centermanager.ui.class_workspace.lesson_session_dialog import LessonSessionDialog
+from centermanager.ui.class_workspace.lesson_session_detail import LessonSessionDetailDialog
+from centermanager.ui.class_workspace.lesson_session_card import LessonSessionCard
+
+logger = logging.getLogger(__name__)
+
+
+class LessonSessionList(QWidget):
+    session_changed = Signal()
+
+    def __init__(
+        self,
+        lesson_service: LessonSessionService,
+        teacher_service: TeacherService,
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._lesson_service = lesson_service
+        self._teacher_service = teacher_service
+        self._class_id: Optional[int] = None
+        self._sessions: List[LessonSession] = []
+
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("📚 Lesson Sessions")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.addWidget(title)
+        header.addStretch()
+        self.add_btn = QPushButton("+ New Session")
+        self.add_btn.clicked.connect(self._on_add)
+        header.addWidget(self.add_btn)
+        layout.addLayout(header)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout(self.container)
+        self.container_layout.setSpacing(6)
+        self.container_layout.setContentsMargins(0, 4, 0, 0)
+        self.scroll_area.setWidget(self.container)
+        layout.addWidget(self.scroll_area)
+
+        self._show_empty()
+
+    def _show_empty(self) -> None:
+        self._clear_container()
+        empty_widget = QWidget()
+        empty_layout = QVBoxLayout(empty_widget)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.setSpacing(4)
+        icon = QLabel("📚")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet("font-size: 28px;")
+        msg = QLabel("No lesson sessions yet.\nCreate your first session.")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setStyleSheet("color: #999; font-size: 14px;")
+        empty_layout.addWidget(icon)
+        empty_layout.addWidget(msg)
+        self.container_layout.addWidget(empty_widget)
+        self.container_layout.addStretch()
+
+    def _clear_container(self) -> None:
+        while self.container_layout.count():
+            item = self.container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def set_class(self, class_id: int) -> None:
+        self._class_id = class_id
+        self._load_sessions()
+
+    def _load_sessions(self) -> None:
+        if self._class_id is None:
+            return
+        try:
+            self._sessions = self._lesson_service.get_sessions_for_class(self._class_id)
+        except Exception as e:
+            logger.exception("Error loading sessions")
+            self._sessions = []
+        self._update_ui()
+
+    def _update_ui(self) -> None:
+        self._clear_container()
+        if not self._sessions:
+            self._show_empty()
+            return
+
+        for session in self._sessions:
+            card = LessonSessionCard(session)
+            card.view_clicked.connect(self._on_view)
+            card.edit_clicked.connect(self._on_edit)
+            card.cancel_clicked.connect(self._on_cancel)
+            self.container_layout.addWidget(card)
+        self.container_layout.addStretch()
+
+    def _on_add(self) -> None:
+        if self._class_id is None:
+            return
+        dialog = LessonSessionDialog(
+            self._lesson_service,
+            self._teacher_service,
+            self._class_id,
+            parent=self
+        )
+        if dialog.exec() == LessonSessionDialog.DialogCode.Accepted:
+            self._load_sessions()
+            self.session_changed.emit()
+
+    def _on_view(self, session_id: int) -> None:
+        dialog = LessonSessionDetailDialog(
+            self._lesson_service,
+            session_id,
+            parent=self
+        )
+        dialog.exec()
+
+    def _on_edit(self, session_id: int) -> None:
+        dialog = LessonSessionDialog(
+            self._lesson_service,
+            self._teacher_service,
+            self._class_id,
+            session_id,
+            parent=self
+        )
+        if dialog.exec() == LessonSessionDialog.DialogCode.Accepted:
+            self._load_sessions()
+            self.session_changed.emit()
+
+    def _on_cancel(self, session_id: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Confirm Cancel",
+            "Cancel this lesson session?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._lesson_service.cancel_session(session_id)
+                self._load_sessions()
+                self.session_changed.emit()
+            except Exception as e:
+                logger.exception("Error cancelling session")
+                QMessageBox.critical(self, "Error", str(e))
 
 ================
 File: src/centermanager/ui/common/__init__.py
@@ -36818,7 +37830,7 @@ class StudentFinancialWidget(QWidget):
         self._update_payment_history()
 
     def _update_summary(self) -> None:
-        if self._summary:
+        if self._summary and (self._summary.total_expected > 0 or self._summary.total_paid > 0):
             self.total_expected_label._value_widget.setText(f"{self._summary.total_expected:,.0f} VND")
             self.total_paid_label._value_widget.setText(f"{self._summary.total_paid:,.0f} VND")
             outstanding = self._summary.total_outstanding
@@ -41248,6 +42260,7 @@ class MainWindow(QMainWindow):
         finance_dashboard_service,
         outstanding_service,
         attendance_service,
+        lesson_service,  # thêm
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -41283,6 +42296,7 @@ class MainWindow(QMainWindow):
         self._finance_dashboard_service = finance_dashboard_service
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
+        self._lesson_service = lesson_service
 
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
@@ -41346,6 +42360,8 @@ class MainWindow(QMainWindow):
             highlight_service=self._highlight_service,
             student_service=self._student_service,
             attendance_service=self._attendance_service,
+            lesson_service=self._lesson_service,
+            teacher_service=self._teacher_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
@@ -42124,7 +43140,7 @@ from centermanager.services.expense_timeline_service import ExpenseTimelineServi
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
-
+from centermanager.services.lesson_session_service import LessonSessionService 
 logger = logging.getLogger(__name__)
 
 
@@ -42228,7 +43244,7 @@ def main() -> int:
         session_factory,
         timeline_service=class_timeline_service,
     )
-
+    lesson_service = LessonSessionService(session_factory)
     # Finance Services
     finance_service = FinanceService(session_factory)
     expense_timeline_service = ExpenseTimelineService(session_factory)
@@ -42292,6 +43308,7 @@ def main() -> int:
         finance_dashboard_service=finance_dashboard_service,
         outstanding_service=outstanding_service,
         attendance_service=attendance_service,  # <-- TRUYỀN
+        lesson_service=lesson_service,
     )
     window.show()
     logger.info("Main window initialized")

@@ -22,7 +22,7 @@ from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
-from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
+from centermanager.services.attendance_service import AttendanceService
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
@@ -31,7 +31,7 @@ from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
-from centermanager.ui.class_workspace.attendance_widget import AttendanceWidget  # <-- THÊM
+from centermanager.ui.class_workspace.attendance_widget import AttendanceWidget
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
 
@@ -51,7 +51,7 @@ class ClassDetailPage(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
-        attendance_service: AttendanceService,  # <-- THÊM
+        attendance_service: AttendanceService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -62,7 +62,7 @@ class ClassDetailPage(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
-        self._attendance_service = attendance_service  # <-- LƯU
+        self._attendance_service = attendance_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
 
@@ -88,7 +88,7 @@ class ClassDetailPage(QWidget):
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
 
-        # Tab widget
+        # Tab widget (chỉ có 2 tab: Overview và Attendance)
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setStyleSheet("""
@@ -285,7 +285,7 @@ class ClassDetailPage(QWidget):
             self._current_class_id = class_obj.id
             self._current_class = class_obj
             self._populate(class_obj)
-            self.attendance_widget.set_class(class_id)  # <-- GỌI ĐỂ LOAD ATTENDANCE
+            self.attendance_widget.set_class(class_id)
             self._show_detail()
         except Exception as e:
             logger.exception(f"Error loading class {class_id}")

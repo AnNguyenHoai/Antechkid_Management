@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
+
         # Teacher Workspace
         self.teacher_workspace = TeacherWorkspaceShell(
             teacher_service=self._teacher_service,
@@ -234,7 +235,7 @@ class MainWindow(QMainWindow):
             logger.exception("Failed to refresh student list")
 
     def _on_attendance_updated(self) -> None:
-        """Refresh student detail when attendance is updated from class workspace."""
         self.student_workspace.refresh_current_student()
+
     def _on_go_to_finance(self) -> None:
         self._on_workspace_selected("finance")

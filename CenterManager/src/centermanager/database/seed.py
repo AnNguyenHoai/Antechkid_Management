@@ -53,9 +53,13 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.CLASS_CREATE,
             PermissionDefinitions.CLASS_UPDATE,
             PermissionDefinitions.REPORT_VIEW,
+            PermissionDefinitions.LESSON_VIEW,
+            PermissionDefinitions.LESSON_CREATE,
+            PermissionDefinitions.LESSON_UPDATE,
+            # Teacher có thể không có cancel? Tùy business, tạm thêm cancel
+            PermissionDefinitions.LESSON_CANCEL,
         ]
     )
-
     reception_role = _create_role(
         session,
         name=RoleDefinitions.RECEPTION,

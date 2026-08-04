@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 Session model - a teaching session.
+Now unified with start_time, end_time, note.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from enum import Enum
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Date, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Date, Integer, ForeignKey, Time, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from centermanager.models.class_ import Class
     from centermanager.models.session_note import SessionNote
     from centermanager.models.student_highlight import StudentHighlight
-    from centermanager.models.attendance import Attendance
+
 
 class SessionStatus(str, Enum):
     SCHEDULED = "Scheduled"
@@ -43,15 +44,36 @@ class Session(Base, TimestampMixin):
     lesson_topic: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     scheduled_date: Mapped[date] = mapped_column(Date, nullable=False)
     actual_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+
+    # New fields from LessonSession
+    start_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    end_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # legacy note field
+
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=SessionStatus.SCHEDULED.value)
     teacher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Relationships
     class_: Mapped[Class] = relationship("Class", back_populates="sessions")
-    note: Mapped[Optional[SessionNote]] = relationship("SessionNote", back_populates="session", uselist=False, cascade="all, delete-orphan")
-    highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="session", cascade="all, delete-orphan")
-    # trong class Session, thêm dòng:
-    attendances: Mapped[List[Attendance]] = relationship("Attendance", back_populates="session", cascade="all, delete-orphan")
+    
+    # Đổi tên relationship để tránh xung đột với cột 'note'
+    session_note: Mapped[Optional[SessionNote]] = relationship(
+        "SessionNote",
+        back_populates="session",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    highlights: Mapped[List[StudentHighlight]] = relationship(
+        "StudentHighlight",
+        back_populates="session",
+        cascade="all, delete-orphan"
+    )
+    attendances: Mapped[List[Attendance]] = relationship(
+        "Attendance",
+        back_populates="session",
+        cascade="all, delete-orphan"
+    )
+
     __table_args__ = (
         UniqueConstraint('class_id', 'session_number', name='uq_session_number_per_class'),
     )

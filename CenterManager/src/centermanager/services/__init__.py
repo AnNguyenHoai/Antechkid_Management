@@ -33,7 +33,7 @@ from .finance_service import FinanceService
 from .income_service import IncomeService
 from .expense_service import ExpenseService
 from .expense_timeline_service import ExpenseTimelineService
-from .expense_service import ExpenseService
+
 __all__ = [
     "StudentService",
     "ParentService",
@@ -46,6 +46,8 @@ __all__ = [
     "StudentValidationError",
     "StudentAlreadyDeletedError",
     "StudentNotDeletedError",
+    "SessionService",
+    "SessionNoteService",
     "TeacherService",
     "TeacherNotFoundError",
     "TeacherValidationError",
@@ -61,4 +63,5 @@ __all__ = [
     "FinanceService",
     "IncomeService",
     "ExpenseService",
+    "ExpenseTimelineService",
 ]

@@ -19,7 +19,7 @@ from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboard
 
 class ClassWorkspaceShell(QWidget):
     go_home = Signal()
-    attendance_updated = Signal()  # <-- THÊM
+    attendance_updated = Signal()
 
     def __init__(
         self,
@@ -102,7 +102,7 @@ class ClassWorkspaceShell(QWidget):
             attendance_service=self._attendance_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
-        self.detail_page.class_updated.connect(self._on_class_updated)  # <-- ĐÃ KẾT NỐI
+        self.detail_page.class_updated.connect(self._on_class_updated)
         self.content_stack.addWidget(self.detail_page)
 
         body.addWidget(self.content_stack, 1)
@@ -136,6 +136,5 @@ class ClassWorkspaceShell(QWidget):
         self.list_page.refresh()
 
     def _on_class_updated(self) -> None:
-        """Emit signal when class data (including attendance) is updated."""
         self.list_page.refresh()
-        self.attendance_updated.emit()  # <-- EMIT KHI ATTENDANCE THAY ĐỔI
+        self.attendance_updated.emit()

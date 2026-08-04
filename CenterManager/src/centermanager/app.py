@@ -47,7 +47,7 @@ from centermanager.services.expense_service import ExpenseService
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 from centermanager.services.outstanding_service import OutstandingService
-from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
+from centermanager.services.attendance_service import AttendanceService
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +170,9 @@ def main() -> int:
         permission_service=permission_service,
     )
 
-    # Dashboard service
     finance_dashboard_service = FinanceDashboardService(income_service, expense_service)
-
-    # Outstanding service
     outstanding_service = OutstandingService(session_factory)
 
-    # Attendance service
     attendance_service = AttendanceService(
         session_factory=session_factory,
         timeline_service=timeline_service,
@@ -215,7 +211,7 @@ def main() -> int:
         expense_service=expense_service,
         finance_dashboard_service=finance_dashboard_service,
         outstanding_service=outstanding_service,
-        attendance_service=attendance_service,  # <-- TRUYỀN
+        attendance_service=attendance_service,
     )
     window.show()
     logger.info("Main window initialized")

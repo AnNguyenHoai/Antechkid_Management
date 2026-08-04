@@ -52,12 +52,13 @@ class SessionNote(Base, TimestampMixin):
     next_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # NEW FIELDS
+    # Lesson content and homework (from LessonSession note, now part of SessionNote)
     lesson_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     homework: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
-    session: Mapped[Session] = relationship("Session", back_populates="note")
+    # SỬA: back_populates phải trùng với tên relationship trong Session
+    session: Mapped[Session] = relationship("Session", back_populates="session_note")
 
     __table_args__ = (
         UniqueConstraint('session_id', name='uq_session_note_session'),

@@ -56,7 +56,7 @@ class SessionDetailDialog(QDialog):
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(8)
 
-        # Scroll area to accommodate all content
+        # Scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -97,9 +97,8 @@ class SessionDetailDialog(QDialog):
         btn_layout.addWidget(self.close_btn)
         self.container_layout.addLayout(btn_layout)
 
-        #highlight connection
         self.highlight_widget.highlight_changed.connect(self._on_highlight_changed)
-        
+
     def _divider(self) -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -113,7 +112,6 @@ class SessionDetailDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # Left: Title and status
         info_layout = QVBoxLayout()
         self.number_label = QLabel()
         self.number_label.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -127,9 +125,13 @@ class SessionDetailDialog(QDialog):
         self.date_label.setStyleSheet("font-size: 13px; color: #666;")
         info_layout.addWidget(self.date_label)
 
+        # New: Time label
+        self.time_label = QLabel()
+        self.time_label.setStyleSheet("font-size: 13px; color: #666;")
+        info_layout.addWidget(self.time_label)
+
         layout.addLayout(info_layout)
 
-        # Right: Status + quick stats
         stats_layout = QVBoxLayout()
         stats_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
@@ -149,7 +151,6 @@ class SessionDetailDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # Không thêm header nữa, vì widget đã có header
         self.note_widget = SessionNoteWidget(
             self._note_service,
             self._session_id,
@@ -162,13 +163,11 @@ class SessionDetailDialog(QDialog):
         return section
 
     def _create_highlight_section(self) -> QWidget:
-        """Today's Highlights section."""
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # Header with Add button
         header = QHBoxLayout()
         title = QLabel("⭐ Today's Highlights")
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
@@ -176,7 +175,6 @@ class SessionDetailDialog(QDialog):
         header.addStretch()
         layout.addLayout(header)
 
-        # Highlight widget
         self.highlight_widget = StudentHighlightWidget(
             self._highlight_service,
             self._session_id,
@@ -189,7 +187,6 @@ class SessionDetailDialog(QDialog):
         return section
 
     def _create_summary(self) -> QWidget:
-        """Quick summary at bottom."""
         widget = QWidget()
         widget.setStyleSheet("background-color: #f5f5f5; padding: 6px 12px; border-radius: 4px;")
         layout = QHBoxLayout(widget)
@@ -211,7 +208,6 @@ class SessionDetailDialog(QDialog):
         return widget
 
     def _load_session(self) -> None:
-        """Load session data and refresh UI."""
         try:
             self._session = self._session_service.get_session(self._session_id)
             if not self._session:
@@ -220,8 +216,7 @@ class SessionDetailDialog(QDialog):
                 return
 
             self._update_header()
-            # Note widget already loaded via __init__, but we need to refresh after session loaded
-            self.note_widget._load_note()  # trigger reload
+            self.note_widget._load_note()
             self.highlight_widget._load_highlights()
             self._update_summary()
             self._update_note_section_status()
@@ -237,7 +232,12 @@ class SessionDetailDialog(QDialog):
         self.number_label.setText(f"Session #{self._session.session_number}")
         self.topic_label.setText(f"Topic: {self._session.lesson_topic or '—'}")
         self.date_label.setText(f"Scheduled: {self._session.scheduled_date.strftime('%d/%m/%Y')}")
-        # Status
+        # Time
+        time_str = ""
+        if self._session.start_time and self._session.end_time:
+            time_str = f"Time: {self._session.start_time.strftime('%H:%M')} - {self._session.end_time.strftime('%H:%M')}"
+        self.time_label.setText(time_str)
+
         status_text = self._session.status
         color = {
             "Scheduled": "#2196f3",
@@ -251,16 +251,13 @@ class SessionDetailDialog(QDialog):
     def _update_summary(self) -> None:
         if not self._session:
             return
-        # Note availability
         note_exists = self.note_widget._note is not None
         self.note_status_label.setText(f"📝 Note: {'✅ Available' if note_exists else '❌ Not available'}")
 
-        # Highlight count
         highlights = self.highlight_widget._highlights
         count = len(highlights)
         self.highlight_count_label.setText(f"⭐ Highlights: {count}")
 
-        # Status icon
         if self._session.status == SessionStatus.COMPLETED.value:
             self.status_icon_label.setText("✅ Completed")
             self.status_icon_label.setStyleSheet("color: #4caf50;")
@@ -269,20 +266,15 @@ class SessionDetailDialog(QDialog):
             self.status_icon_label.setStyleSheet("color: #ff9800;")
 
     def _update_note_section_status(self) -> None:
-        # Called when note changes to update summary
         self._update_summary()
 
     def _on_note_changed(self) -> None:
-        """Refresh after note save/delete."""
         self._update_summary()
-        # Reload note status
         self.note_widget._load_note()
         self._update_note_section_status()
-        # Emit signal to refresh parent (session list)
         self.session_updated.emit()
 
     def _on_highlight_changed(self) -> None:
-        """Refresh after highlight changes."""
         self._update_summary()
         self.highlight_widget._load_highlights()
         self.session_updated.emit()
@@ -296,10 +288,8 @@ class SessionDetailDialog(QDialog):
             parent=self
         )
         if dialog.exec() == SessionDialog.DialogCode.Accepted:
-            # Reload session data
             self._load_session()
             self.session_updated.emit()
 
     def refresh(self) -> None:
-        """External refresh method."""
         self._load_session()

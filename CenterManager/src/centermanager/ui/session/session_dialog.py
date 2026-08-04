@@ -3,13 +3,14 @@
 Dialog for adding/editing a session.
 """
 import logging
-from datetime import date
+from datetime import date, time
 from typing import Optional
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
-    QComboBox, QPushButton, QHBoxLayout, QMessageBox
+    QTimeEdit, QComboBox, QPushButton, QHBoxLayout,
+    QMessageBox, QPlainTextEdit
 )
 
 from centermanager.models.session import SessionStatus
@@ -33,7 +34,7 @@ class SessionDialog(QDialog):
         self._is_edit = session_id is not None
 
         self.setWindowTitle("Edit Session" if self._is_edit else "Add Session")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.setModal(True)
 
         self._setup_ui()
@@ -64,6 +65,18 @@ class SessionDialog(QDialog):
         self.date_edit.setDate(QDate.currentDate())
         form.addRow("Scheduled Date *", self.date_edit)
 
+        # Start Time (NEW)
+        self.start_time_edit = QTimeEdit()
+        self.start_time_edit.setDisplayFormat("HH:mm")
+        self.start_time_edit.setTime(QTime(8, 0))
+        form.addRow("Start Time", self.start_time_edit)
+
+        # End Time (NEW)
+        self.end_time_edit = QTimeEdit()
+        self.end_time_edit.setDisplayFormat("HH:mm")
+        self.end_time_edit.setTime(QTime(9, 0))
+        form.addRow("End Time", self.end_time_edit)
+
         # Actual Date (optional)
         self.actual_date_edit = QDateEdit()
         self.actual_date_edit.setCalendarPopup(True)
@@ -77,6 +90,12 @@ class SessionDialog(QDialog):
         for s in SessionStatus.choices():
             self.status_combo.addItem(s)
         form.addRow("Status", self.status_combo)
+
+        # Note (NEW)
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlaceholderText("Optional note")
+        self.note_edit.setMaximumHeight(80)
+        form.addRow("Note", self.note_edit)
 
         layout.addLayout(form)
 
@@ -101,6 +120,10 @@ class SessionDialog(QDialog):
             self.topic_edit.setText(session.lesson_topic or "")
             qdate = QDate(session.scheduled_date.year, session.scheduled_date.month, session.scheduled_date.day)
             self.date_edit.setDate(qdate)
+            if session.start_time:
+                self.start_time_edit.setTime(QTime(session.start_time.hour, session.start_time.minute))
+            if session.end_time:
+                self.end_time_edit.setTime(QTime(session.end_time.hour, session.end_time.minute))
             if session.actual_date:
                 qdate2 = QDate(session.actual_date.year, session.actual_date.month, session.actual_date.day)
                 self.actual_date_edit.setDate(qdate2)
@@ -109,6 +132,7 @@ class SessionDialog(QDialog):
             idx = self.status_combo.findText(session.status)
             if idx >= 0:
                 self.status_combo.setCurrentIndex(idx)
+            self.note_edit.setPlainText(session.note or "")
         except Exception as e:
             logger.exception("Error loading session")
             QMessageBox.critical(self, "Error", "Could not load session data.")
@@ -118,8 +142,11 @@ class SessionDialog(QDialog):
         title = self.title_edit.text().strip()
         topic = self.topic_edit.text().strip() or None
         scheduled_date = self.date_edit.date().toPython()
+        start_time = self.start_time_edit.time().toPython()
+        end_time = self.end_time_edit.time().toPython()
         actual_date = self.actual_date_edit.date().toPython() if self.actual_date_edit.date().isValid() else None
         status = self.status_combo.currentText()
+        note = self.note_edit.toPlainText().strip() or None
 
         # Validate
         if not title:
@@ -127,6 +154,9 @@ class SessionDialog(QDialog):
             return
         if scheduled_date is None:
             QMessageBox.warning(self, "Validation Error", "Scheduled date is required.")
+            return
+        if start_time and end_time and start_time >= end_time:
+            QMessageBox.warning(self, "Validation Error", "Start time must be before end time.")
             return
 
         try:
@@ -136,8 +166,11 @@ class SessionDialog(QDialog):
                     title=title,
                     lesson_topic=topic,
                     scheduled_date=scheduled_date,
+                    start_time=start_time,
+                    end_time=end_time,
                     actual_date=actual_date,
                     status=status,
+                    note=note,
                 )
             else:
                 self._service.create_session(
@@ -145,8 +178,11 @@ class SessionDialog(QDialog):
                     title=title,
                     lesson_topic=topic,
                     scheduled_date=scheduled_date,
+                    start_time=start_time,
+                    end_time=end_time,
                     actual_date=actual_date,
                     status=status,
+                    note=note,
                 )
             self.accept()
         except SessionValidationError as e:

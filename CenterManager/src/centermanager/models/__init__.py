@@ -11,8 +11,8 @@ from centermanager.models.student_product import StudentProduct
 from centermanager.models.progress import Progress
 from centermanager.models.attachment import Attachment
 from centermanager.models.class_ import Class
-from centermanager.models.session import Session
-from centermanager.models.session_note import SessionNote
+from centermanager.models.session import Session, SessionStatus
+from centermanager.models.session_note import SessionNote, TeachingProgress, ClassAtmosphere
 from centermanager.models.student_highlight import StudentHighlight, HighlightType
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
@@ -37,6 +37,9 @@ from centermanager.models.income import Income
 from centermanager.models.expense import Expense
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.models.attendance import Attendance, AttendanceStatus
+
+# Không còn LessonSession
+
 __all__ = [
     "Student",
     "Parent",
@@ -48,7 +51,10 @@ __all__ = [
     "Attachment",
     "Class",
     "Session",
+    "SessionStatus",
     "SessionNote",
+    "TeachingProgress",
+    "ClassAtmosphere",
     "StudentHighlight",
     "HighlightType",
     "Note",
@@ -69,4 +75,7 @@ __all__ = [
     "ClassTimelineEventType",
     "Income",
     "Expense",
+    "ExpenseTimelineEvent",
+    "Attendance",
+    "AttendanceStatus",
 ]

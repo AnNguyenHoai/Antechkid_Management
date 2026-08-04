@@ -49,14 +49,14 @@ class ClassScheduleWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Table: Session, Date, Topic, Assessment Status, Actions
+        # Table: Session, Date, Time, Topic, Assessment Status, Actions
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "Session", "Date", "Topic", "Assessment", "Actions"
+            "Session", "Date", "Time", "Topic", "Assessment", "Actions"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -94,8 +94,13 @@ class ClassScheduleWidget(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(f"#{sess.session_number}"))
             # Date
             self.table.setItem(row, 1, QTableWidgetItem(sess.scheduled_date.strftime("%d/%m/%Y")))
+            # Time
+            time_str = ""
+            if sess.start_time and sess.end_time:
+                time_str = f"{sess.start_time.strftime('%H:%M')} - {sess.end_time.strftime('%H:%M')}"
+            self.table.setItem(row, 2, QTableWidgetItem(time_str))
             # Topic
-            self.table.setItem(row, 2, QTableWidgetItem(sess.title))
+            self.table.setItem(row, 3, QTableWidgetItem(sess.lesson_topic or sess.title))
 
             # Assessment status: check if note exists
             note = self._note_service.get_note(sess.id)
@@ -107,13 +112,13 @@ class ClassScheduleWidget(QWidget):
                 status_text = "📝 Note only"
             elif has_highlights:
                 status_text = "⭐ Highlights only"
-            self.table.setItem(row, 3, QTableWidgetItem(status_text))
+            self.table.setItem(row, 4, QTableWidgetItem(status_text))
 
             # Actions: View button
             view_btn = QPushButton("View")
             view_btn.setFixedWidth(60)
             view_btn.clicked.connect(lambda checked, sid=sess.id: self._open_session_detail(sid))
-            self.table.setCellWidget(row, 4, view_btn)
+            self.table.setCellWidget(row, 5, view_btn)
 
         self.table.setVisible(True)
 
@@ -123,7 +128,8 @@ class ClassScheduleWidget(QWidget):
         self.table.setItem(0, 1, QTableWidgetItem(""))
         self.table.setItem(0, 2, QTableWidgetItem(""))
         self.table.setItem(0, 3, QTableWidgetItem(""))
-        self.table.setCellWidget(0, 4, None)
+        self.table.setItem(0, 4, QTableWidgetItem(""))
+        self.table.setCellWidget(0, 5, None)
         self.table.setVisible(True)
 
     def _open_session_detail(self, session_id: int) -> None:
