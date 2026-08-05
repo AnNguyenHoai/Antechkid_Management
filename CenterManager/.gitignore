@@ -39,3 +39,4 @@ runtime/Backup/
 # OS
 .DS_Store
 Thumbs.db
+CenterManager/runtime/

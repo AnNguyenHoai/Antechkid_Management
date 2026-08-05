@@ -1,6 +1,13 @@
 {
-    "application": {
-        "name": "CenterManager",
-        "version": "0.1.0"
-    }
+  "application": {
+    "name": "CenterManager",
+    "version": "1.0.0"
+  },
+  "git": {
+    "repository_url": "https://github.com/AnNguyenHoai/Antechkid_CenterManager.git",
+    "branch": "main",
+    "token": "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",
+    "username": "AnNguyenHoai",
+    "email": "nguyenhoaianvtqh@gmail.com"
+  }
 }

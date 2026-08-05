@@ -7,19 +7,37 @@ from centermanager.platform.collaboration import (
     ModeManager,
     LockManager,
     EditSessionManager,
-    CollaborationMode
+    CollaborationMode,
 )
+from centermanager.platform.collaboration.json_lock_repository import JsonLockRepository
+from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
+from centermanager.platform.collaboration.metadata_repository import MetadataRepository
+from centermanager.platform.collaboration.lock_repository import LockRepository
 from centermanager.events.event_bus import EventBus
 from centermanager.core.current_user import set_current_user
 from centermanager.models.user import User
+
 
 @pytest.fixture
 def temp_metadata(tmp_path):
     return tmp_path / "metadata"
 
+
 @pytest.fixture
 def event_bus():
     return EventBus()
+
+
+@pytest.fixture
+def metadata_repository(temp_metadata):
+    return JsonMetadataRepository(temp_metadata)
+
+
+@pytest.fixture
+def lock_repository(temp_metadata):
+    lock_file = temp_metadata / "lock.json"
+    return JsonLockRepository(lock_file)
+
 
 @pytest.fixture
 def collaboration_manager(temp_metadata, event_bus):
@@ -27,15 +45,16 @@ def collaboration_manager(temp_metadata, event_bus):
     set_current_user(user)
     return CollaborationManager(temp_metadata, event_bus)
 
+
 def test_mode_manager():
     mm = ModeManager()
     assert mm.current_mode() == CollaborationMode.READ
     mm.set_mode(CollaborationMode.WRITE)
     assert mm.current_mode() == CollaborationMode.WRITE
 
-def test_lock_manager(temp_metadata):
-    lock_file = temp_metadata / "lock.json"
-    lm = LockManager(lock_file)
+
+def test_lock_manager(lock_repository):
+    lm = LockManager(lock_repository)
     assert not lm.is_locked()
     assert lm.acquire("user1", "sess1") is True
     assert lm.is_locked()
@@ -44,6 +63,7 @@ def test_lock_manager(temp_metadata):
     assert lm.release("user2") is False
     assert lm.release("user1") is True
     assert not lm.is_locked()
+
 
 def test_edit_session_manager():
     esm = EditSessionManager()
@@ -55,12 +75,14 @@ def test_edit_session_manager():
     esm.end_session()
     assert not esm.is_active()
 
+
 def test_collaboration_manager_request_write(collaboration_manager):
     cm = collaboration_manager
     assert cm.current_mode() == CollaborationMode.READ
     assert cm.request_write() is True
     assert cm.current_mode() == CollaborationMode.WRITE
     assert cm.get_session_info()['active'] is True
+
 
 def test_collaboration_manager_release_write(collaboration_manager):
     cm = collaboration_manager
@@ -69,6 +91,7 @@ def test_collaboration_manager_release_write(collaboration_manager):
     assert cm.release_write() is True
     assert cm.current_mode() == CollaborationMode.READ
     assert not cm.get_session_info()['active']
+
 
 def test_collaboration_manager_metadata_creation(temp_metadata, event_bus):
     cm = CollaborationManager(temp_metadata, event_bus)
@@ -86,17 +109,22 @@ def test_collaboration_manager_metadata_creation(temp_metadata, event_bus):
         data = json.load(f)
         assert data["profile"] == "Standalone"
 
+
 def test_collaboration_manager_get_version(collaboration_manager):
     assert collaboration_manager.get_version() == 1
 
+
 def test_collaboration_manager_get_deployment_profile(collaboration_manager):
     assert collaboration_manager.get_deployment_profile() == "Standalone"
+
 
 def test_collaboration_manager_ensure_write(collaboration_manager):
     cm = collaboration_manager
     assert cm.ensure_write() is False
     cm.request_write()
     assert cm.ensure_write() is True
+
+
 def test_metadata_repository(temp_metadata):
     from centermanager.platform.collaboration import JsonMetadataRepository
     repo = JsonMetadataRepository(temp_metadata)
@@ -120,6 +148,7 @@ def test_metadata_repository(temp_metadata):
     repo.save_deployment({"profile": "Test"})
     loaded = repo.load_deployment()
     assert loaded["profile"] == "Test"
+
 
 def test_lock_repository(temp_metadata):
     from centermanager.platform.collaboration import JsonLockRepository

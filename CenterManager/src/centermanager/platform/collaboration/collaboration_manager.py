@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,12 @@ from .release_workflow import ReleaseWorkflow
 from .identity_provider import IdentityProvider
 from .default_identity_provider import DefaultIdentityProvider
 
+# Import synchronization and workflow
+from centermanager.platform.synchronization import SynchronizationProvider
+from centermanager.platform.workflow.publish_workflow import PublishWorkflow
+from centermanager.platform.version.version_manager import VersionManager
+from centermanager.platform.notification import NotificationService
+
 class CollaborationManager:
     def __init__(
         self,
@@ -23,6 +30,9 @@ class CollaborationManager:
         identity_provider: Optional[IdentityProvider] = None,
         metadata_repository: Optional[MetadataRepository] = None,
         lock_repository: Optional[LockRepository] = None,
+        sync_provider: Optional[SynchronizationProvider] = None,
+        version_manager: Optional[VersionManager] = None,
+        notification_service: Optional[NotificationService] = None,
     ):
         self._metadata_dir = metadata_dir
         self._event_bus = event_bus
@@ -51,6 +61,20 @@ class CollaborationManager:
             identity_provider = DefaultIdentityProvider()
         self._identity_provider = identity_provider
 
+        # Synchronization provider (optional)
+        self._sync_provider = sync_provider
+
+        # Version manager (optional, will use metadata repo if not provided)
+        if version_manager is None:
+            from centermanager.platform.version.version_manager import VersionManager as VM
+            version_manager = VM(self._metadata_repository, event_bus)
+        self._version_manager = version_manager
+
+        # Notification service (optional)
+        if notification_service is None:
+            notification_service = NotificationService()
+        self._notification_service = notification_service
+
         # Workflows
         self._write_workflow = WriteWorkflow(
             self._lock_manager,
@@ -66,15 +90,40 @@ class CollaborationManager:
             self._identity_provider,
             self._event_bus,
         )
+        self._publish_workflow = PublishWorkflow(
+            lock_manager=self._lock_manager,
+            mode_manager=self._mode_manager,
+            session_manager=self._session_manager,
+            sync_provider=self._sync_provider,
+            version_manager=self._version_manager,
+            event_bus=self._event_bus,
+            notification_service=self._notification_service,
+        )
 
     def current_mode(self) -> CollaborationMode:
         return self._mode_manager.current_mode()
 
     def request_write(self) -> bool:
+        # If we have sync provider, fetch/pull before acquiring lock
+        if self._sync_provider:
+            self._sync_provider.fetch()
+            if not self._sync_provider.pull():
+                return False
         return self._write_workflow.execute()
 
     def release_write(self) -> bool:
         return self._release_workflow.execute()
+
+    def publish(self, message: str = "Publish") -> bool:
+        """Publish changes (commit + push) and switch to READ.
+        
+        Args:
+            message: Commit message for the publish.
+        """
+        if not self._sync_provider:
+            return False
+        # Truyền message xuống workflow
+        return self._publish_workflow.execute(message=message)
 
     def get_version(self) -> int:
         version_data = self._metadata_repository.load_version()
@@ -93,3 +142,9 @@ class CollaborationManager:
 
     def ensure_write(self) -> bool:
         return self.current_mode() == CollaborationMode.WRITE
+
+    def synchronization_status(self) -> dict:
+        """Return synchronization status if provider exists."""
+        if self._sync_provider:
+            return self._sync_provider.status()
+        return {"status": "disabled"}

@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox
 from PySide6.QtCore import Qt
 
 from centermanager.ui.home import HomePage
@@ -207,13 +207,12 @@ class MainWindow(QMainWindow):
 
         # Set initial write buttons state
         self._update_write_buttons(CollaborationMode.READ)
+        self._update_write_actions(CollaborationMode.READ)
 
     def _setup_collaboration_status_bar(self) -> None:
         status_bar = self.statusBar()
-        # Clear default message
         status_bar.clearMessage()
 
-        # Create widget for collaboration info
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -240,6 +239,10 @@ class MainWindow(QMainWindow):
         self.deployment_label = QLabel(f"Deployment: {profile}")
         layout.addWidget(self.deployment_label)
 
+        # Git Status label
+        self.git_status_label = QLabel("Git: --")
+        layout.addWidget(self.git_status_label)
+
         # Spacer
         layout.addStretch()
 
@@ -256,11 +259,39 @@ class MainWindow(QMainWindow):
         self.release_btn.clicked.connect(self._on_release_write)
         layout.addWidget(self.release_btn)
 
+        # Publish button
+        self.publish_btn = QPushButton("Publish")
+        self.publish_btn.setFixedHeight(28)
+        self.publish_btn.setVisible(False)
+        self.publish_btn.clicked.connect(self._on_publish)
+        layout.addWidget(self.publish_btn)
+
         status_bar.addPermanentWidget(widget, 1)
         self._collab_status_widget = widget
 
-        # Set initial state
         self._update_write_buttons(CollaborationMode.READ)
+        self._update_git_status()
+
+    def _update_git_status(self) -> None:
+        status = self._collaboration_manager.synchronization_status()
+        state = status.get("state", "OFFLINE")
+        commit = status.get("commit", "")
+        branch = status.get("branch", "")
+        self.git_status_label.setText(f"Git: {state} ({branch} {commit})")
+
+    def _on_publish(self) -> None:
+        # Sử dụng QMessageBox cho thông báo
+        try:
+            message = f"Publish by {get_current_user().full_name}"
+            success = self._collaboration_manager.publish(message)
+            if success:
+                QMessageBox.information(self, "Publish", "Publish successful.")
+                self._update_git_status()
+            else:
+                QMessageBox.warning(self, "Publish", "Publish failed. Please check logs.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Publish error: {str(e)}")
+            logger.exception("Publish error")
 
     def _connect_collaboration_events(self) -> None:
         self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
@@ -275,8 +306,8 @@ class MainWindow(QMainWindow):
         mode_str = mode.value if hasattr(mode, 'value') else str(mode)
         self.mode_label.setText(f"Mode: {mode_str}")
         self._update_write_buttons(mode)
-        # Update all write actions in UI
         self._update_write_actions(mode)
+        self._update_git_status()
 
     def _on_write_granted(self, event: WriteGranted) -> None:
         self._notification_service.notify(f"Write access granted to {event.owner}", "success")
@@ -288,6 +319,7 @@ class MainWindow(QMainWindow):
         is_write = (mode == CollaborationMode.WRITE)
         self.write_btn.setVisible(not is_write)
         self.release_btn.setVisible(is_write)
+        self.publish_btn.setVisible(is_write)  # Show Publish button only in WRITE
         if is_write:
             session_info = self._collaboration_manager.get_session_info()
             self.write_btn.setToolTip(f"Current session: {session_info.get('session_id')}")
@@ -295,16 +327,31 @@ class MainWindow(QMainWindow):
             self.write_btn.setToolTip("Request write access to edit data")
 
     def _on_request_write(self) -> None:
-        if self._collaboration_manager.request_write():
-            self._notification_service.notify("Write access granted", "success")
-        else:
-            self._notification_service.notify("Could not acquire write lock. Someone else is editing.", "warning")
+        # Dùng QMessageBox để hiển thị kết quả rõ ràng
+        try:
+            success = self._collaboration_manager.request_write()
+            if success:
+                QMessageBox.information(self, "Write Request", "Write access granted.")
+                # Mode sẽ được cập nhật qua event, nhưng để đảm bảo, cập nhật luôn ở đây
+                self._on_mode_changed(ModeChanged(mode=CollaborationMode.WRITE))
+            else:
+                QMessageBox.warning(self, "Write Request", "Could not acquire write lock. Someone else is editing.")
+                logger.warning("Request write failed")
+        except Exception as e:
+            logger.exception("Error requesting write")
+            QMessageBox.critical(self, "Error", f"Request write error: {str(e)}")
 
     def _on_release_write(self) -> None:
-        if self._collaboration_manager.release_write():
-            self._notification_service.notify("Write access released", "info")
-        else:
-            self._notification_service.notify("Failed to release write lock", "error")
+        try:
+            success = self._collaboration_manager.release_write()
+            if success:
+                QMessageBox.information(self, "Release Write", "Write access released.")
+                self._on_mode_changed(ModeChanged(mode=CollaborationMode.READ))
+            else:
+                QMessageBox.warning(self, "Release Write", "Failed to release write lock.")
+        except Exception as e:
+            logger.exception("Error releasing write")
+            QMessageBox.critical(self, "Error", f"Release write error: {str(e)}")
 
     def _on_notification(self, message: str, severity: str) -> None:
         # Show in status bar for a few seconds

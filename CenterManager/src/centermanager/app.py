@@ -52,7 +52,9 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.services.auto_report_service import AutoReportService
-
+from centermanager.platform.synchronization.git.git_credentials import GitCredentials
+from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
+from centermanager.core.paths import get_paths
 # NEW imports for collaboration
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
@@ -280,12 +282,49 @@ def main() -> int:
         attendance_service._report_service = report_service
 
         # NEW: Collaboration and Notification
-        collaboration_manager = CollaborationManager(paths.metadata_dir, event_bus)
+        # Load Git credentials from configuration (placeholder)
+        # --- Git Synchronization ---
+        sync_provider = None
+        git_config = config.get("git", {})
+        if git_config:
+            repository_url = git_config.get("repository_url")
+            token = git_config.get("token")
+            if repository_url and token:
+                try:
+                    from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
+                    from centermanager.platform.synchronization.git.git_credentials import GitCredentials
+
+                    credentials = GitCredentials(
+                        repository_url=repository_url,
+                        branch=git_config.get("branch", "main"),
+                        token=token,
+                        username=git_config.get("username") or "CenterManager",
+                        email=git_config.get("email") or "cm@centermanager.local",
+                    )
+                    repo_path = paths.runtime_root / "repository"
+                    sync_provider = GitSynchronizationProvider(repo_path, credentials)
+                    logger.info("GitSynchronizationProvider initialized")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize GitSynchronizationProvider: {e}")
+                    sync_provider = None
+            else:
+                logger.warning("Git config missing repository_url or token. Git synchronization disabled.")
+        else:
+            logger.info("No git configuration found. Running in standalone mode.")
+
+        # Tạo notification_service trước
         notification_service = NotificationService()
 
+        # Tạo collaboration_manager với notification_service
+        collaboration_manager = CollaborationManager(
+            metadata_dir=paths.metadata_dir,
+            event_bus=event_bus,
+            sync_provider=sync_provider,
+            notification_service=notification_service,
+        )
         logger.info("[STARTUP-17] All services initialized")
 
-            # Tạo MainWindow
+        # Tạo MainWindow
         window = MainWindow(
             student_service=student_service,
             parent_service=parent_service,
