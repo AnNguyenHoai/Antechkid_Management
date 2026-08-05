@@ -45,7 +45,6 @@ from centermanager.services.teacher_document_service import TeacherDocumentServi
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
 from centermanager.services.class_service import ClassService
 from centermanager.services.class_timeline_service import ClassTimelineService
-from centermanager.services.finance_service import FinanceService
 from centermanager.services.income_service import IncomeService
 from centermanager.services.expense_service import ExpenseService
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
@@ -223,7 +222,6 @@ def main() -> int:
             timeline_service=class_timeline_service,
         )
 
-        finance_service = FinanceService(session_factory)
         expense_timeline_service = ExpenseTimelineService(session_factory)
         expense_service = ExpenseService(
             session_factory=session_factory,
@@ -305,7 +303,6 @@ def main() -> int:
             class_timeline_service=class_timeline_service,
             teacher_assignment_service_for_class=teacher_assignment_service,
             permission_service=permission_service,
-            finance_service=finance_service,
             income_service=income_service,
             expense_service=expense_service,
             finance_dashboard_service=finance_dashboard_service,

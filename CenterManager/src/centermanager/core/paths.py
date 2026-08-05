@@ -1,26 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Centralized path resolution for CenterManager.
-
-All runtime paths are derived from the project root and resolved
-using pathlib. No hardcoded absolute paths are used.
 """
 from pathlib import Path
 from typing import Optional
 
 
 class Paths:
-    """
-    Container for all application paths.
-
-    Attributes:
-        project_root: Root directory of the project (parent of src/).
-        runtime_root: Runtime directory (project_root / 'runtime').
-    """
-
     def __init__(self) -> None:
-        # Project root = parent of 'src' directory
-        # paths.py is in src/centermanager/core/
         self._project_root = Path(__file__).resolve().parent.parent.parent.parent
         self._runtime_root = self._project_root / "runtime"
 
@@ -68,10 +55,17 @@ class Paths:
     def logs_dir(self) -> Path:
         return self._runtime_root / "Logs"
 
+    @property
+    def reports_dir(self) -> Path:
+        """Thư mục lưu báo cáo (Reports/Student/...)."""
+        return self._runtime_root / "Reports"
+
+    @property
+    def temp_dir(self) -> Path:
+        """Thư mục tạm."""
+        return self._runtime_root / "Temp"
+
     def ensure_directories(self) -> None:
-        """
-        Create all required runtime directories if they do not exist.
-        """
         dirs = [
             self.database_dir,
             self.export_dir,
@@ -81,63 +75,57 @@ class Paths:
             self.config_dir,
             self.backup_dir,
             self.logs_dir,
+            self.reports_dir,
+            self.temp_dir,
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
 
 
-# Singleton instance
 _paths: Optional[Paths] = None
 
-
 def get_paths() -> Paths:
-    """Get the global Paths singleton."""
     global _paths
     if _paths is None:
         _paths = Paths()
     return _paths
 
 
-# Convenience functions for direct import
 def project_root() -> Path:
     return get_paths().project_root
-
 
 def runtime_root() -> Path:
     return get_paths().runtime_root
 
-
 def database_dir() -> Path:
     return get_paths().database_dir
-
 
 def export_dir() -> Path:
     return get_paths().export_dir
 
-
 def student_profile_dir() -> Path:
     return get_paths().student_profile_dir
-
 
 def excel_export_dir() -> Path:
     return get_paths().excel_export_dir
 
-
 def attachment_dir() -> Path:
     return get_paths().attachment_dir
-
 
 def config_dir() -> Path:
     return get_paths().config_dir
 
-
 def config_file() -> Path:
     return get_paths().config_file
-
 
 def backup_dir() -> Path:
     return get_paths().backup_dir
 
-
 def logs_dir() -> Path:
     return get_paths().logs_dir
+
+def reports_dir() -> Path:
+    return get_paths().reports_dir
+
+def temp_dir() -> Path:
+    return get_paths().temp_dir

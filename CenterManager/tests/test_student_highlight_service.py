@@ -22,6 +22,10 @@ from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.parent_service import ParentService  # just for dependencies
+from centermanager.core.current_user import CurrentUserContext
+from centermanager.models.user import User
+from centermanager.models.role import Role
+from centermanager.models.permission import Permission
 
 
 @pytest.fixture
@@ -30,6 +34,38 @@ def db_session(test_db_path):
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     return Session()
+
+
+@pytest.fixture
+def admin_user(db_session):
+    """Create an admin user with full permissions."""
+    role = db_session.query(Role).filter(Role.name == "admin").first()
+    if not role:
+        role = Role(name="admin", display_name="Administrator", is_system=True)
+        db_session.add(role)
+        db_session.commit()
+        # Thêm permissions
+        for perm_name in ["lesson.view", "lesson.create", "lesson.update", "lesson.cancel"]:
+            perm = db_session.query(Permission).filter(Permission.name == perm_name).first()
+            if not perm:
+                perm = Permission(name=perm_name, description=perm_name)
+                db_session.add(perm)
+                db_session.commit()
+            if perm not in role.permissions:
+                role.permissions.append(perm)
+        db_session.commit()
+
+    user = User(
+        username="admin_test",
+        password_hash="dummy",
+        full_name="Admin Test",
+        role_id=role.id,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
 
 
 @pytest.fixture
@@ -76,7 +112,7 @@ def enrollment(db_session, student_obj, class_obj):
 
 
 @pytest.fixture
-def services(db_session, class_obj, student_obj, session_obj, enrollment):
+def services(db_session, admin_user, class_obj, student_obj, session_obj, enrollment):
     engine = db_session.get_bind()
     session_factory = sessionmaker(bind=engine)
 
@@ -97,18 +133,21 @@ def services(db_session, class_obj, student_obj, session_obj, enrollment):
         "timeline_service": timeline_service,
         "event_bus": event_bus,
         "db_session": db_session,
+        "admin_user": admin_user,
     }
 
 
 def test_create_highlight(services, session_obj, student_obj):
     hs = services["highlight_service"]
-    highlight = hs.create_highlight(
-        session_id=session_obj.id,
-        student_id=student_obj.id,
-        highlight_type=HighlightType.POSITIVE.value,
-        title="Great work",
-        description="Student solved all problems",
-    )
+    admin = services["admin_user"]
+    with CurrentUserContext(admin):
+        highlight = hs.create_highlight(
+            session_id=session_obj.id,
+            student_id=student_obj.id,
+            highlight_type=HighlightType.POSITIVE.value,
+            title="Great work",
+            description="Student solved all problems",
+        )
     assert highlight.id is not None
     assert highlight.session_id == session_obj.id
     assert highlight.student_id == student_obj.id
@@ -122,13 +161,15 @@ def test_create_highlight_student_not_in_class(services, session_obj, db_session
     db_session.commit()
 
     hs = services["highlight_service"]
-    with pytest.raises(ValueError, match="not enrolled"):
-        hs.create_highlight(
-            session_id=session_obj.id,
-            student_id=s2.id,
-            highlight_type=HighlightType.POSITIVE.value,
-            title="Invalid"
-        )
+    admin = services["admin_user"]
+    with CurrentUserContext(admin):
+        with pytest.raises(ValueError, match="not enrolled"):
+            hs.create_highlight(
+                session_id=session_obj.id,
+                student_id=s2.id,
+                highlight_type=HighlightType.POSITIVE.value,
+                title="Invalid"
+            )
 
 
 def test_create_highlight_session_not_completed(services, class_obj):
@@ -144,27 +185,30 @@ def test_create_highlight_session_not_completed(services, class_obj):
     services["db_session"].commit()
 
     hs = services["highlight_service"]
-    with pytest.raises(ValueError, match="must be COMPLETED"):
-        hs.create_highlight(
-            session_id=sess.id,
-            student_id=1,  # invalid
-            highlight_type=HighlightType.POSITIVE.value,
-            title="Invalid"
-        )
+    admin = services["admin_user"]
+    with CurrentUserContext(admin):
+        with pytest.raises(ValueError, match="must be COMPLETED"):
+            hs.create_highlight(
+                session_id=sess.id,
+                student_id=1,  # invalid
+                highlight_type=HighlightType.POSITIVE.value,
+                title="Invalid"
+            )
 
 
 def test_timeline_created(services, session_obj, student_obj):
     hs = services["highlight_service"]
     timeline_service = services["timeline_service"]
+    admin = services["admin_user"]
 
-    # Create highlight
-    hs.create_highlight(
-        session_id=session_obj.id,
-        student_id=student_obj.id,
-        highlight_type=HighlightType.POSITIVE.value,
-        title="Great work",
-        description="Excellent"
-    )
+    with CurrentUserContext(admin):
+        hs.create_highlight(
+            session_id=session_obj.id,
+            student_id=student_obj.id,
+            highlight_type=HighlightType.POSITIVE.value,
+            title="Great work",
+            description="Excellent"
+        )
 
     # Check timeline
     events = timeline_service.get_student_timeline(student_obj.id)
@@ -177,35 +221,41 @@ def test_timeline_created(services, session_obj, student_obj):
 
 def test_update_highlight(services, session_obj, student_obj):
     hs = services["highlight_service"]
-    created = hs.create_highlight(
-        session_id=session_obj.id,
-        student_id=student_obj.id,
-        highlight_type=HighlightType.POSITIVE.value,
-        title="Old title",
-        description="Old desc"
-    )
-    updated = hs.update_highlight(
-        highlight_id=created.id,
-        highlight_type=HighlightType.SUPPORT.value,
-        title="New title",
-        description="New desc"
-    )
+    admin = services["admin_user"]
+    with CurrentUserContext(admin):
+        created = hs.create_highlight(
+            session_id=session_obj.id,
+            student_id=student_obj.id,
+            highlight_type=HighlightType.POSITIVE.value,
+            title="Old title",
+            description="Old desc"
+        )
+        updated = hs.update_highlight(
+            highlight_id=created.id,
+            highlight_type=HighlightType.SUPPORT.value,
+            title="New title",
+            description="New desc"
+        )
     assert updated.type == HighlightType.SUPPORT.value
     assert updated.title == "New title"
     assert updated.description == "New desc"
 
+
 def test_delete_highlight(services, session_obj, student_obj):
     hs = services["highlight_service"]
-    created = hs.create_highlight(
-        session_id=session_obj.id,
-        student_id=student_obj.id,
-        highlight_type=HighlightType.POSITIVE.value,
-        title="To delete"
-    )
-    hs.delete_highlight(created.id)
-    # Kiểm tra danh sách rỗng
-    highlights = hs.get_highlights_for_session(session_obj.id)
+    admin = services["admin_user"]
+    with CurrentUserContext(admin):
+        created = hs.create_highlight(
+            session_id=session_obj.id,
+            student_id=student_obj.id,
+            highlight_type=HighlightType.POSITIVE.value,
+            title="To delete"
+        )
+        hs.delete_highlight(created.id)
+        # Kiểm tra danh sách rỗng
+        highlights = hs.get_highlights_for_session(session_obj.id)
     assert len(highlights) == 0
     # Kiểm tra xóa lại sẽ raise lỗi
-    with pytest.raises(ValueError, match="not found"):
-        hs.delete_highlight(created.id)
+    with CurrentUserContext(admin):
+        with pytest.raises(ValueError, match="not found"):
+            hs.delete_highlight(created.id)

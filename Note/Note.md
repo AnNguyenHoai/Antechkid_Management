@@ -42,3 +42,5 @@ Current status:
 4/8: Đã yêu cầu deepseek code để deploy, chưa merge vào
 
 -> tiếp theo cần làm export học sinh, trao đổi tiếp với GPT để làm
+
+5/8: đã xong clean up, tiếp theo sẽ làm engine build
