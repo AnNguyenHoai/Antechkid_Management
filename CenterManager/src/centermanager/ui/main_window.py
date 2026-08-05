@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         finance_dashboard_service,
         outstanding_service,
         attendance_service,
+        report_service,                     # NEW
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self._finance_dashboard_service = finance_dashboard_service
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
+        self._report_service = report_service
 
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
@@ -124,62 +126,11 @@ class MainWindow(QMainWindow):
             permission_service=self._permission_service,
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,
+            report_service=self._report_service,          # NEW
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.student_workspace)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
-
-        # Teacher Workspace
-        self.teacher_workspace = TeacherWorkspaceShell(
-            teacher_service=self._teacher_service,
-            assignment_service=self._teacher_assignment_service,
-            document_service=self._teacher_document_service,
-            timeline_service=self._teacher_timeline_service,
-        )
-        self.teacher_workspace.go_home.connect(self._go_home)
-        self.teacher_workspace.navigate_to_class.connect(self._on_navigate_to_class)
-        self.central_stack.addWidget(self.teacher_workspace)
-
-        # Class Workspace
-        self.class_workspace = ClassWorkspaceShell(
-            class_service=self._class_service,
-            assignment_service=self._teacher_assignment_service_for_class,
-            timeline_service=self._class_timeline_service,
-            session_service=self._session_service,
-            note_service=self._note_service,
-            highlight_service=self._highlight_service,
-            student_service=self._student_service,
-            attendance_service=self._attendance_service,
-        )
-        self.class_workspace.go_home.connect(self._go_home)
-        self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
-        self.central_stack.addWidget(self.class_workspace)
-
-        # Finance Workspace
-        self.finance_workspace = FinanceWorkspaceShell(
-            income_service=self._income_service,
-            student_service=self._student_service,
-            class_service=self._class_service,
-            expense_service=self._expense_service,
-            dashboard_service=self._finance_dashboard_service,
-            outstanding_service=self._outstanding_service,
-        )
-        self.finance_workspace.go_home.connect(self._go_home)
-        self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
-        self.central_stack.addWidget(self.finance_workspace)
-
-        # Admin Workspace
-        self.admin_workspace = AdminWorkspaceShell(
-            permission_service=self._permission_service,
-        )
-        self.admin_workspace.go_home.connect(self._go_home)
-        self.central_stack.addWidget(self.admin_workspace)
-
-        self.central_stack.setCurrentWidget(self.home_page)
-        self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
-
-        self._apply_menu_permissions()
-        self._refresh_student_list()
 
     def _apply_menu_permissions(self) -> None:
         self.home_page.refresh()

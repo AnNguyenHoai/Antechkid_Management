@@ -12,7 +12,8 @@ from centermanager.repositories.session_repository import SessionRepository
 from centermanager.repositories.class_repository import ClassRepository
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.core.permission_guard import require_permission
-
+from sqlalchemy.orm import selectinload
+from centermanager.models.enrollment import Enrollment
 
 class SessionServiceError(Exception):
     pass

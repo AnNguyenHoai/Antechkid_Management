@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 StudentDetailPage - displays full student profile with all sections.
-Now includes Financial Tab with Outstanding and Attendance Tab.
+Now includes Reports tab.
 """
 import logging
 from typing import Optional
@@ -9,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QTabWidget
+    QScrollArea, QFrame, QSizePolicy, QTabWidget, QMessageBox
 )
 
 from centermanager.services.student_service import StudentService
@@ -26,10 +26,10 @@ from centermanager.services.income_service import IncomeService
 from centermanager.services.class_service import ClassService
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.outstanding_service import OutstandingService
-from centermanager.services.attendance_service import AttendanceService  # <-- THÊM
+from centermanager.services.attendance_service import AttendanceService
+from centermanager.services.report_service import ReportService
 from centermanager.services.exceptions import StudentNotFoundError
 from centermanager.models.student import Student
-from centermanager.dto import StudentSummaryDTO
 from centermanager.ui.students.helpers import calculate_age, format_date_for_display
 from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.parents import ParentCard, ParentDialog
@@ -41,7 +41,8 @@ from centermanager.ui.student_workspace.quick_actions_widget import QuickActions
 from centermanager.ui.student_workspace.notes_widget import NotesWidget
 from centermanager.ui.student_workspace.documents_widget import DocumentsWidget
 from centermanager.ui.student_workspace.student_financial_widget import StudentFinancialWidget
-from centermanager.ui.student_workspace.student_attendance_widget import StudentAttendanceWidget  # <-- THÊM
+from centermanager.ui.student_workspace.student_attendance_widget import StudentAttendanceWidget
+from centermanager.ui.student_workspace.report_list_widget import ReportListWidget  # NEW
 from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
@@ -56,7 +57,7 @@ class StudentDetailPage(QWidget):
     back_clicked = Signal()
     student_updated = Signal()
     go_to_finance = Signal()
-    
+
     def __init__(
         self,
         student_service: StudentService,
@@ -73,7 +74,8 @@ class StudentDetailPage(QWidget):
         class_service: ClassService,
         permission_service: PermissionService,
         outstanding_service: OutstandingService,
-        attendance_service: AttendanceService,  # <-- THÊM
+        attendance_service: AttendanceService,
+        report_service: ReportService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -91,7 +93,9 @@ class StudentDetailPage(QWidget):
         self._class_service = class_service
         self._permission_service = permission_service
         self._outstanding_service = outstanding_service
-        self._attendance_service = attendance_service  # <-- LƯU
+        self._attendance_service = attendance_service
+        self._report_service = report_service
+
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
 
@@ -158,16 +162,13 @@ class StudentDetailPage(QWidget):
         )
         self.tab_widget.addTab(self.attendance_widget, "📋 Attendance")
 
+        # Tab 4: Reports (NEW)
+        self.report_list_widget = ReportListWidget(self._report_service, parent=self)
+        self.tab_widget.addTab(self.report_list_widget, "📄 Báo cáo")
+
         main_layout.addWidget(self.tab_widget)
 
-    def _on_open_finance(self) -> None:
-        """Switch to Finance Workspace when user clicks 'Open Finance'."""
-        # Emit signal to parent (StudentWorkspaceShell) to switch workspace
-        # We'll use a signal from StudentDetailPage to parent
-        self.go_to_finance.emit()
-
     def _create_profile_tab(self) -> QWidget:
-        """Create the profile tab content."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -238,7 +239,8 @@ class StudentDetailPage(QWidget):
             on_add_parent=self._on_add_parent,
             on_add_assessment=self._on_add_assessment,
             on_add_note=self._on_add_note,
-            on_upload_doc=self._on_upload_doc
+            on_upload_doc=self._on_upload_doc,
+            on_export_pdf=self._export_pdf,
         )
 
         return tab
@@ -284,7 +286,8 @@ class StudentDetailPage(QWidget):
         self._current_student = student
         self._populate_profile(student)
         self._populate_financial(student.id)
-        self._populate_attendance(student.id)  # <-- THÊM
+        self._populate_attendance(student.id)
+        self.report_list_widget.set_student(student.id)  # NEW
         self._show_detail()
 
     def _populate_profile(self, student: Student) -> None:
@@ -318,7 +321,7 @@ class StudentDetailPage(QWidget):
     def _populate_financial(self, student_id: int) -> None:
         self.financial_tab.set_student(student_id)
 
-    def _populate_attendance(self, student_id: int) -> None:  # <-- THÊM
+    def _populate_attendance(self, student_id: int) -> None:
         self.attendance_widget.set_student(student_id)
 
     def _load_parents(self, student_id: int) -> None:
@@ -424,7 +427,43 @@ class StudentDetailPage(QWidget):
                 student = self._student_service.get_student(self._current_student_id)
                 self._populate_profile(student)
                 self._populate_financial(self._current_student_id)
-                self._populate_attendance(self._current_student_id)  # <-- THÊM
+                self._populate_attendance(self._current_student_id)
+                self.report_list_widget.set_student(self._current_student_id)  # NEW
             except Exception as e:
                 logger.exception("Error refreshing student data")
             self.student_updated.emit()
+
+    def _export_pdf(self) -> None:
+        if self._current_student_id is None:
+            QMessageBox.warning(self, "Lỗi", "Chưa chọn học sinh.")
+            return
+
+        try:
+            output_path = self._report_service.generate_student_report(
+                self._current_student_id,
+                report_type="manual"
+            )
+            QMessageBox.information(
+                self,
+                "Xuất thành công",
+                f"Báo cáo đã được lưu tại:\n{output_path}"
+            )
+            # Refresh report list
+            self.report_list_widget.set_student(self._current_student_id)
+            # Open folder
+            import os
+            import sys
+            if sys.platform == 'win32':
+                os.startfile(str(output_path.parent))
+            elif sys.platform == 'darwin':
+                import subprocess
+                subprocess.run(['open', str(output_path.parent)])
+            else:
+                import subprocess
+                subprocess.run(['xdg-open', str(output_path.parent)])
+        except Exception as e:
+            logger.exception("Failed to generate PDF report")
+            QMessageBox.critical(self, "Lỗi xuất", f"Không thể tạo báo cáo PDF: {str(e)}")
+
+    def _on_open_finance(self) -> None:
+        self.go_to_finance.emit()

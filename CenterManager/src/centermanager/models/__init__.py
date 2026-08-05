@@ -16,6 +16,7 @@ from centermanager.models.session_note import SessionNote, TeachingProgress, Cla
 from centermanager.models.student_highlight import StudentHighlight, HighlightType
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
+from centermanager.models.report import Report  # NEW
 
 # RBAC Models
 from centermanager.models.user import User
@@ -38,8 +39,6 @@ from centermanager.models.expense import Expense
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.models.attendance import Attendance, AttendanceStatus
 
-# Không còn LessonSession
-
 __all__ = [
     "Student",
     "Parent",
@@ -60,6 +59,7 @@ __all__ = [
     "Note",
     "NoteType",
     "Document",
+    "Report",  # NEW
     "User",
     "Role",
     "RoleDefinitions",

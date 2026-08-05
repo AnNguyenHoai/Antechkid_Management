@@ -4,7 +4,7 @@ QuickActionsWidget - quick action buttons for student detail.
 """
 from typing import Optional, Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QSizePolicy
 
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
@@ -12,6 +12,8 @@ from centermanager.ui.design_system.components import PrimaryButton, SecondaryBu
 
 
 class QuickActionsWidget(QWidget):
+    export_pdf_clicked = Signal()  # NEW
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._setup_ui()
@@ -21,16 +23,15 @@ class QuickActionsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['sm'])
 
-        # All buttons with consistent styling
         self.edit_btn = PrimaryButton("✏️ Edit")
         self.add_parent_btn = SecondaryButton("👨‍👩‍👧 Add Parent")
         self.add_assessment_btn = SecondaryButton("📊 Add Assessment")
         self.add_note_btn = SecondaryButton("📝 Add Note")
         self.upload_doc_btn = SecondaryButton("📎 Upload Doc")
+        self.export_pdf_btn = SecondaryButton("📄 Export PDF")  # NEW
 
-        # Ensure consistent height
-        for btn in [self.edit_btn, self.add_parent_btn, self.add_assessment_btn, 
-                    self.add_note_btn, self.upload_doc_btn]:
+        for btn in [self.edit_btn, self.add_parent_btn, self.add_assessment_btn,
+                    self.add_note_btn, self.upload_doc_btn, self.export_pdf_btn]:
             btn.setFixedHeight(34)
             btn.setMinimumWidth(120)
 
@@ -39,7 +40,11 @@ class QuickActionsWidget(QWidget):
         layout.addWidget(self.add_assessment_btn)
         layout.addWidget(self.add_note_btn)
         layout.addWidget(self.upload_doc_btn)
+        layout.addWidget(self.export_pdf_btn)  # NEW
         layout.addStretch()
+
+        # Connect new button
+        self.export_pdf_btn.clicked.connect(self.export_pdf_clicked.emit)
 
     def set_actions(
         self,
@@ -47,10 +52,13 @@ class QuickActionsWidget(QWidget):
         on_add_parent: Callable,
         on_add_assessment: Callable,
         on_add_note: Callable,
-        on_upload_doc: Callable
+        on_upload_doc: Callable,
+        on_export_pdf: Optional[Callable] = None,  # NEW
     ) -> None:
         self.edit_btn.clicked.connect(on_edit)
         self.add_parent_btn.clicked.connect(on_add_parent)
         self.add_assessment_btn.clicked.connect(on_add_assessment)
         self.add_note_btn.clicked.connect(on_add_note)
         self.upload_doc_btn.clicked.connect(on_upload_doc)
+        if on_export_pdf:
+            self.export_pdf_btn.clicked.connect(on_export_pdf)

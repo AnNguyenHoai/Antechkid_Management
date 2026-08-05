@@ -16,7 +16,7 @@ from centermanager.models.mixins import TimestampMixin
 from centermanager.models.note import Note
 from centermanager.models.document import Document
 from centermanager.models.attendance import Attendance
-
+from centermanager.models.report import Report  # thêm dòng này
 if TYPE_CHECKING:
     from centermanager.models.parent import Parent
     from centermanager.models.enrollment import Enrollment
@@ -61,6 +61,7 @@ class Student(Base, TimestampMixin):
     highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="student")
     notes_structured: Mapped[List[Note]] = relationship("Note", back_populates="student", cascade="all, delete-orphan")   # NEW
     documents: Mapped[List[Document]] = relationship("Document", back_populates="student", cascade="all, delete-orphan") # NEW
-
+    # Trong class Student, thêm dòng:
+    reports: Mapped[List[Report]] = relationship("Report", back_populates="student", cascade="all, delete-orphan")
     def __repr__(self) -> str:
         return f"<Student(id={self.id}, code='{self.student_code}', name='{self.full_name}')>"

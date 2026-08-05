@@ -40,3 +40,5 @@ Current status:
 28/7: Deepseek mới fix bug xong, chưa copy bản fix vô code, tiếp theo cần copy vô code rồi test
 
 4/8: Đã yêu cầu deepseek code để deploy, chưa merge vào
+
+-> tiếp theo cần làm export học sinh, trao đổi tiếp với GPT để làm

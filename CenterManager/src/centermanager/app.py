@@ -31,6 +31,8 @@ from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.services.student_analytics_service import StudentAnalyticsService
 from centermanager.services.permission_service import PermissionService
+from centermanager.services.report_service import ReportService
+from centermanager.services.report_policy import ReportPolicy
 from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
@@ -50,9 +52,9 @@ from centermanager.services.expense_timeline_service import ExpenseTimelineServi
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
+from centermanager.services.auto_report_service import AutoReportService
 
 logger = logging.getLogger(__name__)
-
 
 def ensure_schema():
     """
@@ -238,14 +240,46 @@ def main() -> int:
         finance_dashboard_service = FinanceDashboardService(income_service, expense_service)
         outstanding_service = OutstandingService(session_factory)
 
+        # Tạo attendance_service tạm thời chưa có report_policy
         attendance_service = AttendanceService(
             session_factory=session_factory,
             timeline_service=timeline_service,
             permission_service=permission_service,
+            report_policy=None,
+            report_service=None,
         )
+
+        # Tạo report_service (cần attendance_service)
+        report_service = ReportService(
+            student_service=student_service,
+            parent_service=parent_service,
+            attendance_service=attendance_service,
+            session_service=session_service,
+            student_note_service=student_note_service,
+            outstanding_service=outstanding_service,
+            income_service=income_service,
+            session_factory=session_factory,   # THÊM DÒNG NÀY
+        )
+
+        # Tạo report_policy (cần attendance_service và report_service)
+        report_policy = ReportPolicy(
+            student_service=student_service,
+            session_service=session_service,
+            class_service=class_service,
+            attendance_service=attendance_service,
+            report_service=report_service,
+        )
+        auto_report_service = AutoReportService(
+            student_service=student_service,
+            report_service=report_service,
+        )
+        # Gán report_policy và report_service vào attendance_service
+        attendance_service._report_policy = report_policy
+        attendance_service._report_service = report_service
+
         logger.info("[STARTUP-17] All services initialized")
 
-        logger.info("[STARTUP-18] Creating MainWindow...")
+        # Tạo MainWindow
         window = MainWindow(
             student_service=student_service,
             parent_service=parent_service,
@@ -277,7 +311,9 @@ def main() -> int:
             finance_dashboard_service=finance_dashboard_service,
             outstanding_service=outstanding_service,
             attendance_service=attendance_service,
+            report_service=report_service,
         )
+        auto_report_service.run_daily_check()
         logger.info("[STARTUP-19] MainWindow instance created")
         window.show()
         logger.info("[STARTUP-20] MainWindow shown")

@@ -211,3 +211,13 @@
 ## Fixed
 - Note and highlight widgets now emit signals to refresh parent automatically.
 - Cancel button returns to note summary view.
+
+# CHANGELOG – Task TASK-013
+
+## Added
+- ReportService – foundation for all report generation.
+- StudentReportGenerator – generates professional PDF reports for a single student.
+- Export PDF button in Student Detail page (Quick Actions).
+- PDF reports include: Student Profile, Academic Summary, Financial Summary, Recent Attendance, Teacher Notes.
+- Export to runtime/Export/StudentProfile/ with filename format: StudentCode_FullName_YYYYMMDD.pdf.
+- Graceful handling of missing data (placeholders shown).

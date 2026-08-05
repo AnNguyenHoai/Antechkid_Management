@@ -42,6 +42,7 @@ class StudentWorkspaceShell(QWidget):
         permission_service,
         outstanding_service,
         attendance_service,
+        report_service,                     # NEW
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -65,6 +66,7 @@ class StudentWorkspaceShell(QWidget):
         self._permission_service = permission_service
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
+        self._report_service = report_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
@@ -136,10 +138,10 @@ class StudentWorkspaceShell(QWidget):
             permission_service=self._permission_service,
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,
+            report_service=self._report_service,          # NEW
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
-        # Kết nối signal go_to_finance từ detail_page
         self.detail_page.go_to_finance.connect(self._on_go_to_finance)
         self.content_stack.addWidget(self.detail_page)
 

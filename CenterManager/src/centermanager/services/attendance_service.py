@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from centermanager.services.report_policy import ReportPolicy
+
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.attendance import Attendance, AttendanceStatus
@@ -19,11 +23,15 @@ class AttendanceService:
         self,
         session_factory: sessionmaker,
         timeline_service: TimelineService,
-        permission_service: PermissionService
+        permission_service: PermissionService,
+        report_policy: Optional[Any] = None,    # ReportPolicy instance, can be None
+        report_service: Optional[Any] = None,   # ReportService instance, can be None
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._permission_service = permission_service
+        self._report_policy = report_policy
+        self._report_service = report_service
 
     def _validate_status(self, status: str) -> str:
         valid = [e.value for e in AttendanceStatus]
@@ -64,7 +72,6 @@ class AttendanceService:
             existing = repo.get_by_session_and_student(session_id, student_id)
 
             if existing:
-                # Update
                 old_status = existing.status
                 existing.status = status
                 if arrival_time is not None:
@@ -74,7 +81,6 @@ class AttendanceService:
                 session.commit()
                 session.refresh(existing)
 
-                # Timeline: attendance updated
                 if old_status != status:
                     self._timeline_service.log_event(
                         student_id=student_id,
@@ -83,9 +89,12 @@ class AttendanceService:
                         description=f"Session {session_id}: status changed from {old_status} to {status}",
                         metadata={"session_id": session_id, "old_status": old_status, "new_status": status}
                     )
+
+                # Trigger report policy
+                self._trigger_report_policy(student_id, session_id, status)
+
                 return existing
             else:
-                # Create new
                 attendance = Attendance(
                     session_id=session_id,
                     student_id=student_id,
@@ -97,7 +106,6 @@ class AttendanceService:
                 session.commit()
                 session.refresh(attendance)
 
-                # Timeline: attendance created
                 self._timeline_service.log_event(
                     student_id=student_id,
                     event_type=TimelineEventType.ATTENDANCE_CREATED,
@@ -105,8 +113,29 @@ class AttendanceService:
                     description=f"Session {session_id}: {status}",
                     metadata={"session_id": session_id, "status": status}
                 )
-                return attendance
 
+                # Trigger report policy
+                self._trigger_report_policy(student_id, session_id, status)
+
+                return attendance
+    def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
+        """Helper method to trigger report policy if available."""
+        if self._report_policy and self._report_service:
+            triggers = self._report_policy.check_and_trigger(
+                student_id,
+                "attendance_updated",
+                {"session_id": session_id, "status": status}
+            )
+            for trigger in triggers:
+                try:
+                    self._report_service.generate_student_report(
+                        student_id,
+                        report_type="automatic",
+                        trigger_event=trigger,
+                        generated_by="system"
+                    )
+                except Exception as e:
+                    logger.exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
     @require_permission("attendance.create")
     def batch_update_attendance(
         self,

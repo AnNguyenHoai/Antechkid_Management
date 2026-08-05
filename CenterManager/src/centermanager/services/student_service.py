@@ -6,9 +6,11 @@ Now integrated with TimelineService.
 from datetime import date, datetime, timezone
 from typing import List, Optional, Any
 
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker, selectinload
 
 from centermanager.models.student import Student
+from centermanager.models.enrollment import Enrollment
+from centermanager.models.class_ import Class
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.services.exceptions import (
@@ -281,3 +283,25 @@ class StudentService:
         with self._session_factory() as session:
             repo = StudentRepository(session)
             return repo.search_students(query)
+
+    def get_student_with_relations(self, student_id: int) -> Student:
+        """
+        Lấy Student với các quan hệ cần thiết đã được eager load.
+        Dùng cho báo cáo và các trường hợp cần dữ liệu liên quan.
+        """
+        with self._session_factory() as session:
+            student = (
+                session.query(Student)
+                .options(
+                    selectinload(Student.enrollments)
+                    .selectinload(Enrollment.class_)
+                    .selectinload(Class.teachers),
+                    selectinload(Student.parents),
+                    selectinload(Student.notes_structured),
+                )
+                .filter(Student.id == student_id, Student.deleted_at.is_(None))
+                .first()
+            )
+            if not student:
+                raise StudentNotFoundError(f"Student {student_id} not found")
+            return student
