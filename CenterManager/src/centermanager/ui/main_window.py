@@ -14,7 +14,9 @@ from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWo
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 from centermanager.ui.finance_workspace import FinanceWorkspaceShell
 from centermanager.ui.admin_workspace import AdminWorkspaceShell
-
+from centermanager.platform.collaboration import CollaborationManager, CollaborationMode
+from centermanager.platform.notification import NotificationService
+from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +53,8 @@ class MainWindow(QMainWindow):
         outstanding_service,
         attendance_service,
         report_service,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -85,6 +89,8 @@ class MainWindow(QMainWindow):
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
         self._report_service = report_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
@@ -178,9 +184,125 @@ class MainWindow(QMainWindow):
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
 
+        self._setup_collaboration_status_bar()
+        self._connect_collaboration_events()
         self._apply_menu_permissions()
         self._refresh_student_list()
 
+    def _setup_collaboration_status_bar(self) -> None:
+        status_bar = self.statusBar()
+        # Clear default message
+        status_bar.clearMessage()
+
+        # Create widget for collaboration info
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # Mode label
+        self.mode_label = QLabel("Mode: READ")
+        self.mode_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.mode_label)
+
+        # User label
+        current_user = get_current_user()
+        user_display = current_user.full_name if current_user else "Unknown"
+        self.user_label = QLabel(f"User: {user_display}")
+        layout.addWidget(self.user_label)
+
+        # Version label
+        version = self._collaboration_manager.get_version()
+        self.version_label = QLabel(f"Version: {version}")
+        layout.addWidget(self.version_label)
+
+        # Deployment label
+        profile = self._collaboration_manager.get_deployment_profile()
+        self.deployment_label = QLabel(f"Deployment: {profile}")
+        layout.addWidget(self.deployment_label)
+
+        # Spacer
+        layout.addStretch()
+
+        # Request Write button
+        self.write_btn = QPushButton("Request Write")
+        self.write_btn.setFixedHeight(28)
+        self.write_btn.clicked.connect(self._on_request_write)
+        layout.addWidget(self.write_btn)
+
+        # Release Write button (initially hidden)
+        self.release_btn = QPushButton("Release Write")
+        self.release_btn.setFixedHeight(28)
+        self.release_btn.setVisible(False)
+        self.release_btn.clicked.connect(self._on_release_write)
+        layout.addWidget(self.release_btn)
+
+        status_bar.addPermanentWidget(widget, 1)
+        self._collab_status_widget = widget
+
+        # Set initial state
+        self._update_write_buttons(CollaborationMode.READ)
+
+    def _connect_collaboration_events(self) -> None:
+        self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
+        self._collaboration_manager._event_bus.register(WriteGranted, self._on_write_granted)
+        self._collaboration_manager._event_bus.register(WriteReleased, self._on_write_released)
+
+        # Notification listener
+        self._notification_service.add_listener(self._on_notification)
+
+    def _on_mode_changed(self, event: ModeChanged) -> None:
+        mode = event.mode
+        mode_str = mode.value if hasattr(mode, 'value') else str(mode)
+        self.mode_label.setText(f"Mode: {mode_str}")
+        self._update_write_buttons(mode)
+        # Update all write actions in UI
+        self._update_write_actions(mode)
+
+    def _on_write_granted(self, event: WriteGranted) -> None:
+        self._notification_service.notify(f"Write access granted to {event.owner}", "success")
+
+    def _on_write_released(self, event: WriteReleased) -> None:
+        self._notification_service.notify(f"Write access released by {event.owner}", "info")
+
+    def _update_write_buttons(self, mode: CollaborationMode) -> None:
+        is_write = (mode == CollaborationMode.WRITE)
+        self.write_btn.setVisible(not is_write)
+        self.release_btn.setVisible(is_write)
+        if is_write:
+            session_info = self._collaboration_manager.get_session_info()
+            self.write_btn.setToolTip(f"Current session: {session_info.get('session_id')}")
+        else:
+            self.write_btn.setToolTip("Request write access to edit data")
+
+    def _on_request_write(self) -> None:
+        if self._collaboration_manager.request_write():
+            self._notification_service.notify("Write access granted", "success")
+        else:
+            self._notification_service.notify("Could not acquire write lock. Someone else is editing.", "warning")
+
+    def _on_release_write(self) -> None:
+        if self._collaboration_manager.release_write():
+            self._notification_service.notify("Write access released", "info")
+        else:
+            self._notification_service.notify("Failed to release write lock", "error")
+
+    def _on_notification(self, message: str, severity: str) -> None:
+        # Show in status bar for a few seconds
+        self.statusBar().showMessage(message, 3000)
+
+    def _update_write_actions(self, mode: CollaborationMode) -> None:
+        """Enable/disable all write actions in the UI."""
+        is_write = (mode == CollaborationMode.WRITE)
+        # We'll iterate over all child widgets and find specific buttons/actions
+        # For simplicity, we'll just call a method on each workspace shell if they expose one.
+        # But to keep it clean, we can use signals, or we can access the stacked widgets.
+        # Here we directly call methods on workspace shells if they have set_write_enabled.
+        for i in range(self.central_stack.count()):
+            widget = self.central_stack.widget(i)
+            if hasattr(widget, 'set_write_enabled'):
+                widget.set_write_enabled(is_write)
+                
     def _apply_menu_permissions(self) -> None:
         self.home_page.refresh()
 

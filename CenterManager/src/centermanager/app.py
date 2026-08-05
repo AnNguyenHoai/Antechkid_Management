@@ -52,7 +52,8 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.services.auto_report_service import AutoReportService
-
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 logger = logging.getLogger(__name__)
 
 def ensure_schema():
@@ -201,6 +202,9 @@ def main() -> int:
             session_factory=session_factory,
         )
         event_bus = EventBus()
+        # Collaboration
+        collaboration_manager = CollaborationManager(paths.metadata_dir, event_bus)
+        notification_service = NotificationService()
         highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
         timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
         event_bus.register(StudentHighlightCreated, timeline_handler)
@@ -309,6 +313,8 @@ def main() -> int:
             outstanding_service=outstanding_service,
             attendance_service=attendance_service,
             report_service=report_service,
+            collaboration_manager=collaboration_manager,
+            notification_service=notification_service,
         )
         auto_report_service.run_daily_check()
         logger.info("[STARTUP-19] MainWindow instance created")

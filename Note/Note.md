@@ -19,7 +19,11 @@ alembic revision --autogenerate -m "initial_schema"
 Nếu bạn muốn giữ dữ liệu hiện có (không reset)
 Sửa file migrations/versions/4_update_assessment_table.py, đổi down_revision thành revision hiện có (ví dụ '2_add_occupation_to_parents' nếu file 3_add_timeline_columns bị mất). Kiểm tra danh sách file trong migrations/versions/ để biết chính xác tên revision đang có.
 
-python run.py  ->>>>> chạy tool
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+pip install -r requirements-dev.txt  # optional for testing
+python run.py
 ============================================
 pytest -> chay cac test
 

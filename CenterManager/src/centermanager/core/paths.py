@@ -65,6 +65,9 @@ class Paths:
         """Thư mục tạm."""
         return self._runtime_root / "Temp"
 
+    @property
+    def metadata_dir(self) -> Path:
+        return self._runtime_root / "metadata"
     def ensure_directories(self) -> None:
         dirs = [
             self.database_dir,
@@ -77,6 +80,7 @@ class Paths:
             self.logs_dir,
             self.reports_dir,
             self.temp_dir,
+            self.metadata_dir,   # <-- thêm
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -129,3 +133,4 @@ def reports_dir() -> Path:
 
 def temp_dir() -> Path:
     return get_paths().temp_dir
+
