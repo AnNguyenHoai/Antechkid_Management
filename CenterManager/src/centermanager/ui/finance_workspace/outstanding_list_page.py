@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 OutstandingListPage - Display outstanding tuition for all students.
-Read-only.
+Read-only. No write actions needed.
 """
 import logging
 from typing import Optional, List
@@ -17,6 +17,8 @@ from centermanager.dto.outstanding_dto import OutstandingDTO
 from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget, EmptyState
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +29,19 @@ class OutstandingListPage(QWidget):
     def __init__(
         self,
         outstanding_service: OutstandingService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
-    ):
+    ) -> None:
         super().__init__(parent)
         self._service = outstanding_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._items: List[OutstandingDTO] = []
         self._setup_ui()
         QTimer.singleShot(100, self.refresh)
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -103,7 +109,7 @@ class OutstandingListPage(QWidget):
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
 
-    def refresh(self):
+    def refresh(self) -> None:
         self.loading.setVisible(True)
         try:
             self._apply_filters()
@@ -113,7 +119,7 @@ class OutstandingListPage(QWidget):
         finally:
             self.loading.setVisible(False)
 
-    def _apply_filters(self):
+    def _apply_filters(self) -> None:
         search = self.search_bar.text().strip() or None
         status = self.status_combo.currentText()
         if status == "Tất cả trạng thái":
@@ -133,7 +139,7 @@ class OutstandingListPage(QWidget):
             logger.exception("Filter error")
             QMessageBox.critical(self, "Lỗi", str(e))
 
-    def _populate_table(self):
+    def _populate_table(self) -> None:
         data = []
         for item in self._items:
             data.append({
@@ -144,14 +150,14 @@ class OutstandingListPage(QWidget):
                 "paid": f"{item.paid:,.0f}",
                 "outstanding": f"{item.outstanding:,.0f}",
                 "status": item.status,
-                "_id": item.student_id,  # for navigation
+                "_id": item.student_id,
             })
         self.data_table.set_data(data, len(data))
 
-    def _on_search(self, text):
+    def _on_search(self, text) -> None:
         self._apply_filters()
 
-    def _on_sort(self, key: str, ascending: bool):
+    def _on_sort(self, key: str, ascending: bool) -> None:
         if key == "student_code":
             self._items.sort(key=lambda x: x.student_code, reverse=not ascending)
         elif key == "student_name":
@@ -168,12 +174,16 @@ class OutstandingListPage(QWidget):
             self._items.sort(key=lambda x: x.status, reverse=not ascending)
         self._populate_table()
 
-    def _on_row_double_clicked(self, row: int):
+    def _on_row_double_clicked(self, row: int) -> None:
         if row < len(self._items):
             student_id = self._items[row].student_id
             self.student_selected.emit(student_id)
 
-    def _clear_filters(self):
+    def _clear_filters(self) -> None:
         self.search_bar.clear()
         self.status_combo.setCurrentIndex(0)
         self._apply_filters()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        # Outstanding is read-only, no actions to enable/disable
+        pass

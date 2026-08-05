@@ -27,6 +27,10 @@ from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
 from centermanager.ui.students.student_import_dialog import StudentImportDialog
 
+# NEW imports for collaboration
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +47,8 @@ class StudentListPage(QWidget):
         filter_service: StudentFilterService,
         import_service: StudentImportService,
         export_service: StudentExportService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -52,6 +58,8 @@ class StudentListPage(QWidget):
         self._filter_service = filter_service
         self._import_service = import_service
         self._export_service = export_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._students: List[Student] = []
         self._filtered: List[Student] = []
         self._sort_key: Optional[str] = None
@@ -254,6 +262,9 @@ class StudentListPage(QWidget):
     def _bulk_delete(self) -> None:
         if not self._selected_ids:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to delete students.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Delete",
             f"Are you sure you want to delete {len(self._selected_ids)} students?",
@@ -272,6 +283,7 @@ class StudentListPage(QWidget):
     def _bulk_export(self) -> None:
         if not self._selected_ids:
             return
+        # Export is read-only, no need to check write.
         try:
             students = [self._student_service.get_student(sid) for sid in self._selected_ids]
             file_path = self._export_service.export_csv(students)
@@ -305,11 +317,17 @@ class StudentListPage(QWidget):
         menu.exec(pos)
 
     def _edit_student(self, student_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         dialog = StudentFormDialog(self._student_service, student_id=student_id, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _delete_student(self, student_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to delete.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Delete",
             "Delete this student?",
@@ -324,16 +342,23 @@ class StudentListPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to delete student.")
 
     def show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a student.", "warning")
+            return
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def show_import_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to import.", "warning")
+            return
         dialog = StudentImportDialog(self._import_service, parent=self)
         if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
             self.refresh()
 
     def export_students(self) -> None:
+        # Export is read-only, no write check needed.
         try:
             file_path = self._export_service.export_all_active()
             QMessageBox.information(self, "Export", f"Exported to: {file_path}")
@@ -351,3 +376,11 @@ class StudentListPage(QWidget):
                     self._populate_table()
                 except Exception as e:
                     QMessageBox.critical(self, "Filter Error", str(e))
+
+    # ====== NEW: Collaboration method ======
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)
+        self.import_btn.setEnabled(enabled)
+        self.bulk_delete_btn.setEnabled(enabled)
+        # Export is read-only, keep enabled
+        # Filter, refresh, search, etc. are read-only, keep enabled

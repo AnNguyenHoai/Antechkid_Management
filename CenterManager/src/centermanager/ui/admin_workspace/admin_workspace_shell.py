@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-AdminWorkspaceShell - main shell for Admin Workspace.
-"""
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -15,6 +12,8 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.admin_workspace.user_list_page import UserListPage
 from centermanager.ui.admin_workspace.settings_page import SettingsPage
 from centermanager.services.permission_service import PermissionService
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 class AdminWorkspaceShell(QWidget):
@@ -23,10 +22,14 @@ class AdminWorkspaceShell(QWidget):
     def __init__(
         self,
         permission_service: PermissionService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._permission_service = permission_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._setup_ui()
         self._connect_signals()
@@ -56,10 +59,18 @@ class AdminWorkspaceShell(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
-        self.users_page = UserListPage(self._permission_service)
+        self.users_page = UserListPage(
+            self._permission_service,
+            self._collaboration_manager,
+            self._notification_service,
+        )
         self.content_stack.addWidget(self.users_page)
 
-        self.settings_page = SettingsPage()
+        # ===== SỬA LỖI TẠI ĐÂY: thêm 2 tham số =====
+        self.settings_page = SettingsPage(
+            self._collaboration_manager,
+            self._notification_service,
+        )
         self.content_stack.addWidget(self.settings_page)
 
         body.addWidget(self.content_stack, 1)
@@ -79,3 +90,10 @@ class AdminWorkspaceShell(QWidget):
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
             self.header.set_context("Admin Workspace", "Settings")
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        if hasattr(self.users_page, 'set_write_enabled'):
+            self.users_page.set_write_enabled(enabled)
+        # Cập nhật cho SettingsPage
+        if hasattr(self.settings_page, 'set_write_enabled'):
+            self.settings_page.set_write_enabled(enabled)

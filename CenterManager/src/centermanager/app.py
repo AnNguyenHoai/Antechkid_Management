@@ -52,8 +52,11 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.services.auto_report_service import AutoReportService
+
+# NEW imports for collaboration
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
+
 logger = logging.getLogger(__name__)
 
 def ensure_schema():
@@ -202,9 +205,6 @@ def main() -> int:
             session_factory=session_factory,
         )
         event_bus = EventBus()
-        # Collaboration
-        collaboration_manager = CollaborationManager(paths.metadata_dir, event_bus)
-        notification_service = NotificationService()
         highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
         timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
         event_bus.register(StudentHighlightCreated, timeline_handler)
@@ -279,9 +279,13 @@ def main() -> int:
         attendance_service._report_policy = report_policy
         attendance_service._report_service = report_service
 
+        # NEW: Collaboration and Notification
+        collaboration_manager = CollaborationManager(paths.metadata_dir, event_bus)
+        notification_service = NotificationService()
+
         logger.info("[STARTUP-17] All services initialized")
 
-        # Tạo MainWindow
+            # Tạo MainWindow
         window = MainWindow(
             student_service=student_service,
             parent_service=parent_service,

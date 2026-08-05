@@ -1,8 +1,7 @@
-# src/centermanager/ui/teacher_workspace/teacher_detail_page.py
 # -*- coding: utf-8 -*-
 """
 TeacherDetailPage - full teacher profile.
-Now with clickable class names to navigate to class detail.
+Now with collaboration support.
 """
 import logging
 from typing import Optional
@@ -10,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMessageBox, QButtonGroup
+    QScrollArea, QFrame, QSizePolicy, QMessageBox
 )
 
 from centermanager.models.teacher import Teacher
@@ -25,6 +24,8 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
 from centermanager.ui.teacher_workspace.teacher_documents_widget import TeacherDocumentsWidget
 from centermanager.ui.timeline import TimelineWidget
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 class TeacherDetailPage(QWidget):
     back_clicked = Signal()
     teacher_updated = Signal()
-    class_clicked = Signal(int)  # <-- thêm signal khi click vào một lớp
+    class_clicked = Signal(int)
 
     def __init__(
         self,
@@ -40,6 +41,8 @@ class TeacherDetailPage(QWidget):
         assignment_service: TeacherAssignmentService,
         document_service: TeacherDocumentService,
         timeline_service: TeacherTimelineService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -47,6 +50,8 @@ class TeacherDetailPage(QWidget):
         self._assignment_service = assignment_service
         self._document_service = document_service
         self._timeline_service = timeline_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._current_teacher_id: Optional[int] = None
         self._current_teacher: Optional[Teacher] = None
 
@@ -130,7 +135,7 @@ class TeacherDetailPage(QWidget):
         ])
         container_layout.addWidget(self.professional_widget)
 
-        # Assigned Classes - now clickable buttons
+        # Assigned Classes
         self.classes_widget = QWidget()
         classes_layout = QVBoxLayout(self.classes_widget)
         classes_layout.setContentsMargins(0, 0, 0, 0)
@@ -240,7 +245,7 @@ class TeacherDetailPage(QWidget):
         self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
         self._field_1.setText(teacher.status or "-")
 
-        # Assigned classes - clickable buttons
+        # Assigned classes
         self._update_classes(teacher.assigned_classes)
 
         # Documents
@@ -251,7 +256,6 @@ class TeacherDetailPage(QWidget):
         self.timeline_widget.set_events(events)
 
     def _update_classes(self, classes) -> None:
-        # Xóa nội dung cũ
         while self.classes_container_layout.count():
             child = self.classes_container_layout.takeAt(0)
             if child.widget():
@@ -287,6 +291,9 @@ class TeacherDetailPage(QWidget):
     def _on_edit(self) -> None:
         if self._current_teacher_id is None:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         dialog = TeacherFormDialog(self._teacher_service, self._current_teacher_id, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
             self.load_teacher(self._current_teacher_id)
@@ -296,3 +303,9 @@ class TeacherDetailPage(QWidget):
         if self._current_teacher_id:
             self.load_teacher(self._current_teacher_id)
             self.teacher_updated.emit()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.edit_btn.setEnabled(enabled)
+        # Documents upload button is inside documents_widget, need to propagate
+        if hasattr(self.documents_widget, 'set_write_enabled'):
+            self.documents_widget.set_write_enabled(enabled)

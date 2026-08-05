@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 TeacherListPage - list of teachers with search, filter, CRUD.
+Now with collaboration support.
 """
 import logging
 from typing import Optional, List
@@ -18,12 +19,13 @@ from centermanager.services.teacher_assignment_service import TeacherAssignmentS
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
 from centermanager.ui.design_system import (
-    Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton
+    SearchBar, EmptyState, PrimaryButton, SecondaryButton
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
-from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,8 @@ class TeacherListPage(QWidget):
         assignment_service: TeacherAssignmentService,
         document_service: TeacherDocumentService,
         timeline_service: TeacherTimelineService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -45,6 +49,8 @@ class TeacherListPage(QWidget):
         self._assignment_service = assignment_service
         self._document_service = document_service
         self._timeline_service = timeline_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._teachers: List[Teacher] = []
         self._filtered: List[Teacher] = []
         self._sort_key: Optional[str] = None
@@ -204,6 +210,9 @@ class TeacherListPage(QWidget):
     def _bulk_archive(self) -> None:
         if not self._selected_ids:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to archive teachers.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Archive",
             f"Archive {len(self._selected_ids)} teachers?",
@@ -244,11 +253,17 @@ class TeacherListPage(QWidget):
         menu.exec(pos)
 
     def _edit_teacher(self, teacher_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         dialog = TeacherFormDialog(self._teacher_service, teacher_id=teacher_id, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _archive_teacher(self, teacher_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Archive",
             "Archive this teacher?",
@@ -263,6 +278,13 @@ class TeacherListPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to archive teacher.")
 
     def show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a teacher.", "warning")
+            return
         dialog = TeacherFormDialog(self._teacher_service, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
             self.refresh()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)
+        self.bulk_archive_btn.setEnabled(enabled)

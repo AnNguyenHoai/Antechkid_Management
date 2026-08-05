@@ -50,6 +50,10 @@ from centermanager.ui.design_system import (
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
 
+# NEW imports for collaboration
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +80,8 @@ class StudentDetailPage(QWidget):
         outstanding_service: OutstandingService,
         attendance_service: AttendanceService,
         report_service: ReportService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -95,6 +101,8 @@ class StudentDetailPage(QWidget):
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
         self._report_service = report_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
@@ -351,6 +359,7 @@ class StudentDetailPage(QWidget):
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
             add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
+            # check write mode before adding parent? Will be checked in slot.
             add_btn.clicked.connect(self._on_add_parent)
             empty_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self.parents_layout.addWidget(empty_widget)
@@ -373,6 +382,9 @@ class StudentDetailPage(QWidget):
                 item.widget().deleteLater()
 
     def _on_add_parent(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a parent.", "warning")
+            return
         if self._current_student_id is None:
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_widget=self)
@@ -380,6 +392,9 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_edit_parent(self, parent_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit a parent.", "warning")
+            return
         if self._current_student_id is None:
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_id=parent_id, parent_widget=self)
@@ -387,6 +402,9 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_delete_parent(self, parent_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to delete a parent.", "warning")
+            return
         from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(self, "Confirm Delete", "Delete this parent?", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -397,6 +415,9 @@ class StudentDetailPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _on_add_assessment(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add an assessment.", "warning")
+            return
         if self._current_student_id is None:
             return
         from centermanager.ui.assessment.assessment_dialog import AssessmentDialog
@@ -405,16 +426,25 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_add_note(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a note.", "warning")
+            return
         if self._current_student_id is None:
             return
         self.notes_widget._on_add()
 
     def _on_upload_doc(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to upload a document.", "warning")
+            return
         if self._current_student_id is None:
             return
         self.documents_widget._on_upload()
 
     def _on_edit_clicked(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         if self._current_student_id is None:
             return
         dialog = StudentFormDialog(self._student_service, student_id=self._current_student_id, parent=self)
@@ -434,6 +464,7 @@ class StudentDetailPage(QWidget):
             self.student_updated.emit()
 
     def _export_pdf(self) -> None:
+        # PDF export is read-only, no write check needed
         if self._current_student_id is None:
             QMessageBox.warning(self, "Lỗi", "Chưa chọn học sinh.")
             return
@@ -467,3 +498,18 @@ class StudentDetailPage(QWidget):
 
     def _on_open_finance(self) -> None:
         self.go_to_finance.emit()
+
+    # ====== NEW: Collaboration method ======
+    def set_write_enabled(self, enabled: bool) -> None:
+        # Quick actions buttons
+        self.quick_actions.edit_btn.setEnabled(enabled)
+        self.quick_actions.add_parent_btn.setEnabled(enabled)
+        self.quick_actions.add_assessment_btn.setEnabled(enabled)
+        self.quick_actions.add_note_btn.setEnabled(enabled)
+        self.quick_actions.upload_doc_btn.setEnabled(enabled)
+        # Export PDF is read-only, keep enabled
+        # Other buttons (in parents, assessment, notes, documents) will be enabled/disabled via their own signals? 
+        # We can also propagate to child widgets if they have set_write_enabled.
+        # For simplicity, we'll rely on the fact that buttons are created dynamically and we already disabled the main ones.
+        # However, the 'Add Parent' button inside empty state and the 'Add Parent' button in list are not covered.
+        # We will need to handle that by checking write mode when those buttons are clicked (already done in their slots).

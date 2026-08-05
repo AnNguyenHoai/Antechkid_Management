@@ -1,9 +1,4 @@
-# src/centermanager/ui/teacher_workspace/teacher_workspace_shell.py
 # -*- coding: utf-8 -*-
-"""
-TeacherWorkspaceShell - main shell for Teacher Workspace.
-Now forwards class_clicked signal to parent.
-"""
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -17,11 +12,13 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.teacher_workspace.teacher_list_page import TeacherListPage
 from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetailPage
 from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 class TeacherWorkspaceShell(QWidget):
     go_home = Signal()
-    navigate_to_class = Signal(int)  # <-- thêm signal để điều hướng đến class
+    navigate_to_class = Signal(int)
 
     def __init__(
         self,
@@ -29,6 +26,8 @@ class TeacherWorkspaceShell(QWidget):
         assignment_service,
         document_service,
         timeline_service,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -36,6 +35,8 @@ class TeacherWorkspaceShell(QWidget):
         self._assignment_service = assignment_service
         self._document_service = document_service
         self._timeline_service = timeline_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._current_teacher_id: Optional[int] = None
 
@@ -81,6 +82,8 @@ class TeacherWorkspaceShell(QWidget):
             self._assignment_service,
             self._document_service,
             self._timeline_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.list_page.teacher_selected.connect(self._on_teacher_selected)
         self.content_stack.addWidget(self.list_page)
@@ -91,10 +94,12 @@ class TeacherWorkspaceShell(QWidget):
             self._assignment_service,
             self._document_service,
             self._timeline_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.teacher_updated.connect(self._on_teacher_updated)
-        self.detail_page.class_clicked.connect(self.navigate_to_class.emit)  # <-- forward signal
+        self.detail_page.class_clicked.connect(self.navigate_to_class.emit)
         self.content_stack.addWidget(self.detail_page)
 
         body.addWidget(self.content_stack, 1)
@@ -129,3 +134,9 @@ class TeacherWorkspaceShell(QWidget):
 
     def _on_teacher_updated(self) -> None:
         self.list_page.refresh()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        if hasattr(self.list_page, 'set_write_enabled'):
+            self.list_page.set_write_enabled(enabled)
+        if hasattr(self.detail_page, 'set_write_enabled'):
+            self.detail_page.set_write_enabled(enabled)

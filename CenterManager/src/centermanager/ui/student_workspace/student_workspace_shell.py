@@ -13,6 +13,8 @@ from centermanager.ui.student_workspace.student_dashboard_page import StudentDas
 from centermanager.ui.student_workspace.student_list_page import StudentListPage
 from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
 from centermanager.ui.student_workspace.student_analytics_page import StudentAnalyticsPage
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 class StudentWorkspaceShell(QWidget):
@@ -42,7 +44,9 @@ class StudentWorkspaceShell(QWidget):
         permission_service,
         outstanding_service,
         attendance_service,
-        report_service,                     # NEW
+        report_service,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -67,6 +71,8 @@ class StudentWorkspaceShell(QWidget):
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
         self._report_service = report_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._current_student_id: Optional[int] = None
         self._setup_ui()
@@ -115,6 +121,8 @@ class StudentWorkspaceShell(QWidget):
             self._filter_service,
             self._import_service,
             self._export_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
@@ -138,7 +146,9 @@ class StudentWorkspaceShell(QWidget):
             permission_service=self._permission_service,
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,
-            report_service=self._report_service,          # NEW
+            report_service=self._report_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.student_updated.connect(self._on_student_updated)
@@ -209,19 +219,20 @@ class StudentWorkspaceShell(QWidget):
     def _on_go_to_finance(self) -> None:
         self.go_to_finance.emit()
 
-    # ====== PHƯƠNG THỨC MỚI ======
     def refresh_current_student(self) -> None:
-        """Refresh the currently displayed student detail."""
         if self._current_student_id is not None:
             self.detail_page.load_student(self._current_student_id)
-            import logging
-            logging.getLogger(__name__).info(f"Refreshed student detail for student {self._current_student_id}")
 
     @property
     def current_student_id(self) -> Optional[int]:
-        """Return the ID of the student currently being viewed, or None."""
         return self._current_student_id
 
     def show_student(self, student_id: int) -> None:
-        """Navigate to Detail Page and load the specified student."""
         self._on_student_selected(student_id)
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        if hasattr(self.list_page, 'set_write_enabled'):
+            self.list_page.set_write_enabled(enabled)
+        if hasattr(self.detail_page, 'set_write_enabled'):
+            self.detail_page.set_write_enabled(enabled)
+        # Có thể cần dashboard_page và analytics_page nếu có nút write

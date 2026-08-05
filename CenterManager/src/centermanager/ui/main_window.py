@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 
 from centermanager.ui.home import HomePage
@@ -14,9 +14,12 @@ from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWo
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 from centermanager.ui.finance_workspace import FinanceWorkspaceShell
 from centermanager.ui.admin_workspace import AdminWorkspaceShell
+
+# NEW imports for collaboration
 from centermanager.platform.collaboration import CollaborationManager, CollaborationMode
 from centermanager.platform.notification import NotificationService
 from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,6 +92,7 @@ class MainWindow(QMainWindow):
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
         self._report_service = report_service
+
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
 
@@ -131,6 +135,8 @@ class MainWindow(QMainWindow):
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,
             report_service=self._report_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
@@ -142,6 +148,8 @@ class MainWindow(QMainWindow):
             assignment_service=self._teacher_assignment_service,
             document_service=self._teacher_document_service,
             timeline_service=self._teacher_timeline_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.teacher_workspace.go_home.connect(self._go_home)
         self.teacher_workspace.navigate_to_class.connect(self._on_navigate_to_class)
@@ -157,6 +165,8 @@ class MainWindow(QMainWindow):
             highlight_service=self._highlight_service,
             student_service=self._student_service,
             attendance_service=self._attendance_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
@@ -170,6 +180,8 @@ class MainWindow(QMainWindow):
             expense_service=self._expense_service,
             dashboard_service=self._finance_dashboard_service,
             outstanding_service=self._outstanding_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.finance_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.finance_workspace)
@@ -177,17 +189,24 @@ class MainWindow(QMainWindow):
         # Admin Workspace
         self.admin_workspace = AdminWorkspaceShell(
             permission_service=self._permission_service,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
         )
         self.admin_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.admin_workspace)
 
+        # Collaboration status bar
+        self._setup_collaboration_status_bar()
+        self._connect_collaboration_events()
+
         self.central_stack.setCurrentWidget(self.home_page)
         self.statusBar().showMessage(f"Welcome, {self._current_user.full_name if self._current_user else 'User'}")
 
-        self._setup_collaboration_status_bar()
-        self._connect_collaboration_events()
         self._apply_menu_permissions()
         self._refresh_student_list()
+
+        # Set initial write buttons state
+        self._update_write_buttons(CollaborationMode.READ)
 
     def _setup_collaboration_status_bar(self) -> None:
         status_bar = self.statusBar()
@@ -294,15 +313,12 @@ class MainWindow(QMainWindow):
     def _update_write_actions(self, mode: CollaborationMode) -> None:
         """Enable/disable all write actions in the UI."""
         is_write = (mode == CollaborationMode.WRITE)
-        # We'll iterate over all child widgets and find specific buttons/actions
-        # For simplicity, we'll just call a method on each workspace shell if they expose one.
-        # But to keep it clean, we can use signals, or we can access the stacked widgets.
-        # Here we directly call methods on workspace shells if they have set_write_enabled.
+        # Propagate to all workspace shells
         for i in range(self.central_stack.count()):
             widget = self.central_stack.widget(i)
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(is_write)
-                
+
     def _apply_menu_permissions(self) -> None:
         self.home_page.refresh()
 

@@ -1,7 +1,7 @@
-# src/centermanager/ui/admin_workspace/user_list_page.py
 # -*- coding: utf-8 -*-
 """
 UserListPage - Admin user management.
+Now with collaboration support.
 """
 import logging
 from typing import Optional, List
@@ -19,6 +19,8 @@ from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryBu
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.admin_workspace.user_form_dialog import UserFormDialog
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +31,14 @@ class UserListPage(QWidget):
     def __init__(
         self,
         permission_service: PermissionService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._service = permission_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._users: List[User] = []
         self._filtered: List[User] = []
 
@@ -78,7 +84,6 @@ class UserListPage(QWidget):
             {"key": "role", "label": "Role", "sortable": True},
             {"key": "status", "label": "Status", "sortable": True},
             {"key": "last_login", "label": "Last Login", "sortable": True},
-            {"key": "actions", "label": "Actions", "sortable": False},
         ]
         self.data_table = DataTable(columns, page_size=20)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -168,16 +173,25 @@ class UserListPage(QWidget):
         menu.exec(pos)
 
     def _show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a user.", "warning")
+            return
         dialog = UserFormDialog(self._service, parent=self)
         if dialog.exec() == UserFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _show_edit_dialog(self, user_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit a user.", "warning")
+            return
         dialog = UserFormDialog(self._service, user_id=user_id, parent=self)
         if dialog.exec() == UserFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _reset_password(self, user_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to reset password.", "warning")
+            return
         reply = QMessageBox.question(
             self,
             "Reset Password",
@@ -198,6 +212,9 @@ class UserListPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _toggle_active(self, user_id: int, active: bool) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to change user status.", "warning")
+            return
         action = "Activate" if active else "Deactivate"
         reply = QMessageBox.question(
             self,
@@ -214,6 +231,9 @@ class UserListPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _unlock_user(self, user_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to unlock a user.", "warning")
+            return
         try:
             self._service.unlock_user(user_id)
             self.refresh()
@@ -221,3 +241,6 @@ class UserListPage(QWidget):
         except Exception as e:
             logger.exception("Unlock failed")
             QMessageBox.critical(self, "Error", str(e))
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)

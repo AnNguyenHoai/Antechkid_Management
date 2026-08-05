@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 IncomeListPage - lists income records with search, filter, CRUD.
-Now supports displaying income from other sources.
+Now with collaboration support.
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -25,6 +25,8 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
 from centermanager.ui.finance_workspace.income_detail_dialog import IncomeDetailDialog
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +39,16 @@ class IncomeListPage(QWidget):
         income_service: IncomeService,
         student_service: StudentService,
         class_service: ClassService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
         self._student_service = student_service
         self._class_service = class_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._incomes = []
         self._filtered = []
         self._selected_ids = []
@@ -145,7 +151,7 @@ class IncomeListPage(QWidget):
 
         layout.addWidget(toolbar)
 
-        # Data Table - thêm cột "Nguồn"
+        # Data Table
         columns = [
             {"key": "payment_date", "label": "Ngày", "sortable": True},
             {"key": "source", "label": "Nguồn thu", "sortable": False},
@@ -157,7 +163,6 @@ class IncomeListPage(QWidget):
             {"key": "payment_period", "label": "Kỳ", "sortable": True},
             {"key": "received_by", "label": "Người thu", "sortable": False},
             {"key": "note", "label": "Ghi chú", "sortable": False},
-            {"key": "actions", "label": "Thao tác", "sortable": False},
         ]
         self.data_table = DataTable(columns, page_size=20)
         self.data_table.sort_requested.connect(self._on_sort)
@@ -207,7 +212,6 @@ class IncomeListPage(QWidget):
     def _populate_table(self) -> None:
         data = []
         for income in self._incomes:
-            # Xác định nguồn
             if income.student_id is not None:
                 source = "Học sinh"
                 student_name = income.student.full_name if income.student else "-"
@@ -236,7 +240,6 @@ class IncomeListPage(QWidget):
         self._apply_filters()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
-        # Có thể implement sort nếu cần
         pass
 
     def _on_row_double_clicked(self, row: int) -> None:
@@ -257,6 +260,9 @@ class IncomeListPage(QWidget):
         menu.exec(pos)
 
     def _show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add income.", "warning")
+            return
         dialog = IncomeFormDialog(
             self._income_service,
             self._student_service,
@@ -267,6 +273,9 @@ class IncomeListPage(QWidget):
             self.refresh()
 
     def _show_edit_dialog(self, income_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit income.", "warning")
+            return
         dialog = IncomeFormDialog(
             self._income_service,
             self._student_service,
@@ -282,6 +291,9 @@ class IncomeListPage(QWidget):
         dialog.exec()
 
     def _delete_income(self, income_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to delete income.", "warning")
+            return
         reply = QMessageBox.question(
             self,
             "Xác nhận xóa",
@@ -304,3 +316,6 @@ class IncomeListPage(QWidget):
         self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
         self.date_to_edit.setDate(QDate.currentDate())
         self._apply_filters()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)

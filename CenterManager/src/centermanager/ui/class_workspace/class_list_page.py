@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ClassListPage - list of classes with search, filter, CRUD.
+Now with collaboration support.
 """
 import logging
 from typing import Optional, List
@@ -23,6 +24,8 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 logger = logging.getLogger(__name__)
@@ -36,12 +39,16 @@ class ClassListPage(QWidget):
         class_service: ClassService,
         assignment_service: TeacherAssignmentService,
         timeline_service: ClassTimelineService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._classes: List[Class] = []
         self._filtered: List[Class] = []
         self._sort_key: Optional[str] = None
@@ -202,6 +209,9 @@ class ClassListPage(QWidget):
     def _bulk_archive(self) -> None:
         if not self._selected_ids:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to archive classes.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Archive",
             f"Archive {len(self._selected_ids)} classes?",
@@ -242,11 +252,17 @@ class ClassListPage(QWidget):
         menu.exec(pos)
 
     def _edit_class(self, class_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         dialog = ClassFormDialog(self._class_service, class_id=class_id, parent=self)
         if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _archive_class(self, class_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Confirm Archive",
             "Archive this class?",
@@ -261,6 +277,13 @@ class ClassListPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to archive class.")
 
     def show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a class.", "warning")
+            return
         dialog = ClassFormDialog(self._class_service, parent=self)
         if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
             self.refresh()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)
+        self.bulk_archive_btn.setEnabled(enabled)

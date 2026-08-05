@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 ClassScheduleWidget - display weekly schedule with assessment view.
-Now with attendance_service for SessionDetailDialog.
 """
 import logging
 from typing import Optional, List
@@ -21,6 +20,8 @@ from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ class ClassScheduleWidget(QWidget):
         student_service: StudentService,
         class_service: ClassService,
         attendance_service: AttendanceService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -45,11 +48,15 @@ class ClassScheduleWidget(QWidget):
         self._student_service = student_service
         self._class_service = class_service
         self._attendance_service = attendance_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
+
         self._class_id: Optional[int] = None
         self._sessions: List[Session] = []
 
         self._setup_ui()
         self._show_empty()
+
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -90,6 +97,11 @@ class ClassScheduleWidget(QWidget):
             logger.exception("Error loading sessions")
             self._show_empty()
 
+    def set_write_enabled(self, enabled: bool) -> None:
+        # Chỉ các nút trong widget này (nếu có) sẽ được disable
+        # Hiện tại không có nút ghi trực tiếp, nhưng có thể có trong tương lai
+        pass
+    
     def _update_table(self) -> None:
         self.table.setRowCount(len(self._sessions))
         if not self._sessions:

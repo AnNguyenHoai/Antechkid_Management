@@ -1,7 +1,7 @@
-# src/centermanager/ui/admin_workspace/settings_page.py
 # -*- coding: utf-8 -*-
 """
 SettingsPage - System configuration.
+Now with collaboration support.
 """
 import json
 import logging
@@ -16,13 +16,22 @@ from PySide6.QtWidgets import (
 
 from centermanager.core.paths import get_paths
 from centermanager.core.config import get_config, save_config
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
 
 class SettingsPage(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
+        parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._setup_ui()
         self._load_settings()
 
@@ -119,6 +128,9 @@ class SettingsPage(QWidget):
             logger.exception("Error loading settings")
 
     def _save_settings(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to save settings.", "warning")
+            return
         try:
             config = get_config()
             data = config.raw
@@ -136,3 +148,6 @@ class SettingsPage(QWidget):
         except Exception as e:
             logger.exception("Error saving settings")
             QMessageBox.critical(self, "Error", f"Could not save settings: {str(e)}")
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.save_btn.setEnabled(enabled)

@@ -13,12 +13,8 @@ from centermanager.ui.finance_workspace.finance_dashboard_page import FinanceDas
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
-from centermanager.ui.finance_workspace.finance_list_page import FinanceListPage
-from centermanager.services.income_service import IncomeService
-from centermanager.services.student_service import StudentService
-from centermanager.services.class_service import ClassService
-from centermanager.services.finance_dashboard_service import FinanceDashboardService
-from centermanager.services.outstanding_service import OutstandingService
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 
 class FinanceWorkspaceShell(QWidget):
@@ -26,12 +22,14 @@ class FinanceWorkspaceShell(QWidget):
 
     def __init__(
         self,
-        income_service: IncomeService,
-        student_service: StudentService,
-        class_service: ClassService,
+        income_service,
+        student_service,
+        class_service,
         expense_service,
-        dashboard_service: FinanceDashboardService,
-        outstanding_service: OutstandingService,  # <-- THÊM
+        dashboard_service,
+        outstanding_service,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -40,7 +38,9 @@ class FinanceWorkspaceShell(QWidget):
         self._class_service = class_service
         self._expense_service = expense_service
         self._dashboard_service = dashboard_service
-        self._outstanding_service = outstanding_service  # <-- LƯU
+        self._outstanding_service = outstanding_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
 
         self._setup_ui()
         self._connect_signals()
@@ -80,16 +80,26 @@ class FinanceWorkspaceShell(QWidget):
         self.income_page = IncomeListPage(
             self._income_service,
             self._student_service,
-            self._class_service
+            self._class_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.content_stack.addWidget(self.income_page)
 
         # Expense
-        self.expense_page = ExpenseListPage(self._expense_service)
+        self.expense_page = ExpenseListPage(
+            self._expense_service,
+            self._collaboration_manager,
+            self._notification_service,
+        )
         self.content_stack.addWidget(self.expense_page)
 
-        # Outstanding - sử dụng service đã lưu
-        self.outstanding_page = OutstandingListPage(self._outstanding_service)
+        # Outstanding
+        self.outstanding_page = OutstandingListPage(
+            self._outstanding_service,
+            self._collaboration_manager,
+            self._notification_service,
+        )
         self.content_stack.addWidget(self.outstanding_page)
 
         body.addWidget(self.content_stack, 1)
@@ -120,3 +130,10 @@ class FinanceWorkspaceShell(QWidget):
             self.nav.set_active_page("outstanding")
             self.header.set_context("Finance Workspace", "Outstanding")
             self.outstanding_page.refresh()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        if hasattr(self.income_page, 'set_write_enabled'):
+            self.income_page.set_write_enabled(enabled)
+        if hasattr(self.expense_page, 'set_write_enabled'):
+            self.expense_page.set_write_enabled(enabled)
+        # Outstanding là read-only, không cần

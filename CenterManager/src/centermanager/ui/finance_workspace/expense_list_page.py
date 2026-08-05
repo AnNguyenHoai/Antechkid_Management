@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+"""
+ExpenseListPage - list of expenses with search, filter, CRUD.
+Now with collaboration support.
+"""
 import logging
 from typing import Optional, List
 from PySide6.QtCore import Qt, Signal, QDate
@@ -13,6 +17,8 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
 from centermanager.ui.finance_workspace.expense_detail_dialog import ExpenseDetailDialog
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +26,24 @@ logger = logging.getLogger(__name__)
 class ExpenseListPage(QWidget):
     expense_selected = Signal(int)
 
-    def __init__(self, expense_service: ExpenseService, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        expense_service: ExpenseService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
+        parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self._service = expense_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._expenses = []
         self._selected_ids = []
 
         self._setup_ui()
         self.refresh()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -124,7 +138,6 @@ class ExpenseListPage(QWidget):
             {"key": "payment_method", "label": "Hình thức", "sortable": True},
             {"key": "paid_by", "label": "Người chi", "sortable": False},
             {"key": "status", "label": "Trạng thái", "sortable": True},
-            {"key": "actions", "label": "Thao tác", "sortable": False},
         ]
         self.data_table = DataTable(columns, page_size=20)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -135,7 +148,7 @@ class ExpenseListPage(QWidget):
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
 
-    def refresh(self):
+    def refresh(self) -> None:
         self.loading.setVisible(True)
         try:
             self._apply_filters()
@@ -145,7 +158,7 @@ class ExpenseListPage(QWidget):
         finally:
             self.loading.setVisible(False)
 
-    def _apply_filters(self):
+    def _apply_filters(self) -> None:
         search = self.search_bar.text().strip() or None
         category = self.category_combo.currentText() or None
         method = self.method_combo.currentText() or None
@@ -170,7 +183,7 @@ class ExpenseListPage(QWidget):
             logger.exception("Filter error")
             QMessageBox.critical(self, "Lỗi", str(e))
 
-    def _populate_table(self):
+    def _populate_table(self) -> None:
         data = []
         for exp in self._expenses:
             data.append({
@@ -185,14 +198,14 @@ class ExpenseListPage(QWidget):
             })
         self.data_table.set_data(data, len(data))
 
-    def _on_search(self, text):
+    def _on_search(self, text) -> None:
         self._apply_filters()
 
-    def _on_row_double_clicked(self, row):
+    def _on_row_double_clicked(self, row) -> None:
         if row < len(self._expenses):
             self._show_detail_dialog(self._expenses[row].id)
 
-    def _on_context_menu(self, pos, row):
+    def _on_context_menu(self, pos, row) -> None:
         if row < 0 or row >= len(self._expenses):
             return
         exp = self._expenses[row]
@@ -205,21 +218,30 @@ class ExpenseListPage(QWidget):
         delete_action.triggered.connect(lambda: self._delete_expense(exp.id))
         menu.exec(pos)
 
-    def _show_add_dialog(self):
+    def _show_add_dialog(self) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add expense.", "warning")
+            return
         dialog = ExpenseFormDialog(self._service, parent=self)
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted:
             self.refresh()
 
-    def _show_edit_dialog(self, expense_id):
+    def _show_edit_dialog(self, expense_id) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit expense.", "warning")
+            return
         dialog = ExpenseFormDialog(self._service, expense_id=expense_id, parent=self)
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted:
             self.refresh()
 
-    def _show_detail_dialog(self, expense_id):
+    def _show_detail_dialog(self, expense_id) -> None:
         dialog = ExpenseDetailDialog(self._service, expense_id, parent=self)
         dialog.exec()
 
-    def _delete_expense(self, expense_id):
+    def _delete_expense(self, expense_id) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to delete expense.", "warning")
+            return
         reply = QMessageBox.question(
             self, "Xác nhận xóa",
             "Bạn có chắc muốn xóa chi phí này?",
@@ -232,11 +254,14 @@ class ExpenseListPage(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Lỗi", str(e))
 
-    def _clear_filters(self):
-        self.search_bar.clear()  # <--- ĐÃ SỬA
+    def _clear_filters(self) -> None:
+        self.search_bar.clear()
         self.category_combo.setCurrentIndex(0)
         self.method_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
         self.date_from.setDate(QDate.currentDate().addDays(-30))
         self.date_to.setDate(QDate.currentDate())
         self._apply_filters()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)
