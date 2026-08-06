@@ -149,7 +149,7 @@ def main() -> int:
         logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
         logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
-        #ensure_schema()
+        ensure_schema()
         logger.info("[STARTUP-02] Schema migration completed")
 
         logger.info("[STARTUP-03] Creating QApplication...")
@@ -313,11 +313,15 @@ def main() -> int:
         notification_service = NotificationService()
 
         # Tạo collaboration_manager với notification_service
+        # Trong app.py, phần khởi tạo collaboration_manager:
         collaboration_manager = CollaborationManager(
             metadata_dir=paths.metadata_dir,
             event_bus=event_bus,
             sync_provider=sync_provider,
             notification_service=notification_service,
+            lock_timeout_seconds=60,
+            heartbeat_interval_seconds=10,
+            app_version="0.1.0",
         )
         logger.info("[STARTUP-17] All services initialized")
 

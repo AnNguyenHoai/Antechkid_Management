@@ -2,5 +2,7 @@
   "locked": false,
   "owner": null,
   "session_id": null,
-  "started_at": null
+  "started_at": null,
+  "last_heartbeat": null,
+  "heartbeat_version": null
 }

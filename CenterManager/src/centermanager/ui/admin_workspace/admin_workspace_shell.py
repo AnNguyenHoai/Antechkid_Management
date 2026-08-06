@@ -14,7 +14,7 @@ from centermanager.ui.admin_workspace.settings_page import SettingsPage
 from centermanager.services.permission_service import PermissionService
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
-
+from centermanager.ui.diagnostics_page import DiagnosticsPage
 
 class AdminWorkspaceShell(QWidget):
     go_home = Signal()
@@ -51,6 +51,7 @@ class AdminWorkspaceShell(QWidget):
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
+            {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
         ]
         self.nav = WorkspaceNavigation("Admin Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -72,7 +73,11 @@ class AdminWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.settings_page)
-
+        # Add Diagnostics page
+        self.diagnostics_page = DiagnosticsPage(
+            self._collaboration_manager,
+        )
+        self.content_stack.addWidget(self.diagnostics_page)
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
 
@@ -90,6 +95,11 @@ class AdminWorkspaceShell(QWidget):
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
             self.header.set_context("Admin Workspace", "Settings")
+        elif page_id == "diagnostics":
+            self.content_stack.setCurrentWidget(self.diagnostics_page)
+            self.nav.set_active_page("diagnostics")
+            self.header.set_context("Admin Workspace", "Diagnostics")
+            self.diagnostics_page.refresh()
 
     def set_write_enabled(self, enabled: bool) -> None:
         if hasattr(self.users_page, 'set_write_enabled'):

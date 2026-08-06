@@ -1,13 +1,19 @@
-# -*- coding: utf-8 -*-
-"""
-Event system - base event classes and handlers.
-"""
 from .event import Event, EventHandler
 from .collaboration_events import (
     WriteRequested,
     WriteGranted,
     WriteReleased,
     ModeChanged,
+    HeartbeatStarted,
+    HeartbeatStopped,
+    RecoveryStarted,
+    RecoveryCompleted,
+    RecoveryFailed,
+    BackupCreated,
+    BackupFailed,
+    HealthChanged,
+    RetryStarted,
+    RetryFinished,
 )
 from .highlight_events import StudentHighlightCreated
 
@@ -18,5 +24,15 @@ __all__ = [
     "WriteGranted",
     "WriteReleased",
     "ModeChanged",
+    "HeartbeatStarted",
+    "HeartbeatStopped",
+    "RecoveryStarted",
+    "RecoveryCompleted",
+    "RecoveryFailed",
+    "BackupCreated",
+    "BackupFailed",
+    "HealthChanged",
+    "RetryStarted",
+    "RetryFinished",
     "StudentHighlightCreated",
 ]

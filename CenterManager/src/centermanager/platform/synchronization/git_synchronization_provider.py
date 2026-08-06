@@ -140,3 +140,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return True
         except Exception:
             return False
+
+    def is_offline(self) -> bool:
+        """Return True if the Git provider is offline or in error state."""
+        return self._git_provider.is_offline()

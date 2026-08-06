@@ -27,3 +27,8 @@ class SynchronizationProvider(ABC):
     def validate(self) -> bool:
         """Validate that synchronization is configured and working."""
         pass
+
+    @abstractmethod
+    def is_offline(self) -> bool:
+        """Return True if the provider is offline or in error state."""
+        pass

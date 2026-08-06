@@ -27,9 +27,10 @@ class GitProvider:
         self._repo_path = repo_path
         self._credentials = credentials
         self._status = GitStatus.OFFLINE
+        self._last_error = None
+
 
     def init_repository(self) -> None:
-        """Initialize or clone repository."""
         if not self._credentials.repository_url:
             raise GitConfigurationError("Repository URL is required.")
         if not self._credentials.token:
@@ -37,37 +38,40 @@ class GitProvider:
 
         if not self._repo_path.exists():
             self._repo_path.mkdir(parents=True, exist_ok=True)
-            # Clone
             self._run_git_command(["clone", self._credentials.repository_url, str(self._repo_path)])
         else:
-            # Ensure we are in the repo
-            self._run_git_command(["status"])  # just to verify
+            self._run_git_command(["status"])
 
-        # Set user config
         if self._credentials.username:
             self._run_git_command(["config", "user.name", self._credentials.username])
         if self._credentials.email:
             self._run_git_command(["config", "user.email", self._credentials.email])
 
+        # ✅ Set status to CONNECTED after successful initialization
+        self._status = GitStatus.CONNECTED
+
     def fetch(self) -> bool:
-        """Fetch from remote."""
         try:
             self._run_git_command(["fetch", "origin", self._credentials.branch])
+            self._status = GitStatus.CONNECTED
             return True
         except GitNetworkError as e:
             self._status = GitStatus.OFFLINE
+            self._last_error = str(e)
             raise
         except GitAuthenticationFailed as e:
             self._status = GitStatus.ERROR
+            self._last_error = str(e)
             raise
         except Exception as e:
             self._status = GitStatus.ERROR
+            self._last_error = str(e)
             raise GitException(f"Fetch failed: {e}")
 
     def pull(self) -> bool:
-        """Pull latest changes."""
         try:
             self._run_git_command(["pull", "origin", self._credentials.branch])
+            self._status = GitStatus.CONNECTED
             return True
         except GitNetworkError:
             self._status = GitStatus.OFFLINE
@@ -83,7 +87,6 @@ class GitProvider:
             raise GitException(f"Pull failed: {e}")
 
     def commit(self, message: str, user: str) -> bool:
-        """Commit changes."""
         try:
             self._run_git_command(["add", "."])
             self._run_git_command(["commit", "-m", f"{user}: {message}"])
@@ -92,9 +95,9 @@ class GitProvider:
             raise GitException(f"Commit failed: {e}")
 
     def push(self) -> bool:
-        """Push to remote."""
         try:
             self._run_git_command(["push", "origin", self._credentials.branch])
+            self._status = GitStatus.CONNECTED
             return True
         except GitNetworkError:
             self._status = GitStatus.OFFLINE
@@ -111,14 +114,24 @@ class GitProvider:
             "status": self._status.value,
             "repo_path": str(self._repo_path),
             "branch": self._credentials.branch if self._credentials else None,
+            "last_error": self._last_error,
         }
 
+    def connection_status(self) -> str:
+        """Return simplified connection status: ONLINE, OFFLINE, ERROR."""
+        if self._status == GitStatus.OFFLINE:
+            return "OFFLINE"
+        elif self._status == GitStatus.ERROR:
+            return "ERROR"
+        return "ONLINE"
+
+    def is_offline(self) -> bool:
+        return self._status in (GitStatus.OFFLINE, GitStatus.ERROR)
+
     def _run_git_command(self, args: list) -> str:
-        """Run git command with proper authentication."""
         cmd = ["git"] + args
         env = os.environ.copy()
         if self._credentials and self._credentials.token:
-            # Set token for authentication
             env["GIT_ASKPASS"] = "echo"
             env["GIT_USER"] = self._credentials.username
             env["GIT_PASSWORD"] = self._credentials.token
@@ -149,4 +162,6 @@ class GitProvider:
         except subprocess.CalledProcessError as e:
             raise GitException(f"Git command failed: {e}")
         except FileNotFoundError:
+            self._status = GitStatus.ERROR
+            self._last_error = "Git executable not found"
             raise GitException("Git executable not found in PATH.")

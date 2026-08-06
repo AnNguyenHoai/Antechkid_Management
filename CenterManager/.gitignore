@@ -35,8 +35,10 @@ runtime/Database/*.db-journal
 runtime/Export/
 runtime/Attachment/
 runtime/Backup/
+runtime/cache/
+runtime/temp/
+runtime/reports/
 
 # OS
 .DS_Store
 Thumbs.db
-CenterManager/runtime/

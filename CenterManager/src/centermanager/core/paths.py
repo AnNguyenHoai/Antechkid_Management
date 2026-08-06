@@ -1,16 +1,15 @@
-# -*- coding: utf-8 -*-
-"""
-Centralized path resolution for CenterManager.
-"""
+import sys
 from pathlib import Path
-from typing import Optional
-
 
 class Paths:
     def __init__(self) -> None:
-        self._project_root = Path(__file__).resolve().parent.parent.parent.parent
+        if getattr(sys, 'frozen', False):
+            # Running as bundled executable
+            self._project_root = Path(sys.executable).resolve().parent
+        else:
+            # Running from source
+            self._project_root = Path(__file__).resolve().parent.parent.parent.parent
         self._runtime_root = self._project_root / "runtime"
-
     @property
     def project_root(self) -> Path:
         return self._project_root
