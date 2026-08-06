@@ -22,14 +22,15 @@ class EventBus:
         logger.debug(f"Registered handler {handler.__class__.__name__} for {event_class.__name__}")
 
     def publish(self, event: Event) -> None:
-        """Publish an event to all registered handlers."""
         event_class = type(event)
         handlers = self._handlers.get(event_class, [])
-        if not handlers:
-            logger.debug(f"No handlers registered for event {event_class.__name__}")
-            return
         for handler in handlers:
             try:
-                handler.handle(event)
+                if hasattr(handler, 'handle'):
+                    handler.handle(event)
+                elif callable(handler):
+                    handler(event)
+                else:
+                    logger.warning(f"Handler {handler} is not callable and has no handle method.")
             except Exception as e:
-                logger.exception(f"Error handling event {event_class.__name__} with {handler.__class__.__name__}: {e}")
+                logger.exception(f"Error handling event {event_class.__name__} with {handler}: {e}")

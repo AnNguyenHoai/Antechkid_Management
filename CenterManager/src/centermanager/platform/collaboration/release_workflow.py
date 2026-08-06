@@ -1,9 +1,14 @@
+# -*- coding: utf-8 -*-
 from .lock_manager import LockManager
 from .edit_session_manager import EditSessionManager
 from .mode_manager import ModeManager, CollaborationMode
 from .identity_provider import IdentityProvider
 from centermanager.events.event_bus import EventBus
 from centermanager.events.collaboration_events import WriteReleased, ModeChanged
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ReleaseWorkflow:
     def __init__(self, lock_manager: LockManager, session_manager: EditSessionManager,
@@ -27,7 +32,13 @@ class ReleaseWorkflow:
         if owner is None:
             return False
 
-        if not self._lock_manager.release(owner):
+        # Release lock, catch any exception
+        try:
+            if not self._lock_manager.release(owner):
+                logger.error("Failed to release lock.")
+                return False
+        except Exception as e:
+            logger.exception(f"Exception while releasing lock: {e}")
             return False
 
         self._session_manager.end_session()

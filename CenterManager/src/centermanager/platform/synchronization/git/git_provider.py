@@ -41,7 +41,7 @@ class GitProvider:
             self._run_git_command(["clone", self._credentials.repository_url, str(self._repo_path)])
         else:
             # Ensure we are in the repo
-            self._run_git_command(["status"], check=True)  # just to verify
+            self._run_git_command(["status"])  # just to verify
 
         # Set user config
         if self._credentials.username:

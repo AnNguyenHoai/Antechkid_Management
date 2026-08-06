@@ -48,3 +48,8 @@ Current status:
 -> tiếp theo cần làm export học sinh, trao đổi tiếp với GPT để làm
 
 5/8: đã xong clean up, tiếp theo sẽ làm engine build
+
+6/8: set up git thành công. quay lại GPT để review và làm tiếp
+
+B1. vào runtime/Config điền thông tin, token thì lên git hub -> mở setting(user) -> tạo token mới -> cấp quyền
+B2. tạo file read me và commit đầu tiên

@@ -3,6 +3,7 @@ import json
 from typing import Optional
 from .metadata_repository import MetadataRepository
 
+
 class MetadataInitializer:
     def __init__(self, repository: MetadataRepository):
         self._repository = repository
@@ -17,6 +18,14 @@ class MetadataInitializer:
                 "session_id": None,
                 "started_at": None
             })
+        else:
+            # Nếu lock đang bị chiếm nhưng không có session_id hợp lệ (hoặc cũ), reset
+            if lock.get("locked") and not lock.get("session_id"):
+                lock["locked"] = False
+                lock["owner"] = None
+                lock["session_id"] = None
+                lock["started_at"] = None
+                self._repository.save_lock(lock)
 
         # Version
         version = self._repository.load_version()

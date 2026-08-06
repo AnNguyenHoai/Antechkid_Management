@@ -62,3 +62,10 @@ class QuickActionsWidget(QWidget):
         self.upload_doc_btn.clicked.connect(on_upload_doc)
         if on_export_pdf:
             self.export_pdf_btn.clicked.connect(on_export_pdf)
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.edit_btn.setEnabled(enabled)
+        self.add_parent_btn.setEnabled(enabled)
+        self.add_assessment_btn.setEnabled(enabled)
+        self.add_note_btn.setEnabled(enabled)
+        self.upload_doc_btn.setEnabled(enabled)
+        # export PDF luôn enabled vì là read-only

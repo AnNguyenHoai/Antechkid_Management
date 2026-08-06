@@ -22,6 +22,7 @@ from centermanager.platform.workflow.publish_workflow import PublishWorkflow
 from centermanager.platform.version.version_manager import VersionManager
 from centermanager.platform.notification import NotificationService
 
+
 class CollaborationManager:
     def __init__(
         self,
@@ -122,7 +123,6 @@ class CollaborationManager:
         """
         if not self._sync_provider:
             return False
-        # Truyền message xuống workflow
         return self._publish_workflow.execute(message=message)
 
     def get_version(self) -> int:
@@ -147,4 +147,4 @@ class CollaborationManager:
         """Return synchronization status if provider exists."""
         if self._sync_provider:
             return self._sync_provider.status()
-        return {"status": "disabled"}
+        return {"state": "disabled"}

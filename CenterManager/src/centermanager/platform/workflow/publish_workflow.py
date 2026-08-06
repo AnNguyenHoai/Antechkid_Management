@@ -18,7 +18,7 @@ from centermanager.events.synchronization_events import (
     SynchronizationStarted, SynchronizationCompleted, SynchronizationFailed,
     VersionUpdated
 )
-
+from centermanager.events.collaboration_events import ModeChanged
 logger = logging.getLogger(__name__)
 
 
@@ -42,11 +42,8 @@ class PublishWorkflow:
         self._notification_service = notification_service
 
     def execute(self, message: str = "Publish") -> bool:
-        """Execute publish workflow: commit, push, update version.
+        logger.info("Publish workflow started.")
         
-        Args:
-            message: Commit message.
-        """
         if self._mode_manager.current_mode() != CollaborationMode.WRITE:
             logger.warning("Publish called in READ mode, ignoring.")
             return False
@@ -57,17 +54,17 @@ class PublishWorkflow:
             logger.error("No active session to publish.")
             return False
 
+        logger.info(f"Publishing: session={session_id}, owner={owner}, message='{message}'")
+
         self._event_bus.publish(PublishStarted(session_id=session_id))
         self._notification_service.notify("Publishing changes...", "info")
 
         try:
-            # Step 1: Synchronize (commit + push)
+            # Step 1: Synchronize
             self._event_bus.publish(SynchronizationStarted(session_id=session_id))
-            # Sử dụng message và owner từ session
-            success = self._sync_provider.publish(
-                message=message,
-                user=owner
-            )
+            logger.info("Calling sync_provider.publish()...")
+            success = self._sync_provider.publish(message=message, user=owner)
+            logger.info(f"sync_provider.publish() returned {success}")
             if not success:
                 self._event_bus.publish(SynchronizationFailed(session_id=session_id))
                 self._event_bus.publish(PublishFailed(session_id=session_id))
@@ -84,6 +81,7 @@ class PublishWorkflow:
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+            logger.info(f"Version incremented: {old_version} -> {new_version}")
             self._event_bus.publish(VersionUpdated(
                 old_version=old_version,
                 new_version=new_version,
@@ -92,19 +90,41 @@ class PublishWorkflow:
             ))
 
             # Step 3: Release lock and switch to READ
-            self._lock_manager.release(owner)
+            lock_released = False
+            try:
+                logger.debug("Checking lock status before release...")
+                if self._lock_manager.is_locked():
+                    logger.debug(f"Lock is currently locked, releasing by owner={owner}")
+                    lock_released = self._lock_manager.release(owner)
+                    logger.debug(f"Lock release result: {lock_released}")
+                else:
+                    logger.info("Lock is not locked, skipping release.")
+                    lock_released = True
+            except Exception as e:
+                logger.exception(f"Exception while releasing lock: {e}")
+                lock_released = False
+
+            # Always end session and switch to READ mode
             self._session_manager.end_session()
             self._mode_manager.set_mode(CollaborationMode.READ)
-
+            logger.info("Session ended, mode switched to READ.")
+            self._event_bus.publish(ModeChanged(mode=CollaborationMode.READ))
             # Step 4: Notify and events
             self._event_bus.publish(PublishSucceeded(session_id=session_id, version=new_version))
-            self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
-            logger.info(f"Publish succeeded: version {new_version}, session {session_id}")
+            if lock_released:
+                self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
+                logger.info(f"Publish succeeded with lock release. Version {new_version}")
+            else:
+                self._notification_service.notify(
+                    f"Publish succeeded but lock could not be released. Version {new_version}",
+                    "warning"
+                )
+                logger.warning(f"Publish succeeded but lock release failed. Version {new_version}")
 
             return True
 
         except Exception as e:
-            logger.exception("Publish workflow failed")
+            logger.exception("Publish workflow failed with exception")
             self._event_bus.publish(SynchronizationFailed(session_id=session_id))
             self._event_bus.publish(PublishFailed(session_id=session_id))
             self._notification_service.notify(f"Publish error: {str(e)}", "error")

@@ -141,13 +141,15 @@ def main() -> int:
             log_dir=paths.logs_dir,
             app_name=config.get("application", {}).get("name", "CenterManager"),
             app_version=config.get("application", {}).get("version", "0.1.0"),
+            console_level="DEBUG",   # hoặc INFO để thấy ít hơn
+            file_level="DEBUG",
         )
         logger.info("[STARTUP-01] Config and logging initialized")
 
         logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
         logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
-        ensure_schema()
+        #ensure_schema()
         logger.info("[STARTUP-02] Schema migration completed")
 
         logger.info("[STARTUP-03] Creating QApplication...")
@@ -284,33 +286,28 @@ def main() -> int:
         # NEW: Collaboration and Notification
         # Load Git credentials from configuration (placeholder)
         # --- Git Synchronization ---
-        sync_provider = None
-        git_config = config.get("git", {})
-        if git_config:
-            repository_url = git_config.get("repository_url")
-            token = git_config.get("token")
-            if repository_url and token:
-                try:
-                    from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
-                    from centermanager.platform.synchronization.git.git_credentials import GitCredentials
+        # Load git credentials from config
+        config_data = get_config().raw
+        git_creds = GitCredentials.from_config(config_data) if config_data else None
 
-                    credentials = GitCredentials(
-                        repository_url=repository_url,
-                        branch=git_config.get("branch", "main"),
-                        token=token,
-                        username=git_config.get("username") or "CenterManager",
-                        email=git_config.get("email") or "cm@centermanager.local",
-                    )
-                    repo_path = paths.runtime_root / "repository"
-                    sync_provider = GitSynchronizationProvider(repo_path, credentials)
-                    logger.info("GitSynchronizationProvider initialized")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize GitSynchronizationProvider: {e}")
-                    sync_provider = None
-            else:
-                logger.warning("Git config missing repository_url or token. Git synchronization disabled.")
+        # Initialize Git provider
+        repo_path = paths.runtime_root / "repository"
+        sync_provider = None
+        if git_creds and git_creds.repository_url and git_creds.token:
+            try:
+                sync_provider = GitSynchronizationProvider(repo_path, git_creds)
+                logger.info("Git synchronization initialized successfully.")
+            except Exception as e:
+                logger.exception(f"Failed to initialize Git synchronization: {e}")
+                sync_provider = None
         else:
-            logger.info("No git configuration found. Running in standalone mode.")
+            if not git_creds:
+                logger.warning("No git credentials found in config.")
+            elif not git_creds.repository_url:
+                logger.warning("Git repository_url is missing.")
+            elif not git_creds.token:
+                logger.warning("Git token is missing.")
+            sync_provider = None
 
         # Tạo notification_service trước
         notification_service = NotificationService()

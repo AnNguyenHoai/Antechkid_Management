@@ -501,15 +501,12 @@ class StudentDetailPage(QWidget):
 
     # ====== NEW: Collaboration method ======
     def set_write_enabled(self, enabled: bool) -> None:
-        # Quick actions buttons
-        self.quick_actions.edit_btn.setEnabled(enabled)
-        self.quick_actions.add_parent_btn.setEnabled(enabled)
-        self.quick_actions.add_assessment_btn.setEnabled(enabled)
-        self.quick_actions.add_note_btn.setEnabled(enabled)
-        self.quick_actions.upload_doc_btn.setEnabled(enabled)
-        # Export PDF is read-only, keep enabled
-        # Other buttons (in parents, assessment, notes, documents) will be enabled/disabled via their own signals? 
-        # We can also propagate to child widgets if they have set_write_enabled.
-        # For simplicity, we'll rely on the fact that buttons are created dynamically and we already disabled the main ones.
-        # However, the 'Add Parent' button inside empty state and the 'Add Parent' button in list are not covered.
-        # We will need to handle that by checking write mode when those buttons are clicked (already done in their slots).
+        """Propagate write mode to child widgets."""
+        self.quick_actions.set_write_enabled(enabled)
+        self.assessment_section.set_write_enabled(enabled)
+        # Các widget khác nếu có set_write_enabled
+        if hasattr(self.notes_widget, 'set_write_enabled'):
+            self.notes_widget.set_write_enabled(enabled)
+        if hasattr(self.documents_widget, 'set_write_enabled'):
+            self.documents_widget.set_write_enabled(enabled)
+        # Parents và timeline không có nút ghi, bỏ qua

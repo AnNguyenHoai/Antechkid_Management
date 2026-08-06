@@ -129,8 +129,23 @@ CenterManager/
       deployment.json
       lock.json
       version.json
+    Reports/
+      Student/
+        HS001/
+          BaoCao_daily_20260806_0004.pdf
+        HS002/
+          BaoCao_daily_20260806_0004.pdf
+        HS003/
+          BaoCao_daily_20260806_0004.pdf
+          BaoCao_Manual_20260805_2330.pdf
+        HS004/
+          BaoCao_daily_20260806_0004.pdf
+        HS005/
+          BaoCao_daily_20260806_0004.pdf
     repository/
       .git/
+        gk/
+          config
         hooks/
           applypatch-msg.sample
           commit-msg.sample
@@ -148,9 +163,186 @@ CenterManager/
           update.sample
         info/
           exclude
+        logs/
+          refs/
+            heads/
+              main
+            remotes/
+              origin/
+                main
+          HEAD
+        objects/
+          08/
+            247862b9302f4ed14b23b131e823dd30aa8bc4
+            29bab401a11f0ac033b312619b42d76b80f932
+          09/
+            1ee7be226c9cecf680830a3dcecd630e53ca06
+          0c/
+            24b4f43032f6b64e3a7b3073b452ba921ef83f
+          0d/
+            2a0037e7f7ffac52fef5e99478e5611b40c73e
+          15/
+            667eb7b8d0bc1f59c447d83d3e4b5a0d3caecd
+          17/
+            5970fe534cff77038ed8f0abe8a18999a3f648
+          1b/
+            613b75d320e49235d21de1c0fecc956d782b10
+          1c/
+            3cdad570c556e37e5aaa16761df65276dfbbd8
+          20/
+            d922f5a8a207481130161bc32e568b03d713b0
+          23/
+            342e5c76444516679dab3a03d9916fd483d14a
+          2a/
+            df1b0e693299273cc5dd54d1fd08f41bd055e1
+          2c/
+            59f3bdd266098211eb10814082c950c8ffa636
+          2f/
+            54920ddf34401ad2df4cf53c58b14f2a15c94f
+          32/
+            7702972f26de7f18c84f60b4f7ffa079c2f5c1
+          34/
+            7c9628e51cc4e8821cece08dc8e7cbc548a1f8
+          35/
+            f57f4441c605b06789d3c4eb0da14a10ae34c1
+          3b/
+            8a436c384d6f4d28a66f58c318ea2496c106ad
+          3e/
+            f635023fcebc4fcda094ff1100bd9be754b14c
+          48/
+            90fa0a5314e42a2ce2cc82acd3cb2c109f22b0
+          49/
+            25eb4acce047f3bcc063efc178df50ab83a702
+          4e/
+            1ee355ae558fbcdc74c7b719bed6354d54763d
+          50/
+            a1484a3a057cd3f154a227e9f2e3c8ca5094c7
+          51/
+            0b493f28da08128d9ced8fda98e36d03adaf97
+          52/
+            98c525dfdeb375789747d317e357f7922b7900
+          54/
+            bd8febb0ef201f7feda796d22e6b8cb63e5771
+          5a/
+            89d8ac2b54a0fe89c249720324fde03329c01a
+          62/
+            1703ccde1341e18693fe7259da12aa16d07571
+          69/
+            ea19f6d14b1d1ecb3a1edc47abd4e77620a582
+          72/
+            3ef2593ebf1e2baeb004830fcc654e663af048
+          73/
+            109688b991568d27c5efc580456a68d9d4ccc1
+            4920b5c5765ad39d18d6f72cb4c9308cc15e6c
+          79/
+            3562c195d5f54450ab9a888af146cbfd170c21
+          7e/
+            6f43c8ad7285ac2d4833de4fcd7d9cd53ea69d
+          7f/
+            2ad2b8f43f3a9f21e1cb4f47bed0936c8817ea
+            a1a1317a76737ce4ac9160b21fb40ac2795dbe
+          80/
+            8b43574a67647e588bfae703bed31fcbaa6474
+          87/
+            3b23cf805ef2869f91492c2ef712e359c583f7
+          89/
+            50b457b97384361fc977508c639169ccca986a
+          8a/
+            a956a72682ae80f6c6dbc44cd716f2cb2c067c
+          91/
+            d78f1ca9591ceaa59fa6923b729c877eab0b28
+          93/
+            e6f00e57a01632533851be5d3f66bfa1f02433
+          99/
+            8a3adeeafa8a0fb1db0fad9cdfc99f767b5f66
+          9a/
+            4ea53de3b93aca69c8d4e879c613b862231f2c
+            7998a7d44ad2ac6b93fdc3b5a604c280437d2b
+          9c/
+            4bbb3f523386bd5b5992a08d9540ffe9942fe2
+          a6/
+            47a3958c22f72e374255ba02abc280f7f2f985
+          ab/
+            159534faa9059495413d2f7bd1f68c9ca5eee9
+          ad/
+            43c4e7298887dee858222bd3a61973067a0250
+          b3/
+            0c64cb681fdcf170b7628c3098572228bad31f
+            dbdbb60ee67c3307f718a1e5b5a6afd1f6e7d0
+          b5/
+            d2d0384e85573f0ebf0cda45777110eb1fe863
+          b7/
+            81c6cd5f2663a3f9e8c966c5f926888281da87
+          b9/
+            45f93c9c3280a3efed2a5436836d3821c8005c
+          ba/
+            7ae4f7ff90ce17e789d29fa407d10107370597
+          c4/
+            90156ea42558c28f42be88181b1e24fe398189
+          d4/
+            60a21bf8129232809782c9493f1388f91c315d
+          d7/
+            44a17e43c9c8fd095c28052c5c42c698275d24
+          da/
+            2a9e73cb66b69a608b0099d1954633c3c6c7b1
+            656ebf3a3062913e8bf3d74bf787fa720425ea
+          dd/
+            556c13265bff0edeeb569f5431e55ee21b13f0
+            882b0d9123d247a39dcfb99d27b3ca95726d88
+          de/
+            607c028f3a0c7ae73633920d1a8b07d019db84
+          e4/
+            d98a12c3ba98c7030ff0bff19efc2f8346be7c
+          e5/
+            eaa64e42e46bb05611d4a1e11e056dcd3e2a0b
+          eb/
+            4a799cf94f6bf124f37420ad05a8b7a757468e
+          f0/
+            587fc88611b44d84df713b0f0bf22810614edf
+            c4243081813203fcdd9f237e5c2fa94319c29a
+          f4/
+            69d281c895f90deed1450a985d132ff3accb03
+          f5/
+            f84830763c370bb185751a716f3ea266a36d26
+          f7/
+            4f1bf6a11cd86a65d86b47023e295e63dca945
+          f8/
+            02426619156f051058b502c6b0503dff30ec24
+          ff/
+            ed314bd10a64bdbb7971f97de4089688dad992
+        refs/
+          heads/
+            main
+          remotes/
+            origin/
+              main
+        COMMIT_EDITMSG
         config
         description
+        FETCH_HEAD
         HEAD
+        index
+        ORIG_HEAD
+      database/
+        center.db
+      metadata/
+        deployment.json
+        lock.json
+        version.json
+      reports/
+        Student/
+          HS001/
+            BaoCao_daily_20260806_0004.pdf
+          HS002/
+            BaoCao_daily_20260806_0004.pdf
+          HS003/
+            BaoCao_daily_20260806_0004.pdf
+            BaoCao_Manual_20260805_2330.pdf
+          HS004/
+            BaoCao_daily_20260806_0004.pdf
+          HS005/
+            BaoCao_daily_20260806_0004.pdf
+      README.md
   src/
     centermanager/
       core/
@@ -523,6 +715,11 @@ Note/
 ================================================================
 Files
 ================================================================
+
+================
+File: CenterManager/runtime/repository/.git/gk/config
+================
+
 
 ================
 File: CenterManager/runtime/repository/.git/hooks/applypatch-msg.sample
@@ -1459,6 +1656,63 @@ File: CenterManager/runtime/repository/.git/info/exclude
 # *~
 
 ================
+File: CenterManager/runtime/repository/.git/logs/refs/heads/main
+================
+0000000000000000000000000000000000000000 5298c525dfdeb375789747d317e357f7922b7900 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950310 +0700	commit (initial): first commit
+5298c525dfdeb375789747d317e357f7922b7900 5298c525dfdeb375789747d317e357f7922b7900 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950310 +0700	Branch: renamed refs/heads/main to refs/heads/main
+5298c525dfdeb375789747d317e357f7922b7900 1c3cdad570c556e37e5aaa16761df65276dfbbd8 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951136 +0700	commit: admin: Publish by System Administrator
+1c3cdad570c556e37e5aaa16761df65276dfbbd8 793562c195d5f54450ab9a888af146cbfd170c21 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951459 +0700	commit: admin: Publish by System Administrator
+793562c195d5f54450ab9a888af146cbfd170c21 723ef2593ebf1e2baeb004830fcc654e663af048 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951541 +0700	commit: admin: Publish by System Administrator
+723ef2593ebf1e2baeb004830fcc654e663af048 c490156ea42558c28f42be88181b1e24fe398189 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951625 +0700	commit: admin: Publish by System Administrator
+c490156ea42558c28f42be88181b1e24fe398189 b945f93c9c3280a3efed2a5436836d3821c8005c AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951774 +0700	commit: admin: Publish by System Administrator
+b945f93c9c3280a3efed2a5436836d3821c8005c f0587fc88611b44d84df713b0f0bf22810614edf AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952109 +0700	commit: admin: Publish by System Administrator
+f0587fc88611b44d84df713b0f0bf22810614edf 20d922f5a8a207481130161bc32e568b03d713b0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952164 +0700	commit: admin: Publish by System Administrator
+20d922f5a8a207481130161bc32e568b03d713b0 dd556c13265bff0edeeb569f5431e55ee21b13f0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952414 +0700	commit: admin: Publish by System Administrator
+
+================
+File: CenterManager/runtime/repository/.git/logs/refs/remotes/origin/main
+================
+0000000000000000000000000000000000000000 5298c525dfdeb375789747d317e357f7922b7900 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950315 +0700	update by push
+5298c525dfdeb375789747d317e357f7922b7900 1c3cdad570c556e37e5aaa16761df65276dfbbd8 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951139 +0700	update by push
+1c3cdad570c556e37e5aaa16761df65276dfbbd8 793562c195d5f54450ab9a888af146cbfd170c21 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951463 +0700	update by push
+793562c195d5f54450ab9a888af146cbfd170c21 723ef2593ebf1e2baeb004830fcc654e663af048 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951543 +0700	update by push
+723ef2593ebf1e2baeb004830fcc654e663af048 c490156ea42558c28f42be88181b1e24fe398189 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951628 +0700	update by push
+c490156ea42558c28f42be88181b1e24fe398189 b945f93c9c3280a3efed2a5436836d3821c8005c AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951778 +0700	update by push
+b945f93c9c3280a3efed2a5436836d3821c8005c f0587fc88611b44d84df713b0f0bf22810614edf AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952113 +0700	update by push
+f0587fc88611b44d84df713b0f0bf22810614edf 20d922f5a8a207481130161bc32e568b03d713b0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952166 +0700	update by push
+20d922f5a8a207481130161bc32e568b03d713b0 dd556c13265bff0edeeb569f5431e55ee21b13f0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952417 +0700	update by push
+
+================
+File: CenterManager/runtime/repository/.git/logs/HEAD
+================
+0000000000000000000000000000000000000000 5298c525dfdeb375789747d317e357f7922b7900 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950310 +0700	commit (initial): first commit
+5298c525dfdeb375789747d317e357f7922b7900 0000000000000000000000000000000000000000 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950310 +0700	Branch: renamed refs/heads/main to refs/heads/main
+5298c525dfdeb375789747d317e357f7922b7900 5298c525dfdeb375789747d317e357f7922b7900 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785950310 +0700	Branch: renamed refs/heads/main to refs/heads/main
+5298c525dfdeb375789747d317e357f7922b7900 1c3cdad570c556e37e5aaa16761df65276dfbbd8 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951136 +0700	commit: admin: Publish by System Administrator
+1c3cdad570c556e37e5aaa16761df65276dfbbd8 793562c195d5f54450ab9a888af146cbfd170c21 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951459 +0700	commit: admin: Publish by System Administrator
+793562c195d5f54450ab9a888af146cbfd170c21 723ef2593ebf1e2baeb004830fcc654e663af048 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951541 +0700	commit: admin: Publish by System Administrator
+723ef2593ebf1e2baeb004830fcc654e663af048 c490156ea42558c28f42be88181b1e24fe398189 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951625 +0700	commit: admin: Publish by System Administrator
+c490156ea42558c28f42be88181b1e24fe398189 b945f93c9c3280a3efed2a5436836d3821c8005c AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785951774 +0700	commit: admin: Publish by System Administrator
+b945f93c9c3280a3efed2a5436836d3821c8005c f0587fc88611b44d84df713b0f0bf22810614edf AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952109 +0700	commit: admin: Publish by System Administrator
+f0587fc88611b44d84df713b0f0bf22810614edf 20d922f5a8a207481130161bc32e568b03d713b0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952164 +0700	commit: admin: Publish by System Administrator
+20d922f5a8a207481130161bc32e568b03d713b0 dd556c13265bff0edeeb569f5431e55ee21b13f0 AnNguyenHoai <nguyenhoaianvtqh@gmail.com> 1785952414 +0700	commit: admin: Publish by System Administrator
+
+================
+File: CenterManager/runtime/repository/.git/refs/heads/main
+================
+dd556c13265bff0edeeb569f5431e55ee21b13f0
+
+================
+File: CenterManager/runtime/repository/.git/refs/remotes/origin/main
+================
+dd556c13265bff0edeeb569f5431e55ee21b13f0
+
+================
+File: CenterManager/runtime/repository/.git/COMMIT_EDITMSG
+================
+admin: Publish by System Administrator
+
+================
 File: CenterManager/runtime/repository/.git/config
 ================
 [core]
@@ -1468,6 +1722,15 @@ File: CenterManager/runtime/repository/.git/config
 	logallrefupdates = true
 	symlinks = false
 	ignorecase = true
+[remote "origin"]
+	url = https://github.com/AnNguyenHoai/Antechkid_CenterManager.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+[user]
+	name = AnNguyenHoai
+	email = nguyenhoaianvtqh@gmail.com
 
 ================
 File: CenterManager/runtime/repository/.git/description
@@ -1475,812 +1738,51 @@ File: CenterManager/runtime/repository/.git/description
 Unnamed repository; edit this file 'description' to name the repository.
 
 ================
+File: CenterManager/runtime/repository/.git/FETCH_HEAD
+================
+20d922f5a8a207481130161bc32e568b03d713b0		branch 'main' of https://github.com/AnNguyenHoai/Antechkid_CenterManager
+
+================
 File: CenterManager/runtime/repository/.git/HEAD
 ================
-ref: refs/heads/master
+ref: refs/heads/main
 
 ================
-File: CenterManager/src/centermanager/events/synchronization_events.py
+File: CenterManager/runtime/repository/.git/ORIG_HEAD
 ================
-from .event import Event
-from dataclasses import dataclass, field
-from datetime import datetime
-
-@dataclass
-class SynchronizationStarted(Event):
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class SynchronizationCompleted(Event):
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class SynchronizationFailed(Event):
-    error: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class PublishStarted(Event):
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class PublishSucceeded(Event):
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class PublishFailed(Event):
-    error: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
-
-@dataclass
-class VersionUpdated(Event):
-    version: int
-    timestamp: datetime = field(default_factory=datetime.now)
+20d922f5a8a207481130161bc32e568b03d713b0
 
 ================
-File: CenterManager/src/centermanager/platform/synchronization/git/__init__.py
+File: CenterManager/runtime/repository/metadata/deployment.json
 ================
-from .git_provider import GitProvider
-from .git_credentials import GitCredentials
-from .git_status import GitStatus
-from .git_exceptions import (
-    GitException,
-    GitRepositoryNotFound,
-    GitAuthenticationFailed,
-    GitPullFailed,
-    GitPushFailed,
-    GitMergeRequired,
-    GitNetworkError,
-    GitCorrupted,
-)
-
-__all__ = [
-    "GitProvider",
-    "GitCredentials",
-    "GitStatus",
-    "GitException",
-    "GitRepositoryNotFound",
-    "GitAuthenticationFailed",
-    "GitPullFailed",
-    "GitPushFailed",
-    "GitMergeRequired",
-    "GitNetworkError",
-    "GitCorrupted",
-]
+{
+  "profile": "Standalone"
+}
 
 ================
-File: CenterManager/src/centermanager/platform/synchronization/git/git_credentials.py
+File: CenterManager/runtime/repository/metadata/lock.json
 ================
-# -*- coding: utf-8 -*-
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class GitCredentials:
-    repository_url: str
-    branch: str
-    token: str
-    username: str
-    email: str
-
-    @classmethod
-    def from_config(cls, config: dict) -> Optional["GitCredentials"]:
-        git_config = config.get("git", {})
-        if not git_config:
-            return None
-        return cls(
-            repository_url=git_config.get("repository_url", ""),
-            branch=git_config.get("branch", "main"),
-            token=git_config.get("token", ""),
-            username=git_config.get("username", ""),
-            email=git_config.get("email", ""),
-        )
+{
+  "locked": true,
+  "owner": "admin",
+  "session_id": "4714b1e0-a1c9-4b5e-888e-2f99f3f8365e",
+  "started_at": "2026-08-06T00:53:19.396569"
+}
 
 ================
-File: CenterManager/src/centermanager/platform/synchronization/git/git_exceptions.py
+File: CenterManager/runtime/repository/metadata/version.json
 ================
-# -*- coding: utf-8 -*-
-"""
-Git exceptions.
-"""
-
-class GitError(Exception):
-    """Base exception for Git operations."""
-    pass
-
-class GitRepositoryError(GitError):
-    """Raised when repository operation fails."""
-    pass
-
-class GitAuthenticationError(GitError):
-    """Raised when authentication fails."""
-    pass
-
-class GitPullError(GitError):
-    """Raised when pull fails."""
-    pass
-
-class GitPushError(GitError):
-    """Raised when push fails."""
-    pass
-
-class GitFetchError(GitError):
-    """Raised when fetch fails."""
-    pass
-
-class GitCommitError(GitError):
-    """Raised when commit fails."""
-    pass
-
-class GitConfigurationError(GitError):
-    """Raised when Git configuration is invalid or missing."""
-    pass
+{
+  "platform_version": 11,
+  "session_id": "63c47aa6-6af7-4b34-a813-f9b21ace150d",
+  "owner": "admin",
+  "timestamp": "2026-08-06T00:49:26.576975"
+}
 
 ================
-File: CenterManager/src/centermanager/platform/synchronization/git/git_provider.py
+File: CenterManager/runtime/repository/README.md
 ================
-# -*- coding: utf-8 -*-
-import os
-import subprocess
-import shutil
-from pathlib import Path
-from typing import Optional
-import logging
-
-from .git_exceptions import (
-    GitException,
-    GitRepositoryNotFound,
-    GitAuthenticationFailed,
-    GitPullFailed,
-    GitPushFailed,
-    GitMergeRequired,
-    GitNetworkError,
-    GitCorrupted,
-)
-from .git_credentials import GitCredentials
-from .git_status import GitStatus
-
-logger = logging.getLogger(__name__)
-
-
-class GitProvider:
-    def __init__(self, repo_path: Path, credentials: Optional[GitCredentials] = None):
-        self._repo_path = repo_path
-        self._credentials = credentials
-        self._status = GitStatus.OFFLINE
-
-    def init_repository(self) -> None:
-        """Initialize or clone repository."""
-        if not self._credentials.repository_url:
-            raise GitConfigurationError("Repository URL is required.")
-        if not self._credentials.token:
-            raise GitConfigurationError("Git token is required.")
-
-        if not self._repo_path.exists():
-            self._repo_path.mkdir(parents=True, exist_ok=True)
-            # Clone
-            self._run_git_command(["clone", self._credentials.repository_url, str(self._repo_path)])
-        else:
-            # Ensure we are in the repo
-            self._run_git_command(["status"], check=True)  # just to verify
-
-        # Set user config
-        if self._credentials.username:
-            self._run_git_command(["config", "user.name", self._credentials.username])
-        if self._credentials.email:
-            self._run_git_command(["config", "user.email", self._credentials.email])
-
-    def fetch(self) -> bool:
-        """Fetch from remote."""
-        try:
-            self._run_git_command(["fetch", "origin", self._credentials.branch])
-            return True
-        except GitNetworkError as e:
-            self._status = GitStatus.OFFLINE
-            raise
-        except GitAuthenticationFailed as e:
-            self._status = GitStatus.ERROR
-            raise
-        except Exception as e:
-            self._status = GitStatus.ERROR
-            raise GitException(f"Fetch failed: {e}")
-
-    def pull(self) -> bool:
-        """Pull latest changes."""
-        try:
-            self._run_git_command(["pull", "origin", self._credentials.branch])
-            return True
-        except GitNetworkError:
-            self._status = GitStatus.OFFLINE
-            raise
-        except GitPullFailed as e:
-            self._status = GitStatus.ERROR
-            raise
-        except GitMergeRequired:
-            self._status = GitStatus.ERROR
-            raise
-        except Exception as e:
-            self._status = GitStatus.ERROR
-            raise GitException(f"Pull failed: {e}")
-
-    def commit(self, message: str, user: str) -> bool:
-        """Commit changes."""
-        try:
-            self._run_git_command(["add", "."])
-            self._run_git_command(["commit", "-m", f"{user}: {message}"])
-            return True
-        except Exception as e:
-            raise GitException(f"Commit failed: {e}")
-
-    def push(self) -> bool:
-        """Push to remote."""
-        try:
-            self._run_git_command(["push", "origin", self._credentials.branch])
-            return True
-        except GitNetworkError:
-            self._status = GitStatus.OFFLINE
-            raise
-        except GitPushFailed as e:
-            self._status = GitStatus.ERROR
-            raise
-        except Exception as e:
-            self._status = GitStatus.ERROR
-            raise GitException(f"Push failed: {e}")
-
-    def status(self) -> dict:
-        return {
-            "status": self._status.value,
-            "repo_path": str(self._repo_path),
-            "branch": self._credentials.branch if self._credentials else None,
-        }
-
-    def _run_git_command(self, args: list) -> str:
-        """Run git command with proper authentication."""
-        cmd = ["git"] + args
-        env = os.environ.copy()
-        if self._credentials and self._credentials.token:
-            # Set token for authentication
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_USER"] = self._credentials.username
-            env["GIT_PASSWORD"] = self._credentials.token
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self._repo_path),
-                capture_output=True,
-                text=True,
-                env=env,
-                check=False,
-            )
-            if result.returncode != 0:
-                stderr = result.stderr.lower()
-                if "fatal: repository" in stderr or "not found" in stderr:
-                    raise GitRepositoryNotFound(result.stderr)
-                elif "authentication" in stderr:
-                    raise GitAuthenticationFailed(result.stderr)
-                elif "pull" in cmd and "merge" in stderr:
-                    raise GitMergeRequired(result.stderr)
-                elif "push" in cmd and "rejected" in stderr:
-                    raise GitPushFailed(result.stderr)
-                elif "network" in stderr or "unreachable" in stderr:
-                    raise GitNetworkError(result.stderr)
-                else:
-                    raise GitException(result.stderr)
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            raise GitException(f"Git command failed: {e}")
-        except FileNotFoundError:
-            raise GitException("Git executable not found in PATH.")
-
-================
-File: CenterManager/src/centermanager/platform/synchronization/git/git_repository.py
-================
-import os
-import subprocess
-import tempfile
-from pathlib import Path
-from typing import Optional, Dict, Any
-import logging
-
-from .git_credentials import GitCredentials
-from .git_exceptions import (
-    GitError,
-    GitRepositoryNotFound,
-    GitAuthenticationError,
-    GitPullError,
-    GitPushError,
-    GitMergeRequiredError,
-    GitNetworkError,
-)
-
-logger = logging.getLogger(__name__)
-
-class GitRepository:
-    def __init__(self, repo_path: Path, credentials: GitCredentials):
-        self._repo_path = repo_path
-        self._credentials = credentials
-        self._ensure_repo()
-
-    def _ensure_repo(self) -> None:
-        """Initialize or open repository."""
-        git_dir = self._repo_path / ".git"
-        if not git_dir.exists():
-            # Clone if not exists
-            self._clone_repo()
-
-    def _clone_repo(self) -> None:
-        """Clone repository from remote."""
-        try:
-            cmd = ["git", "clone", self._credentials.repository_url, str(self._repo_path)]
-            # Add token authentication if provided
-            if self._credentials.token:
-                # Use token in URL (GitHub/GitLab style)
-                url = self._credentials.repository_url
-                if "://" in url:
-                    protocol, rest = url.split("://", 1)
-                    if "@" in rest:
-                        # Already has auth? Replace
-                        rest = rest.split("@")[-1]
-                    url = f"{protocol}://{self._credentials.token}@{rest}"
-                    cmd = ["git", "clone", url, str(self._repo_path)]
-            self._run_cmd(cmd)
-            # Set branch if not default
-            if self._credentials.branch != "main":
-                # Try to checkout branch after clone
-                self._checkout_branch()
-        except Exception as e:
-            raise GitRepositoryNotFound(f"Failed to clone repository: {e}")
-
-    def _run_cmd(self, cmd: list, cwd: Optional[Path] = None) -> str:
-        """Run git command and return output."""
-        if cwd is None:
-            cwd = self._repo_path
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                error_msg = result.stderr.strip()
-                logger.error(f"Git command failed: {' '.join(cmd)} - {error_msg}")
-                self._handle_error(cmd[0], error_msg)
-            return result.stdout.strip()
-        except subprocess.SubprocessError as e:
-            raise GitNetworkError(f"Git command execution failed: {e}")
-
-    def _handle_error(self, cmd: str, error_msg: str) -> None:
-        if "Authentication" in error_msg or "authorization" in error_msg:
-            raise GitAuthenticationError(error_msg)
-        elif "not found" in error_msg or "does not exist" in error_msg:
-            raise GitRepositoryNotFound(error_msg)
-        elif "merge conflict" in error_msg or "need to pull" in error_msg:
-            raise GitMergeRequiredError(error_msg)
-        elif "pull" in cmd and "failed" in error_msg:
-            raise GitPullError(error_msg)
-        elif "push" in cmd and "failed" in error_msg:
-            raise GitPushError(error_msg)
-        else:
-            raise GitError(error_msg)
-
-    def _checkout_branch(self) -> None:
-        cmd = ["git", "checkout", self._credentials.branch]
-        self._run_cmd(cmd)
-
-    def fetch(self) -> bool:
-        try:
-            cmd = ["git", "fetch", "origin"]
-            self._run_cmd(cmd)
-            return True
-        except GitError as e:
-            logger.error(f"Fetch failed: {e}")
-            return False
-
-    def pull(self) -> bool:
-        try:
-            cmd = ["git", "pull", "origin", self._credentials.branch]
-            self._run_cmd(cmd)
-            return True
-        except GitError as e:
-            logger.error(f"Pull failed: {e}")
-            return False
-
-    def commit(self, message: str) -> bool:
-        try:
-            # Add all changes
-            self._run_cmd(["git", "add", "."])
-            # Commit
-            self._run_cmd(["git", "commit", "-m", message])
-            return True
-        except GitError as e:
-            logger.error(f"Commit failed: {e}")
-            return False
-
-    def push(self) -> bool:
-        try:
-            cmd = ["git", "push", "origin", self._credentials.branch]
-            self._run_cmd(cmd)
-            return True
-        except GitError as e:
-            logger.error(f"Push failed: {e}")
-            return False
-
-    def current_commit(self) -> Optional[str]:
-        try:
-            output = self._run_cmd(["git", "rev-parse", "HEAD"])
-            return output[:7] if output else None
-        except GitError:
-            return None
-
-    def current_branch(self) -> Optional[str]:
-        try:
-            output = self._run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-            return output if output else None
-        except GitError:
-            return None
-
-    def status(self) -> Dict[str, Any]:
-        try:
-            output = self._run_cmd(["git", "status", "--porcelain"])
-            changes = []
-            if output:
-                for line in output.split("\n"):
-                    if line.strip():
-                        changes.append(line)
-            return {
-                "is_clean": len(changes) == 0,
-                "changes": changes,
-                "commit": self.current_commit(),
-                "branch": self.current_branch(),
-            }
-        except GitError as e:
-            return {
-                "is_clean": False,
-                "error": str(e),
-                "commit": None,
-                "branch": None,
-            }
-
-    def validate(self) -> bool:
-        try:
-            self._run_cmd(["git", "status"])
-            return True
-        except GitError:
-            return False
-
-================
-File: CenterManager/src/centermanager/platform/synchronization/git/git_status.py
-================
-# -*- coding: utf-8 -*-
-from enum import Enum
-
-class GitStatus(Enum):
-    CONNECTED = "connected"
-    OFFLINE = "offline"
-    SYNCING = "syncing"
-    PUBLISHING = "publishing"
-    ERROR = "error"
-
-    def __str__(self):
-        return self.value
-
-================
-File: CenterManager/src/centermanager/platform/synchronization/__init__.py
-================
-from .synchronization_provider import SynchronizationProvider
-from .git_synchronization_provider import GitSynchronizationProvider
-from .git.git_provider import GitProvider
-from .git.git_credentials import GitCredentials
-from .git.git_status import GitStatus
-
-__all__ = [
-    "SynchronizationProvider",
-    "GitSynchronizationProvider",
-    "GitProvider",
-    "GitCredentials",
-    "GitStatus",
-]
-
-================
-File: CenterManager/src/centermanager/platform/synchronization/git_synchronization_provider.py
-================
-# -*- coding: utf-8 -*-
-import logging
-from pathlib import Path
-from typing import Dict, Any, Optional
-
-from .synchronization_provider import SynchronizationProvider
-from .git.git_provider import GitProvider
-from .git.git_credentials import GitCredentials
-from .git.git_status import GitStatus
-from .git.git_exceptions import GitException
-
-logger = logging.getLogger(__name__)
-
-
-class GitSynchronizationProvider(SynchronizationProvider):
-    def __init__(
-        self,
-        repo_path: Path,
-        credentials: Optional[GitCredentials] = None,
-    ):
-        self._repo_path = repo_path
-        self._credentials = credentials
-        self._git_provider = GitProvider(repo_path, credentials)
-        self._status = GitStatus.OFFLINE
-        self._last_error = None
-
-        # Initialize repository if needed
-        if self._credentials:
-            self._git_provider.init_repository()
-
-    def fetch(self) -> bool:
-        if not self._credentials:
-            return False
-        try:
-            self._git_provider.fetch()
-            self._status = GitStatus.CONNECTED
-            return True
-        except GitException as e:
-            self._last_error = str(e)
-            self._status = GitStatus.ERROR
-            logger.error(f"Git fetch failed: {e}")
-            return False
-
-    def pull(self) -> bool:
-        if not self._credentials:
-            return False
-        try:
-            self._git_provider.pull()
-            self._status = GitStatus.CONNECTED
-            return True
-        except GitException as e:
-            self._last_error = str(e)
-            self._status = GitStatus.ERROR
-            logger.error(f"Git pull failed: {e}")
-            return False
-
-    def publish(self, message: str, user: str) -> bool:
-        if not self._credentials:
-            return False
-        try:
-            self._status = GitStatus.PUBLISHING
-            # Commit
-            self._git_provider.commit(message, user)
-            # Push
-            self._git_provider.push()
-            self._status = GitStatus.CONNECTED
-            return True
-        except GitException as e:
-            self._last_error = str(e)
-            self._status = GitStatus.ERROR
-            logger.error(f"Git publish failed: {e}")
-            return False
-
-    def status(self) -> Dict[str, Any]:
-        base_status = self._git_provider.status()
-        return {
-            **base_status,
-            "last_error": self._last_error,
-            "has_credentials": self._credentials is not None,
-        }
-
-    def validate(self) -> bool:
-        if not self._credentials:
-            return False
-        try:
-            self.fetch()
-            return True
-        except Exception:
-            return False
-
-================
-File: CenterManager/src/centermanager/platform/synchronization/synchronization_provider.py
-================
-# -*- coding: utf-8 -*-
-from abc import ABC, abstractmethod
-from typing import Dict, Any
-
-class SynchronizationProvider(ABC):
-    @abstractmethod
-    def fetch(self) -> bool:
-        """Fetch latest changes from remote."""
-        pass
-
-    @abstractmethod
-    def pull(self) -> bool:
-        """Pull latest changes from remote."""
-        pass
-
-    @abstractmethod
-    def publish(self, message: str, user: str) -> bool:
-        """Commit and push changes."""
-        pass
-
-    @abstractmethod
-    def status(self) -> Dict[str, Any]:
-        """Return synchronization status."""
-        pass
-
-    @abstractmethod
-    def validate(self) -> bool:
-        """Validate that synchronization is configured and working."""
-        pass
-
-================
-File: CenterManager/src/centermanager/platform/version/__init__.py
-================
-from .version_manager import VersionManager
-
-__all__ = ["VersionManager"]
-
-================
-File: CenterManager/src/centermanager/platform/version/version_manager.py
-================
-# -*- coding: utf-8 -*-
-"""
-Version Manager - manages platform version.
-"""
-import logging
-from typing import Dict, Any, Optional
-
-from centermanager.platform.collaboration.metadata_repository import MetadataRepository
-from centermanager.events.event_bus import EventBus
-
-logger = logging.getLogger(__name__)
-
-
-class VersionManager:
-    def __init__(self, metadata_repository: MetadataRepository, event_bus: EventBus):
-        self._metadata_repository = metadata_repository
-        self._event_bus = event_bus
-        self._version_cache = None
-
-    def get_current_version(self) -> int:
-        """Get current platform version."""
-        data = self._metadata_repository.load_version()
-        return data.get("platform_version", 1)
-
-    def increment_version(self, metadata: Optional[Dict[str, Any]] = None) -> int:
-        """
-        Increment platform version and save to metadata.
-        Returns new version number.
-        """
-        data = self._metadata_repository.load_version()
-        current = data.get("platform_version", 1)
-        new_version = current + 1
-        data["platform_version"] = new_version
-        if metadata:
-            data.update(metadata)
-        self._metadata_repository.save_version(data)
-        logger.info(f"Version incremented: {current} -> {new_version}")
-        return new_version
-
-    def refresh(self) -> bool:
-        """Reload version from repository. Returns True if version changed."""
-        old = self.get_current_version()
-        self._version_cache = None
-        new = self.get_current_version()
-        return new != old
-
-================
-File: CenterManager/src/centermanager/platform/workflow/__init__.py
-================
-from .publish_workflow import PublishWorkflow
-
-__all__ = ["PublishWorkflow"]
-
-================
-File: CenterManager/src/centermanager/platform/workflow/publish_workflow.py
-================
-# -*- coding: utf-8 -*-
-"""
-Publish workflow - commits and pushes changes to synchronization backend.
-"""
-import logging
-from datetime import datetime
-from typing import Optional
-
-from centermanager.platform.collaboration.mode_manager import ModeManager, CollaborationMode
-from centermanager.platform.collaboration.lock_manager import LockManager
-from centermanager.platform.collaboration.edit_session_manager import EditSessionManager
-from centermanager.platform.synchronization import SynchronizationProvider
-from centermanager.platform.version.version_manager import VersionManager
-from centermanager.events.event_bus import EventBus
-from centermanager.platform.notification import NotificationService
-from centermanager.events.synchronization_events import (
-    PublishStarted, PublishSucceeded, PublishFailed,
-    SynchronizationStarted, SynchronizationCompleted, SynchronizationFailed,
-    VersionUpdated
-)
-
-logger = logging.getLogger(__name__)
-
-
-class PublishWorkflow:
-    def __init__(
-        self,
-        lock_manager: LockManager,
-        mode_manager: ModeManager,
-        session_manager: EditSessionManager,
-        sync_provider: SynchronizationProvider,
-        version_manager: VersionManager,
-        event_bus: EventBus,
-        notification_service: NotificationService,
-    ):
-        self._lock_manager = lock_manager
-        self._mode_manager = mode_manager
-        self._session_manager = session_manager
-        self._sync_provider = sync_provider
-        self._version_manager = version_manager
-        self._event_bus = event_bus
-        self._notification_service = notification_service
-
-    def execute(self) -> bool:
-        """Execute publish workflow: commit, push, update version."""
-        if self._mode_manager.current_mode() != CollaborationMode.WRITE:
-            logger.warning("Publish called in READ mode, ignoring.")
-            return False
-
-        session_id = self._session_manager.get_session_id()
-        owner = self._session_manager.get_owner()
-        if not session_id or not owner:
-            logger.error("No active session to publish.")
-            return False
-
-        self._event_bus.publish(PublishStarted(session_id=session_id))
-        self._notification_service.notify("Publishing changes...", "info")
-
-        try:
-            # Step 1: Synchronize (commit + push)
-            self._event_bus.publish(SynchronizationStarted(session_id=session_id))
-            success = self._sync_provider.publish(
-                message=f"Publish from session {session_id}",
-                user=owner
-            )
-            if not success:
-                self._event_bus.publish(SynchronizationFailed(session_id=session_id))
-                self._event_bus.publish(PublishFailed(session_id=session_id))
-                self._notification_service.notify("Publish failed.", "error")
-                return False
-            self._event_bus.publish(SynchronizationCompleted(session_id=session_id))
-
-            # Step 2: Increment version
-            old_version = self._version_manager.get_current_version()
-            new_version = self._version_manager.increment_version(
-                metadata={
-                    "session_id": session_id,
-                    "owner": owner,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-            self._event_bus.publish(VersionUpdated(
-                old_version=old_version,
-                new_version=new_version,
-                session_id=session_id,
-                user=owner,
-            ))
-
-            # Step 3: Release lock and switch to READ
-            self._lock_manager.release(owner)
-            self._session_manager.end_session()
-            self._mode_manager.set_mode(CollaborationMode.READ)
-
-            # Step 4: Notify and events
-            self._event_bus.publish(PublishSucceeded(session_id=session_id, version=new_version))
-            self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
-            logger.info(f"Publish succeeded: version {new_version}, session {session_id}")
-
-            return True
-
-        except Exception as e:
-            logger.exception("Publish workflow failed")
-            self._event_bus.publish(SynchronizationFailed(session_id=session_id))
-            self._event_bus.publish(PublishFailed(session_id=session_id))
-            self._notification_service.notify(f"Publish error: {str(e)}", "error")
-            return False
+# Antechkid_CenterManager
 
 ================
 File: InterCommunicationCenter/CENTERMANAGER — SPRINT 0.1 FIX ROUND 1.md
@@ -36047,13 +35549,6 @@ def downgrade() -> None:
     ${downgrades if downgrades else "pass"}
 
 ================
-File: CenterManager/runtime/Config/auto_report_state.json
-================
-{
-    "last_run_date": "2026-08-05"
-}
-
-================
 File: CenterManager/runtime/metadata/deployment.json
 ================
 {
@@ -36061,20 +35556,13 @@ File: CenterManager/runtime/metadata/deployment.json
 }
 
 ================
-File: CenterManager/runtime/metadata/lock.json
-================
-{
-  "locked": true,
-  "owner": "admin",
-  "session_id": "4a03ac41-58ff-4fc5-9825-a08573095b41",
-  "started_at": "2026-08-05T21:14:28.054144"
-}
-
-================
 File: CenterManager/runtime/metadata/version.json
 ================
 {
-  "platform_version": 1
+  "platform_version": 12,
+  "session_id": "4714b1e0-a1c9-4b5e-888e-2f99f3f8365e",
+  "owner": "admin",
+  "timestamp": "2026-08-06T00:53:37.153375"
 }
 
 ================
@@ -36819,17 +36307,18 @@ class EventBus:
         logger.debug(f"Registered handler {handler.__class__.__name__} for {event_class.__name__}")
 
     def publish(self, event: Event) -> None:
-        """Publish an event to all registered handlers."""
         event_class = type(event)
         handlers = self._handlers.get(event_class, [])
-        if not handlers:
-            logger.debug(f"No handlers registered for event {event_class.__name__}")
-            return
         for handler in handlers:
             try:
-                handler.handle(event)
+                if hasattr(handler, 'handle'):
+                    handler.handle(event)
+                elif callable(handler):
+                    handler(event)
+                else:
+                    logger.warning(f"Handler {handler} is not callable and has no handle method.")
             except Exception as e:
-                logger.exception(f"Error handling event {event_class.__name__} with {handler.__class__.__name__}: {e}")
+                logger.exception(f"Error handling event {event_class.__name__} with {handler}: {e}")
 
 ================
 File: CenterManager/src/centermanager/events/event.py
@@ -36876,6 +36365,55 @@ class StudentHighlightCreated(Event):
     title: str
     highlight_type: str
     description: str = None
+
+================
+File: CenterManager/src/centermanager/events/synchronization_events.py
+================
+from .event import Event
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
+
+@dataclass
+class SynchronizationStarted(Event):
+    session_id: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class SynchronizationCompleted(Event):
+    session_id: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class SynchronizationFailed(Event):
+    session_id: Optional[str] = None
+    error: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class PublishStarted(Event):
+    session_id: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class PublishSucceeded(Event):
+    session_id: Optional[str] = None
+    version: Optional[int] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class PublishFailed(Event):
+    session_id: Optional[str] = None
+    error: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class VersionUpdated(Event):
+    old_version: Optional[int] = None
+    new_version: Optional[int] = None
+    session_id: Optional[str] = None
+    user: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.now)
 
 ================
 File: CenterManager/src/centermanager/export/excel/__init__.py
@@ -38122,155 +37660,6 @@ File: CenterManager/src/centermanager/platform/collaboration/collaboration_conte
 # Placeholder for future context
 
 ================
-File: CenterManager/src/centermanager/platform/collaboration/collaboration_manager.py
-================
-# -*- coding: utf-8 -*-
-from pathlib import Path
-from typing import Optional
-
-from centermanager.events.event_bus import EventBus
-from .mode_manager import ModeManager, CollaborationMode
-from .lock_manager import LockManager
-from .edit_session_manager import EditSessionManager
-from .metadata_repository import MetadataRepository
-from .json_metadata_repository import JsonMetadataRepository
-from .lock_repository import LockRepository
-from .json_lock_repository import JsonLockRepository
-from .metadata_initializer import MetadataInitializer
-from .write_workflow import WriteWorkflow
-from .release_workflow import ReleaseWorkflow
-from .identity_provider import IdentityProvider
-from .default_identity_provider import DefaultIdentityProvider
-
-# Import synchronization and workflow
-from centermanager.platform.synchronization import SynchronizationProvider
-from centermanager.platform.workflow.publish_workflow import PublishWorkflow
-from centermanager.platform.version.version_manager import VersionManager
-from centermanager.platform.notification import NotificationService
-
-class CollaborationManager:
-    def __init__(
-        self,
-        metadata_dir: Path,
-        event_bus: EventBus,
-        identity_provider: Optional[IdentityProvider] = None,
-        metadata_repository: Optional[MetadataRepository] = None,
-        lock_repository: Optional[LockRepository] = None,
-        sync_provider: Optional[SynchronizationProvider] = None,
-        version_manager: Optional[VersionManager] = None,
-        notification_service: Optional[NotificationService] = None,
-    ):
-        self._metadata_dir = metadata_dir
-        self._event_bus = event_bus
-
-        # Setup repositories
-        if metadata_repository is None:
-            metadata_repository = JsonMetadataRepository(metadata_dir)
-        self._metadata_repository = metadata_repository
-
-        if lock_repository is None:
-            lock_file = metadata_dir / "lock.json"
-            lock_repository = JsonLockRepository(lock_file)
-        self._lock_repository = lock_repository
-
-        # Initialize metadata
-        initializer = MetadataInitializer(self._metadata_repository)
-        initializer.ensure_initialized()
-
-        # Setup managers
-        self._mode_manager = ModeManager()
-        self._lock_manager = LockManager(self._lock_repository)
-        self._session_manager = EditSessionManager()
-
-        # Identity provider
-        if identity_provider is None:
-            identity_provider = DefaultIdentityProvider()
-        self._identity_provider = identity_provider
-
-        # Synchronization provider (optional)
-        self._sync_provider = sync_provider
-
-        # Version manager (optional, will use metadata repo if not provided)
-        if version_manager is None:
-            from centermanager.platform.version.version_manager import VersionManager as VM
-            version_manager = VM(self._metadata_repository, event_bus)
-        self._version_manager = version_manager
-
-        # Notification service (optional)
-        if notification_service is None:
-            notification_service = NotificationService()
-        self._notification_service = notification_service
-
-        # Workflows
-        self._write_workflow = WriteWorkflow(
-            self._lock_manager,
-            self._session_manager,
-            self._mode_manager,
-            self._identity_provider,
-            self._event_bus,
-        )
-        self._release_workflow = ReleaseWorkflow(
-            self._lock_manager,
-            self._session_manager,
-            self._mode_manager,
-            self._identity_provider,
-            self._event_bus,
-        )
-        self._publish_workflow = PublishWorkflow(
-            lock_manager=self._lock_manager,
-            mode_manager=self._mode_manager,
-            session_manager=self._session_manager,
-            sync_provider=self._sync_provider,
-            version_manager=self._version_manager,
-            event_bus=self._event_bus,
-            notification_service=self._notification_service,
-        )
-
-    def current_mode(self) -> CollaborationMode:
-        return self._mode_manager.current_mode()
-
-    def request_write(self) -> bool:
-        # If we have sync provider, fetch/pull before acquiring lock
-        if self._sync_provider:
-            self._sync_provider.fetch()
-            if not self._sync_provider.pull():
-                return False
-        return self._write_workflow.execute()
-
-    def release_write(self) -> bool:
-        return self._release_workflow.execute()
-
-    def publish(self) -> bool:
-        """Publish changes (commit + push) and switch to READ."""
-        if not self._sync_provider:
-            return False
-        return self._publish_workflow.execute()
-
-    def get_version(self) -> int:
-        version_data = self._metadata_repository.load_version()
-        return version_data.get("platform_version", 1)
-
-    def get_deployment_profile(self) -> str:
-        deployment_data = self._metadata_repository.load_deployment()
-        return deployment_data.get("profile", "Standalone")
-
-    def get_session_info(self) -> dict:
-        return {
-            "session_id": self._session_manager.get_session_id(),
-            "owner": self._session_manager.get_owner(),
-            "active": self._session_manager.is_active(),
-        }
-
-    def ensure_write(self) -> bool:
-        return self.current_mode() == CollaborationMode.WRITE
-
-    def synchronization_status(self) -> dict:
-        """Return synchronization status if provider exists."""
-        if self._sync_provider:
-            return self._sync_provider.status()
-        return {"status": "disabled"}
-
-================
 File: CenterManager/src/centermanager/platform/collaboration/default_identity_provider.py
 ================
 from typing import Optional
@@ -38414,9 +37803,15 @@ class JsonMetadataRepository(MetadataRepository):
 ================
 File: CenterManager/src/centermanager/platform/collaboration/lock_manager.py
 ================
+# -*- coding: utf-8 -*-
 from datetime import datetime
 from typing import Optional, Dict, Any
+import logging
+
 from .lock_repository import LockRepository
+from datetime import datetime, timedelta
+logger = logging.getLogger(__name__)
+
 
 class LockManager:
     def __init__(self, repository: LockRepository):
@@ -38429,28 +37824,77 @@ class LockManager:
         return self._repository.get_lock().get("owner")
 
     def acquire(self, owner: str, session_id: str) -> bool:
+        logger.debug(f"Attempting to acquire lock for owner={owner}, session={session_id}")
         lock = self._repository.get_lock()
+        
         if lock.get("locked", False):
-            return False
+            started_at = lock.get("started_at")
+            if started_at:
+                try:
+                    dt = datetime.fromisoformat(started_at)
+                    age = (datetime.now() - dt).total_seconds()
+                    # Nếu lock tồn tại quá 600 giây (10 phút), coi là stale
+                    if age > 600:
+                        logger.warning(f"Stale lock detected (age: {age:.0f}s). Forcing release.")
+                        lock["locked"] = False
+                        lock["owner"] = None
+                        lock["session_id"] = None
+                        lock["started_at"] = None
+                        self._repository.save_lock(lock)
+                    else:
+                        logger.warning(f"Lock held by {lock.get('owner')} for {age:.0f}s")
+                        return False
+                except Exception as e:
+                    logger.error(f"Error parsing lock timestamp: {e}")
+                    return False
+            else:
+                # Locked nhưng không có started_at -> không hợp lệ, giải phóng
+                logger.warning("Lock has no started_at timestamp. Forcing release.")
+                lock["locked"] = False
+                lock["owner"] = None
+                lock["session_id"] = None
+                lock["started_at"] = None
+                self._repository.save_lock(lock)
+
+        # Nếu đến được đây, lock đã rảnh hoặc đã được giải phóng, tiến hành acquire
         lock["locked"] = True
         lock["owner"] = owner
         lock["session_id"] = session_id
         lock["started_at"] = datetime.now().isoformat()
         self._repository.save_lock(lock)
+        logger.info(f"Lock acquired by {owner}, session {session_id}")
         return True
-
     def release(self, owner: str) -> bool:
-        lock = self._repository.get_lock()
-        if not lock.get("locked", False):
+        logger.debug(f"release() called with owner={owner}")
+        try:
+            lock = self._repository.get_lock()
+            logger.debug(f"Current lock data: {lock}")
+
+            if not lock.get("locked", False):
+                logger.info("Lock is already released.")
+                return True
+
+            current_owner = lock.get("owner")
+            if current_owner != owner:
+                logger.warning(
+                    f"Lock owner mismatch: lock owner='{current_owner}', "
+                    f"request owner='{owner}'. Forcing release."
+                )
+
+            # Force release
+            lock["locked"] = False
+            lock["owner"] = None
+            lock["session_id"] = None
+            lock["started_at"] = None
+
+            logger.debug("Saving lock data after release...")
+            self._repository.save_lock(lock)
+            logger.info(f"Lock released successfully by {owner}")
+            return True
+
+        except Exception as e:
+            logger.exception(f"Exception in release() for owner={owner}: {e}")
             return False
-        if lock.get("owner") != owner:
-            return False
-        lock["locked"] = False
-        lock["owner"] = None
-        lock["session_id"] = None
-        lock["started_at"] = None
-        self._repository.save_lock(lock)
-        return True
 
 ================
 File: CenterManager/src/centermanager/platform/collaboration/lock_repository.py
@@ -38475,6 +37919,7 @@ import json
 from typing import Optional
 from .metadata_repository import MetadataRepository
 
+
 class MetadataInitializer:
     def __init__(self, repository: MetadataRepository):
         self._repository = repository
@@ -38489,6 +37934,14 @@ class MetadataInitializer:
                 "session_id": None,
                 "started_at": None
             })
+        else:
+            # Nếu lock đang bị chiếm nhưng không có session_id hợp lệ (hoặc cũ), reset
+            if lock.get("locked") and not lock.get("session_id"):
+                lock["locked"] = False
+                lock["owner"] = None
+                lock["session_id"] = None
+                lock["started_at"] = None
+                self._repository.save_lock(lock)
 
         # Version
         version = self._repository.load_version()
@@ -38576,12 +38029,17 @@ class ModeManager:
 ================
 File: CenterManager/src/centermanager/platform/collaboration/release_workflow.py
 ================
+# -*- coding: utf-8 -*-
 from .lock_manager import LockManager
 from .edit_session_manager import EditSessionManager
 from .mode_manager import ModeManager, CollaborationMode
 from .identity_provider import IdentityProvider
 from centermanager.events.event_bus import EventBus
 from centermanager.events.collaboration_events import WriteReleased, ModeChanged
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ReleaseWorkflow:
     def __init__(self, lock_manager: LockManager, session_manager: EditSessionManager,
@@ -38605,7 +38063,13 @@ class ReleaseWorkflow:
         if owner is None:
             return False
 
-        if not self._lock_manager.release(owner):
+        # Release lock, catch any exception
+        try:
+            if not self._lock_manager.release(owner):
+                logger.error("Failed to release lock.")
+                return False
+        except Exception as e:
+            logger.exception(f"Exception while releasing lock: {e}")
             return False
 
         self._session_manager.end_session()
@@ -38698,24 +38162,868 @@ class NotificationService:
             self._listeners.remove(callback)
 
 ================
-File: CenterManager/src/centermanager/platform/__init__.py
+File: CenterManager/src/centermanager/platform/synchronization/git/__init__.py
 ================
-from .collaboration import CollaborationManager, CollaborationMode, ModeManager, LockManager, EditSessionManager
-from .notification import NotificationService
-from .synchronization import SynchronizationProvider, GitSynchronizationProvider
-from .workflow import PublishWorkflow
+from .git_provider import GitProvider
+from .git_credentials import GitCredentials
+from .git_status import GitStatus
+from .git_exceptions import (
+    GitException,
+    GitRepositoryNotFound,
+    GitAuthenticationFailed,
+    GitPullFailed,
+    GitPushFailed,
+    GitMergeRequired,
+    GitNetworkError,
+    GitCorrupted,
+)
 
 __all__ = [
-    "CollaborationManager",
-    "CollaborationMode",
-    "ModeManager",
-    "LockManager",
-    "EditSessionManager",
-    "NotificationService",
+    "GitProvider",
+    "GitCredentials",
+    "GitStatus",
+    "GitException",
+    "GitRepositoryNotFound",
+    "GitAuthenticationFailed",
+    "GitPullFailed",
+    "GitPushFailed",
+    "GitMergeRequired",
+    "GitNetworkError",
+    "GitCorrupted",
+]
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git/git_credentials.py
+================
+# -*- coding: utf-8 -*-
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class GitCredentials:
+    repository_url: str
+    branch: str
+    token: str
+    username: str
+    email: str
+
+    @classmethod
+    def from_config(cls, config: dict) -> Optional["GitCredentials"]:
+        git_config = config.get("git", {})
+        if not git_config:
+            return None
+        return cls(
+            repository_url=git_config.get("repository_url", ""),
+            branch=git_config.get("branch", "main"),
+            token=git_config.get("token", ""),
+            username=git_config.get("username", ""),
+            email=git_config.get("email", ""),
+        )
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git/git_exceptions.py
+================
+# -*- coding: utf-8 -*-
+"""
+Git exceptions.
+"""
+
+
+class GitError(Exception):
+    """Base exception for Git operations."""
+    pass
+
+
+class GitRepositoryError(GitError):
+    """Raised when repository operation fails."""
+    pass
+
+
+class GitAuthenticationError(GitError):
+    """Raised when authentication fails."""
+    pass
+
+
+class GitPullError(GitError):
+    """Raised when pull fails."""
+    pass
+
+
+class GitPushError(GitError):
+    """Raised when push fails."""
+    pass
+
+
+class GitFetchError(GitError):
+    """Raised when fetch fails."""
+    pass
+
+
+class GitCommitError(GitError):
+    """Raised when commit fails."""
+    pass
+
+
+class GitConfigurationError(GitError):
+    """Raised when Git configuration is invalid or missing."""
+    pass
+
+
+# ------------------------------------------------------------
+# Aliases để tương thích với các module khác
+# ------------------------------------------------------------
+GitException = GitError
+GitRepositoryNotFound = GitRepositoryError
+GitAuthenticationFailed = GitAuthenticationError
+GitPullFailed = GitPullError
+GitPushFailed = GitPushError
+GitMergeRequired = GitError          # không có lớp riêng, dùng chung
+GitNetworkError = GitError
+GitCorrupted = GitError
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git/git_provider.py
+================
+# -*- coding: utf-8 -*-
+import os
+import subprocess
+import shutil
+from pathlib import Path
+from typing import Optional
+import logging
+
+from .git_exceptions import (
+    GitException,
+    GitRepositoryNotFound,
+    GitAuthenticationFailed,
+    GitPullFailed,
+    GitPushFailed,
+    GitMergeRequired,
+    GitNetworkError,
+    GitCorrupted,
+)
+from .git_credentials import GitCredentials
+from .git_status import GitStatus
+
+logger = logging.getLogger(__name__)
+
+
+class GitProvider:
+    def __init__(self, repo_path: Path, credentials: Optional[GitCredentials] = None):
+        self._repo_path = repo_path
+        self._credentials = credentials
+        self._status = GitStatus.OFFLINE
+
+    def init_repository(self) -> None:
+        """Initialize or clone repository."""
+        if not self._credentials.repository_url:
+            raise GitConfigurationError("Repository URL is required.")
+        if not self._credentials.token:
+            raise GitConfigurationError("Git token is required.")
+
+        if not self._repo_path.exists():
+            self._repo_path.mkdir(parents=True, exist_ok=True)
+            # Clone
+            self._run_git_command(["clone", self._credentials.repository_url, str(self._repo_path)])
+        else:
+            # Ensure we are in the repo
+            self._run_git_command(["status"])  # just to verify
+
+        # Set user config
+        if self._credentials.username:
+            self._run_git_command(["config", "user.name", self._credentials.username])
+        if self._credentials.email:
+            self._run_git_command(["config", "user.email", self._credentials.email])
+
+    def fetch(self) -> bool:
+        """Fetch from remote."""
+        try:
+            self._run_git_command(["fetch", "origin", self._credentials.branch])
+            return True
+        except GitNetworkError as e:
+            self._status = GitStatus.OFFLINE
+            raise
+        except GitAuthenticationFailed as e:
+            self._status = GitStatus.ERROR
+            raise
+        except Exception as e:
+            self._status = GitStatus.ERROR
+            raise GitException(f"Fetch failed: {e}")
+
+    def pull(self) -> bool:
+        """Pull latest changes."""
+        try:
+            self._run_git_command(["pull", "origin", self._credentials.branch])
+            return True
+        except GitNetworkError:
+            self._status = GitStatus.OFFLINE
+            raise
+        except GitPullFailed as e:
+            self._status = GitStatus.ERROR
+            raise
+        except GitMergeRequired:
+            self._status = GitStatus.ERROR
+            raise
+        except Exception as e:
+            self._status = GitStatus.ERROR
+            raise GitException(f"Pull failed: {e}")
+
+    def commit(self, message: str, user: str) -> bool:
+        """Commit changes."""
+        try:
+            self._run_git_command(["add", "."])
+            self._run_git_command(["commit", "-m", f"{user}: {message}"])
+            return True
+        except Exception as e:
+            raise GitException(f"Commit failed: {e}")
+
+    def push(self) -> bool:
+        """Push to remote."""
+        try:
+            self._run_git_command(["push", "origin", self._credentials.branch])
+            return True
+        except GitNetworkError:
+            self._status = GitStatus.OFFLINE
+            raise
+        except GitPushFailed as e:
+            self._status = GitStatus.ERROR
+            raise
+        except Exception as e:
+            self._status = GitStatus.ERROR
+            raise GitException(f"Push failed: {e}")
+
+    def status(self) -> dict:
+        return {
+            "status": self._status.value,
+            "repo_path": str(self._repo_path),
+            "branch": self._credentials.branch if self._credentials else None,
+        }
+
+    def _run_git_command(self, args: list) -> str:
+        """Run git command with proper authentication."""
+        cmd = ["git"] + args
+        env = os.environ.copy()
+        if self._credentials and self._credentials.token:
+            # Set token for authentication
+            env["GIT_ASKPASS"] = "echo"
+            env["GIT_USER"] = self._credentials.username
+            env["GIT_PASSWORD"] = self._credentials.token
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(self._repo_path),
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.lower()
+                if "fatal: repository" in stderr or "not found" in stderr:
+                    raise GitRepositoryNotFound(result.stderr)
+                elif "authentication" in stderr:
+                    raise GitAuthenticationFailed(result.stderr)
+                elif "pull" in cmd and "merge" in stderr:
+                    raise GitMergeRequired(result.stderr)
+                elif "push" in cmd and "rejected" in stderr:
+                    raise GitPushFailed(result.stderr)
+                elif "network" in stderr or "unreachable" in stderr:
+                    raise GitNetworkError(result.stderr)
+                else:
+                    raise GitException(result.stderr)
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            raise GitException(f"Git command failed: {e}")
+        except FileNotFoundError:
+            raise GitException("Git executable not found in PATH.")
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git/git_repository.py
+================
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional, Dict, Any
+import logging
+
+from .git_credentials import GitCredentials
+from .git_exceptions import (
+    GitError,
+    GitRepositoryNotFound,
+    GitAuthenticationError,
+    GitPullError,
+    GitPushError,
+    GitMergeRequiredError,
+    GitNetworkError,
+)
+
+logger = logging.getLogger(__name__)
+
+class GitRepository:
+    def __init__(self, repo_path: Path, credentials: GitCredentials):
+        self._repo_path = repo_path
+        self._credentials = credentials
+        self._ensure_repo()
+
+    def _ensure_repo(self) -> None:
+        """Initialize or open repository."""
+        git_dir = self._repo_path / ".git"
+        if not git_dir.exists():
+            # Clone if not exists
+            self._clone_repo()
+
+    def _clone_repo(self) -> None:
+        """Clone repository from remote."""
+        try:
+            cmd = ["git", "clone", self._credentials.repository_url, str(self._repo_path)]
+            # Add token authentication if provided
+            if self._credentials.token:
+                # Use token in URL (GitHub/GitLab style)
+                url = self._credentials.repository_url
+                if "://" in url:
+                    protocol, rest = url.split("://", 1)
+                    if "@" in rest:
+                        # Already has auth? Replace
+                        rest = rest.split("@")[-1]
+                    url = f"{protocol}://{self._credentials.token}@{rest}"
+                    cmd = ["git", "clone", url, str(self._repo_path)]
+            self._run_cmd(cmd)
+            # Set branch if not default
+            if self._credentials.branch != "main":
+                # Try to checkout branch after clone
+                self._checkout_branch()
+        except Exception as e:
+            raise GitRepositoryNotFound(f"Failed to clone repository: {e}")
+
+    def _run_cmd(self, cmd: list, cwd: Optional[Path] = None) -> str:
+        """Run git command and return output."""
+        if cwd is None:
+            cwd = self._repo_path
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip()
+                logger.error(f"Git command failed: {' '.join(cmd)} - {error_msg}")
+                self._handle_error(cmd[0], error_msg)
+            return result.stdout.strip()
+        except subprocess.SubprocessError as e:
+            raise GitNetworkError(f"Git command execution failed: {e}")
+
+    def _handle_error(self, cmd: str, error_msg: str) -> None:
+        if "Authentication" in error_msg or "authorization" in error_msg:
+            raise GitAuthenticationError(error_msg)
+        elif "not found" in error_msg or "does not exist" in error_msg:
+            raise GitRepositoryNotFound(error_msg)
+        elif "merge conflict" in error_msg or "need to pull" in error_msg:
+            raise GitMergeRequiredError(error_msg)
+        elif "pull" in cmd and "failed" in error_msg:
+            raise GitPullError(error_msg)
+        elif "push" in cmd and "failed" in error_msg:
+            raise GitPushError(error_msg)
+        else:
+            raise GitError(error_msg)
+
+    def _checkout_branch(self) -> None:
+        cmd = ["git", "checkout", self._credentials.branch]
+        self._run_cmd(cmd)
+
+    def fetch(self) -> bool:
+        try:
+            cmd = ["git", "fetch", "origin"]
+            self._run_cmd(cmd)
+            return True
+        except GitError as e:
+            logger.error(f"Fetch failed: {e}")
+            return False
+
+    def pull(self) -> bool:
+        try:
+            cmd = ["git", "pull", "origin", self._credentials.branch]
+            self._run_cmd(cmd)
+            return True
+        except GitError as e:
+            logger.error(f"Pull failed: {e}")
+            return False
+
+    def commit(self, message: str) -> bool:
+        try:
+            # Add all changes
+            self._run_cmd(["git", "add", "."])
+            # Commit
+            self._run_cmd(["git", "commit", "-m", message])
+            return True
+        except GitError as e:
+            logger.error(f"Commit failed: {e}")
+            return False
+
+    def push(self) -> bool:
+        try:
+            cmd = ["git", "push", "origin", self._credentials.branch]
+            self._run_cmd(cmd)
+            return True
+        except GitError as e:
+            logger.error(f"Push failed: {e}")
+            return False
+
+    def current_commit(self) -> Optional[str]:
+        try:
+            output = self._run_cmd(["git", "rev-parse", "HEAD"])
+            return output[:7] if output else None
+        except GitError:
+            return None
+
+    def current_branch(self) -> Optional[str]:
+        try:
+            output = self._run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+            return output if output else None
+        except GitError:
+            return None
+
+    def status(self) -> Dict[str, Any]:
+        try:
+            output = self._run_cmd(["git", "status", "--porcelain"])
+            changes = []
+            if output:
+                for line in output.split("\n"):
+                    if line.strip():
+                        changes.append(line)
+            return {
+                "is_clean": len(changes) == 0,
+                "changes": changes,
+                "commit": self.current_commit(),
+                "branch": self.current_branch(),
+            }
+        except GitError as e:
+            return {
+                "is_clean": False,
+                "error": str(e),
+                "commit": None,
+                "branch": None,
+            }
+
+    def validate(self) -> bool:
+        try:
+            self._run_cmd(["git", "status"])
+            return True
+        except GitError:
+            return False
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git/git_status.py
+================
+# -*- coding: utf-8 -*-
+from enum import Enum
+
+class GitStatus(Enum):
+    CONNECTED = "connected"
+    OFFLINE = "offline"
+    SYNCING = "syncing"
+    PUBLISHING = "publishing"
+    ERROR = "error"
+
+    def __str__(self):
+        return self.value
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/__init__.py
+================
+from .synchronization_provider import SynchronizationProvider
+from .git_synchronization_provider import GitSynchronizationProvider
+from .git.git_provider import GitProvider
+from .git.git_credentials import GitCredentials
+from .git.git_status import GitStatus
+
+__all__ = [
     "SynchronizationProvider",
     "GitSynchronizationProvider",
-    "PublishWorkflow",
+    "GitProvider",
+    "GitCredentials",
+    "GitStatus",
 ]
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/git_synchronization_provider.py
+================
+# -*- coding: utf-8 -*-
+import logging
+import shutil
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+from .synchronization_provider import SynchronizationProvider
+from .git.git_provider import GitProvider
+from .git.git_credentials import GitCredentials
+from .git.git_status import GitStatus
+from .git.git_exceptions import GitException
+from centermanager.core.paths import get_paths
+
+logger = logging.getLogger(__name__)
+
+
+class GitSynchronizationProvider(SynchronizationProvider):
+    def __init__(
+        self,
+        repo_path: Path,
+        credentials: Optional[GitCredentials] = None,
+    ):
+        self._repo_path = repo_path
+        self._credentials = credentials
+        self._git_provider = GitProvider(repo_path, credentials)
+        self._status = GitStatus.OFFLINE
+        self._last_error = None
+
+        # Initialize repository if needed
+        if self._credentials:
+            self._git_provider.init_repository()
+
+    def _sync_data_files(self) -> None:
+        """
+        Copy database, metadata, and reports into the repository
+        so that Git can track changes.
+        """
+        paths = get_paths()
+        # Ensure repo directories exist
+        (self._repo_path / "database").mkdir(parents=True, exist_ok=True)
+        (self._repo_path / "metadata").mkdir(parents=True, exist_ok=True)
+        (self._repo_path / "reports").mkdir(parents=True, exist_ok=True)
+
+        # Copy database
+        db_src = paths.database_dir / "center.db"
+        db_dst = self._repo_path / "database" / "center.db"
+        if db_src.exists():
+            shutil.copy2(db_src, db_dst)
+            logger.debug(f"Copied database: {db_src} -> {db_dst}")
+        else:
+            logger.warning(f"Database file not found: {db_src}")
+
+        # Copy metadata
+        meta_src = paths.metadata_dir
+        if meta_src.exists():
+            for f in meta_src.glob("*.json"):
+                dst = self._repo_path / "metadata" / f.name
+                shutil.copy2(f, dst)
+                logger.debug(f"Copied metadata: {f} -> {dst}")
+        else:
+            logger.warning(f"Metadata directory not found: {meta_src}")
+
+        # Copy reports (optional) - chỉ copy file mới nhất hoặc toàn bộ
+        reports_src = paths.reports_dir
+        if reports_src.exists():
+            # Có thể copy toàn bộ cây thư mục reports nếu cần
+            # Để đơn giản, hiện tại chỉ copy báo cáo của học sinh
+            for student_dir in reports_src.glob("Student/*"):
+                if student_dir.is_dir():
+                    dst = self._repo_path / "reports" / "Student" / student_dir.name
+                    dst.mkdir(parents=True, exist_ok=True)
+                    for pdf in student_dir.glob("*.pdf"):
+                        shutil.copy2(pdf, dst / pdf.name)
+                        logger.debug(f"Copied report: {pdf} -> {dst / pdf.name}")
+        else:
+            logger.debug(f"Reports directory not found: {reports_src}")
+
+    def fetch(self) -> bool:
+        if not self._credentials:
+            return False
+        try:
+            self._git_provider.fetch()
+            self._status = GitStatus.CONNECTED
+            return True
+        except GitException as e:
+            self._last_error = str(e)
+            self._status = GitStatus.ERROR
+            logger.error(f"Git fetch failed: {e}")
+            return False
+
+    def pull(self) -> bool:
+        if not self._credentials:
+            return False
+        try:
+            self._git_provider.pull()
+            self._status = GitStatus.CONNECTED
+            return True
+        except GitException as e:
+            self._last_error = str(e)
+            self._status = GitStatus.ERROR
+            logger.error(f"Git pull failed: {e}")
+            return False
+
+    def publish(self, message: str, user: str) -> bool:
+        if not self._credentials:
+            return False
+        try:
+            self._status = GitStatus.PUBLISHING
+
+            # Step 1: Sync data files into repository
+            self._sync_data_files()
+
+            # Step 2: Commit
+            self._git_provider.commit(message, user)
+
+            # Step 3: Push
+            self._git_provider.push()
+
+            self._status = GitStatus.CONNECTED
+            return True
+        except GitException as e:
+            self._last_error = str(e)
+            self._status = GitStatus.ERROR
+            logger.error(f"Git publish failed: {e}")
+            return False
+
+    def status(self) -> Dict[str, Any]:
+        base_status = self._git_provider.status()
+        return {
+            **base_status,
+            "last_error": self._last_error,
+            "has_credentials": self._credentials is not None,
+        }
+
+    def validate(self) -> bool:
+        if not self._credentials:
+            return False
+        try:
+            self.fetch()
+            return True
+        except Exception:
+            return False
+
+================
+File: CenterManager/src/centermanager/platform/synchronization/synchronization_provider.py
+================
+# -*- coding: utf-8 -*-
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
+class SynchronizationProvider(ABC):
+    @abstractmethod
+    def fetch(self) -> bool:
+        """Fetch latest changes from remote."""
+        pass
+
+    @abstractmethod
+    def pull(self) -> bool:
+        """Pull latest changes from remote."""
+        pass
+
+    @abstractmethod
+    def publish(self, message: str, user: str) -> bool:
+        """Commit and push changes."""
+        pass
+
+    @abstractmethod
+    def status(self) -> Dict[str, Any]:
+        """Return synchronization status."""
+        pass
+
+    @abstractmethod
+    def validate(self) -> bool:
+        """Validate that synchronization is configured and working."""
+        pass
+
+================
+File: CenterManager/src/centermanager/platform/version/__init__.py
+================
+from .version_manager import VersionManager
+
+__all__ = ["VersionManager"]
+
+================
+File: CenterManager/src/centermanager/platform/version/version_manager.py
+================
+# -*- coding: utf-8 -*-
+"""
+Version Manager - manages platform version.
+"""
+import logging
+from typing import Dict, Any, Optional
+
+from centermanager.platform.collaboration.metadata_repository import MetadataRepository
+from centermanager.events.event_bus import EventBus
+
+logger = logging.getLogger(__name__)
+
+
+class VersionManager:
+    def __init__(self, metadata_repository: MetadataRepository, event_bus: EventBus):
+        self._metadata_repository = metadata_repository
+        self._event_bus = event_bus
+        self._version_cache = None
+
+    def get_current_version(self) -> int:
+        """Get current platform version."""
+        data = self._metadata_repository.load_version()
+        return data.get("platform_version", 1)
+
+    def increment_version(self, metadata: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Increment platform version and save to metadata.
+        Returns new version number.
+        """
+        data = self._metadata_repository.load_version()
+        current = data.get("platform_version", 1)
+        new_version = current + 1
+        data["platform_version"] = new_version
+        if metadata:
+            data.update(metadata)
+        self._metadata_repository.save_version(data)
+        logger.info(f"Version incremented: {current} -> {new_version}")
+        return new_version
+
+    def refresh(self) -> bool:
+        """Reload version from repository. Returns True if version changed."""
+        old = self.get_current_version()
+        self._version_cache = None
+        new = self.get_current_version()
+        return new != old
+
+================
+File: CenterManager/src/centermanager/platform/workflow/__init__.py
+================
+from .publish_workflow import PublishWorkflow
+
+__all__ = ["PublishWorkflow"]
+
+================
+File: CenterManager/src/centermanager/platform/workflow/publish_workflow.py
+================
+# -*- coding: utf-8 -*-
+"""
+Publish workflow - commits and pushes changes to synchronization backend.
+"""
+import logging
+from datetime import datetime
+from typing import Optional
+
+from centermanager.platform.collaboration.mode_manager import ModeManager, CollaborationMode
+from centermanager.platform.collaboration.lock_manager import LockManager
+from centermanager.platform.collaboration.edit_session_manager import EditSessionManager
+from centermanager.platform.synchronization import SynchronizationProvider
+from centermanager.platform.version.version_manager import VersionManager
+from centermanager.events.event_bus import EventBus
+from centermanager.platform.notification import NotificationService
+from centermanager.events.synchronization_events import (
+    PublishStarted, PublishSucceeded, PublishFailed,
+    SynchronizationStarted, SynchronizationCompleted, SynchronizationFailed,
+    VersionUpdated
+)
+from centermanager.events.collaboration_events import ModeChanged
+logger = logging.getLogger(__name__)
+
+
+class PublishWorkflow:
+    def __init__(
+        self,
+        lock_manager: LockManager,
+        mode_manager: ModeManager,
+        session_manager: EditSessionManager,
+        sync_provider: SynchronizationProvider,
+        version_manager: VersionManager,
+        event_bus: EventBus,
+        notification_service: NotificationService,
+    ):
+        self._lock_manager = lock_manager
+        self._mode_manager = mode_manager
+        self._session_manager = session_manager
+        self._sync_provider = sync_provider
+        self._version_manager = version_manager
+        self._event_bus = event_bus
+        self._notification_service = notification_service
+
+    def execute(self, message: str = "Publish") -> bool:
+        logger.info("Publish workflow started.")
+        
+        if self._mode_manager.current_mode() != CollaborationMode.WRITE:
+            logger.warning("Publish called in READ mode, ignoring.")
+            return False
+
+        session_id = self._session_manager.get_session_id()
+        owner = self._session_manager.get_owner()
+        if not session_id or not owner:
+            logger.error("No active session to publish.")
+            return False
+
+        logger.info(f"Publishing: session={session_id}, owner={owner}, message='{message}'")
+
+        self._event_bus.publish(PublishStarted(session_id=session_id))
+        self._notification_service.notify("Publishing changes...", "info")
+
+        try:
+            # Step 1: Synchronize
+            self._event_bus.publish(SynchronizationStarted(session_id=session_id))
+            logger.info("Calling sync_provider.publish()...")
+            success = self._sync_provider.publish(message=message, user=owner)
+            logger.info(f"sync_provider.publish() returned {success}")
+            if not success:
+                self._event_bus.publish(SynchronizationFailed(session_id=session_id))
+                self._event_bus.publish(PublishFailed(session_id=session_id))
+                self._notification_service.notify("Publish failed.", "error")
+                return False
+            self._event_bus.publish(SynchronizationCompleted(session_id=session_id))
+
+            # Step 2: Increment version
+            old_version = self._version_manager.get_current_version()
+            new_version = self._version_manager.increment_version(
+                metadata={
+                    "session_id": session_id,
+                    "owner": owner,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            logger.info(f"Version incremented: {old_version} -> {new_version}")
+            self._event_bus.publish(VersionUpdated(
+                old_version=old_version,
+                new_version=new_version,
+                session_id=session_id,
+                user=owner,
+            ))
+
+            # Step 3: Release lock and switch to READ
+            lock_released = False
+            try:
+                logger.debug("Checking lock status before release...")
+                if self._lock_manager.is_locked():
+                    logger.debug(f"Lock is currently locked, releasing by owner={owner}")
+                    lock_released = self._lock_manager.release(owner)
+                    logger.debug(f"Lock release result: {lock_released}")
+                else:
+                    logger.info("Lock is not locked, skipping release.")
+                    lock_released = True
+            except Exception as e:
+                logger.exception(f"Exception while releasing lock: {e}")
+                lock_released = False
+
+            # Always end session and switch to READ mode
+            self._session_manager.end_session()
+            self._mode_manager.set_mode(CollaborationMode.READ)
+            logger.info("Session ended, mode switched to READ.")
+            self._event_bus.publish(ModeChanged(mode=CollaborationMode.READ))
+            # Step 4: Notify and events
+            self._event_bus.publish(PublishSucceeded(session_id=session_id, version=new_version))
+            if lock_released:
+                self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
+                logger.info(f"Publish succeeded with lock release. Version {new_version}")
+            else:
+                self._notification_service.notify(
+                    f"Publish succeeded but lock could not be released. Version {new_version}",
+                    "warning"
+                )
+                logger.warning(f"Publish succeeded but lock release failed. Version {new_version}")
+
+            return True
+
+        except Exception as e:
+            logger.exception("Publish workflow failed with exception")
+            self._event_bus.publish(SynchronizationFailed(session_id=session_id))
+            self._event_bus.publish(PublishFailed(session_id=session_id))
+            self._notification_service.notify(f"Publish error: {str(e)}", "error")
+            return False
 
 ================
 File: CenterManager/src/centermanager/repositories/attendance_repository.py
@@ -41729,6 +42037,10 @@ class AssessmentSection(QWidget):
             self._load_data()
         else:
             self._show_empty()
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Enable/disable write actions (Add button)."""
+        self.add_btn.setEnabled(enabled)
+        # Các nút Edit/Delete nằm trong dialog, không cần xử lý ở đây.
 
 ================
 File: CenterManager/src/centermanager/ui/assessment/rating_widget.py
@@ -45866,172 +46178,6 @@ print(f"\nSession ID: {session_obj.id}")
 print("Mở ứng dụng và đi đến Session Detail với ID này.")
 
 ================
-File: CenterManager/tests/test_collaboration.py
-================
-import pytest
-import json
-from pathlib import Path
-
-from centermanager.platform.collaboration import (
-    CollaborationManager,
-    ModeManager,
-    LockManager,
-    EditSessionManager,
-    CollaborationMode,
-)
-from centermanager.platform.collaboration.json_lock_repository import JsonLockRepository
-from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
-from centermanager.platform.collaboration.metadata_repository import MetadataRepository
-from centermanager.platform.collaboration.lock_repository import LockRepository
-from centermanager.events.event_bus import EventBus
-from centermanager.core.current_user import set_current_user
-from centermanager.models.user import User
-
-
-@pytest.fixture
-def temp_metadata(tmp_path):
-    return tmp_path / "metadata"
-
-
-@pytest.fixture
-def event_bus():
-    return EventBus()
-
-
-@pytest.fixture
-def metadata_repository(temp_metadata):
-    return JsonMetadataRepository(temp_metadata)
-
-
-@pytest.fixture
-def lock_repository(temp_metadata):
-    lock_file = temp_metadata / "lock.json"
-    return JsonLockRepository(lock_file)
-
-
-@pytest.fixture
-def collaboration_manager(temp_metadata, event_bus):
-    user = User(username="test_user", full_name="Test User")
-    set_current_user(user)
-    return CollaborationManager(temp_metadata, event_bus)
-
-
-def test_mode_manager():
-    mm = ModeManager()
-    assert mm.current_mode() == CollaborationMode.READ
-    mm.set_mode(CollaborationMode.WRITE)
-    assert mm.current_mode() == CollaborationMode.WRITE
-
-
-def test_lock_manager(lock_repository):
-    lm = LockManager(lock_repository)
-    assert not lm.is_locked()
-    assert lm.acquire("user1", "sess1") is True
-    assert lm.is_locked()
-    assert lm.get_owner() == "user1"
-    assert lm.acquire("user2", "sess2") is False
-    assert lm.release("user2") is False
-    assert lm.release("user1") is True
-    assert not lm.is_locked()
-
-
-def test_edit_session_manager():
-    esm = EditSessionManager()
-    assert not esm.is_active()
-    sid = esm.start_session("user1")
-    assert esm.is_active()
-    assert esm.get_owner() == "user1"
-    assert esm.get_session_id() == sid
-    esm.end_session()
-    assert not esm.is_active()
-
-
-def test_collaboration_manager_request_write(collaboration_manager):
-    cm = collaboration_manager
-    assert cm.current_mode() == CollaborationMode.READ
-    assert cm.request_write() is True
-    assert cm.current_mode() == CollaborationMode.WRITE
-    assert cm.get_session_info()['active'] is True
-
-
-def test_collaboration_manager_release_write(collaboration_manager):
-    cm = collaboration_manager
-    cm.request_write()
-    assert cm.current_mode() == CollaborationMode.WRITE
-    assert cm.release_write() is True
-    assert cm.current_mode() == CollaborationMode.READ
-    assert not cm.get_session_info()['active']
-
-
-def test_collaboration_manager_metadata_creation(temp_metadata, event_bus):
-    cm = CollaborationManager(temp_metadata, event_bus)
-    assert (temp_metadata / "lock.json").exists()
-    assert (temp_metadata / "version.json").exists()
-    assert (temp_metadata / "deployment.json").exists()
-    with open(temp_metadata / "lock.json") as f:
-        data = json.load(f)
-        assert data["locked"] is False
-        assert data["owner"] is None
-    with open(temp_metadata / "version.json") as f:
-        data = json.load(f)
-        assert data["platform_version"] == 1
-    with open(temp_metadata / "deployment.json") as f:
-        data = json.load(f)
-        assert data["profile"] == "Standalone"
-
-
-def test_collaboration_manager_get_version(collaboration_manager):
-    assert collaboration_manager.get_version() == 1
-
-
-def test_collaboration_manager_get_deployment_profile(collaboration_manager):
-    assert collaboration_manager.get_deployment_profile() == "Standalone"
-
-
-def test_collaboration_manager_ensure_write(collaboration_manager):
-    cm = collaboration_manager
-    assert cm.ensure_write() is False
-    cm.request_write()
-    assert cm.ensure_write() is True
-
-
-def test_metadata_repository(temp_metadata):
-    from centermanager.platform.collaboration import JsonMetadataRepository
-    repo = JsonMetadataRepository(temp_metadata)
-    # Lock
-    lock_data = repo.load_lock()
-    assert lock_data == {}
-    repo.save_lock({"locked": True})
-    loaded = repo.load_lock()
-    assert loaded["locked"] is True
-
-    # Version
-    version_data = repo.load_version()
-    assert version_data == {}
-    repo.save_version({"platform_version": 42})
-    loaded = repo.load_version()
-    assert loaded["platform_version"] == 42
-
-    # Deployment
-    deployment_data = repo.load_deployment()
-    assert deployment_data == {}
-    repo.save_deployment({"profile": "Test"})
-    loaded = repo.load_deployment()
-    assert loaded["profile"] == "Test"
-
-
-def test_lock_repository(temp_metadata):
-    from centermanager.platform.collaboration import JsonLockRepository
-    lock_file = temp_metadata / "lock.json"
-    repo = JsonLockRepository(lock_file)
-    lock = repo.get_lock()
-    assert lock["locked"] is False
-    repo.save_lock({"locked": True, "owner": "test"})
-    loaded = repo.get_lock()
-    assert loaded["locked"] is True
-    assert loaded["owner"] == "test"
-
-================
 File: CenterManager/tests/test_config.py
 ================
 # -*- coding: utf-8 -*-
@@ -47321,51 +47467,6 @@ def test_format_date_for_display():
 def test_format_age_for_display():
     assert format_age_for_display(10) == "10"
     assert format_age_for_display(None) == "-"
-
-================
-File: CenterManager/.gitignore
-================
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-*.spec
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Runtime generated (logs, DB - keep placeholders if needed)
-runtime/Logs/
-runtime/Database/*.db
-runtime/Database/*.db-journal
-runtime/Export/
-runtime/Attachment/
-runtime/Backup/
-
-# OS
-.DS_Store
-Thumbs.db
 
 ================
 File: CenterManager/alembic.ini
@@ -64508,6 +64609,23 @@ will the next Student Profile functionality be designed.
 # END OF SPRINT 0.4 CONTRACT
 
 ================
+File: CenterManager/runtime/Config/auto_report_state.json
+================
+{
+    "last_run_date": "2026-08-06"
+}
+
+================
+File: CenterManager/runtime/metadata/lock.json
+================
+{
+  "locked": false,
+  "owner": null,
+  "session_id": null,
+  "started_at": null
+}
+
+================
 File: CenterManager/src/centermanager/core/permissions.py
 ================
 # -*- coding: utf-8 -*-
@@ -64957,6 +65075,180 @@ class User(Base, TimestampMixin):
         if self.login_attempts >= max_attempts:
             from datetime import timedelta
             self.locked_until = datetime.now() + timedelta(minutes=lock_duration_minutes)
+
+================
+File: CenterManager/src/centermanager/platform/collaboration/collaboration_manager.py
+================
+# -*- coding: utf-8 -*-
+from pathlib import Path
+from typing import Optional
+
+from centermanager.events.event_bus import EventBus
+from .mode_manager import ModeManager, CollaborationMode
+from .lock_manager import LockManager
+from .edit_session_manager import EditSessionManager
+from .metadata_repository import MetadataRepository
+from .json_metadata_repository import JsonMetadataRepository
+from .lock_repository import LockRepository
+from .json_lock_repository import JsonLockRepository
+from .metadata_initializer import MetadataInitializer
+from .write_workflow import WriteWorkflow
+from .release_workflow import ReleaseWorkflow
+from .identity_provider import IdentityProvider
+from .default_identity_provider import DefaultIdentityProvider
+
+# Import synchronization and workflow
+from centermanager.platform.synchronization import SynchronizationProvider
+from centermanager.platform.workflow.publish_workflow import PublishWorkflow
+from centermanager.platform.version.version_manager import VersionManager
+from centermanager.platform.notification import NotificationService
+
+
+class CollaborationManager:
+    def __init__(
+        self,
+        metadata_dir: Path,
+        event_bus: EventBus,
+        identity_provider: Optional[IdentityProvider] = None,
+        metadata_repository: Optional[MetadataRepository] = None,
+        lock_repository: Optional[LockRepository] = None,
+        sync_provider: Optional[SynchronizationProvider] = None,
+        version_manager: Optional[VersionManager] = None,
+        notification_service: Optional[NotificationService] = None,
+    ):
+        self._metadata_dir = metadata_dir
+        self._event_bus = event_bus
+
+        # Setup repositories
+        if metadata_repository is None:
+            metadata_repository = JsonMetadataRepository(metadata_dir)
+        self._metadata_repository = metadata_repository
+
+        if lock_repository is None:
+            lock_file = metadata_dir / "lock.json"
+            lock_repository = JsonLockRepository(lock_file)
+        self._lock_repository = lock_repository
+
+        # Initialize metadata
+        initializer = MetadataInitializer(self._metadata_repository)
+        initializer.ensure_initialized()
+
+        # Setup managers
+        self._mode_manager = ModeManager()
+        self._lock_manager = LockManager(self._lock_repository)
+        self._session_manager = EditSessionManager()
+
+        # Identity provider
+        if identity_provider is None:
+            identity_provider = DefaultIdentityProvider()
+        self._identity_provider = identity_provider
+
+        # Synchronization provider (optional)
+        self._sync_provider = sync_provider
+
+        # Version manager (optional, will use metadata repo if not provided)
+        if version_manager is None:
+            from centermanager.platform.version.version_manager import VersionManager as VM
+            version_manager = VM(self._metadata_repository, event_bus)
+        self._version_manager = version_manager
+
+        # Notification service (optional)
+        if notification_service is None:
+            notification_service = NotificationService()
+        self._notification_service = notification_service
+
+        # Workflows
+        self._write_workflow = WriteWorkflow(
+            self._lock_manager,
+            self._session_manager,
+            self._mode_manager,
+            self._identity_provider,
+            self._event_bus,
+        )
+        self._release_workflow = ReleaseWorkflow(
+            self._lock_manager,
+            self._session_manager,
+            self._mode_manager,
+            self._identity_provider,
+            self._event_bus,
+        )
+        self._publish_workflow = PublishWorkflow(
+            lock_manager=self._lock_manager,
+            mode_manager=self._mode_manager,
+            session_manager=self._session_manager,
+            sync_provider=self._sync_provider,
+            version_manager=self._version_manager,
+            event_bus=self._event_bus,
+            notification_service=self._notification_service,
+        )
+
+    def current_mode(self) -> CollaborationMode:
+        return self._mode_manager.current_mode()
+
+    def request_write(self) -> bool:
+        # If we have sync provider, fetch/pull before acquiring lock
+        if self._sync_provider:
+            self._sync_provider.fetch()
+            if not self._sync_provider.pull():
+                return False
+        return self._write_workflow.execute()
+
+    def release_write(self) -> bool:
+        return self._release_workflow.execute()
+
+    def publish(self, message: str = "Publish") -> bool:
+        """Publish changes (commit + push) and switch to READ.
+        
+        Args:
+            message: Commit message for the publish.
+        """
+        if not self._sync_provider:
+            return False
+        return self._publish_workflow.execute(message=message)
+
+    def get_version(self) -> int:
+        version_data = self._metadata_repository.load_version()
+        return version_data.get("platform_version", 1)
+
+    def get_deployment_profile(self) -> str:
+        deployment_data = self._metadata_repository.load_deployment()
+        return deployment_data.get("profile", "Standalone")
+
+    def get_session_info(self) -> dict:
+        return {
+            "session_id": self._session_manager.get_session_id(),
+            "owner": self._session_manager.get_owner(),
+            "active": self._session_manager.is_active(),
+        }
+
+    def ensure_write(self) -> bool:
+        return self.current_mode() == CollaborationMode.WRITE
+
+    def synchronization_status(self) -> dict:
+        """Return synchronization status if provider exists."""
+        if self._sync_provider:
+            return self._sync_provider.status()
+        return {"state": "disabled"}
+
+================
+File: CenterManager/src/centermanager/platform/__init__.py
+================
+from .collaboration import CollaborationManager, CollaborationMode, ModeManager, LockManager, EditSessionManager
+from .notification import NotificationService
+from .synchronization import SynchronizationProvider, GitSynchronizationProvider
+from .workflow import PublishWorkflow
+
+__all__ = [
+    "CollaborationManager",
+    "CollaborationMode",
+    "ModeManager",
+    "LockManager",
+    "EditSessionManager",
+    "NotificationService",
+    "SynchronizationProvider",
+    "GitSynchronizationProvider",
+    "PublishWorkflow",
+]
 
 ================
 File: CenterManager/src/centermanager/repositories/assessment_repository.py
@@ -71070,6 +71362,172 @@ class WorkspaceHeader(QWidget):
         self.context_label.setText(f"{workspace_name} / {page_label}")
 
 ================
+File: CenterManager/tests/test_collaboration.py
+================
+import pytest
+import json
+from pathlib import Path
+
+from centermanager.platform.collaboration import (
+    CollaborationManager,
+    ModeManager,
+    LockManager,
+    EditSessionManager,
+    CollaborationMode,
+)
+from centermanager.platform.collaboration.json_lock_repository import JsonLockRepository
+from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
+from centermanager.platform.collaboration.metadata_repository import MetadataRepository
+from centermanager.platform.collaboration.lock_repository import LockRepository
+from centermanager.events.event_bus import EventBus
+from centermanager.core.current_user import set_current_user
+from centermanager.models.user import User
+
+
+@pytest.fixture
+def temp_metadata(tmp_path):
+    return tmp_path / "metadata"
+
+
+@pytest.fixture
+def event_bus():
+    return EventBus()
+
+
+@pytest.fixture
+def metadata_repository(temp_metadata):
+    return JsonMetadataRepository(temp_metadata)
+
+
+@pytest.fixture
+def lock_repository(temp_metadata):
+    lock_file = temp_metadata / "lock.json"
+    return JsonLockRepository(lock_file)
+
+
+@pytest.fixture
+def collaboration_manager(temp_metadata, event_bus):
+    user = User(username="test_user", full_name="Test User")
+    set_current_user(user)
+    return CollaborationManager(temp_metadata, event_bus)
+
+
+def test_mode_manager():
+    mm = ModeManager()
+    assert mm.current_mode() == CollaborationMode.READ
+    mm.set_mode(CollaborationMode.WRITE)
+    assert mm.current_mode() == CollaborationMode.WRITE
+
+
+def test_lock_manager(lock_repository):
+    lm = LockManager(lock_repository)
+    assert not lm.is_locked()
+    assert lm.acquire("user1", "sess1") is True
+    assert lm.is_locked()
+    assert lm.get_owner() == "user1"
+    assert lm.acquire("user2", "sess2") is False
+    assert lm.release("user2") is False
+    assert lm.release("user1") is True
+    assert not lm.is_locked()
+
+
+def test_edit_session_manager():
+    esm = EditSessionManager()
+    assert not esm.is_active()
+    sid = esm.start_session("user1")
+    assert esm.is_active()
+    assert esm.get_owner() == "user1"
+    assert esm.get_session_id() == sid
+    esm.end_session()
+    assert not esm.is_active()
+
+
+def test_collaboration_manager_request_write(collaboration_manager):
+    cm = collaboration_manager
+    assert cm.current_mode() == CollaborationMode.READ
+    assert cm.request_write() is True
+    assert cm.current_mode() == CollaborationMode.WRITE
+    assert cm.get_session_info()['active'] is True
+
+
+def test_collaboration_manager_release_write(collaboration_manager):
+    cm = collaboration_manager
+    cm.request_write()
+    assert cm.current_mode() == CollaborationMode.WRITE
+    assert cm.release_write() is True
+    assert cm.current_mode() == CollaborationMode.READ
+    assert not cm.get_session_info()['active']
+
+
+def test_collaboration_manager_metadata_creation(temp_metadata, event_bus):
+    cm = CollaborationManager(temp_metadata, event_bus)
+    assert (temp_metadata / "lock.json").exists()
+    assert (temp_metadata / "version.json").exists()
+    assert (temp_metadata / "deployment.json").exists()
+    with open(temp_metadata / "lock.json") as f:
+        data = json.load(f)
+        assert data["locked"] is False
+        assert data["owner"] is None
+    with open(temp_metadata / "version.json") as f:
+        data = json.load(f)
+        assert data["platform_version"] == 1
+    with open(temp_metadata / "deployment.json") as f:
+        data = json.load(f)
+        assert data["profile"] == "Standalone"
+
+
+def test_collaboration_manager_get_version(collaboration_manager):
+    assert collaboration_manager.get_version() == 1
+
+
+def test_collaboration_manager_get_deployment_profile(collaboration_manager):
+    assert collaboration_manager.get_deployment_profile() == "Standalone"
+
+
+def test_collaboration_manager_ensure_write(collaboration_manager):
+    cm = collaboration_manager
+    assert cm.ensure_write() is False
+    cm.request_write()
+    assert cm.ensure_write() is True
+
+
+def test_metadata_repository(temp_metadata):
+    from centermanager.platform.collaboration import JsonMetadataRepository
+    repo = JsonMetadataRepository(temp_metadata)
+    # Lock
+    lock_data = repo.load_lock()
+    assert lock_data == {}
+    repo.save_lock({"locked": True})
+    loaded = repo.load_lock()
+    assert loaded["locked"] is True
+
+    # Version
+    version_data = repo.load_version()
+    assert version_data == {}
+    repo.save_version({"platform_version": 42})
+    loaded = repo.load_version()
+    assert loaded["platform_version"] == 42
+
+    # Deployment
+    deployment_data = repo.load_deployment()
+    assert deployment_data == {}
+    repo.save_deployment({"profile": "Test"})
+    loaded = repo.load_deployment()
+    assert loaded["profile"] == "Test"
+
+
+def test_lock_repository(temp_metadata):
+    from centermanager.platform.collaboration import JsonLockRepository
+    lock_file = temp_metadata / "lock.json"
+    repo = JsonLockRepository(lock_file)
+    lock = repo.get_lock()
+    assert lock["locked"] is False
+    repo.save_lock({"locked": True, "owner": "test"})
+    loaded = repo.get_lock()
+    assert loaded["locked"] is True
+    assert loaded["owner"] == "test"
+
+================
 File: CenterManager/tests/test_session_note_service.py
 ================
 # -*- coding: utf-8 -*-
@@ -71558,6 +72016,52 @@ def test_delete_highlight(services, session_obj, student_obj):
     with CurrentUserContext(admin):
         with pytest.raises(ValueError, match="not found"):
             hs.delete_highlight(created.id)
+
+================
+File: CenterManager/.gitignore
+================
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime generated (logs, DB - keep placeholders if needed)
+runtime/Logs/
+runtime/Database/*.db
+runtime/Database/*.db-journal
+runtime/Export/
+runtime/Attachment/
+runtime/Backup/
+
+# OS
+.DS_Store
+Thumbs.db
+CenterManager/runtime/
 
 ================
 File: CenterManager/docs/CHANGELOG.md
@@ -74152,6 +74656,13 @@ class QuickActionsWidget(QWidget):
         self.upload_doc_btn.clicked.connect(on_upload_doc)
         if on_export_pdf:
             self.export_pdf_btn.clicked.connect(on_export_pdf)
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.edit_btn.setEnabled(enabled)
+        self.add_parent_btn.setEnabled(enabled)
+        self.add_assessment_btn.setEnabled(enabled)
+        self.add_note_btn.setEnabled(enabled)
+        self.upload_doc_btn.setEnabled(enabled)
+        # export PDF luôn enabled vì là read-only
 
 ================
 File: CenterManager/src/centermanager/ui/student_workspace/student_financial_widget.py
@@ -79625,6 +80136,11 @@ Current status:
 
 5/8: đã xong clean up, tiếp theo sẽ làm engine build
 
+6/8: set up git thành công. quay lại GPT để review và làm tiếp
+
+B1. vào runtime/Config điền thông tin, token thì lên git hub -> mở setting(user) -> tạo token mới -> cấp quyền
+B2. tạo file read me và commit đầu tiên
+
 ================
 File: CenterManager/src/centermanager/ui/class_workspace/class_schedule_widget.py
 ================
@@ -82213,18 +82729,15 @@ class StudentDetailPage(QWidget):
 
     # ====== NEW: Collaboration method ======
     def set_write_enabled(self, enabled: bool) -> None:
-        # Quick actions buttons
-        self.quick_actions.edit_btn.setEnabled(enabled)
-        self.quick_actions.add_parent_btn.setEnabled(enabled)
-        self.quick_actions.add_assessment_btn.setEnabled(enabled)
-        self.quick_actions.add_note_btn.setEnabled(enabled)
-        self.quick_actions.upload_doc_btn.setEnabled(enabled)
-        # Export PDF is read-only, keep enabled
-        # Other buttons (in parents, assessment, notes, documents) will be enabled/disabled via their own signals? 
-        # We can also propagate to child widgets if they have set_write_enabled.
-        # For simplicity, we'll rely on the fact that buttons are created dynamically and we already disabled the main ones.
-        # However, the 'Add Parent' button inside empty state and the 'Add Parent' button in list are not covered.
-        # We will need to handle that by checking write mode when those buttons are clicked (already done in their slots).
+        """Propagate write mode to child widgets."""
+        self.quick_actions.set_write_enabled(enabled)
+        self.assessment_section.set_write_enabled(enabled)
+        # Các widget khác nếu có set_write_enabled
+        if hasattr(self.notes_widget, 'set_write_enabled'):
+            self.notes_widget.set_write_enabled(enabled)
+        if hasattr(self.documents_widget, 'set_write_enabled'):
+            self.documents_widget.set_write_enabled(enabled)
+        # Parents và timeline không có nút ghi, bỏ qua
 
 ================
 File: CenterManager/src/centermanager/ui/student_workspace/student_list_page.py
@@ -83411,13 +83924,15 @@ def main() -> int:
             log_dir=paths.logs_dir,
             app_name=config.get("application", {}).get("name", "CenterManager"),
             app_version=config.get("application", {}).get("version", "0.1.0"),
+            console_level="DEBUG",   # hoặc INFO để thấy ít hơn
+            file_level="DEBUG",
         )
         logger.info("[STARTUP-01] Config and logging initialized")
 
         logger.info(f"Configuration loaded: version {config.get('application', {}).get('version')}")
         logger.info(f"Runtime directories prepared at {paths.runtime_root}")
 
-        ensure_schema()
+        #ensure_schema()
         logger.info("[STARTUP-02] Schema migration completed")
 
         logger.info("[STARTUP-03] Creating QApplication...")
@@ -83554,34 +84069,6 @@ def main() -> int:
         # NEW: Collaboration and Notification
         # Load Git credentials from configuration (placeholder)
         # --- Git Synchronization ---
-        sync_provider = None
-        git_config = config.get("git", {})
-        if git_config:
-            repository_url = git_config.get("repository_url")
-            token = git_config.get("token")
-            if repository_url and token:
-                try:
-                    from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
-                    from centermanager.platform.synchronization.git.git_credentials import GitCredentials
-
-                    credentials = GitCredentials(
-                        repository_url=repository_url,
-                        branch=git_config.get("branch", "main"),
-                        token=token,
-                        username=git_config.get("username") or "CenterManager",
-                        email=git_config.get("email") or "cm@centermanager.local",
-                    )
-                    repo_path = paths.runtime_root / "repository"
-                    sync_provider = GitSynchronizationProvider(repo_path, credentials)
-                    logger.info("GitSynchronizationProvider initialized")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize GitSynchronizationProvider: {e}")
-                    sync_provider = None
-            else:
-                logger.warning("Git config missing repository_url or token. Git synchronization disabled.")
-        else:
-            logger.info("No git configuration found. Running in standalone mode.")
-        notification_service = collaboration_manager.get_notification_service()
         # Load git credentials from config
         config_data = get_config().raw
         git_creds = GitCredentials.from_config(config_data) if config_data else None
@@ -83589,10 +84076,26 @@ def main() -> int:
         # Initialize Git provider
         repo_path = paths.runtime_root / "repository"
         sync_provider = None
-        if git_creds and git_creds.repository_url:
-            sync_provider = GitSynchronizationProvider(repo_path, git_creds)
+        if git_creds and git_creds.repository_url and git_creds.token:
+            try:
+                sync_provider = GitSynchronizationProvider(repo_path, git_creds)
+                logger.info("Git synchronization initialized successfully.")
+            except Exception as e:
+                logger.exception(f"Failed to initialize Git synchronization: {e}")
+                sync_provider = None
+        else:
+            if not git_creds:
+                logger.warning("No git credentials found in config.")
+            elif not git_creds.repository_url:
+                logger.warning("Git repository_url is missing.")
+            elif not git_creds.token:
+                logger.warning("Git token is missing.")
+            sync_provider = None
 
-        # Pass sync_provider to collaboration_manager
+        # Tạo notification_service trước
+        notification_service = NotificationService()
+
+        # Tạo collaboration_manager với notification_service
         collaboration_manager = CollaborationManager(
             metadata_dir=paths.metadata_dir,
             event_bus=event_bus,
@@ -83601,7 +84104,7 @@ def main() -> int:
         )
         logger.info("[STARTUP-17] All services initialized")
 
-            # Tạo MainWindow
+        # Tạo MainWindow
         window = MainWindow(
             student_service=student_service,
             parent_service=parent_service,
@@ -83661,7 +84164,7 @@ File: CenterManager/src/centermanager/ui/main_window.py
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox
 from PySide6.QtCore import Qt
 
 from centermanager.ui.home import HomePage
@@ -83866,8 +84369,7 @@ class MainWindow(QMainWindow):
 
         # Set initial write buttons state
         self._update_write_buttons(CollaborationMode.READ)
-
-    # Add to _setup_collaboration_status_bar method
+        self._update_write_actions(CollaborationMode.READ)
 
     def _setup_collaboration_status_bar(self) -> None:
         status_bar = self.statusBar()
@@ -83940,13 +84442,32 @@ class MainWindow(QMainWindow):
         self.git_status_label.setText(f"Git: {state} ({branch} {commit})")
 
     def _on_publish(self) -> None:
-        message = f"Publish by {get_current_user().full_name} at {datetime.now().isoformat()}"
-        success = self._collaboration_manager.publish(message)
-        if success:
-            self._update_git_status()
-        else:
-            # Error handling already done in workflow
-            pass
+        if self._collaboration_manager.current_mode() != CollaborationMode.WRITE:
+            QMessageBox.warning(
+                self,
+                "Cannot Publish",
+                "You must be in WRITE mode to publish.\n\n"
+                "Click 'Request Write' first, then try again."
+            )
+            return
+
+        if not self._collaboration_manager._sync_provider:
+            QMessageBox.warning(self, "Publish", "Git synchronization is not configured.")
+            logger.warning("Publish attempted but sync_provider is None.")
+            return
+
+        try:
+            message = f"Publish by {get_current_user().full_name}"
+            success = self._collaboration_manager.publish(message)
+            if success:
+                QMessageBox.information(self, "Publish", "Publish successful.")
+                self._update_git_status()
+            else:
+                QMessageBox.warning(self, "Publish", "Publish failed. Please check logs for details.")
+                logger.error("Publish returned False.")
+        except Exception as e:
+            logger.exception("Publish error")
+            QMessageBox.critical(self, "Error", f"Publish error: {str(e)}")
 
     def _connect_collaboration_events(self) -> None:
         self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
@@ -83974,7 +84495,7 @@ class MainWindow(QMainWindow):
         is_write = (mode == CollaborationMode.WRITE)
         self.write_btn.setVisible(not is_write)
         self.release_btn.setVisible(is_write)
-        self.publish_btn.setVisible(is_write)  # Show Publish button only in WRITE
+        self.publish_btn.setVisible(is_write)
         if is_write:
             session_info = self._collaboration_manager.get_session_info()
             self.write_btn.setToolTip(f"Current session: {session_info.get('session_id')}")
@@ -83982,25 +84503,35 @@ class MainWindow(QMainWindow):
             self.write_btn.setToolTip("Request write access to edit data")
 
     def _on_request_write(self) -> None:
-        if self._collaboration_manager.request_write():
-            self._notification_service.notify("Write access granted", "success")
-        else:
-            self._notification_service.notify("Could not acquire write lock. Someone else is editing.", "warning")
+        try:
+            success = self._collaboration_manager.request_write()
+            if success:
+                QMessageBox.information(self, "Write Request", "Write access granted.")
+                self._on_mode_changed(ModeChanged(mode=CollaborationMode.WRITE))
+            else:
+                QMessageBox.warning(self, "Write Request", "Could not acquire write lock. Someone else is editing.")
+                logger.warning("Request write failed")
+        except Exception as e:
+            logger.exception("Error requesting write")
+            QMessageBox.critical(self, "Error", f"Request write error: {str(e)}")
 
     def _on_release_write(self) -> None:
-        if self._collaboration_manager.release_write():
-            self._notification_service.notify("Write access released", "info")
-        else:
-            self._notification_service.notify("Failed to release write lock", "error")
+        try:
+            success = self._collaboration_manager.release_write()
+            if success:
+                QMessageBox.information(self, "Release Write", "Write access released.")
+                self._on_mode_changed(ModeChanged(mode=CollaborationMode.READ))
+            else:
+                QMessageBox.warning(self, "Release Write", "Failed to release write lock.")
+        except Exception as e:
+            logger.exception("Error releasing write")
+            QMessageBox.critical(self, "Error", f"Release write error: {str(e)}")
 
     def _on_notification(self, message: str, severity: str) -> None:
-        # Show in status bar for a few seconds
         self.statusBar().showMessage(message, 3000)
 
     def _update_write_actions(self, mode: CollaborationMode) -> None:
-        """Enable/disable all write actions in the UI."""
         is_write = (mode == CollaborationMode.WRITE)
-        # Propagate to all workspace shells
         for i in range(self.central_stack.count()):
             widget = self.central_stack.widget(i)
             if hasattr(widget, 'set_write_enabled'):
@@ -84080,6 +84611,12 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_class(self, class_id: int) -> None:
         self._on_workspace_selected("class")
         self.class_workspace.show_class(class_id)
+
+    def closeEvent(self, event):
+        if self._collaboration_manager.current_mode() == CollaborationMode.WRITE:
+            logger.info("Releasing write lock on application close...")
+            self._collaboration_manager.release_write()
+        event.accept()
 
 
 

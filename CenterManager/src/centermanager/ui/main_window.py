@@ -280,7 +280,20 @@ class MainWindow(QMainWindow):
         self.git_status_label.setText(f"Git: {state} ({branch} {commit})")
 
     def _on_publish(self) -> None:
-        # Sử dụng QMessageBox cho thông báo
+        if self._collaboration_manager.current_mode() != CollaborationMode.WRITE:
+            QMessageBox.warning(
+                self,
+                "Cannot Publish",
+                "You must be in WRITE mode to publish.\n\n"
+                "Click 'Request Write' first, then try again."
+            )
+            return
+
+        if not self._collaboration_manager._sync_provider:
+            QMessageBox.warning(self, "Publish", "Git synchronization is not configured.")
+            logger.warning("Publish attempted but sync_provider is None.")
+            return
+
         try:
             message = f"Publish by {get_current_user().full_name}"
             success = self._collaboration_manager.publish(message)
@@ -288,10 +301,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Publish", "Publish successful.")
                 self._update_git_status()
             else:
-                QMessageBox.warning(self, "Publish", "Publish failed. Please check logs.")
+                QMessageBox.warning(self, "Publish", "Publish failed. Please check logs for details.")
+                logger.error("Publish returned False.")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Publish error: {str(e)}")
             logger.exception("Publish error")
+            QMessageBox.critical(self, "Error", f"Publish error: {str(e)}")
 
     def _connect_collaboration_events(self) -> None:
         self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
@@ -319,7 +333,7 @@ class MainWindow(QMainWindow):
         is_write = (mode == CollaborationMode.WRITE)
         self.write_btn.setVisible(not is_write)
         self.release_btn.setVisible(is_write)
-        self.publish_btn.setVisible(is_write)  # Show Publish button only in WRITE
+        self.publish_btn.setVisible(is_write)
         if is_write:
             session_info = self._collaboration_manager.get_session_info()
             self.write_btn.setToolTip(f"Current session: {session_info.get('session_id')}")
@@ -327,12 +341,10 @@ class MainWindow(QMainWindow):
             self.write_btn.setToolTip("Request write access to edit data")
 
     def _on_request_write(self) -> None:
-        # Dùng QMessageBox để hiển thị kết quả rõ ràng
         try:
             success = self._collaboration_manager.request_write()
             if success:
                 QMessageBox.information(self, "Write Request", "Write access granted.")
-                # Mode sẽ được cập nhật qua event, nhưng để đảm bảo, cập nhật luôn ở đây
                 self._on_mode_changed(ModeChanged(mode=CollaborationMode.WRITE))
             else:
                 QMessageBox.warning(self, "Write Request", "Could not acquire write lock. Someone else is editing.")
@@ -354,13 +366,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Release write error: {str(e)}")
 
     def _on_notification(self, message: str, severity: str) -> None:
-        # Show in status bar for a few seconds
         self.statusBar().showMessage(message, 3000)
 
     def _update_write_actions(self, mode: CollaborationMode) -> None:
-        """Enable/disable all write actions in the UI."""
         is_write = (mode == CollaborationMode.WRITE)
-        # Propagate to all workspace shells
         for i in range(self.central_stack.count()):
             widget = self.central_stack.widget(i)
             if hasattr(widget, 'set_write_enabled'):
@@ -440,3 +449,9 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_class(self, class_id: int) -> None:
         self._on_workspace_selected("class")
         self.class_workspace.show_class(class_id)
+
+    def closeEvent(self, event):
+        if self._collaboration_manager.current_mode() == CollaborationMode.WRITE:
+            logger.info("Releasing write lock on application close...")
+            self._collaboration_manager.release_write()
+        event.accept()
