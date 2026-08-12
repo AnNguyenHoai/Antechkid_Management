@@ -24,10 +24,9 @@ class ChangePasswordDialog(QDialog):
     def __init__(
         self,
         user: User,
-        permission_service: PermissionService,
-        parent: Optional[QWidget] = None
+        permission_service: PermissionService
     ) -> None:
-        super().__init__(parent)
+        super().__init__()
         self._user = user
         self._permission_service = permission_service
 
@@ -42,7 +41,6 @@ class ChangePasswordDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # Message
         msg = QLabel("You are required to change your password before continuing.")
         msg.setWordWrap(True)
         msg.setStyleSheet("font-size: 14px; color: #333;")
@@ -96,7 +94,6 @@ class ChangePasswordDialog(QDialog):
         new_password = self.new_password_edit.text()
         confirm = self.confirm_password_edit.text()
 
-        # Validate current password
         current_hash = hashlib.sha256(current.encode()).hexdigest()
         if self._user.password_hash != current_hash:
             self._show_error("Current password is incorrect.")
@@ -115,27 +112,22 @@ class ChangePasswordDialog(QDialog):
             return
 
         try:
-            # Sử dụng session mới để cập nhật user
             with self._permission_service._session_factory() as session:
-                # Gắn user vào session bằng merge
                 user = session.merge(self._user)
-                # Cập nhật password
                 new_hash = hashlib.sha256(new_password.encode()).hexdigest()
                 user.password_hash = new_hash
                 user.force_password_change = False
                 user.login_attempts = 0
                 user.locked_until = None
                 session.commit()
-                # Lấy lại user_id để reload sau
                 user_id = user.id
 
-            # Reload user từ DB để có đối tượng mới với session mới
-            user = self._permission_service.get_user(user_id)
-            if user is None:
+            updated_user = self._permission_service.get_user(user_id)
+            if updated_user is None:
                 raise Exception("User not found after password change.")
 
-            logger.info(f"Password changed for user {user.username}")
-            self.password_changed.emit(user)
+            logger.info(f"Password changed for user {updated_user.username}")
+            self.password_changed.emit(updated_user)
             self.accept()
 
         except Exception as e:

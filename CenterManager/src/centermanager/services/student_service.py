@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 StudentService - business logic for Student entity.
-Now integrated with TimelineService.
+Now with ReportPolicy integration.
 """
+import logging
 from datetime import date, datetime, timezone
 from typing import List, Optional, Any
+from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker, selectinload
 
+from centermanager.core.paths import get_paths
 from centermanager.models.student import Student
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.class_ import Class
@@ -20,6 +23,12 @@ from centermanager.services.exceptions import (
     StudentNotDeletedError,
 )
 from centermanager.services.timeline_service import TimelineService
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from centermanager.services.report_policy import ReportPolicy
+    from centermanager.services.report_service import ReportService
+
+logger = logging.getLogger(__name__)
 
 # Sentinel for "field not supplied"
 UNSET = object()
@@ -28,9 +37,17 @@ UNSET = object()
 class StudentService:
     """Application service for Student lifecycle operations."""
 
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        report_policy: Optional["ReportPolicy"] = None,
+        report_service: Optional["ReportService"] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._report_policy = report_policy
+        self._report_service = report_service
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -52,6 +69,25 @@ class StudentService:
         highest = repo.get_highest_hs_number()
         next_num = (highest or 0) + 1
         return f"HS{next_num:03d}"
+
+    def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
+        """Helper method to trigger report policy if available."""
+        logger.info(f"[TRIGGER] Called with event_type={event_type}, event_data={event_data}")
+        if self._report_policy and self._report_service:
+            triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
+            logger.info(f"[TRIGGER] triggers={triggers}")
+            for trigger in triggers:
+                try:
+                    self._report_service.generate_student_report(
+                        student_id,
+                        report_type="automatic",
+                        trigger_event=trigger,
+                        generated_by="system"
+                    )
+                except Exception as e:
+                    logger.exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
+        else:
+            logger.warning(f"[TRIGGER] report_policy or report_service is None (policy={self._report_policy}, service={self._report_service})")
 
     def create_student(
         self,
@@ -100,6 +136,7 @@ class StudentService:
                         metadata={"student_code": student.student_code},
                     )
 
+                # Không trigger report khi tạo mới (có thể không cần)
                 return student
             except Exception:
                 session.rollback()
@@ -130,6 +167,49 @@ class StudentService:
         with self._session_factory() as session:
             repo = StudentRepository(session)
             return repo.list_active()
+
+    def archive_student(self, student_id: int) -> None:
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            if student.deleted_at is not None:
+                raise StudentAlreadyDeletedError("Student already archived.")
+            student.status = "ARCHIVED"
+            session.commit()
+
+    def activate_student(self, student_id: int) -> None:
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            student.status = "ACTIVE"
+            session.commit()
+
+    def set_profile_image(self, student_id: int, image_path: Optional[Path]) -> None:
+        with self._session_factory() as session:
+            repo = StudentRepository(session)
+            student = repo.get_by_id(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            if image_path:
+                import shutil
+                student_code = student.student_code
+                target_dir = get_paths().attachment_dir / student_code
+                target_dir.mkdir(parents=True, exist_ok=True)
+                ext = image_path.suffix
+                dest = target_dir / f"profile{ext}"
+                shutil.copy2(image_path, dest)
+                student.profile_image_path = f"{student_code}/profile{ext}"
+            else:
+                if student.profile_image_path:
+                    old_path = get_paths().attachment_dir / student.profile_image_path
+                    if old_path.exists():
+                        old_path.unlink()
+                    student.profile_image_path = None
+            session.commit()
 
     def update_student(
         self,
@@ -202,7 +282,7 @@ class StudentService:
                 if old != new:
                     changes.append(f"enrollment_date: '{old}' -> '{new}'")
                 student.enrollment_date = enrollment_date
-                
+
             if notes is not UNSET:
                 new_val = self._normalize_text(notes)
                 old_val = student.notes or "(none)"
@@ -212,7 +292,10 @@ class StudentService:
 
             if not changes:
                 # Không có gì thay đổi
+                logger.info(f"[UPDATE] No changes for student {student_id}, skipping trigger.")
                 return student
+
+            logger.info(f"[UPDATE] Changes for student {student_id}: {changes}")
 
             try:
                 session.commit()
@@ -227,6 +310,10 @@ class StudentService:
                         description=description,
                         metadata={"changes": changes},
                     )
+
+                # Trigger report policy (only if significant changes)
+                self._trigger_report_policy(student.id, "student_updated", {"changes": changes})
+
                 return student
             except Exception:
                 session.rollback()
@@ -243,7 +330,6 @@ class StudentService:
             student.deleted_at = self._utc_now()
             try:
                 session.commit()
-                # Log timeline event
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
@@ -252,6 +338,7 @@ class StudentService:
                         description=f"{student.full_name} ({student.student_code}) was soft-deleted.",
                         metadata={"deleted": True},
                     )
+                # Không trigger report khi xóa
             except Exception:
                 session.rollback()
                 raise
@@ -275,9 +362,11 @@ class StudentService:
                         description=f"{student.full_name} ({student.student_code}) was restored.",
                         metadata={"restored": True},
                     )
+                # Không trigger report khi restore
             except Exception:
                 session.rollback()
                 raise
+
     def search_students(self, query: str) -> List[Student]:
         """Search active students by multiple fields."""
         with self._session_factory() as session:

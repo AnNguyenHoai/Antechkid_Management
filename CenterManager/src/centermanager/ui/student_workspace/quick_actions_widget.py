@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-QuickActionsWidget - quick action buttons for student detail.
-"""
 from typing import Optional, Callable
 
 from PySide6.QtCore import Qt, Signal
@@ -12,7 +9,8 @@ from centermanager.ui.design_system.components import PrimaryButton, SecondaryBu
 
 
 class QuickActionsWidget(QWidget):
-    export_pdf_clicked = Signal()  # NEW
+    export_pdf_clicked = Signal()
+    upload_photo_clicked = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -28,23 +26,26 @@ class QuickActionsWidget(QWidget):
         self.add_assessment_btn = SecondaryButton("📊 Add Assessment")
         self.add_note_btn = SecondaryButton("📝 Add Note")
         self.upload_doc_btn = SecondaryButton("📎 Upload Doc")
-        self.export_pdf_btn = SecondaryButton("📄 Export PDF")  # NEW
+        self.upload_photo_btn = SecondaryButton("📷 Photo")
+        self.export_pdf_btn = SecondaryButton("📄 Export PDF")
 
         for btn in [self.edit_btn, self.add_parent_btn, self.add_assessment_btn,
-                    self.add_note_btn, self.upload_doc_btn, self.export_pdf_btn]:
+                    self.add_note_btn, self.upload_doc_btn, self.upload_photo_btn,
+                    self.export_pdf_btn]:
             btn.setFixedHeight(34)
-            btn.setMinimumWidth(120)
+            btn.setMinimumWidth(100)
 
         layout.addWidget(self.edit_btn)
         layout.addWidget(self.add_parent_btn)
         layout.addWidget(self.add_assessment_btn)
         layout.addWidget(self.add_note_btn)
         layout.addWidget(self.upload_doc_btn)
-        layout.addWidget(self.export_pdf_btn)  # NEW
+        layout.addWidget(self.upload_photo_btn)
+        layout.addWidget(self.export_pdf_btn)
         layout.addStretch()
 
-        # Connect new button
         self.export_pdf_btn.clicked.connect(self.export_pdf_clicked.emit)
+        self.upload_photo_btn.clicked.connect(self.upload_photo_clicked.emit)
 
     def set_actions(
         self,
@@ -53,7 +54,8 @@ class QuickActionsWidget(QWidget):
         on_add_assessment: Callable,
         on_add_note: Callable,
         on_upload_doc: Callable,
-        on_export_pdf: Optional[Callable] = None,  # NEW
+        on_export_pdf: Optional[Callable] = None,
+        on_upload_photo: Optional[Callable] = None,
     ) -> None:
         self.edit_btn.clicked.connect(on_edit)
         self.add_parent_btn.clicked.connect(on_add_parent)
@@ -62,10 +64,14 @@ class QuickActionsWidget(QWidget):
         self.upload_doc_btn.clicked.connect(on_upload_doc)
         if on_export_pdf:
             self.export_pdf_btn.clicked.connect(on_export_pdf)
+        if on_upload_photo:
+            self.upload_photo_btn.clicked.connect(on_upload_photo)
+
     def set_write_enabled(self, enabled: bool) -> None:
         self.edit_btn.setEnabled(enabled)
         self.add_parent_btn.setEnabled(enabled)
         self.add_assessment_btn.setEnabled(enabled)
         self.add_note_btn.setEnabled(enabled)
         self.upload_doc_btn.setEnabled(enabled)
-        # export PDF luôn enabled vì là read-only
+        self.upload_photo_btn.setEnabled(enabled)
+        # export PDF luôn enabled

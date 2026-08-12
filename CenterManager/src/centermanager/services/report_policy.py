@@ -36,6 +36,7 @@ class ReportPolicy:
         Check if any report should be generated based on event.
         Returns list of trigger events that should generate a report.
         """
+        logger.info(f"[POLICY] check_and_trigger called with event_type={event_type}, event_data={event_data}")
         triggers = []
 
         if event_type in ("attendance_updated", "session_completed"):
@@ -47,6 +48,15 @@ class ReportPolicy:
                 if not self._report_service.report_exists(student_id, "progress_100"):
                     triggers.append("progress_100")
 
+        elif event_type == "student_updated":
+            changes = event_data.get("changes", []) if event_data else []
+            if changes:
+                logger.info(f"[POLICY] student_updated with changes: {changes}, adding trigger")
+                triggers.append("student_updated")
+            else:
+                logger.info(f"[POLICY] student_updated but no changes, skipping trigger")
+
+        logger.info(f"[POLICY] Returning triggers: {triggers}")
         return triggers
 
     def _get_course_progress(self, student_id: int) -> float:

@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-DocumentsWidget - display and manage student documents.
-"""
 import os
 import sys
 import subprocess
@@ -205,6 +202,9 @@ class DocumentsWidget(QWidget):
                 self.document_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.upload_btn.setEnabled(enabled)
 
 
 class UploadDocumentDialog(QDialog):

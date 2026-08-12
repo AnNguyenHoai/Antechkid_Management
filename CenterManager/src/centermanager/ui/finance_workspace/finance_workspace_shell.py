@@ -13,8 +13,6 @@ from centermanager.ui.finance_workspace.finance_dashboard_page import FinanceDas
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
-from centermanager.platform.collaboration import CollaborationManager
-from centermanager.platform.notification import NotificationService
 
 
 class FinanceWorkspaceShell(QWidget):
@@ -28,8 +26,8 @@ class FinanceWorkspaceShell(QWidget):
         expense_service,
         dashboard_service,
         outstanding_service,
-        collaboration_manager: CollaborationManager,
-        notification_service: NotificationService,
+        platform_context=None,          # <-- THÊM
+        collaboration_manager=None,     # <-- THÊM
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -39,8 +37,8 @@ class FinanceWorkspaceShell(QWidget):
         self._expense_service = expense_service
         self._dashboard_service = dashboard_service
         self._outstanding_service = outstanding_service
+        self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
-        self._notification_service = notification_service
 
         self._setup_ui()
         self._connect_signals()
@@ -82,7 +80,7 @@ class FinanceWorkspaceShell(QWidget):
             self._student_service,
             self._class_service,
             self._collaboration_manager,
-            self._notification_service,
+            None,  # notification_service placeholder
         )
         self.content_stack.addWidget(self.income_page)
 
@@ -90,7 +88,7 @@ class FinanceWorkspaceShell(QWidget):
         self.expense_page = ExpenseListPage(
             self._expense_service,
             self._collaboration_manager,
-            self._notification_service,
+            None,  # notification_service placeholder
         )
         self.content_stack.addWidget(self.expense_page)
 
@@ -98,7 +96,7 @@ class FinanceWorkspaceShell(QWidget):
         self.outstanding_page = OutstandingListPage(
             self._outstanding_service,
             self._collaboration_manager,
-            self._notification_service,
+            None,  # notification_service placeholder
         )
         self.content_stack.addWidget(self.outstanding_page)
 

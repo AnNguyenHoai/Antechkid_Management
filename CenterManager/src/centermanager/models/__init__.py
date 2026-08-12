@@ -17,7 +17,7 @@ from centermanager.models.student_highlight import StudentHighlight, HighlightTy
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
 from centermanager.models.report import Report  # NEW
-
+from centermanager.models.report_cache import ReportCache
 # RBAC Models
 from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
@@ -78,4 +78,5 @@ __all__ = [
     "ExpenseTimelineEvent",
     "Attendance",
     "AttendanceStatus",
+    "ReportCache",
 ]

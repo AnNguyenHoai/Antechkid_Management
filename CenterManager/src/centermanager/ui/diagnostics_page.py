@@ -59,7 +59,10 @@ class DiagnosticsPage(QWidget):
         self._clear_container()
         try:
             diag = self._collaboration_manager.get_diagnostics()
-            health = self._collaboration_manager.get_health()
+            try:
+                health = self._collaboration_manager.get_health()
+            except AttributeError:
+                health = {"status": "UNKNOWN", "details": {"error": "get_health not implemented"}}
 
             self._add_section("Health Status", self._format_health(health))
             self._add_section("Collaboration Mode", self._format_mode(diag))
@@ -102,9 +105,17 @@ class DiagnosticsPage(QWidget):
         self.container_layout.addWidget(widget)
 
     def _format_health(self, health) -> str:
-        status = health.status.value if hasattr(health.status, 'value') else str(health.status)
-        emoji = "✅" if status == "HEALTHY" else "⚠️" if status == "WARNING" else "🚨"
-        return f"{emoji} Overall: {status}\nDetails: {health.details}"
+        """Format health status (supports both object and dict)."""
+        if isinstance(health, dict):
+            status = health.get("status", "UNKNOWN")
+            details = health.get("details", {})
+            emoji = "✅" if status == "HEALTHY" else "⚠️" if status == "WARNING" else "🚨"
+            return f"{emoji} Overall: {status}\nDetails: {details}"
+        else:
+            # Object with .status
+            status = health.status.value if hasattr(health.status, 'value') else str(health.status)
+            emoji = "✅" if status == "HEALTHY" else "⚠️" if status == "WARNING" else "🚨"
+            return f"{emoji} Overall: {status}\nDetails: {health.details}"
 
     def _format_mode(self, diag: dict) -> str:
         mode = diag.get("mode", "UNKNOWN")

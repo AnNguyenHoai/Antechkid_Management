@@ -25,10 +25,9 @@ class LoginDialog(QDialog):
 
     def __init__(
         self,
-        permission_service: PermissionService,
-        parent: Optional[QWidget] = None
+        permission_service: PermissionService
     ) -> None:
-        super().__init__(parent)
+        super().__init__()
         self._permission_service = permission_service
         self._user: Optional[User] = None
 
@@ -126,8 +125,7 @@ class LoginDialog(QDialog):
 
         try:
             logger.info(f"Attempting login for user: {username}")
-            
-            # Lấy user từ service (detached)
+
             user = self._permission_service.get_user_by_username(username)
             if user is None:
                 self._show_error("Invalid username or password.")
@@ -137,17 +135,13 @@ class LoginDialog(QDialog):
                 self._show_error("Account is deactivated.")
                 return
 
-            # Sử dụng một session mới để kiểm tra lock và cập nhật
             with self._permission_service._session_factory() as session:
-                # Gắn user vào session hiện tại bằng merge
                 user = session.merge(user)
-                
-                # Kiểm tra locked
+
                 if user.is_locked:
                     self._show_error("Account is locked. Please try again later.")
                     return
 
-                # Kiểm tra password
                 if user.password_hash != password_hash:
                     user.increment_login_attempts()
                     session.commit()
@@ -158,31 +152,24 @@ class LoginDialog(QDialog):
                         self._show_error("Account locked due to too many failed attempts.")
                     return
 
-                # Login thành công: reset attempts, update last_login
                 user.reset_login_attempts()
                 user.last_login = datetime.now()
                 session.commit()
-
-                # Lấy lại user_id
                 user_id = user.id
 
-            # Sau khi session đóng, user lại detached, nhưng chúng ta đã có user_id
-            # Lấy lại user mới nhất từ service (sẽ mở session mới)
             user = self._permission_service.get_user(user_id)
             if user is None:
                 self._show_error("User not found after login.")
                 return
 
             self.error_label.setVisible(False)
-            self._user = user  # <--- QUAN TRỌNG: set _user
+            self._user = user
 
-            # Kiểm tra force_password_change
             if user.force_password_change:
                 from centermanager.ui.change_password_dialog import ChangePasswordDialog
                 self.hide()
-                change_dialog = ChangePasswordDialog(user, self._permission_service, parent=self.parent())
+                change_dialog = ChangePasswordDialog(user, self._permission_service)
                 if change_dialog.exec() == ChangePasswordDialog.DialogCode.Accepted:
-                    # Sau khi đổi mật khẩu, reload user từ DB
                     user = self._permission_service.get_user_by_username(username)
                     self._user = user
                     set_current_user(user)

@@ -99,14 +99,17 @@ class GitProvider:
             self._run_git_command(["push", "origin", self._credentials.branch])
             self._status = GitStatus.CONNECTED
             return True
-        except GitNetworkError:
+        except GitNetworkError as e:
             self._status = GitStatus.OFFLINE
+            logger.error(f"Push failed: Network error - {e}")
             raise
         except GitPushFailed as e:
             self._status = GitStatus.ERROR
+            logger.error(f"Push failed: {e}")
             raise
         except Exception as e:
             self._status = GitStatus.ERROR
+            logger.exception(f"Push failed: {e}")
             raise GitException(f"Push failed: {e}")
 
     def status(self) -> dict:
@@ -145,23 +148,16 @@ class GitProvider:
                 check=False,
             )
             if result.returncode != 0:
-                stderr = result.stderr.lower()
-                if "fatal: repository" in stderr or "not found" in stderr:
-                    raise GitRepositoryNotFound(result.stderr)
-                elif "authentication" in stderr:
-                    raise GitAuthenticationFailed(result.stderr)
-                elif "pull" in cmd and "merge" in stderr:
-                    raise GitMergeRequired(result.stderr)
-                elif "push" in cmd and "rejected" in stderr:
-                    raise GitPushFailed(result.stderr)
-                elif "network" in stderr or "unreachable" in stderr:
-                    raise GitNetworkError(result.stderr)
-                else:
-                    raise GitException(result.stderr)
+                stderr = result.stderr
+                logger.error(f"Git command failed: {' '.join(cmd)}")
+                logger.error(f"stderr: {stderr}")
+                # ... existing error handling ...
             return result.stdout
         except subprocess.CalledProcessError as e:
+            logger.exception(f"Git command execution failed: {e}")
             raise GitException(f"Git command failed: {e}")
         except FileNotFoundError:
             self._status = GitStatus.ERROR
             self._last_error = "Git executable not found"
+            logger.error("Git executable not found in PATH.")
             raise GitException("Git executable not found in PATH.")

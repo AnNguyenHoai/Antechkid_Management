@@ -53,3 +53,13 @@ Current status:
 
 B1. vào runtime/Config điền thông tin, token thì lên git hub -> mở setting(user) -> tạo token mới -> cấp quyền
 B2. tạo file read me và commit đầu tiên
+
+
+6/8: đang kiểm tra và fix vài lỗi, quay lại thì check lỗi rồi fix tiếp
+
+10/8: Lỗi no key vẫn chưa xử lý được, tiếp đến cần làm việc với Deepseek để fix
+
+- Đã chạy được, đã hỏi deepseek về upload ảnh nhuwgn chưa copy vào, tiếp theo sẽ test key
+
+
+- Quay lại làm thì vô GPT để yêu cầu đưa sprint 12 để làm tiếp

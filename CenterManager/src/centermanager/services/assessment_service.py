@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 AssessmentService - business logic for Assessment entity.
+Now with ReportPolicy integration.
 """
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from sqlalchemy.orm import sessionmaker
 
@@ -11,6 +12,10 @@ from centermanager.models.assessment import Assessment, AssessmentType
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.services.timeline_service import TimelineService
+
+if TYPE_CHECKING:
+    from centermanager.services.report_policy import ReportPolicy
+    from centermanager.services.report_service import ReportService
 
 
 class AssessmentServiceError(Exception):
@@ -26,9 +31,17 @@ class AssessmentValidationError(AssessmentServiceError):
 
 
 class AssessmentService:
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        report_policy: Optional["ReportPolicy"] = None,
+        report_service: Optional["ReportService"] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._report_policy = report_policy
+        self._report_service = report_service
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -50,6 +63,22 @@ class AssessmentService:
         if not isinstance(score, int) or score < 0 or score > 5:
             raise AssessmentValidationError("Score must be between 0 and 5.")
         return score
+
+    def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
+        """Helper method to trigger report policy if available."""
+        if self._report_policy and self._report_service:
+            triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
+            for trigger in triggers:
+                try:
+                    self._report_service.generate_student_report(
+                        student_id,
+                        report_type="automatic",
+                        trigger_event=trigger,
+                        generated_by="system"
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
 
     def create_assessment(
         self,
@@ -104,6 +133,10 @@ class AssessmentService:
                     description=f"{norm_type} assessment{score_str} on {assessment_date.strftime('%d/%m/%Y')}",
                     metadata={"assessment_id": assessment.id},
                 )
+
+            # Trigger report policy
+            self._trigger_report_policy(student_id, "assessment_created", {"assessment_id": assessment.id})
+
             return assessment
 
     def get_assessment(self, assessment_id: int) -> Assessment:
@@ -214,6 +247,10 @@ class AssessmentService:
                     description=description,
                     metadata={"assessment_id": assessment.id, "changes": changes},
                 )
+
+            # Trigger report policy
+            self._trigger_report_policy(assessment.student_id, "assessment_updated", {"assessment_id": assessment.id})
+
             return assessment
 
     def delete_assessment(self, assessment_id: int) -> None:
@@ -234,14 +271,15 @@ class AssessmentService:
                     description=f"Assessment on {assessment.assessment_date.strftime('%d/%m/%Y')} was removed.",
                     metadata={"assessment_id": assessment_id},
                 )
+
+            # Không trigger report khi xóa
+
     def get_all_assessments_with_student(self) -> List[Assessment]:
-        """Get all assessments with student info loaded for UI display."""
         with self._session_factory() as session:
             repo = AssessmentRepository(session)
             return repo.get_all_with_student()
 
     def get_assessments_for_student_with_student(self, student_id: int) -> List[Assessment]:
-        """Get assessments for a student with student info loaded."""
         with self._session_factory() as session:
             repo = AssessmentRepository(session)
             return repo.get_by_student_with_student(student_id)

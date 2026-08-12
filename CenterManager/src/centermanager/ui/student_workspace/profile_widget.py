@@ -5,6 +5,7 @@ ProfileWidget - unified student profile display.
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout, QFrame, QSizePolicy
 )
@@ -12,7 +13,8 @@ from PySide6.QtWidgets import (
 from centermanager.models.student import Student
 from centermanager.ui.students.helpers import calculate_age, format_date_for_display
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.design_system.components import Avatar, StatusBadge
+from centermanager.ui.design_system.components import StatusBadge
+from centermanager.core.paths import get_paths
 
 
 class ProfileWidget(QWidget):
@@ -26,25 +28,36 @@ class ProfileWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['md'])
 
-        # Header
+        # Header with image
         header = QHBoxLayout()
         header.setSpacing(SPACING['lg'])
-        
-        self.avatar = Avatar("", size=56)
-        self.avatar.setFixedSize(56, 56)
-        header.addWidget(self.avatar)
+
+        # Image label instead of Avatar
+        self.image_label = QLabel()
+        self.image_label.setFixedSize(64, 64)
+        self.image_label.setStyleSheet("""
+            QLabel {
+                border: 1px solid #ddd;
+                border-radius: 32px;
+                background: #f0f0f0;
+            }
+        """)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setText("📷")
+        self.image_label.setScaledContents(True)
+        header.addWidget(self.image_label)
 
         info = QVBoxLayout()
         info.setSpacing(SPACING['xs'])
-        
+
         self.name_label = QLabel()
         self.name_label.setStyleSheet(f"""
             font-size: 22px;
             font-weight: 700;
             color: {COLORS['text_primary']};
-        """)  # Giảm từ 26px xuống 22px
+        """)
         info.addWidget(self.name_label)
-        
+
         code_status = QHBoxLayout()
         code_status.setSpacing(SPACING['sm'])
         self.code_label = QLabel()
@@ -52,14 +65,14 @@ class ProfileWidget(QWidget):
             font-size: 13px;
             color: {COLORS['text_muted']};
             font-weight: 500;
-        """)  # Giảm từ 14px xuống 13px
+        """)
         code_status.addWidget(self.code_label)
-        
+
         self.status_badge = StatusBadge("")
         code_status.addWidget(self.status_badge)
         code_status.addStretch()
         info.addLayout(code_status)
-        
+
         header.addLayout(info)
         header.addStretch()
         layout.addLayout(header)
@@ -71,7 +84,7 @@ class ProfileWidget(QWidget):
         line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
         layout.addWidget(line)
 
-        # Details grid - tăng spacing
+        # Details grid
         self.details_grid = QGridLayout()
         self.details_grid.setSpacing(SPACING['md'] + 4)
         self.details_grid.setContentsMargins(0, SPACING['sm'] + 4, 0, 0)
@@ -84,7 +97,9 @@ class ProfileWidget(QWidget):
         if not student:
             return
 
-        self.avatar.set_name(student.full_name)
+        # Set image
+        self._update_image(student)
+
         self.name_label.setText(student.full_name)
         self.code_label.setText(student.student_code)
         self.status_badge.set_status(student.status or "")
@@ -109,7 +124,7 @@ class ProfileWidget(QWidget):
                 color: {COLORS['text_muted']};
                 font-weight: 500;
                 letter-spacing: 0.2px;
-            """)  # Giảm từ 13px xuống 11px
+            """)
             self.details_grid.addWidget(lbl, row, col * 2, 1, 1)
 
             val = QLabel(value)
@@ -117,7 +132,7 @@ class ProfileWidget(QWidget):
                 font-size: 13px;
                 color: {COLORS['text_primary']};
                 font-weight: 500;
-            """)  # Giảm từ 15px xuống 13px
+            """)
             val.setWordWrap(True)
             self.details_grid.addWidget(val, row, col * 2 + 1, 1, 1)
 
@@ -128,12 +143,30 @@ class ProfileWidget(QWidget):
 
         self.details_grid.setRowStretch(row, 1)
 
+    def _update_image(self, student: Student) -> None:
+        """Load profile image if exists."""
+        if student.profile_image_path:
+            full_path = get_paths().attachment_dir / student.profile_image_path
+            if full_path.exists():
+                pixmap = QPixmap(str(full_path))
+                if not pixmap.isNull():
+                    self.image_label.setPixmap(pixmap.scaled(
+                        64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    ))
+                    self.image_label.setText("")
+                    return
+        # Fallback
+        self.image_label.setText("📷")
+        self.image_label.setPixmap(QPixmap())
+
     def clear(self) -> None:
         while self.details_grid.count():
             item = self.details_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self.avatar.set_name("")
+        self.image_label.setText("📷")
+        self.image_label.setPixmap(QPixmap())
         self.name_label.setText("")
         self.code_label.setText("")
         self.status_badge.set_status("")

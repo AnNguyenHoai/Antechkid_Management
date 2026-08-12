@@ -1,250 +1,382 @@
 # -*- coding: utf-8 -*-
-from pathlib import Path
-from typing import Optional
-
-from centermanager.events.event_bus import EventBus
-from .mode_manager import ModeManager, CollaborationMode
-from .lock_manager import LockManager
-from .edit_session_manager import EditSessionManager
-from .metadata_repository import MetadataRepository
-from .json_metadata_repository import JsonMetadataRepository
-from .lock_repository import LockRepository
-from .json_lock_repository import JsonLockRepository
-from .metadata_initializer import MetadataInitializer
-from .write_workflow import WriteWorkflow
-from .release_workflow import ReleaseWorkflow
-from .identity_provider import IdentityProvider
-from .default_identity_provider import DefaultIdentityProvider
-from .recovery_manager import RecoveryManager
-from .heartbeat import HeartbeatService, HeartbeatTimer
-
-from centermanager.platform.synchronization import SynchronizationProvider
-from centermanager.platform.workflow.publish_workflow import PublishWorkflow, PublicationTransaction
-from centermanager.platform.version.version_manager import VersionManager
-from centermanager.platform.notification import NotificationService
-from centermanager.platform.backup import BackupService
-from centermanager.platform.health import CollaborationHealthChecker
+"""CollaborationManager - Main collaboration coordination service."""
 
 import logging
+import uuid
+import threading
+from typing import Optional, Dict, Any
+from datetime import datetime
+from pathlib import Path
+
+from centermanager.core.paths import get_paths
+from centermanager.events.event_bus import EventBus
+
+from .runtime_session import RuntimeSession
+from .runtime_lock import RuntimeLock
+from .write_queue import WriteQueue, WriteRequest
+from .heartbeat import HeartbeatRepository, HeartbeatManager
+from .presence_manager import PresenceManager
+from .arbitration import Priority, Arbitration
+from .events import (
+    SessionStarted,
+    SessionEnded,
+    WriteRequested,
+    WriteGranted,
+    WriteReleased,
+    HeartbeatUpdated,
+    HeartbeatTimeout,
+    QueueUpdated,
+    LockReleased,
+    ModeChanged,
+)
+from .exceptions import (
+    CollaborationNotInitializedError,
+    LockAlreadyHeldError,
+    LockNotHeldError,
+    LockTimeoutError,
+)
+
 logger = logging.getLogger(__name__)
 
 
 class CollaborationManager:
+    """Main collaboration service."""
+    
     def __init__(
         self,
-        metadata_dir: Path,
-        event_bus: EventBus,
-        identity_provider: Optional[IdentityProvider] = None,
-        metadata_repository: Optional[MetadataRepository] = None,
-        lock_repository: Optional[LockRepository] = None,
-        sync_provider: Optional[SynchronizationProvider] = None,
-        version_manager: Optional[VersionManager] = None,
-        notification_service: Optional[NotificationService] = None,
-        lock_timeout_seconds: int = 60,
-        heartbeat_interval_seconds: int = 10,
-        app_version: str = "0.1.0",
+        runtime_root: Optional[Path] = None,
+        event_bus: Optional[EventBus] = None,
+        session: Optional[RuntimeSession] = None,
+        heartbeat_interval: int = 10,
+        lock_timeout: int = 60,
+        queue_dir_name: str = "queue",
+        heartbeat_dir_name: str = "heartbeat",
     ):
-        self._metadata_dir = metadata_dir
-        self._event_bus = event_bus
-        self._app_version = app_version
-        self._heartbeat_interval = heartbeat_interval_seconds
-
-        # Setup repositories
-        if metadata_repository is None:
-            metadata_repository = JsonMetadataRepository(metadata_dir)
-        self._metadata_repository = metadata_repository
-
-        if lock_repository is None:
-            lock_file = metadata_dir / "lock.json"
-            lock_repository = JsonLockRepository(lock_file)
-        self._lock_repository = lock_repository
-
-        # Initialize metadata
-        initializer = MetadataInitializer(self._metadata_repository)
-        initializer.ensure_initialized()
-
-        # Setup managers
-        self._mode_manager = ModeManager()
-        self._lock_manager = LockManager(self._lock_repository, timeout_seconds=lock_timeout_seconds)
-        self._session_manager = EditSessionManager()
-
-        # Identity provider
-        if identity_provider is None:
-            identity_provider = DefaultIdentityProvider()
-        self._identity_provider = identity_provider
-
-        # Synchronization provider (optional)
-        self._sync_provider = sync_provider
-
-        # Version manager (optional, will use metadata repo if not provided)
-        if version_manager is None:
-            from centermanager.platform.version.version_manager import VersionManager as VM
-            version_manager = VM(self._metadata_repository, event_bus)
-        self._version_manager = version_manager
-
-        # Notification service (optional)
-        if notification_service is None:
-            notification_service = NotificationService()
-        self._notification_service = notification_service
-
-        # Backup service
-        self._backup_service = BackupService(event_bus)
-
-        # Heartbeat
-        self._heartbeat_service = HeartbeatService(
-            lock_repository=self._lock_repository,
-            interval_seconds=heartbeat_interval_seconds,
-            app_version=app_version,
+        self._runtime_root = runtime_root or get_paths().runtime_root
+        self._collab_dir = self._runtime_root / "collaboration"
+        self._collab_dir.mkdir(parents=True, exist_ok=True)
+        
+        self._event_bus = event_bus or EventBus()
+        self._lock_timeout = lock_timeout
+        
+        # Components
+        self._lock = RuntimeLock(self._collab_dir / "lock.json")
+        self._queue = WriteQueue(self._collab_dir / queue_dir_name)
+        self._heartbeat_repo = HeartbeatRepository(self._collab_dir / heartbeat_dir_name)
+        
+        # Session
+        self._session: Optional[RuntimeSession] = session
+        self._heartbeat_manager: Optional[HeartbeatManager] = None
+        
+        # Presence
+        self._presence = PresenceManager(
+            heartbeat_repo=self._heartbeat_repo,
+            runtime_lock=self._lock,
+            write_queue=self._queue,
+            timeout_seconds=30,
         )
-        self._heartbeat_timer = HeartbeatTimer(
-            service=self._heartbeat_service,
-            interval_ms=heartbeat_interval_seconds * 1000,
+        
+        # State
+        self._initialized = False
+        self._is_writing = False
+        self._lock_acquired = False
+        
+        # Thread safety - use RLock to allow reentrant calls within same thread
+        self._state_mutex = threading.RLock()
+        
+        logger.info(f"CollaborationManager initialized at {self._collab_dir}")
+    
+    def initialize(self, user_id: str, username: str, role: str, runtime_version: int = 0) -> RuntimeSession:
+        """Initialize collaboration with a user session."""
+        if self._initialized:
+            logger.warning("Collaboration already initialized")
+            return self._session
+        
+        # Create session
+        self._session = RuntimeSession(
+            user_id=user_id,
+            username=username,
+            role=role,
+            runtime_version=runtime_version,
         )
-
-        # Recovery manager
-        self._recovery_manager = RecoveryManager(
-            lock_manager=self._lock_manager,
-            metadata_repository=self._metadata_repository,
-            event_bus=self._event_bus,
+        
+        # Start heartbeat
+        self._heartbeat_manager = HeartbeatManager(
+            repo=self._heartbeat_repo,
+            session=self._session,
+            interval_seconds=10,
+            callback=self._on_heartbeat,
         )
-        self._lock_manager._force_release()
-        # Health checker
-        self._health_checker = CollaborationHealthChecker(
-            lock_manager=self._lock_manager,
-            metadata_repository=self._metadata_repository,
-            version_manager=self._version_manager,
-            sync_provider=self._sync_provider,
-        )
-
-        # Workflows
-        self._write_workflow = WriteWorkflow(
-            self._lock_manager,
-            self._session_manager,
-            self._mode_manager,
-            self._identity_provider,
-            self._event_bus,
-        )
-        self._release_workflow = ReleaseWorkflow(
-            self._lock_manager,
-            self._session_manager,
-            self._mode_manager,
-            self._identity_provider,
-            self._event_bus,
-        )
-        self._publish_workflow = PublishWorkflow(
-            lock_manager=self._lock_manager,
-            mode_manager=self._mode_manager,
-            session_manager=self._session_manager,
-            sync_provider=self._sync_provider,
-            version_manager=self._version_manager,
-            event_bus=self._event_bus,
-            notification_service=self._notification_service,
-            backup_service=self._backup_service,
-        )
-
-        # Run recovery on startup
-        self._run_startup_recovery()
-
-    def _run_startup_recovery(self) -> None:
-        """Run recovery inspection and repair on startup."""
-        logger.info("CollaborationManager: running startup recovery")
-        report = self._recovery_manager.inspect_and_recover()
-        if report.get("recovered", False):
-            logger.info(f"Recovery performed: {report}")
-        else:
-            logger.info("No recovery needed")
-
-    def current_mode(self) -> CollaborationMode:
-        return self._mode_manager.current_mode()
-
-    def request_write(self) -> bool:
-        # ----- XỬ LÝ GIT (cho phép write dù có lỗi) -----
-        if self._sync_provider:
-            try:
-                if self._sync_provider.is_offline():
-                    self._notification_service.notify("Git repository offline. Write mode may not synchronize.", "warning")
-                    logger.warning("Git is offline, but allowing write anyway.")
-                else:
-                    if not self._sync_provider.fetch():
-                        self._notification_service.notify("Git fetch failed. Write mode may not synchronize.", "warning")
-                        logger.warning("Git fetch failed, but continuing.")
-                    if not self._sync_provider.pull():
-                        self._notification_service.notify("Git pull failed. Write mode may not synchronize.", "warning")
-                        logger.warning("Git pull failed, but continuing.")
-            except Exception as e:
-                logger.exception(f"Git sync error: {e}, but allowing write.")
-                self._notification_service.notify(f"Git error: {e}. Write mode may not synchronize.", "warning")
-
-        # FIX: Thực sự yêu cầu quyền ghi và trả về kết quả
-        return self._write_workflow.execute()
-
-    def release_write(self) -> bool:
+        self._heartbeat_manager.start()
+        
+        self._initialized = True
+        
+        # Publish event
+        self._event_bus.publish(SessionStarted(
+            session_id=self._session.session_id,
+            user_id=user_id,
+            username=username,
+            machine_fingerprint=self._session.machine_fingerprint,
+            runtime_version=runtime_version,
+        ))
+        
+        logger.info(f"Collaboration initialized for user {username} (session {self._session.session_id})")
+        return self._session
+    
+    def shutdown(self) -> None:
+        """Shutdown collaboration and release resources."""
+        if not self._initialized:
+            return
+        
+        # Release lock if held
+        if self._is_writing:
+            self._release_write_internal()
+        
         # Stop heartbeat
-        self._heartbeat_timer.stop()
-        self._heartbeat_service.stop()
-        return self._release_workflow.execute()
-
-    def publish(self, message: str = "Publish") -> bool:
-        """Publish changes (commit + push) and switch to READ."""
-        if not self._sync_provider:
+        if self._heartbeat_manager:
+            self._heartbeat_manager.stop()
+        
+        # Publish event
+        if self._session:
+            self._event_bus.publish(SessionEnded(
+                session_id=self._session.session_id,
+                reason="shutdown",
+            ))
+        
+        self._initialized = False
+        self._session = None
+        logger.info("Collaboration shutdown complete")
+    
+    def request_write(self, reason: str = "") -> bool:
+        """Request write access."""
+        self._ensure_initialized()
+        
+        if self._is_writing:
+            logger.debug("Already in write mode")
+            return True
+        
+        with self._state_mutex:
+            # Check if we already own the lock
+            if self._lock.is_locked() and self._lock.get_owner() == self._session.session_id:
+                self._is_writing = True
+                return True
+            
+            # Try to acquire lock
+            try:
+                acquired = self._lock.acquire(self._session, timeout_seconds=5)
+                if acquired:
+                    self._is_writing = True
+                    self._lock_acquired = True
+                    self._event_bus.publish(WriteGranted(
+                        session_id=self._session.session_id,
+                        user_id=self._session.user_id,
+                        username=self._session.username,
+                        request_id="",
+                        queue_position=0,
+                    ))
+                    self._event_bus.publish(ModeChanged(mode="WRITE"))
+                    logger.info(f"Write granted immediately to {self._session.username}")
+                    return True
+                    logger.info(f"Write granted immediately to {self._session.username}")
+                    return True
+            except LockTimeoutError:
+                pass
+            except Exception as e:
+                logger.error(f"Lock acquisition error: {e}")
+            
+            # Enqueue request
+            request = WriteRequest(
+                request_id=str(uuid.uuid4()),
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+                role=self._session.role,
+                priority=Priority.from_role(self._session.role),
+                timestamp=datetime.now(),
+                reason=reason,
+            )
+            self._queue.enqueue(request)
+            queue_position = self._queue.count()
+            
+            self._event_bus.publish(WriteRequested(
+                request_id=request.request_id,
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+                priority=request.priority,
+                reason=reason,
+                queue_position=queue_position,
+            ))
+            self._event_bus.publish(QueueUpdated(
+                queue_length=queue_position,
+                next_writer=self._queue.peek().username if self._queue.peek() else None,
+            ))
+            
+            logger.info(f"Write request queued for {self._session.username} (position {queue_position})")
             return False
-        return self._publish_workflow.execute(message=message)
-
-    def get_version(self) -> int:
-        version_data = self._metadata_repository.load_version()
-        return version_data.get("platform_version", 1)
-
-    def get_deployment_profile(self) -> str:
-        deployment_data = self._metadata_repository.load_deployment()
-        return deployment_data.get("profile", "Standalone")
-
-    def get_session_info(self) -> dict:
+    
+    def release_write(self) -> bool:
+        """Release write access."""
+        self._ensure_initialized()
+        
+        if not self._is_writing:
+            logger.warning("Not in write mode")
+            return False
+        
+        # Release lock within mutex
+        with self._state_mutex:
+            result = self._release_write_internal()
+        
+        # Process queue outside mutex to avoid deadlock
+        if result:
+            self._process_queue()
+        
+        return result
+    
+    def _release_write_internal(self) -> bool:
+        """Internal method to release write access."""
+        try:
+            self._lock.release(self._session)
+            self._is_writing = False
+            self._lock_acquired = False
+            
+            self._event_bus.publish(WriteReleased(
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+            ))
+            self._event_bus.publish(LockReleased(
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+            ))
+            self._event_bus.publish(ModeChanged(mode="READ"))            
+            logger.info(f"Write released by {self._session.username}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to release write: {e}")
+            return False
+    
+    def _process_queue(self) -> None:
+        """Process the next request in queue."""
+        # Check if queue has pending requests
+        request = self._queue.peek()
+        if not request:
+            logger.debug("Queue is empty")
+            return
+        
+        # Check if the request is still valid (session online)
+        if self._heartbeat_repo.is_expired(request.session_id):
+            logger.warning(f"Removing expired request from {request.username}")
+            self._queue.cancel(request.request_id)
+            self._process_queue()  # Recursive call, but safe as we're not holding mutex
+            return
+        
+        # Notify about next writer (no auto-grant)
+        logger.info(f"Processing queue: next up is {request.username}")
+        self._event_bus.publish(QueueUpdated(
+            queue_length=self._queue.count(),
+            next_writer=request.username,
+        ))
+    
+    def heartbeat(self) -> bool:
+        """Update heartbeat for current session."""
+        self._ensure_initialized()
+        if self._heartbeat_manager:
+            self._heartbeat_manager.update()
+            self._event_bus.publish(HeartbeatUpdated(
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+            ))
+            return True
+        return False
+    
+    def get_presence(self) -> Dict[str, Any]:
+        """Get presence summary."""
+        self._ensure_initialized()
+        return self._presence.get_summary()
+    
+    def get_queue(self) -> Dict[str, Any]:
+        """Get queue status."""
+        self._ensure_initialized()
         return {
-            "session_id": self._session_manager.get_session_id(),
-            "owner": self._session_manager.get_owner(),
-            "active": self._session_manager.is_active(),
+            "length": self._queue.count(),
+            "requests": [r.to_dict() for r in self._queue.get_requests()],
+            "next": self._queue.peek().to_dict() if self._queue.peek() else None,
         }
+    
+    def get_session(self) -> Optional[RuntimeSession]:
+        return self._session
+    
+    def is_initialized(self) -> bool:
+        return self._initialized
+    
+    def is_writing(self) -> bool:
+        return self._is_writing
+    
+    def _on_heartbeat(self, session: RuntimeSession) -> None:
+        """Callback when heartbeat is updated."""
+        self._heartbeat_repo.update(session)
+    
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            raise CollaborationNotInitializedError("Collaboration not initialized. Call initialize() first.")
+    
+    def _check_session(self) -> None:
+        if not self._session:
+            raise CollaborationNotInitializedError("No session available")
+    def get_queue_length(self) -> int:
+        """Get number of pending requests in queue."""
+        return self._queue.count()
 
+    def has_writer(self) -> bool:
+        """Check if there is an active writer."""
+        return self._is_writing or self._lock.is_locked()
     def ensure_write(self) -> bool:
-        return self.current_mode() == CollaborationMode.WRITE
+        """Ensure write mode is active. Returns True if in write mode."""
+        self._ensure_initialized()
+        return self._is_writing
 
-    def synchronization_status(self) -> dict:
-        """Return synchronization status if provider exists."""
-        if self._sync_provider:
-            return self._sync_provider.status()
-        return {"state": "disabled"}
-
-    def get_health(self):
-        """Get collaboration health status."""
-        return self._health_checker.check_all()
-
-    def get_recovery_report(self):
-        """Get last recovery report."""
-        # We could store the last report, but for simplicity, run a new inspection
-        return self._recovery_manager.inspect_and_recover()
-
-    def get_diagnostics(self) -> dict:
-        """Get full diagnostics for collaboration status."""
-        lock = self._lock_repository.get_lock()
-        version_data = self._metadata_repository.load_version()
-        deployment_data = self._metadata_repository.load_deployment()
-        sync_status = self._sync_provider.status() if self._sync_provider else {"state": "disabled"}
-
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Get collaboration diagnostics for UI."""
+        self._ensure_initialized()
+        lock_info = self._lock.get_lock_info() if hasattr(self._lock, 'get_lock_info') else {}
         return {
-            "mode": self._mode_manager.current_mode().value if self._mode_manager.current_mode() else "UNKNOWN",
-            "user": self._identity_provider.current_user_id(),
-            "platform_version": version_data.get("platform_version", 0),
-            "deployment_profile": deployment_data.get("profile", "Standalone"),
+            "mode": "WRITE" if self._is_writing else "READ",
+            "user": self._session.username if self._session else None,
+            "session_id": self._session.session_id if self._session else None,
             "lock": {
-                "locked": lock.get("locked", False),
-                "owner": lock.get("owner"),
-                "session_id": lock.get("session_id"),
-                "started_at": lock.get("started_at"),
-                "last_heartbeat": lock.get("last_heartbeat"),
-                "heartbeat_version": lock.get("heartbeat_version"),
-                "is_stale": self._lock_manager.is_stale(),
+                "locked": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
+                "owner": self._lock.get_owner() if hasattr(self._lock, 'get_owner') else None,
+                "session_id": lock_info.get("session_id"),
+                "started_at": lock_info.get("acquired_at"),
+                "last_heartbeat": lock_info.get("last_heartbeat"),
+                "is_stale": False,
             },
-            "session": self.get_session_info(),
-            "git": sync_status,
-            "heartbeat": self._heartbeat_service.get_status(),
+            "session": {
+                "active": self._is_writing,
+                "owner": self._session.username if self._session else None,
+                "session_id": self._session.session_id if self._session else None,
+            },
+            "git": {"state": "disabled"},
+            "heartbeat": {
+                "is_running": self._heartbeat_manager is not None,
+                "heartbeat_count": 0,
+                "last_heartbeat": None,
+                "owner": self._session.username if self._session else None,
+            },
+            "platform_version": 0,
+            "deployment_profile": "standalone",
+        }
+    def get_health(self) -> Dict[str, Any]:
+        """Get collaboration health status."""
+        self._ensure_initialized()
+        return {
+            "status": "HEALTHY",
+            "details": {
+                "mode": "WRITE" if self._is_writing else "READ",
+                "session": self._session.session_id if self._session else None,
+                "lock": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
+            }
         }

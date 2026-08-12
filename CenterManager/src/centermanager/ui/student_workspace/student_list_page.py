@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """StudentListPage - Enterprise data management screen."""
+
 import logging
 from typing import Optional, List, Dict, Any
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QMessageBox, QMenu, QSizePolicy
@@ -27,14 +28,15 @@ from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
 from centermanager.ui.students.student_import_dialog import StudentImportDialog
 
-# NEW imports for collaboration
+from centermanager.platform.context import PlatformContext
 from centermanager.platform.collaboration import CollaborationManager
-from centermanager.platform.notification import NotificationService
+from centermanager.platform.business import WriteGuard, PermissionGuard
+from centermanager.ui.workspace_base import WorkspaceBase
 
 logger = logging.getLogger(__name__)
 
 
-class StudentListPage(QWidget):
+class StudentListPage(WorkspaceBase):
     student_selected = Signal(int)
     data_updated = Signal()
     filter_clicked = Signal()
@@ -47,19 +49,24 @@ class StudentListPage(QWidget):
         filter_service: StudentFilterService,
         import_service: StudentImportService,
         export_service: StudentExportService,
+        platform_context: PlatformContext,
         collaboration_manager: CollaborationManager,
-        notification_service: NotificationService,
-        parent: Optional[QWidget] = None
-    ) -> None:
-        super().__init__(parent)
+        parent: Optional[QWidget] = None,
+    ):
         self._student_service = student_service
         self._parent_service = parent_service
         self._assessment_service = assessment_service
         self._filter_service = filter_service
         self._import_service = import_service
         self._export_service = export_service
-        self._collaboration_manager = collaboration_manager
-        self._notification_service = notification_service
+
+        super().__init__(
+            workspace_id="student_list",
+            platform_context=platform_context,
+            collaboration_manager=collaboration_manager,
+            parent=parent,
+        )
+
         self._students: List[Student] = []
         self._filtered: List[Student] = []
         self._sort_key: Optional[str] = None
@@ -68,6 +75,7 @@ class StudentListPage(QWidget):
 
         self._setup_ui()
         self.refresh()
+        self._is_initialized = True
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -129,6 +137,7 @@ class StudentListPage(QWidget):
 
         layout.addWidget(toolbar)
 
+        # Bulk actions bar
         self.bulk_bar = QWidget()
         self.bulk_bar.setStyleSheet(f"""
             background: {COLORS['primary_hover']};
@@ -172,6 +181,19 @@ class StudentListPage(QWidget):
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
 
+        # Update permissions
+        self._update_button_states()
+
+    def _update_button_states(self) -> None:
+        """Update button states based on write permission."""
+        can_write = self.can_write()
+        self.add_btn.setEnabled(can_write)
+        self.import_btn.setEnabled(can_write)
+        self.bulk_delete_btn.setEnabled(can_write)
+
+    def initialize(self) -> None:
+        pass
+
     def refresh(self) -> None:
         self.loading.setVisible(True)
         try:
@@ -182,8 +204,19 @@ class StudentListPage(QWidget):
             QMessageBox.critical(self, "Error", "Failed to load students.")
         finally:
             self.loading.setVisible(False)
-        # Emit data_updated để dashboard refresh
         self.data_updated.emit()
+        self._update_button_states()
+
+    def show_add_dialog(self) -> None:
+        try:
+            self.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
+
+        dialog = StudentFormDialog(self._student_service, parent=self)
+        if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
+            self.refresh()
 
     def _apply_filters_and_sort(self) -> None:
         filtered = self._filter_students(self.search_bar.text())
@@ -310,12 +343,51 @@ class StudentListPage(QWidget):
         menu.addAction(edit_action)
 
         menu.addSeparator()
+
+        if student.status == "ARCHIVED":
+            activate_action = QAction("Activate Student", self)
+            activate_action.triggered.connect(lambda: self._activate_student(student.id))
+            menu.addAction(activate_action)
+        else:
+            archive_action = QAction("Archive Student", self)
+            archive_action.triggered.connect(lambda: self._archive_student(student.id))
+            menu.addAction(archive_action)
+
+        menu.addSeparator()
         delete_action = QAction("Delete Student", self)
         delete_action.triggered.connect(lambda: self._delete_student(student.id))
         menu.addAction(delete_action)
 
         menu.exec(pos)
 
+    def _archive_student(self, student_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Archive",
+            "Archive this student? They will not appear in default lists.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._student_service.archive_student(student_id)
+                self.refresh()
+            except Exception as e:
+                logger.exception("Archive failed")
+                QMessageBox.critical(self, "Error", str(e))
+
+    def _activate_student(self, student_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to activate.", "warning")
+            return
+        try:
+            self._student_service.activate_student(student_id)
+            self.refresh()
+        except Exception as e:
+            logger.exception("Activate failed")
+            QMessageBox.critical(self, "Error", str(e))
+            
     def _edit_student(self, student_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify("You must be in WRITE mode to edit.", "warning")

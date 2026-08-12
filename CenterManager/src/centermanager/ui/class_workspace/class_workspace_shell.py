@@ -12,8 +12,6 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.class_workspace.class_list_page import ClassListPage
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
 from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage
-from centermanager.platform.collaboration import CollaborationManager
-from centermanager.platform.notification import NotificationService
 
 
 class ClassWorkspaceShell(QWidget):
@@ -30,8 +28,8 @@ class ClassWorkspaceShell(QWidget):
         highlight_service,
         student_service,
         attendance_service,
-        collaboration_manager: CollaborationManager,
-        notification_service: NotificationService,
+        platform_context=None,          # <-- THÊM
+        collaboration_manager=None,     # <-- THÊM
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -43,8 +41,8 @@ class ClassWorkspaceShell(QWidget):
         self._highlight_service = highlight_service
         self._student_service = student_service
         self._attendance_service = attendance_service
+        self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
-        self._notification_service = notification_service
 
         self._current_class_id: Optional[int] = None
 
@@ -90,7 +88,7 @@ class ClassWorkspaceShell(QWidget):
             self._assignment_service,
             self._timeline_service,
             self._collaboration_manager,
-            self._notification_service,
+            None,  # notification_service placeholder
         )
         self.list_page.class_selected.connect(self._on_class_selected)
         self.content_stack.addWidget(self.list_page)
@@ -106,7 +104,7 @@ class ClassWorkspaceShell(QWidget):
             student_service=self._student_service,
             attendance_service=self._attendance_service,
             collaboration_manager=self._collaboration_manager,
-            notification_service=self._notification_service,
+            notification_service=None,  # placeholder
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.class_updated.connect(self._on_class_updated)
