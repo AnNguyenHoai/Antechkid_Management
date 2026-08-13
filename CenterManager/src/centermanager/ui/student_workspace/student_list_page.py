@@ -51,6 +51,7 @@ class StudentListPage(WorkspaceBase):
         export_service: StudentExportService,
         platform_context: PlatformContext,
         collaboration_manager: CollaborationManager,
+        notification_service,  # <-- THÊM
         parent: Optional[QWidget] = None,
     ):
         self._student_service = student_service
@@ -59,6 +60,7 @@ class StudentListPage(WorkspaceBase):
         self._filter_service = filter_service
         self._import_service = import_service
         self._export_service = export_service
+        self._notification_service = notification_service  # <-- LƯU
 
         super().__init__(
             workspace_id="student_list",
@@ -371,7 +373,7 @@ class StudentListPage(WorkspaceBase):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self._student_service.archive_student(student_id)
+                self._student_service.archive_student(student_id)  # <-- service sẽ publish event
                 self.refresh()
             except Exception as e:
                 logger.exception("Archive failed")
@@ -382,7 +384,7 @@ class StudentListPage(WorkspaceBase):
             self._notification_service.notify("You must be in WRITE mode to activate.", "warning")
             return
         try:
-            self._student_service.activate_student(student_id)
+            self._student_service.activate_student(student_id)  # <-- service sẽ publish event
             self.refresh()
         except Exception as e:
             logger.exception("Activate failed")

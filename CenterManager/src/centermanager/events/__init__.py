@@ -16,6 +16,11 @@ from .collaboration_events import (
     RetryFinished,
 )
 from .highlight_events import StudentHighlightCreated
+from .student_events import (
+    StudentArchived,
+    StudentActivated,
+    StudentDeleted,
+)
 
 __all__ = [
     "Event",
@@ -35,4 +40,7 @@ __all__ = [
     "RetryStarted",
     "RetryFinished",
     "StudentHighlightCreated",
+    "StudentArchived",
+    "StudentActivated",
+    "StudentDeleted",
 ]

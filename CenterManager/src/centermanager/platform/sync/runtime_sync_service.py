@@ -5,9 +5,12 @@ import logging
 import threading
 import time
 import uuid
+import shutil
 from datetime import datetime
 from typing import Optional, Callable
+from pathlib import Path
 
+from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
 
 from .status import SyncStatus
@@ -104,6 +107,45 @@ class RuntimeSyncService:
         """Manually execute synchronization."""
         return self._perform_sync()
 
+    def publish_only(self, message: str = "Finish Editing", user: str = "system") -> bool:
+        """
+        Publish local changes WITHOUT fetching or pulling first.
+        This is the dedicated Publish operation for Writer Finish Editing.
+        """
+        with self._state_mutex:
+            if self._status == SyncStatus.SYNCHRONIZING:
+                logger.warning("Cannot publish while synchronization is in progress")
+                return False
+            self._set_status(SyncStatus.SYNCHRONIZING)
+
+        try:
+            result = self._sync_manager.publish_only(
+                message=message,
+                user=user
+            )
+
+            if result and result.is_success():
+                self._last_sync = datetime.now()
+                self._failed_count = 0
+                with self._state_mutex:
+                    self._set_status(SyncStatus.IDLE)
+                logger.info("Publish-only completed successfully")
+                return True
+            else:
+                error = result.message if result else "Unknown error"
+                logger.error(f"Publish-only failed: {error}")
+                self._failed_count += 1
+                with self._state_mutex:
+                    self._set_status(SyncStatus.FAILED)
+                return False
+
+        except Exception as e:
+            logger.exception(f"Publish-only exception: {e}")
+            self._failed_count += 1
+            with self._state_mutex:
+                self._set_status(SyncStatus.FAILED)
+            return False
+
     def cancel_sync(self) -> bool:
         """Cancel ongoing synchronization."""
         with self._state_mutex:
@@ -131,14 +173,11 @@ class RuntimeSyncService:
         """Main sync loop."""
         while self._running:
             try:
-                # Check for updates
                 self._perform_check()
 
-                # If update available and conditions met, sync
                 if self._pending_update:
                     self._attempt_sync()
 
-                # Sleep
                 time.sleep(self._poll_interval)
             except Exception as e:
                 logger.exception(f"Sync loop error: {e}")
@@ -249,6 +288,11 @@ class RuntimeSyncService:
                     self._last_sync = datetime.now()
                     self._failed_count = 0
 
+                # Apply runtime update
+                apply_success = self._apply_runtime_update()
+                if not apply_success:
+                    logger.error("Failed to apply runtime update after sync")
+
                 self._event_bus.publish(SynchronizationCompleted(
                     correlation_id=corr_id,
                     session_id=session_id,
@@ -283,6 +327,46 @@ class RuntimeSyncService:
             with self._state_mutex:
                 self._set_status(SyncStatus.FAILED)
             return False
+
+    def _apply_runtime_update(self) -> bool:
+        """
+        Apply repository database to runtime database.
+        Copy runtime/repository/database/center.db -> runtime/Database/center.db
+        Returns True if successful.
+        """
+        try:
+            paths = get_paths()
+            repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+            runtime_db = paths.database_dir / "center.db"
+
+            if not repo_db.exists():
+                logger.warning("Repository database not found, skipping runtime update")
+                return True
+
+            # Copy repository DB to runtime DB
+            runtime_db.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repo_db, runtime_db)
+            logger.info(f"Runtime database updated from repository: {runtime_db}")
+
+            # Refresh database sessions
+            self._refresh_db_sessions()
+
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to apply runtime update: {e}")
+            return False
+
+    def _refresh_db_sessions(self) -> None:
+        """
+        Refresh database sessions after runtime DB update.
+        This ensures SQLAlchemy sessions don't serve stale data.
+        """
+        try:
+            from centermanager.database.session import refresh_runtime_db
+            refresh_runtime_db()
+            logger.info("Database sessions refreshed after runtime update")
+        except Exception as e:
+            logger.exception(f"Failed to refresh database sessions: {e}")
 
     def _check_reload(self) -> None:
         """Check if reload is required and decide."""

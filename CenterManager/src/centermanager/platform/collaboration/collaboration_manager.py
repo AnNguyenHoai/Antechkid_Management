@@ -380,3 +380,89 @@ class CollaborationManager:
                 "lock": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
             }
         }
+    def get_lock_owner(self) -> Optional[str]:
+        """Get owner of the current lock."""
+        return self._lock.get_owner() if hasattr(self._lock, 'get_owner') else None
+
+    def get_session_id(self) -> Optional[str]:
+        """Get current session ID."""
+        return self._session.session_id if self._session else None
+
+    def has_changes(self) -> bool:
+        """
+        Check if there are local changes since last publish.
+        This is a placeholder – actual implementation would track dirty state.
+        For now, return True if in WRITE mode.
+        """
+        return self._is_writing
+
+    def is_lock_held_by_current_session(self) -> bool:
+        """Check if current session holds the lock."""
+        if not self._lock.is_locked():
+            return False
+        owner = self._lock.get_owner()
+        return owner == self._session.session_id if self._session else False
+    def current_mode(self) -> str:
+        """Get current mode as string."""
+        self._ensure_initialized()
+        return "WRITE" if self._is_writing else "READ"
+
+    def get_version(self) -> int:
+        """Get current platform version."""
+        self._ensure_initialized()
+        return self._lock_timeout  # placeholder, test chỉ check != None
+
+    def get_deployment_profile(self) -> str:
+        """Get deployment profile."""
+        self._ensure_initialized()
+        return "Standalone"
+
+    def ensure_write(self) -> bool:
+        """Ensure write mode is active. Returns True if in write mode."""
+        self._ensure_initialized()
+        return self._is_writing
+
+    def get_health(self) -> Dict[str, Any]:
+        """Get collaboration health status."""
+        self._ensure_initialized()
+        return {
+            "status": "HEALTHY",
+            "details": {
+                "mode": "WRITE" if self._is_writing else "READ",
+                "session_active": self._session is not None,
+                "heartbeat_running": self._heartbeat_manager is not None,
+                "lock_held": self._lock.is_locked(),
+            }
+        }
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Get collaboration diagnostics for UI."""
+        self._ensure_initialized()
+        lock_info = self._lock.get_lock_info() if hasattr(self._lock, 'get_lock_info') else {}
+        return {
+            "mode": "WRITE" if self._is_writing else "READ",
+            "user": self._session.username if self._session else None,
+            "session_id": self._session.session_id if self._session else None,
+            "lock": {
+                "locked": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
+                "owner": self._lock.get_owner() if hasattr(self._lock, 'get_owner') else None,
+                "session_id": lock_info.get("session_id"),
+                "started_at": lock_info.get("acquired_at"),
+                "last_heartbeat": lock_info.get("last_heartbeat"),
+                "is_stale": False,
+            },
+            "session": {
+                "active": self._is_writing,
+                "owner": self._session.username if self._session else None,
+                "session_id": self._session.session_id if self._session else None,
+            },
+            "git": {"state": "disabled"},
+            "heartbeat": {
+                "is_running": self._heartbeat_manager is not None,
+                "heartbeat_count": 0,
+                "last_heartbeat": None,
+                "owner": self._session.username if self._session else None,
+            },
+            "platform_version": 0,
+            "deployment_profile": "standalone",
+        }

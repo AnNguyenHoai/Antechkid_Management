@@ -3,7 +3,7 @@
 
 from .synchronization_manager import SynchronizationManager
 from .synchronization_provider import SynchronizationProvider
-from .git_provider import GitSynchronizationProvider
+from .git_synchronization_provider import GitSynchronizationProvider   # <-- ĐỔI TỪ git_provider
 from .synchronization_policy import SynchronizationPolicy, SyncPolicy
 from .version_resolver import VersionResolver, VersionStatus
 from .synchronization_result import SynchronizationResult, SyncResult

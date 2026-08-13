@@ -1,13 +1,12 @@
 import sys
 from pathlib import Path
+from typing import Optional  # <--- THÊM DÒNG NÀY
 
 class Paths:
     def __init__(self) -> None:
         if getattr(sys, 'frozen', False):
-            # Running as bundled executable
             self._project_root = Path(sys.executable).resolve().parent
         else:
-            # Running from source
             self._project_root = Path(__file__).resolve().parent.parent.parent.parent
         self._runtime_root = self._project_root / "runtime"
     @property

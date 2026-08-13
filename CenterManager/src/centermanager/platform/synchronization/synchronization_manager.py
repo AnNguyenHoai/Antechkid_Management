@@ -30,7 +30,7 @@ class SynchronizationManager:
     """
     Coordinates synchronization workflow.
     """
-    
+
     def __init__(
         self,
         provider: SynchronizationProvider,
@@ -46,15 +46,14 @@ class SynchronizationManager:
         self._last_result: Optional[SynchronizationResult] = None
         self._correlation_id: Optional[str] = None
 
-
     def clone(self, progress_callback: Optional[Callable] = None) -> SynchronizationResult:
         """Clone repository from remote."""
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
-        
+
         logger.info(f"[{correlation_id}] Cloning repository")
-        
+
         try:
             if not self._provider.connect():
                 return SynchronizationResult(
@@ -63,8 +62,7 @@ class SynchronizationManager:
                     provider=self._provider.name(),
                     started_at=datetime.now(),
                 )
-            
-            # Check if clone method exists
+
             if hasattr(self._provider, 'clone'):
                 self._provider.clone(progress_callback)
                 result = SynchronizationResult(
@@ -84,7 +82,7 @@ class SynchronizationManager:
                     provider=self._provider.name(),
                     started_at=datetime.now(),
                 )
-                
+
         except Exception as e:
             logger.exception(f"[{correlation_id}] Clone failed: {e}")
             result = SynchronizationResult(
@@ -96,27 +94,15 @@ class SynchronizationManager:
             )
             self._last_result = result
             return result
-    
+
     def check_updates(self) -> SynchronizationResult:
         """Check for updates without performing sync."""
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
-        
+
         logger.info(f"[{correlation_id}] Checking updates")
-        
-        # Check if provider exists
-        if self._provider is None:
-            return SynchronizationResult(
-                result=SyncResult.OFFLINE,
-                message="Synchronization provider is not configured",
-                provider="none",
-                started_at=datetime.now(),
-            )
-            self._last_result = result
-            return result
-        
-        # Check provider health
+
         if not self._provider.health():
             result = SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -130,8 +116,7 @@ class SynchronizationManager:
             ))
             self._last_result = result
             return result
-        
-        # Connect if needed
+
         if not self._provider.connect():
             result = SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -141,20 +126,17 @@ class SynchronizationManager:
             )
             self._last_result = result
             return result
-        
-        # Get remote manifest
+
         remote_manifest = self._provider.remote_manifest()
         remote_version = remote_manifest.get("runtime_version") if remote_manifest else None
-        
-        # Get current version from local manifest
+
         current_version = 0
         if hasattr(self._provider, 'current_version'):
             current_version = self._provider.current_version()
-        
-        # Resolve version
+
         resolver = VersionResolver()
         status = resolver.resolve(current_version, remote_version)
-        
+
         self._publish_event(VersionChecked(
             correlation_id=correlation_id,
             current_version=current_version,
@@ -162,9 +144,9 @@ class SynchronizationManager:
             status=status.value,
             provider=self._provider.name(),
         ))
-        
+
         needs_sync = resolver.needs_sync(current_version, remote_version)
-        
+
         result = SynchronizationResult(
             result=SyncResult.NO_CHANGE if not needs_sync else SyncResult.SUCCESS,
             message="Version check completed",
@@ -177,32 +159,30 @@ class SynchronizationManager:
         )
         self._last_result = result
         return result
-    
+
     def begin_sync(self, message: str = "", user: str = "system") -> SynchronizationResult:
         """Execute synchronization workflow."""
-        if self._provider is None:
+        if self._is_syncing:
             return SynchronizationResult(
                 result=SyncResult.FAILED,
-                message="Synchronization provider is not configured",
-                provider="none",
-                started_at=datetime.now(),
+                message="Synchronization already in progress",
+                provider=self._provider.name(),
             )
-            
+
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         self._is_syncing = True
         start_time = time.time()
-        
+
         logger.info(f"[{correlation_id}] Beginning synchronization")
-        
+
         self._publish_event(SynchronizationStarted(
             correlation_id=correlation_id,
             provider=self._provider.name(),
             policy=self._policy.policy.value,
         ))
-        
+
         try:
-            # Check provider
             if not self._provider.health():
                 result = SynchronizationResult(
                     result=SyncResult.OFFLINE,
@@ -216,8 +196,7 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-            
-            # Connect if needed
+
             if not self._provider.connect():
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
@@ -232,13 +211,12 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-            
-            # Fetch remote
+
             fetch_result = self._retry_policy.execute(
                 self._provider.fetch,
                 name="fetch"
             )
-            
+
             if not fetch_result:
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
@@ -253,13 +231,12 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-            
-            # Pull changes
+
             pull_result = self._retry_policy.execute(
                 self._provider.pull,
                 name="pull"
             )
-            
+
             if not pull_result:
                 result = SynchronizationResult(
                     result=SyncResult.CONFLICT,
@@ -274,14 +251,13 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-            
-            # Publish changes if message provided
+
             if message:
                 publish_result = self._retry_policy.execute(
                     lambda: self._provider.publish(message, user),
                     name="publish"
                 )
-                
+
                 if not publish_result:
                     result = SynchronizationResult(
                         result=SyncResult.FAILED,
@@ -296,8 +272,7 @@ class SynchronizationManager:
                     ))
                     self._last_result = result
                     return result
-            
-            # Success
+
             result = SynchronizationResult(
                 result=SyncResult.SUCCESS,
                 message="Synchronization completed successfully",
@@ -306,17 +281,17 @@ class SynchronizationManager:
                 started_at=datetime.now(),
                 finished_at=datetime.now(),
             )
-            
+
             self._publish_event(SynchronizationFinished(
                 correlation_id=correlation_id,
                 provider=self._provider.name(),
                 result=result.result.value,
                 duration_ms=result.duration_ms,
             ))
-            
+
             self._last_result = result
             return result
-            
+
         except Exception as e:
             logger.exception(f"[{correlation_id}] Sync failed: {e}")
             result = SynchronizationResult(
@@ -333,10 +308,87 @@ class SynchronizationManager:
             ))
             self._last_result = result
             return result
-        
+
         finally:
             self._is_syncing = False
-    
+
+    def publish_only(self, message: str = "", user: str = "system") -> SynchronizationResult:
+        """
+        Publish local changes WITHOUT fetching or pulling first.
+        This is for Writer Finish Editing - only commit and push.
+        """
+        if self._is_syncing:
+            return SynchronizationResult(
+                result=SyncResult.FAILED,
+                message="Synchronization already in progress",
+                provider=self._provider.name(),
+            )
+
+        correlation_id = str(uuid.uuid4())
+        self._correlation_id = correlation_id
+        self._is_syncing = True
+        start_time = time.time()
+
+        logger.info(f"[{correlation_id}] Publishing local changes (no fetch/pull)")
+
+        try:
+            if not self._provider.health():
+                result = SynchronizationResult(
+                    result=SyncResult.OFFLINE,
+                    message="Provider unavailable",
+                    provider=self._provider.name(),
+                    started_at=datetime.now(),
+                )
+                self._last_result = result
+                return result
+
+            if not self._provider.connect():
+                result = SynchronizationResult(
+                    result=SyncResult.FAILED,
+                    message="Failed to connect to provider",
+                    provider=self._provider.name(),
+                    started_at=datetime.now(),
+                )
+                self._last_result = result
+                return result
+
+            if not self._provider.publish(message, user):
+                result = SynchronizationResult(
+                    result=SyncResult.FAILED,
+                    message="Publish failed",
+                    provider=self._provider.name(),
+                    started_at=datetime.now(),
+                    finished_at=datetime.now(),
+                )
+                self._last_result = result
+                return result
+
+            result = SynchronizationResult(
+                result=SyncResult.SUCCESS,
+                message="Publish completed successfully",
+                provider=self._provider.name(),
+                duration_ms=(time.time() - start_time) * 1000,
+                started_at=datetime.now(),
+                finished_at=datetime.now(),
+            )
+            self._last_result = result
+            return result
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Publish failed: {e}")
+            result = SynchronizationResult(
+                result=SyncResult.FAILED,
+                message=str(e),
+                provider=self._provider.name(),
+                started_at=datetime.now(),
+                finished_at=datetime.now(),
+            )
+            self._last_result = result
+            return result
+
+        finally:
+            self._is_syncing = False
+
     def cancel(self) -> bool:
         """Cancel current synchronization."""
         if not self._is_syncing:
@@ -349,20 +401,19 @@ class SynchronizationManager:
             ))
         logger.info(f"[{self._correlation_id}] Synchronization cancelled")
         return True
-    
+
     def provider(self) -> SynchronizationProvider:
         return self._provider
-    
+
     def policy(self) -> SynchronizationPolicy:
         return self._policy
-    
+
     def last_result(self) -> Optional[SynchronizationResult]:
         return self._last_result
-    
+
     def is_syncing(self) -> bool:
         return self._is_syncing
-    
+
     def _publish_event(self, event) -> None:
-        """Publish event if event bus is available."""
         if self._event_bus:
             self._event_bus.publish(event)

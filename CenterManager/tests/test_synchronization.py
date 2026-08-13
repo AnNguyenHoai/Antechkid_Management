@@ -214,19 +214,21 @@ class TestGitSynchronizationProvider:
         assert manifest is None
 
     def test_fetch_publish_not_implemented(self, tmp_path):
-        """Test fetch and publish with local repo."""
+        from centermanager.platform.synchronization.exceptions import RemoteUnavailableError
+        """Test fetch and publish with local repo (no remote)."""
         import git
         repo = git.Repo.init(tmp_path)
         (tmp_path / "test.txt").write_text("test")
         repo.index.add(["test.txt"])
         repo.index.commit("Initial commit")
-        
+
         provider = GitSynchronizationProvider(tmp_path)
         provider.connect()
-        # Fetch works without remote (just logs)
+        # Fetch works without remote
         assert provider.fetch() is True
-        # Publish with no changes
-        assert provider.publish("test", "user") is True
+        # Publish with no remote – should raise RemoteUnavailableError
+        with pytest.raises(RemoteUnavailableError):
+            provider.publish("test", "user")
 
     def test_pull(self, tmp_path):
         """Test pull with local repo."""

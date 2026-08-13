@@ -250,7 +250,6 @@ class TestCollaborationManager:
 
         cm.initialize("user1", "testuser", "admin")
         
-        # Check lock is not held
         assert cm._lock.is_locked() is False
         
         result = cm.request_write()
@@ -273,21 +272,32 @@ class TestCollaborationManager:
         cm2 = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
         cm2.initialize("user2", "testuser2", "teacher")
 
-        # Release first lock
         cm.release_write()
 
-        # Now second should get it (but it's queued, not auto-granted)
-        # Check queue state
         queue = cm2.get_queue()
         assert queue["length"] == 0
 
     def test_heartbeat(self, tmp_path):
+        """Test heartbeat with proper synchronization."""
         event_bus = EventBus()
         cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
 
+        # Initialize collaboration (starts heartbeat thread)
         cm.initialize("user1", "testuser", "admin")
+        
+        # Đợi heartbeat thread hoàn thành chu kỳ đầu tiên
+        time.sleep(0.5)
+        
+        # Gọi heartbeat manually
         result = cm.heartbeat()
         assert result is True
+        
+        # Đợi một chút để thread ghi xong
+        time.sleep(0.3)
+        
+        # Shutdown để cleanup
+        cm.shutdown()
+        assert cm.is_initialized() is False
 
     def test_get_presence(self, tmp_path):
         event_bus = EventBus()

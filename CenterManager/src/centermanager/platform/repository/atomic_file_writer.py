@@ -19,24 +19,19 @@ class AtomicFileWriter:
         self._path = path
 
     def write(self, data: Any, serializer: Optional[Callable[[Any], str]] = None) -> None:
-        """
-        Atomically write data to file.
-        If serializer is None, data must be str.
-        """
-        # Ensure parent exists
+        """Atomically write data to file."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temp file in same directory
         temp_fd = None
         temp_path = None
         try:
-            temp_fd, temp_path = tempfile.mkstemp(
+            temp_fd, temp_path_str = tempfile.mkstemp(
                 dir=self._path.parent,
                 prefix=f".{self._path.name}.",
                 suffix=".tmp",
             )
+            temp_path = Path(temp_path_str)  # <--- Chuyển thành Path
 
-            # Write data
             with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
                 if serializer is not None:
                     content = serializer(data)
@@ -51,11 +46,9 @@ class AtomicFileWriter:
                 f.flush()
                 os.fsync(f.fileno())
 
-            # Atomic rename
-            os.replace(temp_path, self._path)
+            os.replace(temp_path_str, str(self._path))
 
         except Exception as e:
-            # Cleanup temp file on error
             if temp_path and temp_path.exists():
                 try:
                     temp_path.unlink()

@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
+"""StudentWorkspaceShell - Student Workspace with platform integration."""
+
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame
 
+from centermanager.ui.workspace_base import WorkspaceBase
 from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
@@ -14,16 +18,17 @@ from centermanager.ui.student_workspace.student_analytics_page import StudentAna
 from centermanager.platform.context import PlatformContext
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.business import WriteGuard, PermissionGuard
-from centermanager.ui.workspace_base import WorkspaceBase
 from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
 from centermanager.events.synchronization_events import VersionUpdated, SynchronizationCompleted
 
-import logging
 logger = logging.getLogger(__name__)
 
 
 class StudentWorkspaceShell(WorkspaceBase):
-    """Student Workspace with platform integration."""
+    """
+    Student Workspace - main workspace for student management.
+    Implements platform lifecycle and event integration.
+    """
 
     go_home = Signal()
     go_to_finance = Signal()
@@ -54,6 +59,7 @@ class StudentWorkspaceShell(WorkspaceBase):
         report_service,
         platform_context: PlatformContext,
         collaboration_manager: CollaborationManager,
+        notification_service,
         parent: Optional[QWidget] = None,
     ):
         # Store services
@@ -79,6 +85,11 @@ class StudentWorkspaceShell(WorkspaceBase):
         self._attendance_service = attendance_service
         self._report_service = report_service
 
+        # Platform
+        self._platform_context = platform_context
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
+
         self._current_student_id: Optional[int] = None
         self._event_subscriptions = []
 
@@ -94,18 +105,22 @@ class StudentWorkspaceShell(WorkspaceBase):
         self._connect_signals()
 
     def _setup_ui(self) -> None:
+        """Setup the UI components."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Header
         self.header = WorkspaceHeader("Student Workspace", "Dashboard")
         self.header.back_home_clicked.connect(self.go_home.emit)
         layout.addWidget(self.header)
 
+        # Body
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
+        # Navigation
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "students", "icon": "👨‍🎓", "label": "Students"},
@@ -115,6 +130,7 @@ class StudentWorkspaceShell(WorkspaceBase):
         self.nav.page_selected.connect(self.navigate_to)
         body.addWidget(self.nav)
 
+        # Content stack
         self.content_stack = QStackedWidget()
         self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
 
@@ -136,6 +152,7 @@ class StudentWorkspaceShell(WorkspaceBase):
             self._export_service,
             self._platform_context,
             self._collaboration_manager,
+            self._notification_service,
         )
         self.list_page.student_selected.connect(self._on_student_selected)
         self.list_page.filter_clicked.connect(self._on_filter_clicked)
@@ -176,6 +193,7 @@ class StudentWorkspaceShell(WorkspaceBase):
         layout.addLayout(body)
 
     def _connect_signals(self) -> None:
+        """Connect internal signals."""
         self.nav.page_selected.connect(self.navigate_to)
         self.header.back_home_clicked.connect(self.go_home.emit)
 
@@ -187,10 +205,8 @@ class StudentWorkspaceShell(WorkspaceBase):
             return
         logger.info(f"[StudentWorkspace] Initializing workspace {self.workspace_id}")
 
-        # Đăng ký sự kiện platform
         event_bus = self._collaboration_manager._event_bus
         if event_bus:
-            # Note: EventBus hiện tại không có unregister, nhưng ta vẫn lưu danh sách để sau này có thể mở rộng
             self._event_subscriptions.append(
                 event_bus.register(ModeChanged, self._on_mode_changed)
             )
@@ -218,31 +234,36 @@ class StudentWorkspaceShell(WorkspaceBase):
     def stop(self) -> None:
         """Stop workspace operations."""
         logger.info("[StudentWorkspace] Stopping")
-        # Có thể lưu trạng thái nếu cần
 
     def dispose(self) -> None:
         """Release resources and unsubscribe from events."""
         if not self._is_initialized:
             return
         logger.info("[StudentWorkspace] Disposing")
-        # Hiện tại EventBus không hỗ trợ unregister, nhưng ta vẫn xóa danh sách để không phản hồi nữa
         self._event_subscriptions.clear()
         self._is_initialized = False
         logger.info("[StudentWorkspace] Disposed")
 
     def refresh(self) -> None:
+        """Refresh workspace data."""
         self.navigate_to("students")
         self.dashboard_page.refresh()
         if self._current_student_id is not None:
             self.detail_page.load_student(self._current_student_id)
 
     def activate(self) -> None:
+        """Called when workspace becomes active."""
         super().activate()
         self.refresh()
+
+    def deactivate(self) -> None:
+        """Called when workspace becomes inactive."""
+        super().deactivate()
 
     # ===== Navigation =====
 
     def navigate_to(self, page_id: str) -> None:
+        """Navigate to a page within the workspace."""
         if page_id == "dashboard":
             self.content_stack.setCurrentWidget(self.dashboard_page)
             self.nav.set_active_page("dashboard")
@@ -261,27 +282,31 @@ class StudentWorkspaceShell(WorkspaceBase):
 
     # ===== Event Handlers =====
 
-    def _on_mode_changed(self, event) -> None:
+    def _on_mode_changed(self, event: ModeChanged) -> None:
+        """Handle mode changed event."""
         mode = event.mode if isinstance(event.mode, str) else event.mode.value
         is_write = (mode == "WRITE")
         logger.debug(f"[StudentWorkspace] Mode changed to {mode}")
         self.set_write_enabled(is_write)
 
-    def _on_write_granted(self, event) -> None:
+    def _on_write_granted(self, event: WriteGranted) -> None:
+        """Handle write granted event."""
         logger.info(f"[StudentWorkspace] Write granted to {event.username}")
         self.set_write_enabled(True)
 
-    def _on_write_released(self, event) -> None:
+    def _on_write_released(self, event: WriteReleased) -> None:
+        """Handle write released event."""
         logger.info(f"[StudentWorkspace] Write released by {event.username}")
         self.set_write_enabled(False)
 
-    def _on_sync_completed(self, event) -> None:
+    def _on_sync_completed(self, event: SynchronizationCompleted) -> None:
+        """Handle sync completed event."""
         logger.info("[StudentWorkspace] Sync completed, refreshing data")
         self.refresh_current_student()
 
-    def _on_version_updated(self, event) -> None:
+    def _on_version_updated(self, event: VersionUpdated) -> None:
+        """Handle version updated event."""
         logger.info(f"[StudentWorkspace] Version updated to {event.new_version}")
-        # Có thể refresh nếu cần
 
     # ===== Write state propagation =====
 
@@ -290,11 +315,11 @@ class StudentWorkspaceShell(WorkspaceBase):
         for widget in [self.list_page, self.detail_page]:
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(enabled)
-        # Các widget khác nếu có
 
     # ===== Actions =====
 
     def _on_student_selected(self, student_id: int) -> None:
+        """Handle student selection from list."""
         self._current_student_id = student_id
         self.detail_page.load_student(student_id)
         self.content_stack.setCurrentWidget(self.detail_page)
@@ -303,38 +328,51 @@ class StudentWorkspaceShell(WorkspaceBase):
         self.student_selected.emit(student_id)
 
     def _on_student_selected_from_dashboard(self, student_id: int) -> None:
+        """Handle student selection from dashboard."""
         self._on_student_selected(student_id)
 
     def _on_back_from_detail(self) -> None:
+        """Navigate back from detail to list."""
         self.navigate_to("students")
         self.list_page.refresh()
 
     def _on_student_updated(self) -> None:
+        """Refresh list and dashboard after student update."""
         self.list_page.refresh()
         self.dashboard_page.refresh()
+        # Do NOT refresh home_page here - it's owned by MainWindow
+        # HomePage will be refreshed when user navigates back to home
 
     def _on_add_action(self) -> None:
+        """Show add student dialog."""
         self.list_page.show_add_dialog()
 
     def _on_import_action(self) -> None:
+        """Show import student dialog."""
         self.list_page.show_import_dialog()
 
     def _on_export_action(self) -> None:
+        """Export students."""
         self.list_page.export_students()
 
     def _on_filter_clicked(self) -> None:
+        """Show filter dialog."""
         self.list_page.show_filter_dialog()
 
     def _on_go_to_finance(self) -> None:
+        """Navigate to finance workspace."""
         self.go_to_finance.emit()
 
     def refresh_current_student(self) -> None:
+        """Refresh the currently selected student."""
         if self._current_student_id is not None:
             self.detail_page.load_student(self._current_student_id)
 
     @property
     def current_student_id(self) -> Optional[int]:
+        """Get the currently selected student ID."""
         return self._current_student_id
 
     def show_student(self, student_id: int) -> None:
+        """Show a specific student."""
         self._on_student_selected(student_id)

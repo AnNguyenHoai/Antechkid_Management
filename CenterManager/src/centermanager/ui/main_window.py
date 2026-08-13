@@ -19,21 +19,9 @@ from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper
 
 from centermanager.platform.context import PlatformContext
-from centermanager.platform.collaboration import (
-    CollaborationManager,
-    CollaborationMode,
-    ModeChanged,          # <-- Lấy từ đây
-    SessionStarted,
-    SessionEnded,
-    WriteRequested,
-    WriteGranted,
-    WriteReleased,
-    HeartbeatUpdated,
-    QueueUpdated,
-)
+from centermanager.platform.collaboration import CollaborationManager, CollaborationMode, ModeChanged, WriteGranted, WriteReleased
 from centermanager.platform.sync import RuntimeSyncService
 from centermanager.platform.business import BusinessModuleRegistry
-from centermanager.events.synchronization_events import VersionUpdated
 from centermanager.platform.sync.events import (
     UpdateDetected,
     SynchronizationDeferred,
@@ -41,7 +29,11 @@ from centermanager.platform.sync.events import (
     SynchronizationCompleted,
     SynchronizationFailed,
     SyncStatusChanged,
+    ReloadRequired,  # <-- THÊM
 )
+
+from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +76,8 @@ class MainWindow(QMainWindow):
         collaboration_manager: CollaborationManager,
         sync_service: RuntimeSyncService,
         module_registry: BusinessModuleRegistry,
+        transaction_manager: WriteTransactionManager,
+        notification_service: NotificationService,  # <-- THÊM
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -125,6 +119,10 @@ class MainWindow(QMainWindow):
         self._collaboration_manager = collaboration_manager
         self._sync_service = sync_service
         self._module_registry = module_registry
+        self._notification_service = notification_service  # <-- LƯU
+
+        # Write Transaction Manager
+        self._transaction = transaction_manager
 
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
@@ -157,8 +155,7 @@ class MainWindow(QMainWindow):
         self._apply_menu_permissions()
         self._refresh_student_list()
 
-        self._update_write_buttons(CollaborationMode.READ)
-        self._update_write_actions(CollaborationMode.READ)
+        self._update_write_buttons()
 
     # ===== Setup Methods =====
 
@@ -194,11 +191,11 @@ class MainWindow(QMainWindow):
             report_service=self._report_service,
             platform_context=self._platform_context,
             collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,  # <-- TRUYỀN
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
         self.central_stack.addWidget(self.student_workspace)
-        # Khởi tạo workspace
         self.student_workspace.initialize()
         self.student_workspace.start()
 
@@ -262,7 +259,7 @@ class MainWindow(QMainWindow):
     # ===== Collaboration Status Bar =====
 
     def _setup_collaboration_status_bar(self) -> None:
-        """Setup collaboration status bar with platform info."""
+        """Setup collaboration status bar with transaction buttons."""
         status_bar = self.statusBar()
         status_bar.clearMessage()
 
@@ -293,108 +290,242 @@ class MainWindow(QMainWindow):
         self.sync_label = QLabel(f"Sync: {status_text}")
         layout.addWidget(self.sync_label)
 
-        # Queue label
-        self.queue_label = QLabel("Queue: 0")
-        layout.addWidget(self.queue_label)
-
-        # Spacer
         layout.addStretch()
 
-        # Request Write button
-        self.write_btn = QPushButton("Request Write")
-        self.write_btn.setFixedHeight(28)
-        self.write_btn.clicked.connect(self._on_request_write)
-        layout.addWidget(self.write_btn)
+        # Start Editing / Finish Editing buttons
+        self.start_edit_btn = QPushButton("✏️ Start Editing")
+        self.start_edit_btn.setFixedHeight(28)
+        self.start_edit_btn.clicked.connect(self._on_start_editing)
+        layout.addWidget(self.start_edit_btn)
 
-        # Release Write button
-        self.release_btn = QPushButton("Release Write")
-        self.release_btn.setFixedHeight(28)
-        self.release_btn.setVisible(False)
-        self.release_btn.clicked.connect(self._on_release_write)
-        layout.addWidget(self.release_btn)
+        self.finish_edit_btn = QPushButton("✅ Finish Editing")
+        self.finish_edit_btn.setFixedHeight(28)
+        self.finish_edit_btn.setVisible(False)
+        self.finish_edit_btn.clicked.connect(self._on_finish_editing)
+        layout.addWidget(self.finish_edit_btn)
 
-        # Publish button
-        self.publish_btn = QPushButton("Publish")
-        self.publish_btn.setFixedHeight(28)
-        self.publish_btn.setVisible(False)
-        self.publish_btn.clicked.connect(self._on_publish)
-        layout.addWidget(self.publish_btn)
+        self.cancel_edit_btn = QPushButton("❌ Cancel")
+        self.cancel_edit_btn.setFixedHeight(28)
+        self.cancel_edit_btn.setVisible(False)
+        self.cancel_edit_btn.clicked.connect(self._on_cancel_editing)
+        layout.addWidget(self.cancel_edit_btn)
+
+        # Transaction state label
+        self.tx_state_label = QLabel("")
+        self.tx_state_label.setStyleSheet("font-size: 11px; color: #888;")
+        layout.addWidget(self.tx_state_label)
 
         status_bar.addPermanentWidget(widget, 1)
         self._collab_status_widget = widget
 
-        self._update_write_buttons(CollaborationMode.READ)
-        self._update_git_status()
-        self._update_queue_status()
+        self._update_write_buttons()
 
-    def _update_write_buttons(self, mode: CollaborationMode) -> None:
-        """Update write button visibility based on mode."""
-        is_write = (mode == CollaborationMode.WRITE)
-        self.write_btn.setVisible(not is_write)
-        self.release_btn.setVisible(is_write)
-        self.publish_btn.setVisible(is_write)
+    def _update_write_buttons(self) -> None:
+        """Update button states based on transaction state."""
+        state = self._transaction.state
+        is_editing = self._transaction.is_editing
+        can_edit = self._transaction.can_edit
 
-        if is_write:
-            session_info = self._collaboration_manager.get_session()
-            if session_info:
-                self.write_btn.setToolTip(f"Current session: {session_info.session_id}")
+        self.start_edit_btn.setVisible(can_edit)
+        self.finish_edit_btn.setVisible(is_editing)
+        self.cancel_edit_btn.setVisible(is_editing)
+
+        mode = "WRITE" if is_editing else "READ"
+        self.mode_label.setText(f"Mode: {mode}")
+
+        state_display = {
+            WriteTransactionState.IDLE: "Ready",
+            WriteTransactionState.EDITING: "Editing...",
+            WriteTransactionState.LOCAL_SAVED: "Saved, pending publish",
+            WriteTransactionState.PUBLISHING: "Publishing...",
+            WriteTransactionState.PUBLISHED: "Published",
+            WriteTransactionState.COMPLETED: "Done",
+            WriteTransactionState.FAILED: "Failed!",
+            WriteTransactionState.OFFLINE_PENDING_PUBLISH: "Offline, pending publish",
+        }.get(state, state.name)
+        self.tx_state_label.setText(f"State: {state_display}")
+
+        self.start_edit_btn.setEnabled(can_edit)
+        self.finish_edit_btn.setEnabled(is_editing and state != WriteTransactionState.FAILED)
+        self.cancel_edit_btn.setEnabled(is_editing)
+
+        self._update_write_actions(is_editing)
+
+    def _update_write_actions(self, enabled: bool) -> None:
+        """Enable/disable write actions in all workspaces."""
+        for i in range(self.central_stack.count()):
+            widget = self.central_stack.widget(i)
+            if hasattr(widget, 'set_write_enabled'):
+                widget.set_write_enabled(enabled)
+
+    # ===== Transaction Actions =====
+
+    def _on_start_editing(self) -> None:
+        """Start editing session."""
+        if not self._transaction.can_edit:
+            return
+
+        def save_local() -> bool:
+            logger.info("Start editing - saving local data...")
+            if hasattr(self.student_workspace, 'dashboard_page'):
+                try:
+                    self.student_workspace.dashboard_page.refresh()
+                    return True
+                except Exception as e:
+                    logger.exception("Save failed")
+                    return False
+            return True
+
+        success = self._transaction.start_editing(save_local)
+        if success:
+            self._transaction._has_changes = False
+            self.statusBar().showMessage("Editing started. Make your changes, then click 'Finish Editing'.", 3000)
         else:
-            self.write_btn.setToolTip("Request write access to edit data")
+            QMessageBox.warning(self, "Cannot Edit", "Could not acquire write lock. Another user may be editing.")
+        self._update_write_buttons()
 
-    def _update_git_status(self) -> None:
-        """Update Git status on status bar."""
-        # Currently not implemented for simplicity
-        pass
+    def _on_finish_editing(self) -> None:
+        if not self._transaction.is_editing:
+            return
 
-    def _update_queue_status(self) -> None:
-        """Update queue status on status bar."""
-        try:
-            queue_info = self._collaboration_manager.get_queue()
-            length = queue_info.get("length", 0)
-            self.queue_label.setText(f"Queue: {length}")
-        except Exception:
-            self.queue_label.setText("Queue: --")
+        def save_local() -> bool:
+            logger.info("Finishing editing - saving local data...")
+            # Mark that changes exist
+            self._transaction.mark_dirty()
+            if hasattr(self.student_workspace, 'dashboard_page'):
+                try:
+                    self.student_workspace.dashboard_page.refresh()
+                    return True
+                except Exception as e:
+                    logger.exception("Save failed")
+                    return False
+            return True
+
+        def on_publish_success():
+            self.statusBar().showMessage("✅ Changes published successfully!", 3000)
+            logger.info("Publish success - updating UI")
+            self._update_write_buttons()
+            if hasattr(self.student_workspace, 'dashboard_page'):
+                self.student_workspace.dashboard_page.refresh()
+            if hasattr(self.student_workspace, 'list_page'):
+                self.student_workspace.list_page.refresh()
+
+        def on_publish_failure(error: str):
+            logger.error(f"Publish failure: {error}")
+            QMessageBox.warning(
+                self,
+                "Publish Failed",
+                f"Could not publish changes: {error}\n\n"
+                "Your changes are saved locally but not shared.\n"
+                "You can Retry, Continue Offline, or Cancel."
+            )
+            self._update_write_buttons()
+
+        success = self._transaction.finish_editing(
+            save_callback=save_local,
+            on_publish_success=on_publish_success,
+            on_publish_failure=on_publish_failure,
+        )
+
+        self._update_write_buttons()
+
+        if not success and self._transaction.state == WriteTransactionState.FAILED:
+            self._show_publish_failure_dialog()
+
+    def _show_publish_failure_dialog(self) -> None:
+        """Show dialog for publish failure options."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Publish Failed")
+        msg.setText("Publishing changes failed.")
+        msg.setInformativeText("What would you like to do?")
+        retry_btn = msg.addButton("Retry", QMessageBox.ActionRole)
+        offline_btn = msg.addButton("Continue Offline", QMessageBox.ActionRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == retry_btn:
+            if self._transaction.retry_publish():
+                self.statusBar().showMessage("✅ Publish successful!", 3000)
+                self._update_write_buttons()
+            else:
+                self._show_publish_failure_dialog()
+        elif clicked == offline_btn:
+            self._transaction.continue_offline()
+            self.statusBar().showMessage("📡 Working offline. Changes will be published later.", 3000)
+            self._update_write_buttons()
+        else:
+            self._transaction.cancel_editing(force=True)
+            self.statusBar().showMessage("❌ Editing cancelled. Changes discarded.", 3000)
+            self._update_write_buttons()
+
+    # Trong _on_cancel_editing
+    def _on_cancel_editing(self) -> None:
+        """Cancel editing with confirmation if changes exist."""
+        if not self._transaction.is_editing:
+            return
+
+        if self._transaction.has_changes():
+            reply = QMessageBox.question(
+                self,
+                "Discard Changes",
+                "You have unsaved changes.\n\n"
+                "Cancel editing and discard all changes?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+            # Discard changes with force=True to restore snapshot
+            success = self._transaction.cancel_editing(force=True)
+            if success:
+                self.statusBar().showMessage("Editing cancelled. Changes discarded.", 2000)
+            else:
+                QMessageBox.critical(self, "Error", "Could not discard changes. Please try again.")
+                return
+        else:
+            self._transaction.cancel_editing(force=False)
+            self.statusBar().showMessage("Editing cancelled.", 2000)
+
+        self._update_write_buttons()
 
     # ===== Collaboration Event Handling =====
-
+    def _on_reload_required(self, event: ReloadRequired) -> None:
+        """Handle reload required event."""
+        logger.info(f"Reload required: version {event.new_version}, reason: {event.reason}")
+        
+        # Kiểm tra nếu đang ở Student Workspace
+        current_widget = self.central_stack.currentWidget()
+        if current_widget == self.student_workspace:
+            self.student_workspace.refresh()
+            logger.info("Student workspace refreshed after reload required")
+        elif current_widget == self.home_page:
+            self.home_page.refresh()
+            logger.info("Home page refreshed after reload required")
+        
+        self.statusBar().showMessage(f"Runtime updated to version {event.new_version}", 3000)
     def _connect_collaboration_events(self) -> None:
         """Connect collaboration events."""
-        self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)   # <-- THÊM DÒNG NÀY
+        self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
         self._collaboration_manager._event_bus.register(WriteGranted, self._on_write_granted)
         self._collaboration_manager._event_bus.register(WriteReleased, self._on_write_released)
-        self._collaboration_manager._event_bus.register(QueueUpdated, self._on_queue_updated)
 
-        # Sync events
         self._sync_service._event_bus.register(SyncStatusChanged, self._on_sync_status_changed)
-        self._sync_service._event_bus.register(UpdateDetected, self._on_update_detected)
         self._sync_service._event_bus.register(SynchronizationCompleted, self._on_sync_completed)
-
-        # Version updates
-        self._collaboration_manager._event_bus.register(VersionUpdated, self._on_version_updated)
+        self._sync_service._event_bus.register(SynchronizationFailed, self._on_sync_failed)
+        # === THÊM: Lắng nghe ReloadRequired ===
+        self._sync_service._event_bus.register(ReloadRequired, self._on_reload_required)
 
     def _on_mode_changed(self, event: ModeChanged) -> None:
         """Handle mode changed event."""
-        mode_str = event.mode if isinstance(event.mode, str) else event.mode.value
-        self.mode_label.setText(f"Mode: {mode_str}")
-        mode = CollaborationMode.WRITE if mode_str == "WRITE" else CollaborationMode.READ
-        self._update_write_buttons(mode)
-        self._update_write_actions(mode)
-        self._update_queue_status()
+        self._update_write_buttons()
 
-    def _on_write_granted(self, event: WriteGranted) -> None:
+    def _on_write_granted(self, event) -> None:
         """Handle write granted event."""
         self.statusBar().showMessage(f"Write access granted to {event.username}", 3000)
 
-    def _on_write_released(self, event: WriteReleased) -> None:
+    def _on_write_released(self, event) -> None:
         """Handle write released event."""
         self.statusBar().showMessage(f"Write access released by {event.username}", 3000)
-        self._update_queue_status()
-
-    def _on_queue_updated(self, event: QueueUpdated) -> None:
-        """Handle queue updated event."""
-        self._update_queue_status()
-        if event.next_writer:
-            self.statusBar().showMessage(f"Next writer: {event.next_writer}", 2000)
 
     def _on_sync_status_changed(self, event: SyncStatusChanged) -> None:
         """Handle sync status changed event."""
@@ -402,84 +533,14 @@ class MainWindow(QMainWindow):
         if event.new_status == "failed":
             self.statusBar().showMessage("Synchronization failed. Check logs.", 3000)
 
-    def _on_update_detected(self, event: UpdateDetected) -> None:
-        """Handle update detected event."""
-        self.statusBar().showMessage(
-            f"Runtime update available: v{event.current_version} → v{event.remote_version}",
-            5000,
-        )
-
     def _on_sync_completed(self, event: SynchronizationCompleted) -> None:
         """Handle sync completed event."""
-        self.statusBar().showMessage(
-            f"Runtime updated to v{event.new_version}",
-            3000,
-        )
+        self.statusBar().showMessage(f"Runtime updated to v{event.new_version}", 3000)
         self.version_label.setText(f"Runtime: v{event.new_version}")
 
-    def _on_version_updated(self, event) -> None:
-        """Handle version updated event."""
-        # Refresh workspace if needed
-        if self.central_stack.currentWidget() == self.student_workspace:
-            self.student_workspace.refresh()
-        self.version_label.setText(f"Runtime: v{event.new_version}")
-
-    # ===== Write Actions =====
-
-    def _update_write_actions(self, mode: CollaborationMode) -> None:
-        """Update write actions for all workspaces."""
-        is_write = (mode == CollaborationMode.WRITE)
-        for i in range(self.central_stack.count()):
-            widget = self.central_stack.widget(i)
-            if hasattr(widget, 'set_write_enabled'):
-                widget.set_write_enabled(is_write)
-
-    def _on_request_write(self) -> None:
-        """Handle request write button click."""
-        try:
-            reason = "Manual request"
-            success = self._collaboration_manager.request_write(reason=reason)
-            if success:
-                self.statusBar().showMessage("Write access granted.", 3000)
-            else:
-                self.statusBar().showMessage("Write request queued.", 3000)
-                self._update_queue_status()
-        except Exception as e:
-            logger.exception("Error requesting write")
-            QMessageBox.critical(self, "Error", f"Request write error: {str(e)}")
-
-    def _on_release_write(self) -> None:
-        """Handle release write button click."""
-        try:
-            success = self._collaboration_manager.release_write()
-            if success:
-                self.statusBar().showMessage("Write access released.", 3000)
-            else:
-                QMessageBox.warning(self, "Release Write", "Failed to release write lock.")
-        except Exception as e:
-            logger.exception("Error releasing write")
-            QMessageBox.critical(self, "Error", f"Release write error: {str(e)}")
-
-    def _on_publish(self) -> None:
-        """Handle publish button click."""
-        # Check if in write mode
-        if not self._collaboration_manager.is_writing():
-            QMessageBox.warning(self, "Publish", "You must be in WRITE mode to publish.")
-            return
-
-        try:
-            success = self._sync_service.execute_sync()
-            if success:
-                QMessageBox.information(self, "Publish", "Publish successful.")
-            else:
-                QMessageBox.warning(self, "Publish", "Publish failed. Check logs.")
-        except Exception as e:
-            if "conflict" in str(e).lower():
-                QMessageBox.warning(self, "Publish Conflict", 
-                    "Cannot publish due to repository conflict.\n"
-                    "Please resolve manually or use local mode.")
-            else:
-                QMessageBox.critical(self, "Error", f"Publish error: {str(e)}")
+    def _on_sync_failed(self, event: SynchronizationFailed) -> None:
+        """Handle sync failed event."""
+        self.statusBar().showMessage(f"Sync failed: {event.error}", 3000)
 
     # ===== Workspace Navigation =====
 
@@ -496,10 +557,7 @@ class MainWindow(QMainWindow):
         required_perm = permission_map.get(workspace_id)
         if required_perm:
             if not self._permission_helper.has_permission(required_perm):
-                self.statusBar().showMessage(
-                    f"Permission denied: Insufficient access rights for {workspace_id}"
-                )
-                logger.warning(f"Permission denied for {workspace_id}")
+                self.statusBar().showMessage(f"Permission denied for {workspace_id}")
                 return
 
         if workspace_id == "student":
@@ -564,28 +622,31 @@ class MainWindow(QMainWindow):
         """Handle attendance updated signal."""
         self.student_workspace.refresh_current_student()
 
-    def _update_write_actions(self, mode: CollaborationMode) -> None:
-        """Propagate write mode to all workspaces."""
-        is_write = (mode == CollaborationMode.WRITE)
-        for i in range(self.central_stack.count()):
-            widget = self.central_stack.widget(i)
-            if hasattr(widget, 'set_write_enabled'):
-                widget.set_write_enabled(is_write)
-
     # ===== Close Event =====
 
     def closeEvent(self, event) -> None:
-        """Handle close event."""
-        if self._collaboration_manager.is_writing():
-            logger.info("Releasing write lock on application close...")
-            self._collaboration_manager.release_write()
+        """Handle close event with transaction safety."""
+        if self._transaction.is_editing:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "You have unsaved changes. Do you want to finish editing before closing?",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            if reply == QMessageBox.Yes:
+                self._on_finish_editing()
+                if self._transaction.is_editing:
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.Cancel:
+                event.ignore()
+                return
+            self._transaction.cancel_editing(force=True)
 
-        # Dispose student workspace
         if hasattr(self, 'student_workspace'):
             self.student_workspace.stop()
             self.student_workspace.dispose()
 
         self._sync_service.stop()
         self._collaboration_manager.shutdown()
-
         event.accept()

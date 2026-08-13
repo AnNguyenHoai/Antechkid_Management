@@ -48,10 +48,8 @@ from centermanager.services.permission_service import PermissionService
 from centermanager.services.report_service import ReportService
 from centermanager.services.report_policy import ReportPolicy
 from centermanager.services.auto_report_service import AutoReportService
-from centermanager.events.event_bus import EventBus
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
-from centermanager.ui.main_window import MainWindow
 from centermanager.services.home_dashboard_service import HomeDashboardService
 from centermanager.ui.login_dialog import LoginDialog
 from centermanager.services.teacher_service import TeacherService
@@ -68,10 +66,12 @@ from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.platform import BootstrapManager, PlatformContext, PlatformLifecycleState
 from centermanager.platform.collaboration import CollaborationManager
-# Platform imports
-from centermanager.platform import BootstrapManager, RuntimeContextManager, RuntimeState
 from centermanager.platform.synchronization.git.git_provider import GitProvider
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
+from centermanager.platform.notification import NotificationService
+from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
+from centermanager.platform.version import VersionManager
+from centermanager.services.write_transaction import WriteTransactionManager
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +174,8 @@ def main() -> int:
             try:
                 repo_path = paths.runtime_root / "repository"
                 
-                # 1. Clone nếu chưa có
                 if not repo_path.exists() or not (repo_path / ".git").exists():
                     logger.info("[STARTUP] Cloning repository...")
-                    from centermanager.platform.synchronization.git.git_provider import GitProvider
-                    from centermanager.platform.synchronization.git.git_credentials import GitCredentials
-                    
                     creds = GitCredentials(
                         repository_url=git_config.get("repository_url"),
                         branch=git_config.get("branch", "main"),
@@ -188,10 +184,9 @@ def main() -> int:
                         email=git_config.get("email", ""),
                     )
                     provider = GitProvider(repo_path, creds)
-                    provider.init_repository()  # clone
+                    provider.init_repository()
                     logger.info("[STARTUP] Repository cloned successfully")
                 
-                # 2. Tạo sync_provider và connect
                 sync_provider = GitSynchronizationProvider(
                     repo_path=repo_path,
                     repository_url=git_config.get("repository_url"),
@@ -213,6 +208,8 @@ def main() -> int:
             runtime_root=paths.runtime_root,
             event_bus=event_bus,
         )
+        notification_service = NotificationService()
+        
         collaboration_manager.initialize(
             user_id=str(current_user.id),
             username=current_user.username,
@@ -242,9 +239,16 @@ def main() -> int:
         # ============================================
         module_registry = BusinessModuleRegistry()
 
-        # Initialize business services (existing code)
+        # Initialize business services
         timeline_service = TimelineService(session_factory)
-        student_service = StudentService(session_factory, timeline_service)
+        
+        # ===== QUAN TRỌNG: Truyền event_bus vào StudentService =====
+        student_service = StudentService(
+            session_factory,
+            timeline_service,
+            event_bus=event_bus  # <-- THÊM
+        )
+        
         parent_service = ParentService(session_factory, timeline_service)
         assessment_service = AssessmentService(session_factory, timeline_service)
         session_service = SessionService(session_factory)
@@ -267,13 +271,17 @@ def main() -> int:
         filter_service = StudentFilterService(session_factory)
         export_service = StudentExportService(student_service)
         import_service = StudentImportService(student_service)
-        home_service = HomeDashboardService(session_factory)
+        
+        # ===== QUAN TRỌNG: Truyền event_bus vào HomeDashboardService =====
+        home_service = HomeDashboardService(session_factory, event_bus=event_bus)  # <-- SỬA
+        
         analytics_service = StudentAnalyticsService(session_factory)
 
         teacher_timeline_service = TeacherTimelineService(session_factory)
         teacher_service = TeacherService(session_factory, teacher_timeline_service)
         teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
         teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
+        teacher_assignment_service_for_class = teacher_assignment_service
 
         class_timeline_service = ClassTimelineService(session_factory)
         class_service = ClassService(session_factory, timeline_service=class_timeline_service)
@@ -331,6 +339,16 @@ def main() -> int:
             student_service=student_service,
             report_service=report_service,
         )
+        
+        # Create Version Manager
+        metadata_dir = paths.runtime_root / "metadata"
+        metadata_repo = JsonMetadataRepository(metadata_dir)
+        version_manager = VersionManager(metadata_repo, event_bus)
+
+        # Create Write Transaction Manager
+        transaction_manager = WriteTransactionManager(collaboration_manager)
+        transaction_manager.set_sync_service(sync_service)
+        transaction_manager.set_version_manager(version_manager)
 
         # ============================================
         # MAIN WINDOW
@@ -358,7 +376,7 @@ def main() -> int:
             teacher_timeline_service=teacher_timeline_service,
             class_service=class_service,
             class_timeline_service=class_timeline_service,
-            teacher_assignment_service_for_class=teacher_assignment_service,
+            teacher_assignment_service_for_class=teacher_assignment_service_for_class,
             permission_service=permission_service,
             income_service=income_service,
             expense_service=expense_service,
@@ -370,6 +388,8 @@ def main() -> int:
             collaboration_manager=collaboration_manager,
             sync_service=sync_service,
             module_registry=module_registry,
+            transaction_manager=transaction_manager,
+            notification_service=notification_service,
         )
 
         logger.info("[STARTUP] MainWindow instance created")

@@ -29,7 +29,6 @@ class GitProvider:
         self._status = GitStatus.OFFLINE
         self._last_error = None
 
-
     def init_repository(self) -> None:
         if not self._credentials.repository_url:
             raise GitConfigurationError("Repository URL is required.")
@@ -47,7 +46,6 @@ class GitProvider:
         if self._credentials.email:
             self._run_git_command(["config", "user.email", self._credentials.email])
 
-        # ✅ Set status to CONNECTED after successful initialization
         self._status = GitStatus.CONNECTED
 
     def fetch(self) -> bool:
@@ -95,8 +93,14 @@ class GitProvider:
             raise GitException(f"Commit failed: {e}")
 
     def push(self) -> bool:
+        """Push local commits to remote. Works even if no changes but has pending commits."""
         try:
-            self._run_git_command(["push", "origin", self._credentials.branch])
+            # Check if there is anything to push (local ahead of remote)
+            if self.has_pending_push():
+                self._run_git_command(["push", "origin", self._credentials.branch])
+                self._status = GitStatus.CONNECTED
+                return True
+            # No pending push, consider success
             self._status = GitStatus.CONNECTED
             return True
         except GitNetworkError as e:
@@ -112,6 +116,22 @@ class GitProvider:
             logger.exception(f"Push failed: {e}")
             raise GitException(f"Push failed: {e}")
 
+    def has_pending_push(self) -> bool:
+        """Check if local has commits not pushed to remote."""
+        if not self._credentials or not self._credentials.repository_url:
+            return False
+        try:
+            local_commit = self._run_git_command(["rev-parse", "HEAD"]).strip()
+            remote_ref = f"origin/{self._credentials.branch}"
+            try:
+                remote_commit = self._run_git_command(["rev-parse", remote_ref]).strip()
+            except GitException:
+                # Remote branch not found, meaning no upstream, so pending push
+                return True
+            return local_commit != remote_commit
+        except Exception:
+            return False
+
     def status(self) -> dict:
         return {
             "status": self._status.value,
@@ -121,7 +141,6 @@ class GitProvider:
         }
 
     def connection_status(self) -> str:
-        """Return simplified connection status: ONLINE, OFFLINE, ERROR."""
         if self._status == GitStatus.OFFLINE:
             return "OFFLINE"
         elif self._status == GitStatus.ERROR:
@@ -151,7 +170,21 @@ class GitProvider:
                 stderr = result.stderr
                 logger.error(f"Git command failed: {' '.join(cmd)}")
                 logger.error(f"stderr: {stderr}")
-                # ... existing error handling ...
+                # Raise appropriate exception based on error
+                if "authentication" in stderr.lower() or "authorization" in stderr.lower():
+                    raise GitAuthenticationFailed(stderr)
+                elif "not found" in stderr.lower() or "does not exist" in stderr.lower():
+                    raise GitRepositoryNotFound(stderr)
+                elif "merge conflict" in stderr.lower() or "need to pull" in stderr.lower():
+                    raise GitMergeRequired(stderr)
+                elif "pull" in cmd and "failed" in stderr.lower():
+                    raise GitPullFailed(stderr)
+                elif "push" in cmd and "failed" in stderr.lower():
+                    raise GitPushFailed(stderr)
+                elif "could not read from remote" in stderr.lower() or "network" in stderr.lower():
+                    raise GitNetworkError(stderr)
+                else:
+                    raise GitException(stderr)
             return result.stdout
         except subprocess.CalledProcessError as e:
             logger.exception(f"Git command execution failed: {e}")

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 StudentService - business logic for Student entity.
-Now with ReportPolicy integration.
+Now with ReportPolicy integration and event publishing.
 """
 import logging
 from datetime import date, datetime, timezone
@@ -23,6 +23,8 @@ from centermanager.services.exceptions import (
     StudentNotDeletedError,
 )
 from centermanager.services.timeline_service import TimelineService
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted
+from centermanager.events.event_bus import EventBus
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from centermanager.services.report_policy import ReportPolicy
@@ -43,11 +45,13 @@ class StudentService:
         timeline_service: Optional[TimelineService] = None,
         report_policy: Optional["ReportPolicy"] = None,
         report_service: Optional["ReportService"] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._report_policy = report_policy
         self._report_service = report_service
+        self._event_bus = event_bus
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -71,11 +75,8 @@ class StudentService:
         return f"HS{next_num:03d}"
 
     def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
-        """Helper method to trigger report policy if available."""
-        logger.info(f"[TRIGGER] Called with event_type={event_type}, event_data={event_data}")
         if self._report_policy and self._report_service:
             triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
-            logger.info(f"[TRIGGER] triggers={triggers}")
             for trigger in triggers:
                 try:
                     self._report_service.generate_student_report(
@@ -86,8 +87,6 @@ class StudentService:
                     )
                 except Exception as e:
                     logger.exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
-        else:
-            logger.warning(f"[TRIGGER] report_policy or report_service is None (policy={self._report_policy}, service={self._report_service})")
 
     def create_student(
         self,
@@ -126,7 +125,6 @@ class StudentService:
                 session.commit()
                 session.refresh(student)
 
-                # Log timeline event
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
@@ -135,8 +133,6 @@ class StudentService:
                         description=f"{student.full_name} ({student.student_code}) was added.",
                         metadata={"student_code": student.student_code},
                     )
-
-                # Không trigger report khi tạo mới (có thể không cần)
                 return student
             except Exception:
                 session.rollback()
@@ -169,6 +165,7 @@ class StudentService:
             return repo.list_active()
 
     def archive_student(self, student_id: int) -> None:
+        """Archive a student (set status to ARCHIVED) and publish event."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             student = repo.get_by_id_including_deleted(student_id)
@@ -176,17 +173,64 @@ class StudentService:
                 raise StudentNotFoundError(f"Student {student_id} not found.")
             if student.deleted_at is not None:
                 raise StudentAlreadyDeletedError("Student already archived.")
+            
+            previous_status = student.status
             student.status = "ARCHIVED"
             session.commit()
+            session.refresh(student)
+            
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    student_id=student.id,
+                    event_type=TimelineEventType.STUDENT_UPDATED,
+                    title="Student Archived",
+                    description=f"{student.full_name} ({student.student_code}) was archived.",
+                    metadata={"previous_status": previous_status},
+                )
+            
+            # Publish event
+            if self._event_bus:
+                self._event_bus.publish(StudentArchived(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    previous_status=previous_status,
+                ))
+                logger.info(f"StudentArchived event published for student {student.id}")
 
     def activate_student(self, student_id: int) -> None:
+        """Activate a student (set status to ACTIVE) and publish event."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             student = repo.get_by_id_including_deleted(student_id)
             if student is None:
                 raise StudentNotFoundError(f"Student {student_id} not found.")
+            if student.deleted_at is not None:
+                raise StudentAlreadyDeletedError("Student is archived, cannot activate.")
+            
+            previous_status = student.status
             student.status = "ACTIVE"
             session.commit()
+            session.refresh(student)
+            
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    student_id=student.id,
+                    event_type=TimelineEventType.STUDENT_UPDATED,
+                    title="Student Activated",
+                    description=f"{student.full_name} ({student.student_code}) was activated.",
+                    metadata={"previous_status": previous_status},
+                )
+            
+            # Publish event
+            if self._event_bus:
+                self._event_bus.publish(StudentActivated(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    previous_status=previous_status,
+                ))
+                logger.info(f"StudentActivated event published for student {student.id}")
 
     def set_profile_image(self, student_id: int, image_path: Optional[Path]) -> None:
         with self._session_factory() as session:
@@ -229,7 +273,7 @@ class StudentService:
             if student is None:
                 raise StudentNotFoundError(f"Student id {student_id} not found.")
 
-            changes = []  # list of strings "field: old -> new"
+            changes = []
 
             if full_name is not UNSET:
                 new_val = self._normalize_text(full_name)
@@ -249,7 +293,7 @@ class StudentService:
 
             if date_of_birth is not UNSET:
                 old_val = student.date_of_birth.strftime("%d/%m/%Y") if student.date_of_birth else "(none)"
-                new_val = date_of_birth  # có thể None hoặc date
+                new_val = date_of_birth
                 new_str = new_val.strftime("%d/%m/%Y") if new_val else "(none)"
                 if old_val != new_str:
                     changes.append(f"date_of_birth: '{old_val}' -> '{new_str}'")
@@ -291,11 +335,7 @@ class StudentService:
                 student.notes = new_val
 
             if not changes:
-                # Không có gì thay đổi
-                logger.info(f"[UPDATE] No changes for student {student_id}, skipping trigger.")
                 return student
-
-            logger.info(f"[UPDATE] Changes for student {student_id}: {changes}")
 
             try:
                 session.commit()
@@ -311,15 +351,14 @@ class StudentService:
                         metadata={"changes": changes},
                     )
 
-                # Trigger report policy (only if significant changes)
                 self._trigger_report_policy(student.id, "student_updated", {"changes": changes})
-
                 return student
             except Exception:
                 session.rollback()
                 raise
 
     def delete_student(self, student_id: int) -> None:
+        """Soft delete a student and publish event."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             student = repo.get_by_id_including_deleted(student_id)
@@ -327,18 +366,29 @@ class StudentService:
                 raise StudentNotFoundError(f"Student id {student_id} not found.")
             if student.deleted_at is not None:
                 raise StudentAlreadyDeletedError(f"Student id {student_id} is already deleted.")
+            
             student.deleted_at = self._utc_now()
             try:
                 session.commit()
+                session.refresh(student)
+                
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
-                        event_type=TimelineEventType.STUDENT_UPDATED,  # or maybe a dedicated DELETE event?
+                        event_type=TimelineEventType.STUDENT_UPDATED,
                         title="Student Deleted",
                         description=f"{student.full_name} ({student.student_code}) was soft-deleted.",
                         metadata={"deleted": True},
                     )
-                # Không trigger report khi xóa
+                
+                # Publish event
+                if self._event_bus:
+                    self._event_bus.publish(StudentDeleted(
+                        student_id=student.id,
+                        student_code=student.student_code,
+                        student_name=student.full_name,
+                    ))
+                    logger.info(f"StudentDeleted event published for student {student.id}")
             except Exception:
                 session.rollback()
                 raise
@@ -362,22 +412,16 @@ class StudentService:
                         description=f"{student.full_name} ({student.student_code}) was restored.",
                         metadata={"restored": True},
                     )
-                # Không trigger report khi restore
             except Exception:
                 session.rollback()
                 raise
 
     def search_students(self, query: str) -> List[Student]:
-        """Search active students by multiple fields."""
         with self._session_factory() as session:
             repo = StudentRepository(session)
             return repo.search_students(query)
 
     def get_student_with_relations(self, student_id: int) -> Student:
-        """
-        Lấy Student với các quan hệ cần thiết đã được eager load.
-        Dùng cho báo cáo và các trường hợp cần dữ liệu liên quan.
-        """
         with self._session_factory() as session:
             student = (
                 session.query(Student)

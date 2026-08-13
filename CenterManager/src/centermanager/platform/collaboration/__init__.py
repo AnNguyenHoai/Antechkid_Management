@@ -5,7 +5,7 @@ from .collaboration_manager import CollaborationManager
 from .runtime_session import RuntimeSession
 from .runtime_lock import RuntimeLock
 from .write_queue import WriteQueue, WriteRequest
-from .heartbeat import HeartbeatRepository, HeartbeatManager  # <-- import từ file heartbeat.py
+from .heartbeat import HeartbeatRepository, HeartbeatManager
 from .presence_manager import PresenceManager
 from .arbitration import Priority, Arbitration
 from .events import (
@@ -32,7 +32,16 @@ from .exceptions import (
     HeartbeatTimeoutError,
     CollaborationNotInitializedError,
 )
-from .mode_manager import CollaborationMode
+
+# === THÊM CÁC IMPORT SAU ===
+from .mode_manager import ModeManager, CollaborationMode
+from .lock_manager import LockManager
+from .edit_session_manager import EditSessionManager
+from .json_lock_repository import JsonLockRepository
+from .json_metadata_repository import JsonMetadataRepository
+from .metadata_repository import MetadataRepository
+from .lock_repository import LockRepository
+
 __all__ = [
     "CollaborationManager",
     "RuntimeSession",
@@ -53,6 +62,7 @@ __all__ = [
     "HeartbeatTimeout",
     "QueueUpdated",
     "LockReleased",
+    "ModeChanged",
     "CollaborationError",
     "LockAlreadyHeldError",
     "LockNotHeldError",
@@ -63,6 +73,13 @@ __all__ = [
     "InvalidPriorityError",
     "HeartbeatTimeoutError",
     "CollaborationNotInitializedError",
+    # === THÊM VÀO ĐÂY ===
+    "ModeManager",
     "CollaborationMode",
-    "ModeChanged",
+    "LockManager",
+    "EditSessionManager",
+    "JsonLockRepository",
+    "JsonMetadataRepository",
+    "MetadataRepository",
+    "LockRepository",
 ]
