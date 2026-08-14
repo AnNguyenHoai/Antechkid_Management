@@ -6,6 +6,8 @@ import threading
 import time
 import uuid
 import shutil
+import json
+import os
 from datetime import datetime
 from typing import Optional, Callable
 from pathlib import Path
@@ -53,7 +55,7 @@ class RuntimeSyncService:
         event_bus: Optional[EventBus] = None,
         policy: Optional[AutoPullPolicy] = None,
         reload_service: Optional[ReloadDecisionService] = None,
-        poll_interval: int = 30,
+        poll_interval: int = 5,
     ):
         self._sync_manager = sync_manager
         self._collab_manager = collab_manager
@@ -83,35 +85,27 @@ class RuntimeSyncService:
         logger.info(f"RuntimeSyncService initialized (poll_interval={poll_interval}s)")
 
     def start(self) -> None:
-        """Start automatic sync service."""
         if self._running:
             return
-
         self._running = True
         self._thread = threading.Thread(target=self._sync_loop, daemon=True)
         self._thread.start()
         logger.info("RuntimeSyncService started")
 
     def stop(self) -> None:
-        """Stop automatic sync service."""
         self._running = False
         if self._thread:
             self._thread.join(timeout=2)
         logger.info("RuntimeSyncService stopped")
 
     def check_for_updates(self) -> bool:
-        """Manually check for updates."""
+        logger.info("Manual check_for_updates triggered")
         return self._perform_check()
 
     def execute_sync(self) -> bool:
-        """Manually execute synchronization."""
         return self._perform_sync()
 
     def publish_only(self, message: str = "Finish Editing", user: str = "system") -> bool:
-        """
-        Publish local changes WITHOUT fetching or pulling first.
-        This is the dedicated Publish operation for Writer Finish Editing.
-        """
         with self._state_mutex:
             if self._status == SyncStatus.SYNCHRONIZING:
                 logger.warning("Cannot publish while synchronization is in progress")
@@ -119,16 +113,15 @@ class RuntimeSyncService:
             self._set_status(SyncStatus.SYNCHRONIZING)
 
         try:
-            result = self._sync_manager.publish_only(
-                message=message,
-                user=user
-            )
+            result = self._sync_manager.publish_only(message=message, user=user)
 
             if result and result.is_success():
                 self._last_sync = datetime.now()
                 self._failed_count = 0
+                self._current_version = self._get_repository_version()
                 with self._state_mutex:
                     self._set_status(SyncStatus.IDLE)
+                self.check_for_updates()
                 logger.info("Publish-only completed successfully")
                 return True
             else:
@@ -147,7 +140,6 @@ class RuntimeSyncService:
             return False
 
     def cancel_sync(self) -> bool:
-        """Cancel ongoing synchronization."""
         with self._state_mutex:
             if self._status == SyncStatus.SYNCHRONIZING:
                 self._sync_manager.cancel()
@@ -156,7 +148,6 @@ class RuntimeSyncService:
         return False
 
     def current_state(self) -> dict:
-        """Get current sync state."""
         with self._state_mutex:
             return {
                 "status": self._status.value,
@@ -170,21 +161,32 @@ class RuntimeSyncService:
             }
 
     def _sync_loop(self) -> None:
-        """Main sync loop."""
         while self._running:
             try:
                 self._perform_check()
-
                 if self._pending_update:
                     self._attempt_sync()
-
                 time.sleep(self._poll_interval)
             except Exception as e:
                 logger.exception(f"Sync loop error: {e}")
                 time.sleep(self._poll_interval)
 
+    def _get_repository_version(self) -> int:
+        try:
+            paths = get_paths()
+            manifest_path = paths.runtime_root / "repository" / "manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("runtime_version", 0)
+            else:
+                logger.warning(f"Repository manifest not found at {manifest_path}")
+                return 0
+        except Exception as e:
+            logger.warning(f"Failed to read repository manifest: {e}")
+            return 0
+
     def _perform_check(self) -> bool:
-        """Perform version check."""
         corr_id = str(uuid.uuid4())
         session_id = self._collab_manager.get_session().session_id if self._collab_manager.get_session() else "unknown"
 
@@ -193,14 +195,14 @@ class RuntimeSyncService:
             self._last_check = datetime.now()
 
         try:
+            current_version = self._get_repository_version()
             result = self._sync_manager.check_updates()
-            remote_version = result.remote_version or 0
-            current_version = result.current_version or 0
+            remote_version = result.remote_version
 
             with self._state_mutex:
                 self._current_version = current_version
-                self._remote_version = remote_version
-                self._pending_update = remote_version > current_version
+                self._remote_version = remote_version if remote_version is not None else 0
+                self._pending_update = remote_version is not None and remote_version > current_version
 
             logger.info(f"[{corr_id}] Version check: current={current_version}, remote={remote_version}, pending={self._pending_update}")
 
@@ -224,23 +226,31 @@ class RuntimeSyncService:
             return False
 
     def _attempt_sync(self) -> None:
-        """Attempt to synchronize if conditions allow."""
         session_id = self._collab_manager.get_session().session_id if self._collab_manager.get_session() else "unknown"
 
         has_writer = self._collab_manager.is_writing()
         queue_length = len(self._collab_manager.get_queue().get("requests", []))
 
         context = self._context_manager.get_context()
-        is_ready = context.is_ready()
+        is_ready = context.runtime.is_ready()
 
         is_healthy = self._sync_manager.provider().health()
+
+        if self._remote_version is None:
+            version_status = VersionStatus.REMOTE_UNAVAILABLE
+        elif self._remote_version > self._current_version:
+            version_status = VersionStatus.OUTDATED
+        elif self._remote_version == self._current_version:
+            version_status = VersionStatus.UP_TO_DATE
+        else:
+            version_status = VersionStatus.CONFLICT
 
         should, reason = self._policy.should_pull(
             is_ready=is_ready,
             has_writer=has_writer,
             queue_length=queue_length,
             is_healthy=is_healthy,
-            version_status=VersionStatus.OUTDATED if self._pending_update else VersionStatus.UP_TO_DATE
+            version_status=version_status
         )
 
         if not should:
@@ -258,7 +268,6 @@ class RuntimeSyncService:
         self._perform_sync()
 
     def _perform_sync(self) -> bool:
-        """Execute synchronization workflow."""
         corr_id = str(uuid.uuid4())
         session_id = self._collab_manager.get_session().session_id if self._collab_manager.get_session() else "unknown"
         start_time = time.time()
@@ -282,13 +291,14 @@ class RuntimeSyncService:
             duration_ms = (time.time() - start_time) * 1000
 
             if success and result and result.is_success():
+                new_version = self._get_repository_version()
+
                 with self._state_mutex:
-                    self._current_version = self._remote_version
+                    self._current_version = new_version
                     self._pending_update = False
                     self._last_sync = datetime.now()
                     self._failed_count = 0
 
-                # Apply runtime update
                 apply_success = self._apply_runtime_update()
                 if not apply_success:
                     logger.error("Failed to apply runtime update after sync")
@@ -297,11 +307,11 @@ class RuntimeSyncService:
                     correlation_id=corr_id,
                     session_id=session_id,
                     old_version=result.current_version or 0,
-                    new_version=result.remote_version or self._current_version,
+                    new_version=self._current_version,
                     duration_ms=duration_ms,
                 ))
 
-                logger.info(f"[{corr_id}] Sync completed in {duration_ms:.0f}ms")
+                logger.info(f"[{corr_id}] Sync completed in {duration_ms:.0f}ms, new version={self._current_version}")
                 self._check_reload()
 
                 with self._state_mutex:
@@ -329,11 +339,6 @@ class RuntimeSyncService:
             return False
 
     def _apply_runtime_update(self) -> bool:
-        """
-        Apply repository database to runtime database.
-        Copy runtime/repository/database/center.db -> runtime/Database/center.db
-        Returns True if successful.
-        """
         try:
             paths = get_paths()
             repo_db = paths.runtime_root / "repository" / "database" / "center.db"
@@ -343,24 +348,51 @@ class RuntimeSyncService:
                 logger.warning("Repository database not found, skipping runtime update")
                 return True
 
-            # Copy repository DB to runtime DB
             runtime_db.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(repo_db, runtime_db)
+            with open(repo_db, 'rb') as fsrc:
+                with open(runtime_db, 'wb') as fdst:
+                    fdst.write(fsrc.read())
+                    fdst.flush()
+                    os.fsync(fdst.fileno())
             logger.info(f"Runtime database updated from repository: {runtime_db}")
 
-            # Refresh database sessions
-            self._refresh_db_sessions()
+            repo_manifest = paths.runtime_root / "repository" / "manifest.json"
+            runtime_manifest = paths.runtime_root / "manifest.json"
+            if repo_manifest.exists():
+                with open(repo_manifest, 'rb') as fsrc:
+                    with open(runtime_manifest, 'wb') as fdst:
+                        fdst.write(fsrc.read())
+                        fdst.flush()
+                        os.fsync(fdst.fileno())
+                logger.info(f"Runtime manifest updated from repository: {runtime_manifest}")
 
+                # Đồng bộ metadata version.json với repository manifest
+                with open(repo_manifest, 'r', encoding='utf-8') as f:
+                    manifest_data = json.load(f)
+                runtime_version = manifest_data.get("runtime_version")
+                if runtime_version is not None:
+                    meta_version_path = paths.metadata_dir / "version.json"
+                    meta_version_path.parent.mkdir(parents=True, exist_ok=True)
+                    if meta_version_path.exists():
+                        with open(meta_version_path, 'r', encoding='utf-8') as f:
+                            meta_data = json.load(f)
+                    else:
+                        meta_data = {}
+                    meta_data["platform_version"] = runtime_version
+                    meta_data.pop("pending_version", None)
+                    with open(meta_version_path, 'w', encoding='utf-8') as f:
+                        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    logger.info(f"Metadata version.json updated to platform_version={runtime_version}")
+
+            self._refresh_db_sessions()
             return True
         except Exception as e:
             logger.exception(f"Failed to apply runtime update: {e}")
             return False
 
     def _refresh_db_sessions(self) -> None:
-        """
-        Refresh database sessions after runtime DB update.
-        This ensures SQLAlchemy sessions don't serve stale data.
-        """
         try:
             from centermanager.database.session import refresh_runtime_db
             refresh_runtime_db()
@@ -369,12 +401,10 @@ class RuntimeSyncService:
             logger.exception(f"Failed to refresh database sessions: {e}")
 
     def _check_reload(self) -> None:
-        """Check if reload is required and decide."""
         state = ReloadState(
             is_writing=self._collab_manager.is_writing(),
             has_pending_queue=len(self._collab_manager.get_queue().get("requests", [])) > 0,
         )
-
         decision = self._reload_service.decide(state)
 
         if decision == ReloadDecision.RELOAD_NOW:
@@ -391,7 +421,6 @@ class RuntimeSyncService:
             logger.info("Reload deferred - conditions not met")
 
     def _set_status(self, status: SyncStatus) -> None:
-        """Set sync status and publish event."""
         old = self._status
         self._status = status
         if old != status:

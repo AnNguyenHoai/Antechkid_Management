@@ -20,8 +20,8 @@ from .student_events import (
     StudentArchived,
     StudentActivated,
     StudentDeleted,
+    StudentUpdated,
 )
-
 __all__ = [
     "Event",
     "EventHandler",
@@ -43,4 +43,8 @@ __all__ = [
     "StudentArchived",
     "StudentActivated",
     "StudentDeleted",
+    "StudentArchived",
+    "StudentActivated",
+    "StudentDeleted",
+    "StudentUpdated",
 ]

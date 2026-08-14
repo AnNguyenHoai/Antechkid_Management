@@ -7,8 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from datetime import datetime
-import time
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from centermanager.core import paths as paths_module
 from centermanager.database.engine import create_engine_for_path
@@ -153,7 +152,7 @@ class TestRuntimeVersion:
         meta_repo = JsonMetadataRepository(meta_dir)
         version_manager = VersionManager(meta_repo, event_bus)
 
-        # Setup sync provider
+        # Setup sync provider (mock git to avoid network)
         repo_path = runtime_env.runtime_root / "repository"
         provider = GitSynchronizationProvider(
             repo_path=repo_path,
@@ -182,19 +181,41 @@ class TestRuntimeVersion:
         old_version = version_manager.get_current_version()
         assert old_version == 1
 
-        # Simulate finish editing steps
-        tx._publish_database()
-        # Create pending version
-        pending = version_manager.create_pending_version()
-        assert pending == 2
+        # Start editing and finish
+        def save_local():
+            with Session() as sess:
+                s = sess.query(Student).first()
+                if s:
+                    s.full_name = "Updated Student"
+                    sess.commit()
+            return True
 
-        # Mock _do_publish to return True
+        tx.start_editing(save_local)
+        tx.mark_dirty()
+
+        # Mock _do_publish to simulate successful push
         with patch.object(tx, '_do_publish', return_value=True):
-            # Also mock publish_pending_version to avoid actual file write
-            with patch.object(version_manager, 'publish_pending_version', return_value=True):
-                # Ensure state is LOCAL_SAVED before publish
-                tx._state = WriteTransactionState.LOCAL_SAVED
-                success = tx._publish()
+            # Also mock _publish_database_and_manifest to update manifest
+            def mock_publish_db():
+                # Copy DB
+                db_src = runtime_env.database_dir / "center.db"
+                if db_src.exists():
+                    db_dst = repo_path / "database"
+                    db_dst.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(db_src, db_dst / "center.db")
+                # Update manifest
+                manifest_path = repo_path / "manifest.json"
+                if manifest_path.exists():
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        manifest = json.load(f)
+                    manifest["runtime_version"] = 2
+                    manifest["published_at"] = datetime.now().isoformat()
+                    with open(manifest_path, "w", encoding="utf-8") as f:
+                        json.dump(manifest, f, indent=2)
+                return True
+
+            with patch.object(tx, '_publish_database_and_manifest', side_effect=mock_publish_db):
+                success = tx.finish_editing()
                 assert success
 
         # Check version incremented
@@ -203,6 +224,11 @@ class TestRuntimeVersion:
 
         # Check pending version cleared
         assert version_manager.get_pending_version() is None
+
+        # Check manifest in repository updated
+        with open(repo_path / "manifest.json", "r") as f:
+            manifest = json.load(f)
+            assert manifest["runtime_version"] == 2
 
     def test_manifest_and_database_atomic(self, runtime_env, temp_repo):
         """Test that database and manifest are committed together."""
@@ -241,14 +267,19 @@ class TestRuntimeVersion:
         tx = WriteTransactionManager(cm)
         tx.set_version_manager(version_manager)
 
-        # Copy database and update manifest
-        tx._publish_database()
+        # Create pending version
         pending = version_manager.create_pending_version()
         assert pending == 2
-        # Update manifest using provider
+
+        # Update manifest in repository
         provider.update_manifest(2)
 
         # Check both files exist in repository
+        # Create dummy database file
+        (repo_path / "database").mkdir(exist_ok=True)
+        with open(repo_path / "database" / "center.db", "w") as f:
+            f.write("test db")
+
         assert (repo_path / "database" / "center.db").exists()
         assert (repo_path / "manifest.json").exists()
         

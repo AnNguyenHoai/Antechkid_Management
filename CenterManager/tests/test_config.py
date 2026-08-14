@@ -1,3 +1,4 @@
+# tests/test_config.py
 # -*- coding: utf-8 -*-
 """
 Tests for configuration loader.
@@ -14,6 +15,7 @@ from centermanager.core.config import (
     _DEFAULT_CONFIG,
 )
 from centermanager.core.paths import get_paths
+from tests.conftest import REAL_RUNTIME_PATH
 
 
 def test_config_uses_default_when_missing(temp_runtime):
@@ -53,10 +55,8 @@ def test_init_config_creates_default_if_missing(temp_runtime):
 
 
 def test_get_config_returns_config(temp_runtime):
-    # Use temp_runtime so we test the default config, not the production one
     config = get_config()
     assert config.get("application.name") == "CenterManager"
-    # version is whatever the default is, but we can check it exists
     assert config.get("application.version") is not None
 
 
@@ -77,7 +77,6 @@ def test_config_raw_property(clean_paths):
     assert config.get("application.name") == original_name
 
 
-# Test bảo vệ production runtime
 def test_production_runtime_unchanged():
     from tests.conftest import REAL_RUNTIME_PATH
     config_file = REAL_RUNTIME_PATH / "Config" / "config.json"
@@ -86,4 +85,3 @@ def test_production_runtime_unchanged():
         data = json.load(f)
     assert "application" in data
     assert "name" in data["application"]
-    # Do not assert the version value, as it may legitimately change.

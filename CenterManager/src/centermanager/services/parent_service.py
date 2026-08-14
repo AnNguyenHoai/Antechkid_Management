@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ParentService - business logic for Parent entity.
-Now integrated with TimelineService.
+Now integrated with TimelineService and EventBus.
 """
 from typing import List, Optional
 
@@ -12,6 +12,26 @@ from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.services.exceptions import StudentServiceError, StudentValidationError
 from centermanager.services.timeline_service import TimelineService
+from centermanager.events.event_bus import EventBus
+from centermanager.events.event import Event
+
+
+class ParentAdded(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
+
+
+class ParentUpdated(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
+
+
+class ParentDeleted(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
 
 
 class ParentServiceError(StudentServiceError):
@@ -27,9 +47,15 @@ class ParentValidationError(ParentServiceError):
 
 
 class ParentService:
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        event_bus: Optional[EventBus] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._event_bus = event_bus
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -103,6 +129,10 @@ class ParentService:
                     description=f"{norm_relationship or 'Guardian'}: {norm_name}",
                     metadata={"parent_id": parent.id},
                 )
+
+            # Emit event for dirty marking
+            if self._event_bus:
+                self._event_bus.publish(ParentAdded(parent.id, student_id))
 
             return parent
 
@@ -188,8 +218,8 @@ class ParentService:
 
             session.commit()
             session.refresh(parent)
-            # Trong update_parent, sau khi commit và refresh:
-            if self._timeline_service and changes:
+
+            if self._timeline_service:
                 description = "Updated: " + "; ".join(changes)
                 self._timeline_service.log_event(
                     student_id=parent.student_id,
@@ -198,6 +228,9 @@ class ParentService:
                     description=description,
                     metadata={"changes": changes},
                 )
+
+            if self._event_bus:
+                self._event_bus.publish(ParentUpdated(parent.id, parent.student_id))
 
             return parent
 
@@ -212,7 +245,6 @@ class ParentService:
             repo.delete(parent)
             session.commit()
 
-            # Log timeline event
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -221,3 +253,6 @@ class ParentService:
                     description=f"Deleted {name or 'guardian'}",
                     metadata={"parent_id": parent_id},
                 )
+
+            if self._event_bus:
+                self._event_bus.publish(ParentDeleted(parent_id, student_id))

@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from centermanager.events.event import Event
 
@@ -34,4 +34,14 @@ class StudentDeleted(Event):
     student_id: int
     student_code: str
     student_name: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class StudentUpdated(Event):
+    """Event emitted when a student is updated."""
+    student_id: int
+    student_code: str
+    student_name: str
+    changes: List[str]
     timestamp: datetime = field(default_factory=datetime.now)

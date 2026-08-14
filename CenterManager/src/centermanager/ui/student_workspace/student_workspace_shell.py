@@ -4,7 +4,7 @@
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame
 
 from centermanager.ui.workspace_base import WorkspaceBase
@@ -18,8 +18,9 @@ from centermanager.ui.student_workspace.student_analytics_page import StudentAna
 from centermanager.platform.context import PlatformContext
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.business import WriteGuard, PermissionGuard
-from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
+from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased, WriteRequested
 from centermanager.events.synchronization_events import VersionUpdated, SynchronizationCompleted
+from centermanager.platform.sync.events import ReloadRequired
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,13 @@ class StudentWorkspaceShell(WorkspaceBase):
 
         self._setup_ui()
         self._connect_signals()
+
+        # Store reference to home page (set by MainWindow)
+        self.home_page = None
+
+    def set_home_page(self, home_page):
+        """Set home page reference for refresh."""
+        self.home_page = home_page
 
     def _setup_ui(self) -> None:
         """Setup the UI components."""
@@ -217,10 +225,16 @@ class StudentWorkspaceShell(WorkspaceBase):
                 event_bus.register(WriteReleased, self._on_write_released)
             )
             self._event_subscriptions.append(
+                event_bus.register(WriteRequested, self._on_write_requested)
+            )
+            self._event_subscriptions.append(
                 event_bus.register(SynchronizationCompleted, self._on_sync_completed)
             )
             self._event_subscriptions.append(
                 event_bus.register(VersionUpdated, self._on_version_updated)
+            )
+            self._event_subscriptions.append(
+                event_bus.register(ReloadRequired, self._on_reload_required)
             )
 
         self._is_initialized = True
@@ -287,31 +301,84 @@ class StudentWorkspaceShell(WorkspaceBase):
         mode = event.mode if isinstance(event.mode, str) else event.mode.value
         is_write = (mode == "WRITE")
         logger.debug(f"[StudentWorkspace] Mode changed to {mode}")
-        self.set_write_enabled(is_write)
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self.set_write_enabled(is_write))
+        else:
+            self.set_write_enabled(is_write)
 
     def _on_write_granted(self, event: WriteGranted) -> None:
         """Handle write granted event."""
         logger.info(f"[StudentWorkspace] Write granted to {event.username}")
-        self.set_write_enabled(True)
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self.set_write_enabled(True))
+        else:
+            self.set_write_enabled(True)
 
     def _on_write_released(self, event: WriteReleased) -> None:
         """Handle write released event."""
         logger.info(f"[StudentWorkspace] Write released by {event.username}")
-        self.set_write_enabled(False)
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self.set_write_enabled(False))
+        else:
+            self.set_write_enabled(False)
+
+    def _on_write_requested(self, event: WriteRequested) -> None:
+        """Handle write requested event."""
+        logger.info(f"[StudentWorkspace] Write requested by {event.username}")
+        # Cập nhật UI waiting status
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self._update_waiting_status)
+        else:
+            self._update_waiting_status()
+
+    def _update_waiting_status(self) -> None:
+        """Update waiting status indicator."""
+        # Delegate to main window
+        parent = self.parent()
+        while parent and not hasattr(parent, '_update_waiting_status'):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_update_waiting_status'):
+            parent._update_waiting_status()
 
     def _on_sync_completed(self, event: SynchronizationCompleted) -> None:
         """Handle sync completed event."""
         logger.info("[StudentWorkspace] Sync completed, refreshing data")
-        self.refresh_current_student()
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self.refresh_current_student)
+        else:
+            self.refresh_current_student()
 
     def _on_version_updated(self, event: VersionUpdated) -> None:
         """Handle version updated event."""
         logger.info(f"[StudentWorkspace] Version updated to {event.new_version}")
 
+    def _on_reload_required(self, event: ReloadRequired) -> None:
+        """Handle reload required event."""
+        logger.info(f"[StudentWorkspace] Reload required: version {event.new_version}, reason: {event.reason}")
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self._reload_required_ui)
+        else:
+            self._reload_required_ui()
+
+    def _reload_required_ui(self) -> None:
+        """UI thread version of reload required."""
+        # Refresh current student data
+        self.refresh_current_student()
+        # Refresh dashboard and list
+        self.dashboard_page.refresh()
+        self.list_page.refresh()
+        # Refresh home page if available
+        if self.home_page:
+            self.home_page.refresh()
+        logger.info("[StudentWorkspace] Reload completed")
+
     # ===== Write state propagation =====
 
     def set_write_enabled(self, enabled: bool) -> None:
         """Enable/disable write actions in all child widgets."""
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self.set_write_enabled(enabled))
+            return
         for widget in [self.list_page, self.detail_page]:
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(enabled)
@@ -340,8 +407,8 @@ class StudentWorkspaceShell(WorkspaceBase):
         """Refresh list and dashboard after student update."""
         self.list_page.refresh()
         self.dashboard_page.refresh()
-        # Do NOT refresh home_page here - it's owned by MainWindow
-        # HomePage will be refreshed when user navigates back to home
+        if self.home_page:
+            self.home_page.refresh()
 
     def _on_add_action(self) -> None:
         """Show add student dialog."""
@@ -366,7 +433,9 @@ class StudentWorkspaceShell(WorkspaceBase):
     def refresh_current_student(self) -> None:
         """Refresh the currently selected student."""
         if self._current_student_id is not None:
+            # Đảm bảo load lại từ DB (đã được sync)
             self.detail_page.load_student(self._current_student_id)
+            logger.info(f"[StudentWorkspace] Refreshed student {self._current_student_id}")
 
     @property
     def current_student_id(self) -> Optional[int]:

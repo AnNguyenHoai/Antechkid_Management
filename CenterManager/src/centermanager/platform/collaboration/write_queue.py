@@ -123,6 +123,19 @@ class WriteQueue:
             return True
         return False
     
+    def has_pending(self, session_id: str) -> bool:
+        """Check if a session has a pending request."""
+        for req in self._list_requests():
+            if req.session_id == session_id:
+                return True
+        return False
+    
+    def cancel_for_session(self, session_id: str) -> None:
+        """Cancel all pending requests for a session."""
+        for req in self._list_requests():
+            if req.session_id == session_id:
+                self.cancel(req.request_id)
+    
     def clear(self) -> None:
         """Clear all pending requests."""
         for file in self._queue_dir.glob("*.json"):

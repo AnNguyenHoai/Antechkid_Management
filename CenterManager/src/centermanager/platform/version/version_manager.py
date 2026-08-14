@@ -71,17 +71,44 @@ class VersionManager:
             logger.info("Pending version cleared")
 
     def increment_version(self, metadata: Optional[Dict[str, Any]] = None) -> int:
-        """
-        Deprecated: use create_pending_version() + publish_pending_version().
-        Kept for backward compatibility.
-        """
+        """Deprecated: use create_pending_version() + publish_pending_version()."""
         return self.create_pending_version(metadata)
 
-    def update_manifest_version(self, new_version: int, repo_path: Path) -> bool:
+    def update_repository_manifest(self, repo_path: Path, version: int) -> bool:
         """
         Update manifest.json in repository with new version.
-        Also updates runtime/manifest.json for consistency.
+        This is called BEFORE Git commit.
         """
+        try:
+            manifest_path = repo_path / "manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {
+                    "schema_version": 1,
+                    "runtime_version": 0,
+                    "database_version": 1,
+                    "minimum_app_version": "0.1.0",
+                    "publisher": "CenterManager",
+                    "branch": "main",
+                    "created_at": datetime.now().isoformat(),
+                    "published_at": None,
+                }
+
+            data["runtime_version"] = version
+            data["published_at"] = datetime.now().isoformat()
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"Repository manifest updated to version {version}")
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to update repository manifest: {e}")
+            return False
+
+    def update_manifest_version(self, new_version: int, repo_path: Path) -> bool:
+        """Update manifest.json in repository with new version."""
         try:
             runtime_manifest_path = get_paths().runtime_root / "manifest.json"
             self._update_manifest_file(runtime_manifest_path, new_version)
@@ -125,4 +152,4 @@ class VersionManager:
         old = self.get_current_version()
         self._version_cache = None
         new = self.get_current_version()
-        return new != old
+        return new != old   

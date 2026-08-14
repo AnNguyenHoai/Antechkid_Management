@@ -68,7 +68,7 @@ class TestVersionResolver:
     def test_unknown_remote(self):
         resolver = VersionResolver()
         status = resolver.resolve(5, None)
-        assert status == VersionStatus.UNKNOWN
+        assert status == VersionStatus.REMOTE_UNAVAILABLE
 
     def test_conflict(self):
         resolver = VersionResolver()

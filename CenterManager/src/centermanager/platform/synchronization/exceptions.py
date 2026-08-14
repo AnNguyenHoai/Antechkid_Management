@@ -70,3 +70,7 @@ class PullFailedError(SynchronizationError):
 class PushFailedError(SynchronizationError):
     """Push operation failed."""
     pass
+
+class PullFailedError(SynchronizationError):
+    """Raised when pull operation fails."""
+    pass

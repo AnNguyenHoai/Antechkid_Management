@@ -26,6 +26,7 @@ from centermanager.platform import (
     RuntimeSyncService,
     BusinessModuleRegistry,
 )
+from centermanager.platform.sync import StartupSynchronization
 from centermanager.platform.business import BusinessModule
 
 from centermanager.ui.main_window import MainWindow
@@ -48,6 +49,7 @@ from centermanager.services.permission_service import PermissionService
 from centermanager.services.report_service import ReportService
 from centermanager.services.report_policy import ReportPolicy
 from centermanager.services.auto_report_service import AutoReportService
+from centermanager.services.git_config_service import GitConfigService
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.events.handlers.highlight_timeline_handler import HighlightTimelineHandler
 from centermanager.services.home_dashboard_service import HomeDashboardService
@@ -124,31 +126,84 @@ def main() -> int:
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
 
         # ============================================
-        # DATABASE SCHEMA
+        # DATABASE ENGINE (before sync, but no schema yet)
         # ============================================
         from sqlalchemy.orm import sessionmaker
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
+
+        # ============================================
+        # GIT CONFIGURATION (must load before sync)
+        # ============================================
+        git_config_service = GitConfigService()
+
+        # Check if Git config exists, if not show first-run dialog
+        if not git_config_service.has_config():
+            logger.info("[STARTUP] Git configuration missing, showing first-run dialog")
+            from centermanager.ui.git_config_dialog import GitConfigDialog
+            dialog = GitConfigDialog(git_config_service)
+            if dialog.exec() == GitConfigDialog.DialogCode.Accepted:
+                logger.info("[STARTUP] Git configuration saved")
+            else:
+                logger.warning("[STARTUP] Git configuration skipped. Cannot continue without Git config.")
+                QMessageBox.critical(None, "Configuration Required",
+                                     "Git configuration is required to synchronize data.\n"
+                                     "Please provide the encrypted configuration bundle.")
+                return 1
+
+        # Load Git config
+        git_config = git_config_service.get_config()
+        if git_config is None:
+            logger.error("[STARTUP] Git configuration not available after dialog")
+            QMessageBox.critical(None, "Configuration Error",
+                                 "Could not load Git configuration. Please check the bundle format.")
+            return 1
+
+        # ============================================
+        # CREATE SYNCHRONIZATION PROVIDER
+        # ============================================
+        repo_path = paths.runtime_root / "repository"
+        sync_provider = GitSynchronizationProvider(
+            repo_path=repo_path,
+            repository_url=git_config.repository_url,
+            token=git_config.token,
+            username=git_config.username,
+            branch=git_config.branch,
+            email=git_config.email or "",
+        )
+
+        # ============================================
+        # STARTUP SYNCHRONIZATION (blocking gate)
+        # ============================================
+        logger.info("[STARTUP] Running startup synchronization...")
+        startup_sync = StartupSynchronization(sync_provider)
+        if not startup_sync.run():
+            logger.error("[STARTUP] Startup synchronization failed")
+            QMessageBox.critical(
+                None,
+                "Synchronization Error",
+                "Unable to synchronize application data.\n"
+                "Please check your network connection or Git configuration.\n\n"
+                "If the problem persists, contact your system administrator."
+            )
+            return 1
+
+        logger.info("[STARTUP] Startup synchronization completed")
+
+        # ============================================
+        # ENSURE DATABASE SCHEMA (after sync)
+        # ============================================
         ensure_schema()
-        logger.info("[STARTUP] Schema migration completed")
+        logger.info("[STARTUP] Schema ensured")
 
         # ============================================
-        # SEED ROLES & PERMISSIONS
-        # ============================================
-        logger.info("[STARTUP] Seeding roles and permissions...")
-        try:
-            with session_factory() as session:
-                seed_roles_and_permissions(session)
-            logger.info("[STARTUP] Roles and permissions seeded")
-        except Exception as e:
-            logger.exception("Error seeding roles/permissions")
-
-        # ============================================
-        # SERVICES INITIALIZATION
+        # PERMISSION SERVICE (for login)
         # ============================================
         permission_service = PermissionService(session_factory)
 
-        # Login
+        # ============================================
+        # LOGIN
+        # ============================================
         login_dialog = LoginDialog(permission_service)
         if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
             logger.info("[STARTUP] Login cancelled. Exiting.")
@@ -163,53 +218,26 @@ def main() -> int:
         logger.info(f"[STARTUP] User authenticated: {current_user.username}")
 
         # ============================================
-        # PLATFORM SERVICES
+        # PLATFORM SERVICES (after login)
         # ============================================
         event_bus = EventBus()
 
-        # Synchronization
-        sync_provider = None
-        git_config = config.raw.get("git", {})
-        if git_config.get("repository_url") and git_config.get("token"):
-            try:
-                repo_path = paths.runtime_root / "repository"
-                
-                if not repo_path.exists() or not (repo_path / ".git").exists():
-                    logger.info("[STARTUP] Cloning repository...")
-                    creds = GitCredentials(
-                        repository_url=git_config.get("repository_url"),
-                        branch=git_config.get("branch", "main"),
-                        token=git_config.get("token"),
-                        username=git_config.get("username", ""),
-                        email=git_config.get("email", ""),
-                    )
-                    provider = GitProvider(repo_path, creds)
-                    provider.init_repository()
-                    logger.info("[STARTUP] Repository cloned successfully")
-                
-                sync_provider = GitSynchronizationProvider(
-                    repo_path=repo_path,
-                    repository_url=git_config.get("repository_url"),
-                    token=git_config.get("token"),
-                    branch=git_config.get("branch", "main"),
-                )
-                if sync_provider.connect():
-                    logger.info("[STARTUP] Git provider connected")
-                else:
-                    logger.warning("[STARTUP] Git provider connect failed")
-                
-            except Exception as e:
-                logger.exception(f"Failed to initialize Git provider: {e}")
-
+        # Synchronization manager (for background sync)
         sync_policy = SynchronizationPolicy.from_config(config.raw.get("collaboration", {}))
+        sync_manager = SynchronizationManager(
+            provider=sync_provider,
+            policy=sync_policy,
+            event_bus=event_bus,
+        )
 
         # Collaboration
         collaboration_manager = CollaborationManager(
             runtime_root=paths.runtime_root,
             event_bus=event_bus,
+            sync_provider=sync_provider,
         )
         notification_service = NotificationService()
-        
+
         collaboration_manager.initialize(
             user_id=str(current_user.id),
             username=current_user.username,
@@ -217,14 +245,7 @@ def main() -> int:
             runtime_version=platform_context.runtime.manifest.runtime_version,
         )
 
-        # Synchronization Manager
-        sync_manager = SynchronizationManager(
-            provider=sync_provider,
-            policy=sync_policy,
-            event_bus=event_bus,
-        )
-
-        # Runtime Sync Service
+        # Runtime Sync Service (background)
         sync_service = RuntimeSyncService(
             sync_manager=sync_manager,
             collab_manager=collaboration_manager,
@@ -239,17 +260,21 @@ def main() -> int:
         # ============================================
         module_registry = BusinessModuleRegistry()
 
-        # Initialize business services
+        # Initialize business services - CORRECT ORDER
         timeline_service = TimelineService(session_factory)
-        
-        # ===== QUAN TRỌNG: Truyền event_bus vào StudentService =====
+
         student_service = StudentService(
             session_factory,
             timeline_service,
-            event_bus=event_bus  # <-- THÊM
+            event_bus=event_bus
         )
-        
-        parent_service = ParentService(session_factory, timeline_service)
+
+        parent_service = ParentService(
+            session_factory,
+            timeline_service,
+            event_bus
+        )
+
         assessment_service = AssessmentService(session_factory, timeline_service)
         session_service = SessionService(session_factory)
         note_service = SessionNoteService(session_factory, session_service)
@@ -271,10 +296,9 @@ def main() -> int:
         filter_service = StudentFilterService(session_factory)
         export_service = StudentExportService(student_service)
         import_service = StudentImportService(student_service)
-        
-        # ===== QUAN TRỌNG: Truyền event_bus vào HomeDashboardService =====
-        home_service = HomeDashboardService(session_factory, event_bus=event_bus)  # <-- SỬA
-        
+
+        home_service = HomeDashboardService(session_factory, event_bus=event_bus)
+
         analytics_service = StudentAnalyticsService(session_factory)
 
         teacher_timeline_service = TeacherTimelineService(session_factory)
@@ -339,7 +363,7 @@ def main() -> int:
             student_service=student_service,
             report_service=report_service,
         )
-        
+
         # Create Version Manager
         metadata_dir = paths.runtime_root / "metadata"
         metadata_repo = JsonMetadataRepository(metadata_dir)
@@ -347,7 +371,10 @@ def main() -> int:
 
         # Create Write Transaction Manager
         transaction_manager = WriteTransactionManager(collaboration_manager)
-        transaction_manager.set_sync_service(sync_service)
+        if sync_service is not None:
+            transaction_manager.set_sync_service(sync_service)
+        else:
+            logger.warning("[STARTUP] WriteTransactionManager: sync service disabled")
         transaction_manager.set_version_manager(version_manager)
 
         # ============================================
@@ -390,6 +417,8 @@ def main() -> int:
             module_registry=module_registry,
             transaction_manager=transaction_manager,
             notification_service=notification_service,
+            git_config_service=git_config_service,
+            event_bus=event_bus,
         )
 
         logger.info("[STARTUP] MainWindow instance created")
@@ -403,7 +432,8 @@ def main() -> int:
         logger.info(f"[STARTUP] QApplication.exec finished with code {exit_code}")
 
         # Shutdown
-        sync_service.stop()
+        if sync_service is not None:
+            sync_service.stop()
         collaboration_manager.shutdown()
 
         return exit_code

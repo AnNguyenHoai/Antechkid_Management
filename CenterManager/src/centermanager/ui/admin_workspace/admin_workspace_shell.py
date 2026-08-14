@@ -1,3 +1,4 @@
+# src/centermanager/ui/admin_workspace/admin_workspace_shell.py
 # -*- coding: utf-8 -*-
 from typing import Optional
 
@@ -11,6 +12,7 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.admin_workspace.user_list_page import UserListPage
 from centermanager.ui.admin_workspace.settings_page import SettingsPage
+from centermanager.ui.admin_workspace.git_settings_page import GitSettingsPage
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 
 
@@ -20,12 +22,14 @@ class AdminWorkspaceShell(QWidget):
     def __init__(
         self,
         permission_service,
-        platform_context=None,          # <-- THÊM
-        collaboration_manager=None,     # <-- THÊM
+        git_config_service=None,
+        platform_context=None,
+        collaboration_manager=None,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._permission_service = permission_service
+        self._git_config_service = git_config_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
 
@@ -49,6 +53,7 @@ class AdminWorkspaceShell(QWidget):
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
+            {"id": "git", "icon": "🔐", "label": "Git Config"},
             {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
         ]
         self.nav = WorkspaceNavigation("Admin Workspace", pages)
@@ -70,6 +75,13 @@ class AdminWorkspaceShell(QWidget):
             None,  # notification_service placeholder
         )
         self.content_stack.addWidget(self.settings_page)
+
+        self.git_settings_page = GitSettingsPage(
+            self._git_config_service,
+            self._collaboration_manager,
+            None,  # notification_service placeholder
+        )
+        self.content_stack.addWidget(self.git_settings_page)
 
         self.diagnostics_page = DiagnosticsPage(
             self._collaboration_manager,
@@ -93,6 +105,11 @@ class AdminWorkspaceShell(QWidget):
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
             self.header.set_context("Admin Workspace", "Settings")
+        elif page_id == "git":
+            self.content_stack.setCurrentWidget(self.git_settings_page)
+            self.nav.set_active_page("git")
+            self.header.set_context("Admin Workspace", "Git Config")
+            self.git_settings_page.refresh()
         elif page_id == "diagnostics":
             self.content_stack.setCurrentWidget(self.diagnostics_page)
             self.nav.set_active_page("diagnostics")
@@ -104,3 +121,5 @@ class AdminWorkspaceShell(QWidget):
             self.users_page.set_write_enabled(enabled)
         if hasattr(self.settings_page, 'set_write_enabled'):
             self.settings_page.set_write_enabled(enabled)
+        if hasattr(self.git_settings_page, 'set_write_enabled'):
+            self.git_settings_page.set_write_enabled(enabled)

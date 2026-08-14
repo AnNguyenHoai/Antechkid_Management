@@ -46,7 +46,7 @@ class CollaborationManager:
         self,
         runtime_root: Optional[Path] = None,
         event_bus: Optional[EventBus] = None,
-        session: Optional[RuntimeSession] = None,
+        sync_provider: Optional[Any] = None,
         heartbeat_interval: int = 10,
         lock_timeout: int = 60,
         queue_dir_name: str = "queue",
@@ -65,7 +65,7 @@ class CollaborationManager:
         self._heartbeat_repo = HeartbeatRepository(self._collab_dir / heartbeat_dir_name)
         
         # Session
-        self._session: Optional[RuntimeSession] = session
+        self._session: Optional[RuntimeSession] = None
         self._heartbeat_manager: Optional[HeartbeatManager] = None
         
         # Presence
@@ -81,8 +81,11 @@ class CollaborationManager:
         self._is_writing = False
         self._lock_acquired = False
         
-        # Thread safety - use RLock to allow reentrant calls within same thread
+        # Thread safety
         self._state_mutex = threading.RLock()
+        
+        # Sync provider for Git lock
+        self._sync_provider = sync_provider
         
         logger.info(f"CollaborationManager initialized at {self._collab_dir}")
     
@@ -92,7 +95,6 @@ class CollaborationManager:
             logger.warning("Collaboration already initialized")
             return self._session
         
-        # Create session
         self._session = RuntimeSession(
             user_id=user_id,
             username=username,
@@ -100,7 +102,6 @@ class CollaborationManager:
             runtime_version=runtime_version,
         )
         
-        # Start heartbeat
         self._heartbeat_manager = HeartbeatManager(
             repo=self._heartbeat_repo,
             session=self._session,
@@ -111,7 +112,6 @@ class CollaborationManager:
         
         self._initialized = True
         
-        # Publish event
         self._event_bus.publish(SessionStarted(
             session_id=self._session.session_id,
             user_id=user_id,
@@ -124,25 +124,17 @@ class CollaborationManager:
         return self._session
     
     def shutdown(self) -> None:
-        """Shutdown collaboration and release resources."""
         if not self._initialized:
             return
-        
-        # Release lock if held
         if self._is_writing:
             self._release_write_internal()
-        
-        # Stop heartbeat
         if self._heartbeat_manager:
             self._heartbeat_manager.stop()
-        
-        # Publish event
         if self._session:
             self._event_bus.publish(SessionEnded(
                 session_id=self._session.session_id,
                 reason="shutdown",
             ))
-        
         self._initialized = False
         self._session = None
         logger.info("Collaboration shutdown complete")
@@ -150,137 +142,125 @@ class CollaborationManager:
     def request_write(self, reason: str = "") -> bool:
         """Request write access."""
         self._ensure_initialized()
-        
         if self._is_writing:
-            logger.debug("Already in write mode")
             return True
         
-        with self._state_mutex:
-            # Check if we already own the lock
-            if self._lock.is_locked() and self._lock.get_owner() == self._session.session_id:
-                self._is_writing = True
-                return True
-            
-            # Try to acquire lock
-            try:
-                acquired = self._lock.acquire(self._session, timeout_seconds=5)
-                if acquired:
+        # Generate request_id
+        request_id = str(uuid.uuid4())
+        
+        # Always publish WriteRequested event
+        self._event_bus.publish(WriteRequested(
+            request_id=request_id,
+            session_id=self._session.session_id,
+            user_id=self._session.user_id,
+            username=self._session.username,
+            priority=Priority.from_role(self._session.role),
+            reason=reason,
+            queue_position=self._queue.count(),
+        ))
+        
+        # If sync provider available, use Git lock
+        if self._sync_provider is not None:
+            lock_data = {
+                "locked": True,
+                "session_id": self._session.session_id,
+                "owner": self._session.username,
+                "user_id": self._session.user_id,
+                "acquired_at": datetime.now().isoformat(),
+                "last_heartbeat": datetime.now().isoformat(),
+                "machine": self._session.machine_fingerprint,
+            }
+            with self._state_mutex:
+                if self._sync_provider.acquire_lock(lock_data):
                     self._is_writing = True
                     self._lock_acquired = True
                     self._event_bus.publish(WriteGranted(
                         session_id=self._session.session_id,
                         user_id=self._session.user_id,
                         username=self._session.username,
-                        request_id="",
+                        request_id=request_id,
                         queue_position=0,
                     ))
                     self._event_bus.publish(ModeChanged(mode="WRITE"))
-                    logger.info(f"Write granted immediately to {self._session.username}")
+                    logger.info(f"Write granted to {self._session.username} via Git lock")
                     return True
-                    logger.info(f"Write granted immediately to {self._session.username}")
-                    return True
-            except LockTimeoutError:
-                pass
-            except Exception as e:
-                logger.error(f"Lock acquisition error: {e}")
-            
-            # Enqueue request
-            request = WriteRequest(
-                request_id=str(uuid.uuid4()),
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-                role=self._session.role,
-                priority=Priority.from_role(self._session.role),
-                timestamp=datetime.now(),
-                reason=reason,
-            )
-            self._queue.enqueue(request)
-            queue_position = self._queue.count()
-            
-            self._event_bus.publish(WriteRequested(
-                request_id=request.request_id,
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-                priority=request.priority,
-                reason=reason,
-                queue_position=queue_position,
-            ))
-            self._event_bus.publish(QueueUpdated(
-                queue_length=queue_position,
-                next_writer=self._queue.peek().username if self._queue.peek() else None,
-            ))
-            
-            logger.info(f"Write request queued for {self._session.username} (position {queue_position})")
-            return False
+                else:
+                    logger.info(f"Could not acquire Git lock for {self._session.username}")
+                    return False
+        else:
+            # Fallback file lock
+            with self._state_mutex:
+                try:
+                    acquired = self._lock.acquire(self._session)
+                    if acquired:
+                        self._is_writing = True
+                        self._lock_acquired = True
+                        self._event_bus.publish(WriteGranted(
+                            session_id=self._session.session_id,
+                            user_id=self._session.user_id,
+                            username=self._session.username,
+                            request_id=request_id,
+                            queue_position=0,
+                        ))
+                        self._event_bus.publish(ModeChanged(mode="WRITE"))
+                        logger.info(f"Write granted to {self._session.username} via file lock")
+                        return True
+                except LockTimeoutError:
+                    pass
+                return False
     
     def release_write(self) -> bool:
-        """Release write access."""
         self._ensure_initialized()
-        
         if not self._is_writing:
             logger.warning("Not in write mode")
             return False
         
-        # Release lock within mutex
         with self._state_mutex:
-            result = self._release_write_internal()
-        
-        # Process queue outside mutex to avoid deadlock
-        if result:
-            self._process_queue()
-        
-        return result
+            if self._sync_provider is not None:
+                result = self._sync_provider.release_lock(self._session.username)
+                if result:
+                    self._is_writing = False
+                    self._lock_acquired = False
+                    self._event_bus.publish(WriteReleased(
+                        session_id=self._session.session_id,
+                        user_id=self._session.user_id,
+                        username=self._session.username,
+                    ))
+                    self._event_bus.publish(ModeChanged(mode="READ"))
+                    logger.info(f"Write released by {self._session.username}")
+                    return True
+                else:
+                    logger.error("Failed to release Git lock")
+                    # Still force release local state to avoid stuck
+                    self._is_writing = False
+                    self._lock_acquired = False
+                    self._event_bus.publish(WriteReleased(
+                        session_id=self._session.session_id,
+                        user_id=self._session.user_id,
+                        username=self._session.username,
+                    ))
+                    self._event_bus.publish(ModeChanged(mode="READ"))
+                    return False
+            else:
+                self._lock.release(self._session)
+                self._is_writing = False
+                self._lock_acquired = False
+                self._event_bus.publish(WriteReleased(
+                    session_id=self._session.session_id,
+                    user_id=self._session.user_id,
+                    username=self._session.username,
+                ))
+                self._event_bus.publish(ModeChanged(mode="READ"))
+                return True
     
     def _release_write_internal(self) -> bool:
-        """Internal method to release write access."""
-        try:
+        if self._sync_provider:
+            return self._sync_provider.release_lock(self._session.username)
+        else:
             self._lock.release(self._session)
-            self._is_writing = False
-            self._lock_acquired = False
-            
-            self._event_bus.publish(WriteReleased(
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-            ))
-            self._event_bus.publish(LockReleased(
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-            ))
-            self._event_bus.publish(ModeChanged(mode="READ"))            
-            logger.info(f"Write released by {self._session.username}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to release write: {e}")
-            return False
-    
-    def _process_queue(self) -> None:
-        """Process the next request in queue."""
-        # Check if queue has pending requests
-        request = self._queue.peek()
-        if not request:
-            logger.debug("Queue is empty")
-            return
-        
-        # Check if the request is still valid (session online)
-        if self._heartbeat_repo.is_expired(request.session_id):
-            logger.warning(f"Removing expired request from {request.username}")
-            self._queue.cancel(request.request_id)
-            self._process_queue()  # Recursive call, but safe as we're not holding mutex
-            return
-        
-        # Notify about next writer (no auto-grant)
-        logger.info(f"Processing queue: next up is {request.username}")
-        self._event_bus.publish(QueueUpdated(
-            queue_length=self._queue.count(),
-            next_writer=request.username,
-        ))
     
     def heartbeat(self) -> bool:
-        """Update heartbeat for current session."""
         self._ensure_initialized()
         if self._heartbeat_manager:
             self._heartbeat_manager.update()
@@ -293,12 +273,10 @@ class CollaborationManager:
         return False
     
     def get_presence(self) -> Dict[str, Any]:
-        """Get presence summary."""
         self._ensure_initialized()
         return self._presence.get_summary()
     
     def get_queue(self) -> Dict[str, Any]:
-        """Get queue status."""
         self._ensure_initialized()
         return {
             "length": self._queue.count(),
@@ -316,30 +294,23 @@ class CollaborationManager:
         return self._is_writing
     
     def _on_heartbeat(self, session: RuntimeSession) -> None:
-        """Callback when heartbeat is updated."""
         self._heartbeat_repo.update(session)
     
     def _ensure_initialized(self) -> None:
         if not self._initialized:
             raise CollaborationNotInitializedError("Collaboration not initialized. Call initialize() first.")
     
-    def _check_session(self) -> None:
-        if not self._session:
-            raise CollaborationNotInitializedError("No session available")
     def get_queue_length(self) -> int:
-        """Get number of pending requests in queue."""
         return self._queue.count()
-
+    
     def has_writer(self) -> bool:
-        """Check if there is an active writer."""
         return self._is_writing or self._lock.is_locked()
+    
     def ensure_write(self) -> bool:
-        """Ensure write mode is active. Returns True if in write mode."""
         self._ensure_initialized()
         return self._is_writing
-
+    
     def get_diagnostics(self) -> Dict[str, Any]:
-        """Get collaboration diagnostics for UI."""
         self._ensure_initialized()
         lock_info = self._lock.get_lock_info() if hasattr(self._lock, 'get_lock_info') else {}
         return {
@@ -359,7 +330,7 @@ class CollaborationManager:
                 "owner": self._session.username if self._session else None,
                 "session_id": self._session.session_id if self._session else None,
             },
-            "git": {"state": "disabled"},
+            "git": {"state": "disabled" if self._sync_provider is None else "enabled"},
             "heartbeat": {
                 "is_running": self._heartbeat_manager is not None,
                 "heartbeat_count": 0,
@@ -369,8 +340,8 @@ class CollaborationManager:
             "platform_version": 0,
             "deployment_profile": "standalone",
         }
+    
     def get_health(self) -> Dict[str, Any]:
-        """Get collaboration health status."""
         self._ensure_initialized()
         return {
             "status": "HEALTHY",
@@ -380,89 +351,53 @@ class CollaborationManager:
                 "lock": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
             }
         }
+    
     def get_lock_owner(self) -> Optional[str]:
-        """Get owner of the current lock."""
         return self._lock.get_owner() if hasattr(self._lock, 'get_owner') else None
-
+    
     def get_session_id(self) -> Optional[str]:
-        """Get current session ID."""
         return self._session.session_id if self._session else None
-
+    
     def has_changes(self) -> bool:
-        """
-        Check if there are local changes since last publish.
-        This is a placeholder – actual implementation would track dirty state.
-        For now, return True if in WRITE mode.
-        """
         return self._is_writing
-
+    
     def is_lock_held_by_current_session(self) -> bool:
-        """Check if current session holds the lock."""
         if not self._lock.is_locked():
             return False
         owner = self._lock.get_owner()
         return owner == self._session.session_id if self._session else False
+    
     def current_mode(self) -> str:
-        """Get current mode as string."""
         self._ensure_initialized()
         return "WRITE" if self._is_writing else "READ"
-
+    
     def get_version(self) -> int:
-        """Get current platform version."""
         self._ensure_initialized()
-        return self._lock_timeout  # placeholder, test chỉ check != None
-
+        return self._lock_timeout
+    
     def get_deployment_profile(self) -> str:
-        """Get deployment profile."""
         self._ensure_initialized()
         return "Standalone"
-
-    def ensure_write(self) -> bool:
-        """Ensure write mode is active. Returns True if in write mode."""
+    
+    def get_waiting_users(self) -> list:
         self._ensure_initialized()
-        return self._is_writing
-
-    def get_health(self) -> Dict[str, Any]:
-        """Get collaboration health status."""
-        self._ensure_initialized()
-        return {
-            "status": "HEALTHY",
-            "details": {
-                "mode": "WRITE" if self._is_writing else "READ",
-                "session_active": self._session is not None,
-                "heartbeat_running": self._heartbeat_manager is not None,
-                "lock_held": self._lock.is_locked(),
-            }
-        }
-
-    def get_diagnostics(self) -> Dict[str, Any]:
-        """Get collaboration diagnostics for UI."""
-        self._ensure_initialized()
-        lock_info = self._lock.get_lock_info() if hasattr(self._lock, 'get_lock_info') else {}
-        return {
-            "mode": "WRITE" if self._is_writing else "READ",
-            "user": self._session.username if self._session else None,
-            "session_id": self._session.session_id if self._session else None,
-            "lock": {
-                "locked": self._lock.is_locked() if hasattr(self._lock, 'is_locked') else False,
-                "owner": self._lock.get_owner() if hasattr(self._lock, 'get_owner') else None,
-                "session_id": lock_info.get("session_id"),
-                "started_at": lock_info.get("acquired_at"),
-                "last_heartbeat": lock_info.get("last_heartbeat"),
-                "is_stale": False,
-            },
-            "session": {
-                "active": self._is_writing,
-                "owner": self._session.username if self._session else None,
-                "session_id": self._session.session_id if self._session else None,
-            },
-            "git": {"state": "disabled"},
-            "heartbeat": {
-                "is_running": self._heartbeat_manager is not None,
-                "heartbeat_count": 0,
-                "last_heartbeat": None,
-                "owner": self._session.username if self._session else None,
-            },
-            "platform_version": 0,
-            "deployment_profile": "standalone",
-        }
+        requests = self._queue.get_requests()
+        waiting = []
+        for req in requests:
+            if not self._heartbeat_repo.is_expired(req.session_id):
+                waiting.append({
+                    "username": req.username,
+                    "priority": req.priority,
+                    "request_id": req.request_id,
+                    "session_id": req.session_id,
+                    "timestamp": req.timestamp,
+                })
+        return waiting
+    
+    def is_next_eligible(self) -> bool:
+        if not self._initialized or not self._session:
+            return False
+        next_req = self._queue.peek()
+        if not next_req:
+            return False
+        return next_req.session_id == self._session.session_id

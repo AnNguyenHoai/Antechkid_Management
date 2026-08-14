@@ -4,8 +4,8 @@
 import logging
 from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QThread
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QSizePolicy
 
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
@@ -19,20 +19,19 @@ from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper
 
 from centermanager.platform.context import PlatformContext
-from centermanager.platform.collaboration import CollaborationManager, CollaborationMode, ModeChanged, WriteGranted, WriteReleased
+from centermanager.platform.collaboration import CollaborationManager, ModeChanged, WriteGranted, WriteReleased, WriteRequested
 from centermanager.platform.sync import RuntimeSyncService
 from centermanager.platform.business import BusinessModuleRegistry
 from centermanager.platform.sync.events import (
-    UpdateDetected,
-    SynchronizationDeferred,
-    SynchronizationStarted as SyncStarted,
     SynchronizationCompleted,
     SynchronizationFailed,
     SyncStatusChanged,
-    ReloadRequired,  # <-- THÊM
+    ReloadRequired,
 )
 
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
+from centermanager.events.event_bus import EventBus
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +73,12 @@ class MainWindow(QMainWindow):
         report_service,
         platform_context: PlatformContext,
         collaboration_manager: CollaborationManager,
-        sync_service: RuntimeSyncService,
+        sync_service: Optional[RuntimeSyncService],
         module_registry: BusinessModuleRegistry,
         transaction_manager: WriteTransactionManager,
-        notification_service: NotificationService,  # <-- THÊM
+        notification_service,
+        git_config_service,
+        event_bus: EventBus,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -119,10 +120,13 @@ class MainWindow(QMainWindow):
         self._collaboration_manager = collaboration_manager
         self._sync_service = sync_service
         self._module_registry = module_registry
-        self._notification_service = notification_service  # <-- LƯU
+        self._notification_service = notification_service
+        self._git_config_service = git_config_service
+        self._event_bus = event_bus
 
         # Write Transaction Manager
         self._transaction = transaction_manager
+        self._closing_requested = False
 
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
@@ -147,6 +151,12 @@ class MainWindow(QMainWindow):
         # Collaboration status bar
         self._setup_collaboration_status_bar()
         self._connect_collaboration_events()
+        self._connect_domain_events()
+
+        # Waiting user polling timer (2 giây để phản hồi nhanh)
+        self._waiting_timer = QTimer()
+        self._waiting_timer.timeout.connect(self._update_waiting_status)
+        self._waiting_timer.start(2000)
 
         # Start with home
         self.central_stack.setCurrentWidget(self.home_page)
@@ -191,7 +201,7 @@ class MainWindow(QMainWindow):
             report_service=self._report_service,
             platform_context=self._platform_context,
             collaboration_manager=self._collaboration_manager,
-            notification_service=self._notification_service,  # <-- TRUYỀN
+            notification_service=self._notification_service,
         )
         self.student_workspace.go_home.connect(self._go_home)
         self.student_workspace.go_to_finance.connect(self._on_go_to_finance)
@@ -250,6 +260,7 @@ class MainWindow(QMainWindow):
         """Setup admin workspace."""
         self.admin_workspace = AdminWorkspaceShell(
             permission_service=self._permission_service,
+            git_config_service=self._git_config_service,
             platform_context=self._platform_context,
             collaboration_manager=self._collaboration_manager,
         )
@@ -285,12 +296,29 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.version_label)
 
         # Sync status label
-        sync_state = self._sync_service.current_state()
-        status_text = sync_state.get("status", "idle")
-        self.sync_label = QLabel(f"Sync: {status_text}")
+        self.sync_label = QLabel("Sync: disabled")
+        if self._sync_service is not None:
+            sync_state = self._sync_service.current_state()
+            status_text = sync_state.get("status", "idle")
+            self.sync_label.setText(f"Sync: {status_text}")
         layout.addWidget(self.sync_label)
 
         layout.addStretch()
+
+        # Waiting indicator
+        self.waiting_indicator = QLabel("● No waiting")
+        self.waiting_indicator.setStyleSheet("""
+            QLabel {
+                background-color: #f0f0f0;
+                color: #999;
+                padding: 3px 12px;
+                border-radius: 12px;
+                font-weight: 500;
+                font-size: 12px;
+            }
+        """)
+        self.waiting_indicator.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        layout.addWidget(self.waiting_indicator)
 
         # Start Editing / Finish Editing buttons
         self.start_edit_btn = QPushButton("✏️ Start Editing")
@@ -303,12 +331,6 @@ class MainWindow(QMainWindow):
         self.finish_edit_btn.setVisible(False)
         self.finish_edit_btn.clicked.connect(self._on_finish_editing)
         layout.addWidget(self.finish_edit_btn)
-
-        self.cancel_edit_btn = QPushButton("❌ Cancel")
-        self.cancel_edit_btn.setFixedHeight(28)
-        self.cancel_edit_btn.setVisible(False)
-        self.cancel_edit_btn.clicked.connect(self._on_cancel_editing)
-        layout.addWidget(self.cancel_edit_btn)
 
         # Transaction state label
         self.tx_state_label = QLabel("")
@@ -328,7 +350,6 @@ class MainWindow(QMainWindow):
 
         self.start_edit_btn.setVisible(can_edit)
         self.finish_edit_btn.setVisible(is_editing)
-        self.cancel_edit_btn.setVisible(is_editing)
 
         mode = "WRITE" if is_editing else "READ"
         self.mode_label.setText(f"Mode: {mode}")
@@ -347,9 +368,9 @@ class MainWindow(QMainWindow):
 
         self.start_edit_btn.setEnabled(can_edit)
         self.finish_edit_btn.setEnabled(is_editing and state != WriteTransactionState.FAILED)
-        self.cancel_edit_btn.setEnabled(is_editing)
 
         self._update_write_actions(is_editing)
+        self._update_waiting_status()
 
     def _update_write_actions(self, enabled: bool) -> None:
         """Enable/disable write actions in all workspaces."""
@@ -357,6 +378,63 @@ class MainWindow(QMainWindow):
             widget = self.central_stack.widget(i)
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(enabled)
+
+    def _update_waiting_status(self) -> None:
+        """Update waiting indicator with color change when someone is waiting."""
+        if not self._collaboration_manager.is_initialized():
+            return
+
+        # Auto-acquire logic: nếu user hiện tại là next eligible và không có writer, tự động acquire
+        if not self._collaboration_manager.is_writing():
+            if self._collaboration_manager.is_next_eligible():
+                logger.info("Auto-acquiring lock: current user is next eligible")
+                if not hasattr(self, '_auto_acquire_pending') or not self._auto_acquire_pending:
+                    self._auto_acquire_pending = True
+                    QTimer.singleShot(100, lambda: self._auto_acquire())
+                return
+        else:
+            self._auto_acquire_pending = False
+
+        # Update indicator
+        waiting = self._collaboration_manager.get_waiting_users()
+        if waiting and self._collaboration_manager.is_writing():
+            names = ", ".join([w["username"] for w in waiting[:2]])
+            if len(waiting) > 2:
+                names += f" and {len(waiting)-2} others"
+            self.waiting_indicator.setText(f"⚠️ {names} waiting")
+            self.waiting_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: #ff9800;
+                    color: #ffffff;
+                    padding: 3px 12px;
+                    border-radius: 12px;
+                    font-weight: 700;
+                    font-size: 12px;
+                }
+            """)
+            self.statusBar().showMessage("", 0)
+        else:
+            self.waiting_indicator.setText("● No waiting")
+            self.waiting_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: #f0f0f0;
+                    color: #999;
+                    padding: 3px 12px;
+                    border-radius: 12px;
+                    font-weight: 500;
+                    font-size: 12px;
+                }
+            """)
+            if self._transaction.is_editing:
+                self.statusBar().showMessage("✏️ Editing...", 0)
+            else:
+                self.statusBar().showMessage("Ready", 0)
+
+    def _auto_acquire(self) -> None:
+        """Auto-acquire lock when user is next eligible."""
+        self._auto_acquire_pending = False
+        if not self._collaboration_manager.is_writing() and self._collaboration_manager.is_next_eligible():
+            self._on_start_editing()
 
     # ===== Transaction Actions =====
 
@@ -380,17 +458,19 @@ class MainWindow(QMainWindow):
         if success:
             self._transaction._has_changes = False
             self.statusBar().showMessage("Editing started. Make your changes, then click 'Finish Editing'.", 3000)
+            self._update_write_buttons()
         else:
-            QMessageBox.warning(self, "Cannot Edit", "Could not acquire write lock. Another user may be editing.")
-        self._update_write_buttons()
+            # Không hiển thị pop-up, chỉ hiển thị trên status bar
+            self.statusBar().showMessage("Could not acquire write lock. Someone else is editing.", 3000)
+            self._update_write_buttons()
 
     def _on_finish_editing(self) -> None:
+        """Finish editing and publish changes."""
         if not self._transaction.is_editing:
             return
 
         def save_local() -> bool:
             logger.info("Finishing editing - saving local data...")
-            # Mark that changes exist
             self._transaction.mark_dirty()
             if hasattr(self.student_workspace, 'dashboard_page'):
                 try:
@@ -409,6 +489,9 @@ class MainWindow(QMainWindow):
                 self.student_workspace.dashboard_page.refresh()
             if hasattr(self.student_workspace, 'list_page'):
                 self.student_workspace.list_page.refresh()
+            if self._closing_requested:
+                self._closing_requested = False
+                QTimer.singleShot(500, self.close)
 
         def on_publish_failure(error: str):
             logger.error(f"Publish failure: {error}")
@@ -417,9 +500,11 @@ class MainWindow(QMainWindow):
                 "Publish Failed",
                 f"Could not publish changes: {error}\n\n"
                 "Your changes are saved locally but not shared.\n"
-                "You can Retry, Continue Offline, or Cancel."
+                "You can Retry or Continue Offline."
             )
             self._update_write_buttons()
+            if self._closing_requested:
+                self._closing_requested = False
 
         success = self._transaction.finish_editing(
             save_callback=save_local,
@@ -440,7 +525,6 @@ class MainWindow(QMainWindow):
         msg.setInformativeText("What would you like to do?")
         retry_btn = msg.addButton("Retry", QMessageBox.ActionRole)
         offline_btn = msg.addButton("Continue Offline", QMessageBox.ActionRole)
-        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
         msg.exec()
 
         clicked = msg.clickedButton()
@@ -455,65 +539,64 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("📡 Working offline. Changes will be published later.", 3000)
             self._update_write_buttons()
         else:
-            self._transaction.cancel_editing(force=True)
-            self.statusBar().showMessage("❌ Editing cancelled. Changes discarded.", 3000)
-            self._update_write_buttons()
+            pass
 
-    # Trong _on_cancel_editing
-    def _on_cancel_editing(self) -> None:
-        """Cancel editing with confirmation if changes exist."""
-        if not self._transaction.is_editing:
-            return
+    # ===== Domain Event Handlers =====
 
-        if self._transaction.has_changes():
-            reply = QMessageBox.question(
-                self,
-                "Discard Changes",
-                "You have unsaved changes.\n\n"
-                "Cancel editing and discard all changes?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                return
-            # Discard changes with force=True to restore snapshot
-            success = self._transaction.cancel_editing(force=True)
-            if success:
-                self.statusBar().showMessage("Editing cancelled. Changes discarded.", 2000)
-            else:
-                QMessageBox.critical(self, "Error", "Could not discard changes. Please try again.")
-                return
-        else:
-            self._transaction.cancel_editing(force=False)
-            self.statusBar().showMessage("Editing cancelled.", 2000)
+    def _connect_domain_events(self) -> None:
+        """Register domain event listeners for transaction dirty tracking."""
+        if self._event_bus:
+            self._event_bus.register(StudentArchived, self._on_student_archived_event)
+            self._event_bus.register(StudentActivated, self._on_student_activated_event)
+            self._event_bus.register(StudentUpdated, self._on_student_updated_event)
+            self._event_bus.register(StudentDeleted, self._on_student_deleted_event)
+            # Parent events
+            from centermanager.services.parent_service import ParentAdded, ParentUpdated, ParentDeleted
+            self._event_bus.register(ParentAdded, self._on_parent_event)
+            self._event_bus.register(ParentUpdated, self._on_parent_event)
+            self._event_bus.register(ParentDeleted, self._on_parent_event)
+            logger.info("MainWindow registered Student and Parent events")
 
-        self._update_write_buttons()
+    def _on_parent_event(self, event) -> None:
+        """Handle parent events to mark dirty."""
+        if self._transaction.is_editing:
+            self._transaction.mark_dirty()
+            logger.info(f"Transaction marked dirty: parent event {event.__class__.__name__}")
+            
+    def _on_student_archived_event(self, event: StudentArchived) -> None:
+        if self._transaction.is_editing:
+            self._transaction.mark_dirty()
+            logger.info(f"Transaction marked dirty: student archive (id={event.student_id}, code={event.student_code})")
+
+    def _on_student_activated_event(self, event: StudentActivated) -> None:
+        if self._transaction.is_editing:
+            self._transaction.mark_dirty()
+            logger.info(f"Transaction marked dirty: student activate (id={event.student_id}, code={event.student_code})")
+
+    def _on_student_updated_event(self, event: StudentUpdated) -> None:
+        if self._transaction.is_editing:
+            self._transaction.mark_dirty()
+            logger.info(f"Transaction marked dirty: student update (id={event.student_id}, code={event.student_code})")
+
+    def _on_student_deleted_event(self, event: StudentDeleted) -> None:
+        if self._transaction.is_editing:
+            self._transaction.mark_dirty()
+            logger.info(f"Transaction marked dirty: student delete (id={event.student_id}, code={event.student_code})")
 
     # ===== Collaboration Event Handling =====
-    def _on_reload_required(self, event: ReloadRequired) -> None:
-        """Handle reload required event."""
-        logger.info(f"Reload required: version {event.new_version}, reason: {event.reason}")
-        
-        # Kiểm tra nếu đang ở Student Workspace
-        current_widget = self.central_stack.currentWidget()
-        if current_widget == self.student_workspace:
-            self.student_workspace.refresh()
-            logger.info("Student workspace refreshed after reload required")
-        elif current_widget == self.home_page:
-            self.home_page.refresh()
-            logger.info("Home page refreshed after reload required")
-        
-        self.statusBar().showMessage(f"Runtime updated to version {event.new_version}", 3000)
+
     def _connect_collaboration_events(self) -> None:
         """Connect collaboration events."""
         self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
         self._collaboration_manager._event_bus.register(WriteGranted, self._on_write_granted)
         self._collaboration_manager._event_bus.register(WriteReleased, self._on_write_released)
+        self._collaboration_manager._event_bus.register(WriteRequested, self._on_write_requested)
 
-        self._sync_service._event_bus.register(SyncStatusChanged, self._on_sync_status_changed)
-        self._sync_service._event_bus.register(SynchronizationCompleted, self._on_sync_completed)
-        self._sync_service._event_bus.register(SynchronizationFailed, self._on_sync_failed)
-        # === THÊM: Lắng nghe ReloadRequired ===
-        self._sync_service._event_bus.register(ReloadRequired, self._on_reload_required)
+        if self._sync_service is not None:
+            self._sync_service._event_bus.register(SyncStatusChanged, self._on_sync_status_changed)
+            self._sync_service._event_bus.register(SynchronizationCompleted, self._on_sync_completed)
+            self._sync_service._event_bus.register(SynchronizationFailed, self._on_sync_failed)
+            self._sync_service._event_bus.register(ReloadRequired, self._on_reload_required)
 
     def _on_mode_changed(self, event: ModeChanged) -> None:
         """Handle mode changed event."""
@@ -522,25 +605,85 @@ class MainWindow(QMainWindow):
     def _on_write_granted(self, event) -> None:
         """Handle write granted event."""
         self.statusBar().showMessage(f"Write access granted to {event.username}", 3000)
+        self._update_write_buttons()
 
     def _on_write_released(self, event) -> None:
         """Handle write released event."""
         self.statusBar().showMessage(f"Write access released by {event.username}", 3000)
+        self._update_write_buttons()
+        # Khi write được release, kích hoạt check update để pull dữ liệu mới
+        if self._sync_service is not None:
+            logger.info("WriteReleased: triggering check_for_updates")
+            QTimer.singleShot(500, self._sync_service.check_for_updates)
+
+    def _on_write_requested(self, event) -> None:
+        """Handle write requested event."""
+        logger.info(f"WriteRequested received from {event.username} (session={event.session_id})")
+        # Cập nhật waiting indicator ngay lập tức
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self._update_waiting_status)
+        else:
+            self._update_waiting_status()
 
     def _on_sync_status_changed(self, event: SyncStatusChanged) -> None:
         """Handle sync status changed event."""
-        self.sync_label.setText(f"Sync: {event.new_status}")
-        if event.new_status == "failed":
-            self.statusBar().showMessage("Synchronization failed. Check logs.", 3000)
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self._on_sync_status_changed_ui(event))
+        else:
+            self._on_sync_status_changed_ui(event)
+
+    def _on_sync_status_changed_ui(self, event: SyncStatusChanged) -> None:
+        if self._sync_service is not None:
+            self.sync_label.setText(f"Sync: {event.new_status}")
+            if event.new_status == "failed":
+                self.statusBar().showMessage("Synchronization failed. Check logs.", 3000)
 
     def _on_sync_completed(self, event: SynchronizationCompleted) -> None:
         """Handle sync completed event."""
-        self.statusBar().showMessage(f"Runtime updated to v{event.new_version}", 3000)
-        self.version_label.setText(f"Runtime: v{event.new_version}")
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self._on_sync_completed_ui(event))
+        else:
+            self._on_sync_completed_ui(event)
+
+    def _on_sync_completed_ui(self, event: SynchronizationCompleted) -> None:
+        if self._sync_service is not None:
+            self.statusBar().showMessage(f"Runtime updated to v{event.new_version}", 3000)
+            self.version_label.setText(f"Runtime: v{event.new_version}")
+            # Refresh student workspace sau khi sync
+            if self.central_stack.currentWidget() == self.student_workspace:
+                self.student_workspace.refresh_current_student()
 
     def _on_sync_failed(self, event: SynchronizationFailed) -> None:
         """Handle sync failed event."""
-        self.statusBar().showMessage(f"Sync failed: {event.error}", 3000)
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self._on_sync_failed_ui(event))
+        else:
+            self._on_sync_failed_ui(event)
+
+    def _on_sync_failed_ui(self, event: SynchronizationFailed) -> None:
+        if self._sync_service is not None:
+            self.statusBar().showMessage(f"Sync failed: {event.error}", 3000)
+
+    def _on_reload_required(self, event: ReloadRequired) -> None:
+        """Handle reload required event."""
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, lambda: self._on_reload_required_ui(event))
+        else:
+            self._on_reload_required_ui(event)
+
+    def _on_reload_required_ui(self, event: ReloadRequired) -> None:
+        """UI thread version of reload required."""
+        logger.info(f"[MainWindow] Reload required: version {event.new_version}, reason: {event.reason}")
+        current_widget = self.central_stack.currentWidget()
+        if current_widget == self.student_workspace:
+            self.student_workspace.refresh()
+            # Đảm bảo refresh student detail nếu đang mở
+            self.student_workspace.refresh_current_student()
+            logger.info("[MainWindow] Student workspace refreshed after reload required")
+        elif current_widget == self.home_page:
+            self.home_page.refresh()
+            logger.info("[MainWindow] Home page refreshed after reload required")
+        self.statusBar().showMessage(f"Runtime updated to version {event.new_version}", 3000)
 
     # ===== Workspace Navigation =====
 
@@ -569,22 +712,27 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Student Workspace")
             self._refresh_student_list()
             self.student_workspace.dashboard_page.refresh()
+            self._update_waiting_status()
         elif workspace_id == "teacher":
             self.central_stack.setCurrentWidget(self.teacher_workspace)
             self.teacher_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Teacher Workspace")
+            self._update_waiting_status()
         elif workspace_id == "class":
             self.central_stack.setCurrentWidget(self.class_workspace)
             self.class_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Class Workspace")
+            self._update_waiting_status()
         elif workspace_id == "finance":
             self.central_stack.setCurrentWidget(self.finance_workspace)
             self.finance_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Finance Workspace")
+            self._update_waiting_status()
         elif workspace_id == "admin":
             self.central_stack.setCurrentWidget(self.admin_workspace)
             self.admin_workspace.navigate_to("users")
             self.statusBar().showMessage("Admin Workspace")
+            self._update_waiting_status()
         else:
             self.statusBar().showMessage(f"Workspace {workspace_id} not available")
 
@@ -593,6 +741,7 @@ class MainWindow(QMainWindow):
         self.central_stack.setCurrentWidget(self.home_page)
         self.home_page.refresh()
         self.statusBar().showMessage("Home")
+        self._update_waiting_status()
 
     def _on_go_to_finance(self) -> None:
         """Navigate to finance workspace."""
@@ -627,26 +776,33 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Handle close event with transaction safety."""
         if self._transaction.is_editing:
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "You have unsaved changes. Do you want to finish editing before closing?",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
-            )
-            if reply == QMessageBox.Yes:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Unsaved Changes")
+            msg.setText("You are still editing.\nPlease finish editing before closing.")
+            msg.setInformativeText("What would you like to do?")
+            finish_btn = msg.addButton("Finish Editing", QMessageBox.ActionRole)
+            stay_btn = msg.addButton("Stay", QMessageBox.ActionRole)
+            msg.setDefaultButton(finish_btn)
+            msg.exec()
+
+            clicked = msg.clickedButton()
+            if clicked == finish_btn:
+                self._closing_requested = True
                 self._on_finish_editing()
-                if self._transaction.is_editing:
-                    event.ignore()
-                    return
-            elif reply == QMessageBox.Cancel:
                 event.ignore()
                 return
-            self._transaction.cancel_editing(force=True)
+            elif clicked == stay_btn:
+                event.ignore()
+                return
+            else:
+                event.ignore()
+                return
 
         if hasattr(self, 'student_workspace'):
             self.student_workspace.stop()
             self.student_workspace.dispose()
 
-        self._sync_service.stop()
+        if self._sync_service is not None:
+            self._sync_service.stop()
         self._collaboration_manager.shutdown()
         event.accept()

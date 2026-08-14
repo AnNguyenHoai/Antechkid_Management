@@ -15,6 +15,7 @@ from .events import (
     ReloadRequired,
     SyncStatusChanged,
 )
+from .startup_sync import StartupSynchronization   # <-- THÊM
 
 __all__ = [
     "RuntimeSyncService",
@@ -31,4 +32,5 @@ __all__ = [
     "SynchronizationFailed",
     "ReloadRequired",
     "SyncStatusChanged",
+    "StartupSynchronization",   # <-- THÊM
 ]

@@ -33,7 +33,7 @@ class SynchronizationManager:
 
     def __init__(
         self,
-        provider: SynchronizationProvider,
+        provider: Optional[SynchronizationProvider],
         policy: Optional[SynchronizationPolicy] = None,
         event_bus: Optional[EventBus] = None,
         retry_policy: Optional[RetryPolicy] = None,
@@ -48,6 +48,14 @@ class SynchronizationManager:
 
     def clone(self, progress_callback: Optional[Callable] = None) -> SynchronizationResult:
         """Clone repository from remote."""
+        if self._provider is None:
+            return SynchronizationResult(
+                result=SyncResult.OFFLINE,
+                message="Synchronization provider is not available",
+                provider="none",
+                started_at=datetime.now(),
+            )
+
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
@@ -97,6 +105,14 @@ class SynchronizationManager:
 
     def check_updates(self) -> SynchronizationResult:
         """Check for updates without performing sync."""
+        if self._provider is None:
+            return SynchronizationResult(
+                result=SyncResult.OFFLINE,
+                message="Synchronization provider is not available",
+                provider="none",
+                started_at=datetime.now(),
+            )
+
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
@@ -127,8 +143,13 @@ class SynchronizationManager:
             self._last_result = result
             return result
 
-        remote_manifest = self._provider.remote_manifest()
-        remote_version = remote_manifest.get("runtime_version") if remote_manifest else None
+        try:
+            remote_manifest = self._provider.remote_manifest()
+            remote_version = remote_manifest.get("runtime_version") if remote_manifest else None
+            logger.info(f"[{correlation_id}] Remote version: {remote_version}")
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to get remote manifest: {e}")
+            remote_version = None
 
         current_version = 0
         if hasattr(self._provider, 'current_version'):
@@ -162,6 +183,14 @@ class SynchronizationManager:
 
     def begin_sync(self, message: str = "", user: str = "system") -> SynchronizationResult:
         """Execute synchronization workflow."""
+        if self._provider is None:
+            return SynchronizationResult(
+                result=SyncResult.OFFLINE,
+                message="Synchronization provider is not available",
+                provider="none",
+                started_at=datetime.now(),
+            )
+
         if self._is_syncing:
             return SynchronizationResult(
                 result=SyncResult.FAILED,
@@ -317,6 +346,14 @@ class SynchronizationManager:
         Publish local changes WITHOUT fetching or pulling first.
         This is for Writer Finish Editing - only commit and push.
         """
+        if self._provider is None:
+            return SynchronizationResult(
+                result=SyncResult.OFFLINE,
+                message="Synchronization provider is not available",
+                provider="none",
+                started_at=datetime.now(),
+            )
+
         if self._is_syncing:
             return SynchronizationResult(
                 result=SyncResult.FAILED,
@@ -402,7 +439,7 @@ class SynchronizationManager:
         logger.info(f"[{self._correlation_id}] Synchronization cancelled")
         return True
 
-    def provider(self) -> SynchronizationProvider:
+    def provider(self) -> Optional[SynchronizationProvider]:
         return self._provider
 
     def policy(self) -> SynchronizationPolicy:

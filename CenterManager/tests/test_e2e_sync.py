@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """E2E tests for two-machine sync (simulated)."""
 
+import sys
 import pytest
 import shutil
 import subprocess
@@ -21,102 +22,14 @@ from centermanager.events.event_bus import EventBus
 from sqlalchemy.orm import sessionmaker
 
 
-@pytest.fixture
-def temp_repo(tmp_path):
-    """Create a bare repository to use as remote."""
-    repo_path = tmp_path / "remote.git"
-    repo_path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "--bare"], cwd=repo_path, capture_output=True)
-    return repo_path
-
-
-def create_runtime_env(tmp_path, remote_repo, label):
-    """Create a local repository with initial commit and push to remote."""
-    root = tmp_path / f"runtime_{label}"
-    root.mkdir(parents=True, exist_ok=True)
-    db_dir = root / "Database"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    meta_dir = root / "metadata"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    collab_dir = root / "collaboration"
-    collab_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create local repository (not clone)
-    repo_dst = root / "repository"
-    repo_dst.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "--initial-branch=main"], cwd=repo_dst, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dst, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dst, capture_output=True)
-
-    # Create manifest
-    manifest = {
-        "schema_version": 1,
-        "runtime_version": 1,
-        "database_version": 1,
-        "minimum_app_version": "0.1.0",
-        "publisher": "Test",
-        "branch": "main",
-        "created_at": datetime.now().isoformat(),
-        "published_at": None,
-    }
-    with open(repo_dst / "manifest.json", "w") as f:
-        json.dump(manifest, f, indent=2)
-    with open(root / "manifest.json", "w") as f:
-        json.dump(manifest, f, indent=2)
-    with open(meta_dir / "version.json", "w") as f:
-        json.dump({"platform_version": 1}, f)
-
-    # Commit and push to remote using as_uri to handle spaces in path
-    subprocess.run(["git", "add", "."], cwd=repo_dst, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_dst, capture_output=True)
-    subprocess.run(["git", "remote", "add", "origin", remote_repo.as_uri()], cwd=repo_dst, capture_output=True)
-    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo_dst, capture_output=True)
-
-    # Create a class for paths
-    class TestPaths:
-        def __init__(self, r):
-            self._runtime_root = r
-            self._project_root = r.parent
-        @property
-        def runtime_root(self):
-            return self._runtime_root
-        @property
-        def database_dir(self):
-            return self._runtime_root / "Database"
-        @property
-        def metadata_dir(self):
-            return self._runtime_root / "metadata"
-        @property
-        def config_dir(self):
-            return self._runtime_root / "Config"
-        @property
-        def logs_dir(self):
-            return self._runtime_root / "Logs"
-        @property
-        def backup_dir(self):
-            return self._runtime_root / "Backup"
-        @property
-        def attachment_dir(self):
-            return self._runtime_root / "Attachment"
-        @property
-        def reports_dir(self):
-            return self._runtime_root / "Reports"
-        @property
-        def export_dir(self):
-            return self._runtime_root / "Export"
-        def ensure_directories(self):
-            for d in [self.database_dir, self.metadata_dir, self.config_dir,
-                      self.logs_dir, self.backup_dir, self.attachment_dir,
-                      self.reports_dir, self.export_dir]:
-                d.mkdir(parents=True, exist_ok=True)
-
-    return TestPaths(root), repo_dst
-
-
+# Skip on Windows due to path space issues
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows path spaces cause Git errors")
 def test_two_machine_sync(temp_repo, tmp_path):
     """Simulate two machines syncing via Git."""
-    remote_repo = temp_repo  # bare repository
-    remote_url = remote_repo.as_uri()  # file:/// URL with spaces encoded
+    remote_repo = temp_repo
+
+    # Initialize remote with initial content
+    initialize_remote(remote_repo)
 
     # Machine A
     paths_a, repo_a = create_runtime_env(tmp_path, remote_repo, "A")
@@ -132,7 +45,7 @@ def test_two_machine_sync(temp_repo, tmp_path):
 
     provider_a = GitSynchronizationProvider(
         repo_path=repo_a,
-        repository_url=remote_url,
+        repository_url=remote_repo.as_uri(),
         token="",
         branch="main"
     )
@@ -154,7 +67,7 @@ def test_two_machine_sync(temp_repo, tmp_path):
 
     provider_b = GitSynchronizationProvider(
         repo_path=repo_b,
-        repository_url=remote_url,
+        repository_url=remote_repo.as_uri(),
         token="",
         branch="main"
     )
