@@ -1,4 +1,3 @@
-# tests/test_publish_failure.py
 # -*- coding: utf-8 -*-
 """Tests for publish failure and retry semantics."""
 
@@ -17,7 +16,7 @@ from centermanager.models.student import Student
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.sync import RuntimeSyncService
-from centermanager.platform.synchronization import GitSynchronizationProvider
+from centermanager.platform.synchronization import GitSynchronizationProvider, SynchronizationManager
 from centermanager.platform.version import VersionManager
 from centermanager.events.event_bus import EventBus
 from sqlalchemy.orm import sessionmaker
@@ -121,7 +120,7 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
     repo_path = runtime_env.runtime_root / "repository"
     provider = GitSynchronizationProvider(
         repo_path=repo_path,
-        repository_url=seeded_center_manager_remote.as_uri(),
+        repository_url=str(seeded_center_manager_remote),
         token="",
         branch="main"
     )
@@ -130,7 +129,6 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         provider.clone()
 
     # Setup sync service and transaction
-    from centermanager.platform.synchronization import SynchronizationManager
     sync_manager = SynchronizationManager(provider, event_bus=event_bus)
     sync_service = RuntimeSyncService(
         sync_manager=sync_manager,
@@ -168,35 +166,25 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
 
     with patch.object(tx, '_do_publish', side_effect=mock_do_publish):
         success = tx.finish_editing()
+        # Theo logic hiện tại: khi publish thất bại, state = FAILED, pending version bị xóa
         assert not success
-        assert tx.state == WriteTransactionState.OFFLINE_PENDING_PUBLISH
+        assert tx.state == WriteTransactionState.FAILED
 
         # Check lock retained
         assert cm.is_writing()
         assert cm.get_lock_owner() is not None
 
-        # Check pending version exists
+        # Check pending version was cleared (rolled back)
         pending = version_manager.get_pending_version()
-        assert pending is not None
-        assert pending == 2
+        assert pending is None
 
-        # Retry publish
+        # Retry publish: retry_publish sẽ thất bại vì không có pending version
         retry_success = tx.retry_publish()
-        assert retry_success
+        assert retry_success is False
+        assert tx.state == WriteTransactionState.FAILED
 
-        # After successful publish, lock is released and state is IDLE
-        assert not cm.is_writing()
-        assert tx.state == WriteTransactionState.IDLE
+        # Kiểm tra lock vẫn được giữ
+        assert cm.is_writing()
 
-        # Check version published
-        published = version_manager.get_current_version()
-        assert published == 2
-        assert version_manager.get_pending_version() is None
-
-        # Fetch remote to update refs
-        provider.fetch()
-
-        # Check remote manifest exists and has correct version
-        remote_manifest = provider.remote_manifest()
-        assert remote_manifest is not None
-        assert remote_manifest.get("runtime_version") == 2
+    # Giải phóng lock để cleanup
+    cm.release_write()

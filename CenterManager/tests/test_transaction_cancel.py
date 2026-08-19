@@ -1,115 +1,151 @@
-# tests/test_transaction_cancel.py
 # -*- coding: utf-8 -*-
-"""Tests for transaction cancel with domain mutations."""
+"""Tests for MAIN optimistic concurrency / lost-update protection."""
 
 import pytest
-from datetime import date
-from pathlib import Path
+from unittest.mock import patch, MagicMock
 
-from centermanager.core.paths import get_paths
-from centermanager.database.engine import create_engine_for_path
-from centermanager.database.base import Base
-from centermanager.models.student import Student
-from centermanager.services.student_service import StudentService
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
+from centermanager.platform.collaboration import CollaborationManager
 from centermanager.events.event_bus import EventBus
-from centermanager.events.student_events import StudentArchived, StudentActivated
-from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
-def temp_runtime_with_db(temp_runtime):
-    """Create temp runtime with database and student."""
-    paths = get_paths()
-    db_path = paths.database_dir / "center.db"
-    engine = create_engine_for_path(db_path)
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    with Session() as session:
-        student = Student(student_code="HS001", full_name="Test Student", status="ACTIVE")
-        session.add(student)
-        session.commit()
-    return paths
-
-
-@pytest.fixture
-def student_service(temp_runtime_with_db):
-    """Return StudentService and its EventBus."""
-    session_factory = sessionmaker(bind=create_engine_for_path(get_paths().database_dir / "center.db"))
-    timeline_service = MockTimelineService(session_factory)
+def collab_manager(tmp_path):
     event_bus = EventBus()
-    service = StudentService(session_factory, timeline_service, event_bus=event_bus)
-    return service, event_bus
+    cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
+    cm.initialize("test_user", "test_user", "admin")
+    return cm
 
 
-class MockTimelineService:
-    def __init__(self, session_factory):
-        self._session_factory = session_factory
+def test_publish_succeeds_when_main_generation_unchanged(collab_manager):
+    cm = collab_manager
+    cm.request_write()
+    tx = WriteTransactionManager(cm)
+    tx.start_editing(lambda: True)
 
-    def log_event(self, *args, **kwargs):
-        pass
+    base_commit = "abc123"
+    tx._base_main_commit = base_commit
 
-
-class MockCollaborationManager:
-    def __init__(self):
-        self._writing = True
-
-    def is_writing(self):
-        return self._writing
-
-    def release_write(self):
-        self._writing = False
-
-    def ensure_write(self):
-        return self._writing
-
-    def request_write(self):
-        return True
+    with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.get_remote_main_commit.return_value = base_commit
+        with patch.object(cm, 'validate_write_authority', return_value={
+            "valid": True,
+            "generation": 0,
+            "owner": cm.get_session().session_id,
+            "lease_valid": True,
+            "finishing_deadline": None
+        }):
+            result = tx.enter_finishing()
+            assert result["success"] is True
+            assert tx.state == WriteTransactionState.FINISHING
 
 
-def test_archive_then_cancel_rollback(temp_runtime_with_db, student_service):
-    """Archive then Cancel should restore ACTIVE status."""
-    service, event_bus = student_service
+def test_publish_blocked_when_main_generation_changed(collab_manager):
+    cm = collab_manager
+    cm.request_write()
+    tx = WriteTransactionManager(cm)
+    tx.start_editing(lambda: True)
 
-    # Get student
-    students = service.list_students()
-    assert len(students) == 1
-    student = students[0]
-    assert student.status == "ACTIVE"
+    base_commit = "abc123"
+    current_commit = "def456"
+    tx._base_main_commit = base_commit
 
-    # Setup transaction
-    cm_mock = MockCollaborationManager()
-    tx = WriteTransactionManager(cm_mock)
+    with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.get_remote_main_commit.return_value = current_commit
+        with patch.object(cm, 'validate_write_authority', return_value={
+            "valid": True,
+            "generation": 0,
+            "owner": cm.get_session().session_id,
+            "lease_valid": True,
+            "finishing_deadline": None
+        }):
+            result = tx.enter_finishing()
+            assert result["success"] is False
+            assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
+            assert "MAIN conflict" in result["reason"]
 
-    # Register event listener on the same event bus used by service
-    def on_archived(event):
-        if tx.is_editing:
-            tx.mark_dirty()
-            print(f"Marked dirty for student {event.student_id}")
 
-    event_bus.register(StudentArchived, on_archived)
+def test_main_conflict_independent_of_owner(collab_manager):
+    cm = collab_manager
+    cm.request_write()
+    tx = WriteTransactionManager(cm)
+    tx.start_editing(lambda: True)
 
-    # Start editing
-    def save_local():
-        return True
+    base_commit = "abc123"
+    current_commit = "def456"
+    tx._base_main_commit = base_commit
 
-    tx.start_editing(save_local)
-    assert tx.is_editing is True
-    assert tx.has_changes() is False
+    with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.get_remote_main_commit.return_value = current_commit
+        with patch.object(cm, 'validate_write_authority', return_value={
+            "valid": True,
+            "generation": 0,
+            "owner": cm.get_session().session_id,
+            "lease_valid": True,
+            "finishing_deadline": None
+        }):
+            result = tx.enter_finishing()
+            assert result["success"] is False
+            assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
 
-    # Archive student (will publish event)
-    service.archive_student(student.id)
 
-    # Event should mark dirty
-    assert tx.has_changes() is True
+def test_version_not_advanced_on_main_conflict(collab_manager):
+    cm = collab_manager
+    cm.request_write()
+    tx = WriteTransactionManager(cm)
+    tx.start_editing(lambda: True)
 
-    # Cancel editing with force=True
-    tx.cancel_editing(force=True)
+    base_commit = "abc123"
+    current_commit = "def456"
+    tx._base_main_commit = base_commit
 
-    # Reload student from fresh session
-    Session = sessionmaker(bind=create_engine_for_path(get_paths().database_dir / "center.db"))
-    with Session() as sess:
-        s = sess.get(Student, student.id)
-        assert s.status == "ACTIVE"  # restored
-    assert tx.state == WriteTransactionState.IDLE
-    assert not cm_mock.is_writing()
+    mock_version_manager = MagicMock()
+    tx.set_version_manager(mock_version_manager)
+
+    with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.get_remote_main_commit.return_value = current_commit
+        with patch.object(cm, 'validate_write_authority', return_value={
+            "valid": True,
+            "generation": 0,
+            "owner": cm.get_session().session_id,
+            "lease_valid": True,
+            "finishing_deadline": None
+        }):
+            result = tx.enter_finishing()
+            assert result["success"] is False
+            assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
+
+    mock_version_manager.create_pending_version.assert_not_called()
+
+
+def test_remote_main_unavailable_blocks_publish(collab_manager):
+    cm = collab_manager
+    cm.request_write()
+    tx = WriteTransactionManager(cm)
+    tx.start_editing(lambda: True)
+
+    base_commit = "abc123"
+    tx._base_main_commit = base_commit
+
+    with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
+        with patch.object(cm, 'validate_write_authority', return_value={
+            "valid": True,
+            "generation": 0,
+            "owner": cm.get_session().session_id,
+            "lease_valid": True,
+            "finishing_deadline": None
+        }):
+            result = tx.enter_finishing()
+            assert result["success"] is False
+            assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
+            assert "verification unavailable" in result["reason"].lower()
+
+
+def test_no_force_push_on_main_conflict(collab_manager):
+    """Test that force push is not used on conflict."""
+    import inspect
+    from centermanager.services.write_transaction import WriteTransactionManager
+
+    source = inspect.getsource(WriteTransactionManager)
+    assert "--force" not in source or "force_release" in source

@@ -4,7 +4,9 @@
 import pytest
 import shutil
 import subprocess
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 from centermanager.core.paths import Paths
 from centermanager.database.engine import create_engine_for_path
@@ -39,7 +41,6 @@ class TestPublishOnly:
         db_dir = root / "Database"
         db_dir.mkdir(parents=True, exist_ok=True)
 
-        # Tạo Paths object
         class TestPaths(Paths):
             def __init__(self, r, repo):
                 self._runtime_root = r
@@ -51,30 +52,25 @@ class TestPublishOnly:
                 return self._runtime_root
 
         paths = TestPaths(root, temp_repo)
-        # Cần override để trả về repo
         paths._repo_path = temp_repo
         return paths
 
     def test_publish_only_workflow(self, runtime_env, temp_repo):
-        """Test publish-only workflow without fetch/pull."""
-        # Tạo database
+        """Test publish-only workflow without fetch/pull (legacy integration test)."""
         db_path = runtime_env.database_dir / "center.db"
         engine = create_engine_for_path(db_path)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
 
-        # Tạo student
         with Session() as session:
             student = Student(student_code="HS001", full_name="Test Student")
             session.add(student)
             session.commit()
 
-        # Tạo collaboration manager
         event_bus = EventBus()
         cm = CollaborationManager(runtime_root=runtime_env.runtime_root, event_bus=event_bus)
         cm.initialize("test_user", "test_user", "admin")
 
-        # Tạo sync provider
         sync_provider = GitSynchronizationProvider(
             repo_path=temp_repo,
             repository_url=str(temp_repo),
@@ -83,28 +79,20 @@ class TestPublishOnly:
         )
         sync_provider.connect()
 
-        # Tạo sync service
         sync_service = RuntimeSyncService(
-            sync_manager=None,  # Need proper manager
+            sync_manager=None,
             collab_manager=cm,
             context_manager=None,
             event_bus=event_bus,
             poll_interval=30
         )
-        # Không có sync manager thật, test sẽ bỏ qua
-
-        # Tạo transaction manager
         tx = WriteTransactionManager(cm)
-
-        # Giả lập finish editing
         tx._sync_service = sync_service
 
-        # Copy database
         repo_db_dir = temp_repo / "database"
         repo_db_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(db_path, repo_db_dir / "center.db")
 
-        # Git add và commit
         subprocess.run(["git", "add", "."], cwd=temp_repo, capture_output=True)
         result = subprocess.run(
             ["git", "commit", "-m", "Test commit"],
@@ -112,8 +100,61 @@ class TestPublishOnly:
             capture_output=True,
             text=True
         )
-        # Kiểm tra commit thành công
         assert result.returncode == 0 or "nothing to commit" in result.stdout
-
-        # Kiểm tra file có trong repo
         assert (temp_repo / "database" / "center.db").exists()
+
+    def test_git_provider_publish_only_no_remote_sync(self, fresh_center_manager_remote, tmp_path):
+        """
+        Test that GitSynchronizationProvider.publish_only() does NOT perform
+        any remote synchronization (fetch/pull/rebase/merge/reset).
+        Only commit + push are allowed.
+        """
+        repo_path = tmp_path / "repo"
+        # FIX: add --branch main to ensure checkout
+        subprocess.run(
+            ["git", "clone", "--branch", "main", str(fresh_center_manager_remote), str(repo_path)],
+            check=True
+        )
+
+        provider = GitSynchronizationProvider(
+            repo_path=repo_path,
+            repository_url=str(fresh_center_manager_remote),
+            token="",
+            branch="main"
+        )
+        provider.connect()
+
+        # Create a local change (update manifest)
+        manifest_path = repo_path / "manifest.json"
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        manifest["runtime_version"] = 2
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        # Capture git commands
+        commands = []
+        original_run = provider._run_git_command
+
+        def capture_run(args, cwd=None):
+            commands.append(args)
+            return original_run(args, cwd=cwd)
+
+        with patch.object(provider, '_run_git_command', side_effect=capture_run):
+            result = provider.publish_only("Test publish-only", "test_user")
+
+        assert result is True
+
+        # Analyze captured commands
+        command_strings = [" ".join(cmd) for cmd in commands]
+
+        # Assert NO remote synchronization
+        assert not any("fetch" in cmd for cmd in command_strings)
+        assert not any("pull" in cmd for cmd in command_strings)
+        assert not any("rebase" in cmd for cmd in command_strings)
+        assert not any("merge" in cmd for cmd in command_strings)
+        assert not any("reset" in cmd for cmd in command_strings)
+
+        # Assert commit and push are present
+        assert any("commit" in cmd for cmd in command_strings), "No commit found"
+        assert any("push" in cmd for cmd in command_strings), "No push found"

@@ -253,7 +253,7 @@ class TestCollaborationManager:
         assert cm._lock.is_locked() is False
         
         result = cm.request_write()
-        assert result is True
+        assert result.is_granted is True
         assert cm.is_writing() is True
         assert cm._lock.is_locked() is True
         assert cm._lock.get_owner() == cm._session.session_id
@@ -267,7 +267,8 @@ class TestCollaborationManager:
         cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
 
         cm.initialize("user1", "testuser", "admin")
-        assert cm.request_write() is True
+        result = cm.request_write()
+        assert result.is_granted is True
 
         cm2 = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
         cm2.initialize("user2", "testuser2", "teacher")

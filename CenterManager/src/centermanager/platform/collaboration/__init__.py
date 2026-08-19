@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """Collaboration - Platform collaboration runtime."""
 
-from .collaboration_manager import CollaborationManager
+from .collaboration_manager import (
+    CollaborationManager,
+    WriteRequestResult,
+    WriteRequestInfo,
+)
 from .runtime_session import RuntimeSession
 from .runtime_lock import RuntimeLock
 from .write_queue import WriteQueue, WriteRequest
@@ -32,8 +36,6 @@ from .exceptions import (
     HeartbeatTimeoutError,
     CollaborationNotInitializedError,
 )
-
-# === THÊM CÁC IMPORT SAU ===
 from .mode_manager import ModeManager, CollaborationMode
 from .lock_manager import LockManager
 from .edit_session_manager import EditSessionManager
@@ -44,6 +46,8 @@ from .lock_repository import LockRepository
 
 __all__ = [
     "CollaborationManager",
+    "WriteRequestResult",
+    "WriteRequestInfo",
     "RuntimeSession",
     "RuntimeLock",
     "WriteQueue",
@@ -73,7 +77,6 @@ __all__ = [
     "InvalidPriorityError",
     "HeartbeatTimeoutError",
     "CollaborationNotInitializedError",
-    # === THÊM VÀO ĐÂY ===
     "ModeManager",
     "CollaborationMode",
     "LockManager",

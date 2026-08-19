@@ -79,7 +79,8 @@ def test_edit_session_manager():
 def test_collaboration_manager_request_write(collaboration_manager):
     cm = collaboration_manager
     assert cm.current_mode() == "READ"
-    assert cm.request_write() is True
+    result = cm.request_write()
+    assert result.is_granted is True
     assert cm.current_mode() == "WRITE"
     # get_session_info không tồn tại, dùng get_session
     session = cm.get_session()

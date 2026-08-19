@@ -128,6 +128,11 @@ class MainWindow(QMainWindow):
         self._transaction = transaction_manager
         self._closing_requested = False
 
+        # Cache for waiting users (to show on writer UI even before Git sync)
+        self._waiting_users_cache = []
+        # Flag to prevent self-enqueue after finish
+        self._skip_auto_request_until_next_poll = False
+
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
 
         # UI Setup
@@ -153,7 +158,7 @@ class MainWindow(QMainWindow):
         self._connect_collaboration_events()
         self._connect_domain_events()
 
-        # Waiting user polling timer (2 giây để phản hồi nhanh)
+        # Waiting user polling timer (2 seconds)
         self._waiting_timer = QTimer()
         self._waiting_timer.timeout.connect(self._update_waiting_status)
         self._waiting_timer.start(2000)
@@ -332,6 +337,13 @@ class MainWindow(QMainWindow):
         self.finish_edit_btn.clicked.connect(self._on_finish_editing)
         layout.addWidget(self.finish_edit_btn)
 
+        # Cancel waiting button
+        self.cancel_btn = QPushButton("✖ Cancel Request")
+        self.cancel_btn.setFixedHeight(28)
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self._on_cancel_waiting)
+        layout.addWidget(self.cancel_btn)
+
         # Transaction state label
         self.tx_state_label = QLabel("")
         self.tx_state_label.setStyleSheet("font-size: 11px; color: #888;")
@@ -348,60 +360,133 @@ class MainWindow(QMainWindow):
         is_editing = self._transaction.is_editing
         can_edit = self._transaction.can_edit
 
-        self.start_edit_btn.setVisible(can_edit)
-        self.finish_edit_btn.setVisible(is_editing)
+        # Handle FINISHING states
+        if state in (WriteTransactionState.FINISHING,
+                     WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
+                     WriteTransactionState.FINISHING_STALE):
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            if state == WriteTransactionState.FINISHING:
+                self.tx_state_label.setText("Finishing...")
+            elif state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
+                self.tx_state_label.setText("Waiting for collaboration...")
+            else:  # FINISHING_STALE
+                self.tx_state_label.setText("Stale session - click Start Editing again")
+                self.start_edit_btn.setVisible(True)
+                self.start_edit_btn.setEnabled(True)
+                self.start_edit_btn.setText("✏️ Start Editing (renew)")
+            self.mode_label.setText("Mode: FINISHING")
+            return
 
+        # Normal states
+        if state == WriteTransactionState.IDLE:
+            self.start_edit_btn.setText("✏️ Start Editing")
+            self.start_edit_btn.setEnabled(True)
+            self.start_edit_btn.setVisible(True)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            self.tx_state_label.setText("Ready")
+        elif state == WriteTransactionState.WAITING:
+            self.start_edit_btn.setText("⏳ Waiting...")
+            self.start_edit_btn.setEnabled(False)
+            self.start_edit_btn.setVisible(True)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(True)
+            lock_status = self._collaboration_manager.get_lock_status()
+            owner = lock_status.get("owner", "Unknown")
+            pos = self._transaction.get_waiting_position()
+            self.tx_state_label.setText(f"Waiting (pos {pos}) - Lock held by {owner}")
+            self.statusBar().showMessage(f"Waiting for write lock (held by {owner})")
+        elif is_editing:
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setVisible(True)
+            self.cancel_btn.setVisible(False)
+            self.tx_state_label.setText("Editing...")
+            self.statusBar().showMessage("Editing mode - click Finish when done")
+        elif state == WriteTransactionState.PUBLISH_CONFLICT:
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(True)
+            self.tx_state_label.setText("⚠️ Data changed on another computer")
+            self.statusBar().showMessage("MAIN conflict: please refresh and try again")
+            self.mode_label.setText("Mode: CONFLICT")
+            if not getattr(self, '_conflict_dialog_shown', False):
+                self._conflict_dialog_shown = True
+                QMessageBox.warning(self, "Data Changed", 
+                    "The data was changed on another computer.\n\nPlease refresh before finishing your changes.")
+        else:
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            state_display = {
+                WriteTransactionState.LOCAL_SAVED: "Saved, pending publish",
+                WriteTransactionState.PUBLISHING: "Publishing...",
+                WriteTransactionState.PUBLISHED: "Published",
+                WriteTransactionState.FAILED: "Failed!",
+                WriteTransactionState.OFFLINE_PENDING_PUBLISH: "Offline, pending publish",
+            }.get(state, state.name)
+            self.tx_state_label.setText(state_display)
+
+        # Update mode label
         mode = "WRITE" if is_editing else "READ"
         self.mode_label.setText(f"Mode: {mode}")
 
-        state_display = {
-            WriteTransactionState.IDLE: "Ready",
-            WriteTransactionState.EDITING: "Editing...",
-            WriteTransactionState.LOCAL_SAVED: "Saved, pending publish",
-            WriteTransactionState.PUBLISHING: "Publishing...",
-            WriteTransactionState.PUBLISHED: "Published",
-            WriteTransactionState.COMPLETED: "Done",
-            WriteTransactionState.FAILED: "Failed!",
-            WriteTransactionState.OFFLINE_PENDING_PUBLISH: "Offline, pending publish",
-        }.get(state, state.name)
-        self.tx_state_label.setText(f"State: {state_display}")
-
-        self.start_edit_btn.setEnabled(can_edit)
-        self.finish_edit_btn.setEnabled(is_editing and state != WriteTransactionState.FAILED)
-
-        self._update_write_actions(is_editing)
         self._update_waiting_status()
+        self._update_write_actions(is_editing)
 
-    def _update_write_actions(self, enabled: bool) -> None:
-        """Enable/disable write actions in all workspaces."""
-        for i in range(self.central_stack.count()):
-            widget = self.central_stack.widget(i)
-            if hasattr(widget, 'set_write_enabled'):
-                widget.set_write_enabled(enabled)
-
+    def _update_lock_owner_display(self) -> None:
+        """Update lock owner display in status bar."""
+        if not self._collaboration_manager.is_initialized():
+            return
+        
+        lock_status = self._collaboration_manager.get_lock_status()
+        is_locked = lock_status.get("locked", False)
+        owner = lock_status.get("owner") or lock_status.get("username")
+        session_id = lock_status.get("session_id")
+        current_session = self._collaboration_manager.get_session_id()
+        
+        if is_locked and owner:
+            if session_id == current_session:
+                owner_display = f"🔓 You are editing (as {owner})"
+            else:
+                owner_display = f"🔒 {owner} is editing"
+        else:
+            owner_display = "📖 No one is editing"
+        
+        self.statusBar().showMessage(owner_display, 5000)
+        # Cập nhật waiting indicator
+        self._update_waiting_status()
+        
     def _update_waiting_status(self) -> None:
-        """Update waiting indicator with color change when someone is waiting."""
+        """Update waiting indicator and lock owner display."""
         if not self._collaboration_manager.is_initialized():
             return
 
-        # Auto-acquire logic: nếu user hiện tại là next eligible và không có writer, tự động acquire
-        if not self._collaboration_manager.is_writing():
-            if self._collaboration_manager.is_next_eligible():
-                logger.info("Auto-acquiring lock: current user is next eligible")
-                if not hasattr(self, '_auto_acquire_pending') or not self._auto_acquire_pending:
-                    self._auto_acquire_pending = True
-                    QTimer.singleShot(100, lambda: self._auto_acquire())
-                return
-        else:
-            self._auto_acquire_pending = False
+        lock_status = self._collaboration_manager.get_lock_status()
+        waiting_requests = self._collaboration_manager.get_waiting_requests()
 
-        # Update indicator
-        waiting = self._collaboration_manager.get_waiting_users()
-        if waiting and self._collaboration_manager.is_writing():
-            names = ", ".join([w["username"] for w in waiting[:2]])
-            if len(waiting) > 2:
-                names += f" and {len(waiting)-2} others"
-            self.waiting_indicator.setText(f"⚠️ {names} waiting")
+        is_locked = lock_status.get("locked", False)
+        owner = lock_status.get("owner") or lock_status.get("username")
+        lock_session = lock_status.get("session_id")
+        current_session = self._collaboration_manager.get_session_id()
+
+        # Cập nhật mode label
+        mode = "WRITE" if self._transaction.is_editing else "READ"
+        if is_locked and lock_session != current_session:
+            self.mode_label.setText(f"Mode: {mode} (locked by {owner})")
+            self.mode_label.setStyleSheet("font-weight: bold; color: #d32f2f;")
+        elif self._transaction.is_editing:
+            self.mode_label.setText(f"Mode: {mode} (you own the lock)")
+            self.mode_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
+        else:
+            self.mode_label.setText(f"Mode: {mode}")
+            self.mode_label.setStyleSheet("font-weight: bold;")
+
+        # Update waiting indicator
+        if is_locked and lock_session == current_session and waiting_requests:
+            names = [r.get("username", "Unknown") for r in waiting_requests]
+            self.waiting_indicator.setText(f"⚠️ {len(waiting_requests)} waiting: {', '.join(names)}")
             self.waiting_indicator.setStyleSheet("""
                 QLabel {
                     background-color: #ff9800;
@@ -412,7 +497,21 @@ class MainWindow(QMainWindow):
                     font-size: 12px;
                 }
             """)
-            self.statusBar().showMessage("", 0)
+            self.statusBar().showMessage(f"⚠️ {len(waiting_requests)} user(s) waiting: {', '.join(names)}")
+        elif is_locked and lock_session != current_session:
+            self.waiting_indicator.setText(f"🔒 {owner} is editing")
+            self.waiting_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: #d32f2f;
+                    color: #ffffff;
+                    padding: 3px 12px;
+                    border-radius: 12px;
+                    font-weight: 700;
+                    font-size: 12px;
+                }
+            """)
+            if self._transaction.state == WriteTransactionState.WAITING:
+                self.statusBar().showMessage(f"Waiting for write lock (held by {owner})")
         else:
             self.waiting_indicator.setText("● No waiting")
             self.waiting_indicator.setStyleSheet("""
@@ -425,22 +524,51 @@ class MainWindow(QMainWindow):
                     font-size: 12px;
                 }
             """)
-            if self._transaction.is_editing:
-                self.statusBar().showMessage("✏️ Editing...", 0)
-            else:
-                self.statusBar().showMessage("Ready", 0)
+            if not waiting_requests:
+                self.statusBar().showMessage("")
 
-    def _auto_acquire(self) -> None:
-        """Auto-acquire lock when user is next eligible."""
-        self._auto_acquire_pending = False
-        if not self._collaboration_manager.is_writing() and self._collaboration_manager.is_next_eligible():
-            self._on_start_editing()
+        # Auto-grant logic
+        if self._transaction.state == WriteTransactionState.WAITING:
+            if not is_locked:
+                logger.info("Lock is free, granting existing waiting request")
+                request_id = self._transaction._waiting_request_id
+                if request_id:
+                    success = self._collaboration_manager.grant_existing_waiting_request(request_id)
+                    if success:
+                        self._transaction.on_write_granted()
+                        self._update_write_buttons()
+                        self._waiting_users_cache = []
+                        self._skip_auto_request_until_next_poll = True
+                        self.statusBar().showMessage("Write lock automatically granted.", 3000)
+                    else:
+                        logger.warning("Failed to grant waiting request, retrying in 2s")
+                        QTimer.singleShot(2000, self._update_waiting_status)
+                else:
+                    logger.warning("No request_id available, cannot auto-grant")
+                    QTimer.singleShot(2000, self._update_waiting_status)
+
+    def _update_write_actions(self, enabled: bool) -> None:
+        """Enable/disable write actions in all workspaces."""
+        for i in range(self.central_stack.count()):
+            widget = self.central_stack.widget(i)
+            if hasattr(widget, 'set_write_enabled'):
+                widget.set_write_enabled(enabled)
 
     # ===== Transaction Actions =====
 
     def _on_start_editing(self) -> None:
         """Start editing session."""
-        if not self._transaction.can_edit:
+        # If we are in FINISHING_STALE, reset to IDLE and try again
+        if self._transaction.state == WriteTransactionState.FINISHING_STALE:
+            logger.info("Renewing stale editing session")
+            self._transaction._state = WriteTransactionState.IDLE
+            self._transaction._finishing_deadline = None
+            self._transaction._finishing_started_at = None
+            self._transaction._publish_intent = False
+            self._transaction._base_main_commit = None
+            self._update_write_buttons()
+
+        if not (self._transaction.can_edit or self._transaction.state == WriteTransactionState.WAITING):
             return
 
         def save_local() -> bool:
@@ -460,7 +588,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Editing started. Make your changes, then click 'Finish Editing'.", 3000)
             self._update_write_buttons()
         else:
-            # Không hiển thị pop-up, chỉ hiển thị trên status bar
             self.statusBar().showMessage("Could not acquire write lock. Someone else is editing.", 3000)
             self._update_write_buttons()
 
@@ -516,6 +643,9 @@ class MainWindow(QMainWindow):
 
         if not success and self._transaction.state == WriteTransactionState.FAILED:
             self._show_publish_failure_dialog()
+        if not success and self._transaction.state == WriteTransactionState.PUBLISH_CONFLICT:
+            self._conflict_dialog_shown = False
+            return
 
     def _show_publish_failure_dialog(self) -> None:
         """Show dialog for publish failure options."""
@@ -611,7 +741,10 @@ class MainWindow(QMainWindow):
         """Handle write released event."""
         self.statusBar().showMessage(f"Write access released by {event.username}", 3000)
         self._update_write_buttons()
-        # Khi write được release, kích hoạt check update để pull dữ liệu mới
+        self._waiting_users_cache = []  # Clear cache
+        if self._transaction.state == WriteTransactionState.WAITING:
+            logger.info("WriteReleased while waiting, checking auto-grant")
+            QTimer.singleShot(500, self._update_waiting_status)
         if self._sync_service is not None:
             logger.info("WriteReleased: triggering check_for_updates")
             QTimer.singleShot(500, self._sync_service.check_for_updates)
@@ -619,11 +752,29 @@ class MainWindow(QMainWindow):
     def _on_write_requested(self, event) -> None:
         """Handle write requested event."""
         logger.info(f"WriteRequested received from {event.username} (session={event.session_id})")
-        # Cập nhật waiting indicator ngay lập tức
+        # Add to cache if not already present
+        if not any(u.get("session_id") == event.session_id for u in self._waiting_users_cache):
+            self._waiting_users_cache.append({
+                "username": event.username,
+                "session_id": event.session_id,
+                "priority": getattr(event, 'priority', 0),
+                "request_id": getattr(event, 'request_id', ''),
+                "timestamp": getattr(event, 'timestamp', None),
+            })
         if QThread.currentThread() != self.thread():
             QTimer.singleShot(0, self._update_waiting_status)
         else:
             self._update_waiting_status()
+
+    def _on_cancel_waiting(self) -> None:
+        """Cancel waiting request."""
+        if self._transaction.state == WriteTransactionState.WAITING:
+            if self._transaction.cancel_editing():
+                self.statusBar().showMessage("Write request cancelled.")
+                self._waiting_users_cache = []
+                self._update_write_buttons()
+            else:
+                self.statusBar().showMessage("Failed to cancel request.", 3000)
 
     def _on_sync_status_changed(self, event: SyncStatusChanged) -> None:
         """Handle sync status changed event."""
@@ -649,7 +800,6 @@ class MainWindow(QMainWindow):
         if self._sync_service is not None:
             self.statusBar().showMessage(f"Runtime updated to v{event.new_version}", 3000)
             self.version_label.setText(f"Runtime: v{event.new_version}")
-            # Refresh student workspace sau khi sync
             if self.central_stack.currentWidget() == self.student_workspace:
                 self.student_workspace.refresh_current_student()
 
@@ -677,7 +827,6 @@ class MainWindow(QMainWindow):
         current_widget = self.central_stack.currentWidget()
         if current_widget == self.student_workspace:
             self.student_workspace.refresh()
-            # Đảm bảo refresh student detail nếu đang mở
             self.student_workspace.refresh_current_student()
             logger.info("[MainWindow] Student workspace refreshed after reload required")
         elif current_widget == self.home_page:

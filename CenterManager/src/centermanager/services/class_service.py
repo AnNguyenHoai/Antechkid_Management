@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
-"""
-ClassService - business logic for Class entity.
-"""
+"""ClassService - business logic for Class entity."""
 from datetime import date, datetime, timezone
 from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from centermanager.models.class_ import Class
+from centermanager.models.student import Student          # <-- THÊM DÒNG NÀY
 from centermanager.models.class_timeline_event import ClassTimelineEventType
 from centermanager.models.enrollment import Enrollment
+from centermanager.models.teacher import Teacher
+from centermanager.models.teacher_assignment import TeacherAssignment
 from centermanager.repositories.class_repository import ClassRepository
-from centermanager.repositories.enrollment_repository import EnrollmentRepository   # <--- thêm dòng này
+from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.services.class_timeline_service import ClassTimelineService
-from centermanager.services.exceptions import (
-    StudentServiceError,
-    StudentValidationError,
-)
+from centermanager.services.exceptions import StudentServiceError, StudentValidationError
 
 UNSET = object()
 

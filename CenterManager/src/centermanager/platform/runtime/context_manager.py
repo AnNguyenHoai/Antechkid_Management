@@ -3,6 +3,7 @@
 
 import uuid
 import platform
+from datetime import datetime  # <-- FIX: added import
 from typing import Optional
 import logging
 
@@ -14,6 +15,7 @@ from .context.runtime_manifest import RuntimeManifest
 from .context.runtime_state import RuntimeState, RuntimeStateMachine
 from .context.runtime_configuration import RuntimeConfiguration
 from .context.runtime_version import RuntimeVersion
+from .context.runtime_session import RuntimeSession  # <-- FIX: added import
 
 logger = logging.getLogger(__name__)
 

@@ -81,6 +81,10 @@ class WriteQueue:
     
     def enqueue(self, request: WriteRequest) -> None:
         """Add a request to the queue."""
+        # Check if already pending
+        if self.has_pending(request.session_id):
+            logger.warning(f"Session {request.session_id} already has a pending request, skipping")
+            return
         file_path = self._queue_dir / f"{request.request_id}.json"
         writer = AtomicFileWriter(file_path)
         writer.write_json(request.to_dict())
@@ -130,6 +134,22 @@ class WriteQueue:
                 return True
         return False
     
+    def get_by_session(self, session_id: str) -> Optional[WriteRequest]:
+        """Get the pending request for a session."""
+        for req in self._list_requests():
+            if req.session_id == session_id:
+                return req
+        return None
+    
+    def get_position(self, session_id: str) -> int:
+        """Get queue position (1-based) of a session."""
+        requests = self._list_requests()
+        requests.sort(key=lambda r: (-r.priority, r.timestamp))
+        for idx, req in enumerate(requests, start=1):
+            if req.session_id == session_id:
+                return idx
+        return 0
+    
     def cancel_for_session(self, session_id: str) -> None:
         """Cancel all pending requests for a session."""
         for req in self._list_requests():
@@ -145,10 +165,22 @@ class WriteQueue:
     def _list_requests(self) -> List[WriteRequest]:
         """List all pending requests."""
         requests = []
+        now = datetime.now()
         for file in self._queue_dir.glob("*.json"):
             try:
                 with open(file, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                # Check expiry
+                timestamp_str = data.get("timestamp")
+                if timestamp_str:
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp_str)
+                        if (now - timestamp).total_seconds() > 120:
+                            file.unlink()
+                            logger.info(f"Removed expired request {file.name}")
+                            continue
+                    except Exception:
+                        pass
                 if data.get("status") == "pending":
                     requests.append(WriteRequest.from_dict(data))
             except Exception as e:

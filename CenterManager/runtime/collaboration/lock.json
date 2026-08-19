@@ -1,0 +1,15 @@
+{
+  "locked": false,
+  "session_id": null,
+  "machine_fingerprint": null,
+  "user_id": null,
+  "username": null,
+  "acquired_at": null,
+  "last_heartbeat": null,
+  "runtime_version": null,
+  "lock_generation": 0,
+  "lease_revision": 0,
+  "finishing_started_at": null,
+  "finishing_deadline": null,
+  "publish_intent": false
+}

@@ -389,10 +389,11 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            if not self._provider.publish(message, user):
+            # Gọi publish_only thay vì publish
+            if not self._provider.publish_only(message, user):
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
-                    message="Publish failed",
+                    message="Publish-only failed",
                     provider=self._provider.name(),
                     started_at=datetime.now(),
                     finished_at=datetime.now(),
@@ -402,7 +403,7 @@ class SynchronizationManager:
 
             result = SynchronizationResult(
                 result=SyncResult.SUCCESS,
-                message="Publish completed successfully",
+                message="Publish-only completed successfully",
                 provider=self._provider.name(),
                 duration_ms=(time.time() - start_time) * 1000,
                 started_at=datetime.now(),
@@ -412,7 +413,7 @@ class SynchronizationManager:
             return result
 
         except Exception as e:
-            logger.exception(f"[{correlation_id}] Publish failed: {e}")
+            logger.exception(f"[{correlation_id}] Publish-only failed: {e}")
             result = SynchronizationResult(
                 result=SyncResult.FAILED,
                 message=str(e),
