@@ -238,12 +238,40 @@ class GitSynchronizationProvider(SynchronizationProvider):
         return None
 
     def _read_lock_from_oid(self, oid: str) -> Dict[str, Any]:
+        """
+        Read lock.json from a remote lock commit.
+
+        A remote OID returned by `ls-remote` is not necessarily present in this
+        client's local object database. This is especially important for a
+        second machine observing a lock created by another machine.
+
+        First try the already-local object. If it is missing, fetch only the
+        collaboration lock branch and retry. Fetching the lock branch does not
+        checkout it and does not modify MAIN HEAD, index, or working tree.
+        """
         try:
-            content = self._run_git_command(["show", f"{oid}:lock.json"], check=False)
+            content = self._run_git_command(
+                ["show", f"{oid}:lock.json"], check=False
+            )
             if content:
                 return json.loads(content)
         except Exception as e:
-            logger.warning(f"Failed to read lock.json from OID {oid}: {e}")
+            logger.debug(f"Lock OID {oid} not local yet: {e}")
+
+        # The OID came from the remote, but the commit may not exist locally.
+        # Fetch the collaboration-only lock branch once, then retry.
+        try:
+            if self._fetch_lock_branch():
+                content = self._run_git_command(
+                    ["show", f"{oid}:lock.json"], check=False
+                )
+                if content:
+                    return json.loads(content)
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch/read remote lock OID {oid}: {e}"
+            )
+
         return {}
 
     def _has_remote_origin(self) -> bool:
