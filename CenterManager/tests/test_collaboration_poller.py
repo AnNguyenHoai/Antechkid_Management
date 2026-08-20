@@ -13,10 +13,13 @@ from centermanager.platform.collaboration import CollaborationManager, Collabora
 
 
 def wait_for_spy(spy: QSignalSpy, timeout_ms: int = 5000) -> bool:
-    """Wait for a signal without assuming QSignalSpy is list-like."""
-    if spy.count() > 0:
-        return True
-    return spy.wait(timeout_ms)
+    """Wait for a signal while explicitly pumping the Qt event loop.
+
+    QSignalSpy.wait() is not used here because the signal originates from the
+    poller QThread. The same event-loop polling strategy used by the passing
+    single-flight test is deterministic for this cross-thread observation.
+    """
+    return wait_for_condition(lambda: spy.count() > 0, timeout_ms)
 
 
 def wait_for_condition(predicate, timeout_ms: int = 5000, step_ms: int = 20) -> bool:
@@ -160,7 +163,17 @@ def test_single_flight_and_coalescing(qapp, tmp_path):
 
 
 def test_backoff_state_machine(qapp, tmp_path):
-    poller, cm = make_poller(tmp_path)
+    # Use an explicit 1-second initial backoff so the expected exponential
+    # sequence is deterministic: 1 -> 2 -> 4 -> 8 -> reset.
+    event_bus = EventBus()
+    cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
+    cm.initialize("test_user", "test_user", "admin")
+    poller = CollaborationPoller(
+        cm,
+        event_bus,
+        initial_backoff=1,
+        max_backoff=10,
+    )
     calls = {"count": 0}
 
     def fail_then_succeed():
