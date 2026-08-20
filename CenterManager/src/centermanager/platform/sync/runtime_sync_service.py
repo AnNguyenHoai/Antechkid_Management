@@ -105,7 +105,7 @@ class RuntimeSyncService:
     def execute_sync(self) -> bool:
         return self._perform_sync()
 
-    def publish_only(self, message: str = "Finish Editing", user: str = "system") -> bool:
+    def publish_only(self, message: str = "Finish Editing", user: str = "system", expected_main_commit: Optional[str] = None) -> bool:
         with self._state_mutex:
             if self._status == SyncStatus.SYNCHRONIZING:
                 logger.warning("Cannot publish while synchronization is in progress")
@@ -113,7 +113,7 @@ class RuntimeSyncService:
             self._set_status(SyncStatus.SYNCHRONIZING)
 
         try:
-            result = self._sync_manager.publish_only(message=message, user=user)
+            result = self._sync_manager.publish_only(message=message, user=user, expected_main_commit=expected_main_commit)
 
             if result and result.is_success():
                 self._last_sync = datetime.now()

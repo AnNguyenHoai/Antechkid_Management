@@ -391,19 +391,17 @@ class WriteTransactionManager:
                 self._reset_to_idle()
                 return True
             else:
-                if self._version_manager:
-                    self._version_manager.clear_pending_version()
-                    self._pending_version = None
-                self._state = WriteTransactionState.FAILED
-                logger.info("Transaction: FAILED (publish failed, pending version rolled back)")
+                # Keep the pending version and local commit intact so the exact
+                # same publication can be retried after a transient/conflict failure.
+                self._state = WriteTransactionState.OFFLINE_PENDING_PUBLISH
+                logger.info("Transaction: OFFLINE_PENDING_PUBLISH (publish failed; pending version retained)")
                 if self._on_publish_failure:
                     self._on_publish_failure("Publish operation failed (push failed)")
                 return False
         except Exception as e:
-            if self._version_manager:
-                self._version_manager.clear_pending_version()
-                self._pending_version = None
-            self._state = WriteTransactionState.FAILED
+            # A failed push is retryable. Do not clear the pending version or
+            # release the write lock here.
+            self._state = WriteTransactionState.OFFLINE_PENDING_PUBLISH
             logger.exception(f"Publish exception: {e}")
             if self._on_publish_failure:
                 self._on_publish_failure(str(e))
@@ -415,7 +413,7 @@ class WriteTransactionManager:
             session = self._collab_manager.get_session()
             if session and session.username:
                 user = session.username
-            return self._sync_service.publish_only(message="Finish Editing", user=user)
+            return self._sync_service.publish_only(message="Finish Editing", user=user, expected_main_commit=self._base_main_commit)
         logger.warning("No sync service available for publish")
         return False
 

@@ -341,7 +341,7 @@ class SynchronizationManager:
         finally:
             self._is_syncing = False
 
-    def publish_only(self, message: str = "", user: str = "system") -> SynchronizationResult:
+    def publish_only(self, message: str = "", user: str = "system", expected_main_commit: Optional[str] = None) -> SynchronizationResult:
         """
         Publish local changes WITHOUT fetching or pulling first.
         This is for Writer Finish Editing - only commit and push.
@@ -390,7 +390,7 @@ class SynchronizationManager:
                 return result
 
             # Gọi publish_only thay vì publish
-            if not self._provider.publish_only(message, user):
+            if not self._provider.publish_only(message, user, expected_main_commit=expected_main_commit):
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
                     message="Publish-only failed",

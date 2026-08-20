@@ -723,14 +723,21 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 logger.error(f"Push failed: {e}")
                 raise PushFailedError(f"Push failed: {e}")
 
-    def _push_only(self) -> None:
+    def _push_only(self, expected_remote_commit: Optional[str] = None) -> None:
         if not self._has_remote_origin():
             logger.debug("No remote origin, push-only skipped")
             return
         auth_url = self._build_authenticated_url()
         push_url = auth_url if auth_url != self._repository_url else self._repository_url
         try:
-            self._run_git_command(["push", push_url, f"HEAD:{self._branch}"])
+            push_args = ["push"]
+            if expected_remote_commit:
+                # MAIN publish fencing: update main only if the remote is still
+                # exactly the commit captured when the write transaction began.
+                # This is a Git-level CAS; never fall back to an unconditional force push.
+                push_args.append(f"--force-with-lease={self._branch}:{expected_remote_commit}")
+            push_args.extend([push_url, f"HEAD:{self._branch}"])
+            self._run_git_command(push_args)
             logger.info("Push-only successful")
         except RepositoryConflictError as e:
             logger.error(f"Push-only rejected: {e}")
@@ -788,48 +795,59 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.error(f"Publish failed: {e}")
             raise PushFailedError(f"Push failed: {e}")
 
-    def publish_only(self, message: str, user: str) -> bool:
+    def publish_only(self, message: str, user: str, expected_main_commit: Optional[str] = None) -> bool:
+        """Publish prepared business changes without any remote synchronization.
+
+        When ``expected_main_commit`` is supplied, the final MAIN push is fenced
+        with ``--force-with-lease`` so a remote MAIN change cannot be overwritten.
+        A conflict is a terminal publish failure for this attempt; this method
+        never pulls/rebases/merges or retries the same stale push.
+        """
         self._ensure_repo()
         try:
-            # Stage business files
+            if expected_main_commit:
+                # Observe the authoritative remote ref directly.  Do not use
+                # origin/main here because that would require a fetch and would
+                # violate the publish-only contract.
+                remote_out = self._run_git_command(
+                    ["ls-remote", "origin", f"refs/heads/{self._branch}"]
+                )
+                remote_main = remote_out.split()[0] if remote_out.strip() else None
+                if remote_main != expected_main_commit:
+                    raise RepositoryConflictError(
+                        f"MAIN changed before publish: expected {expected_main_commit[:8]}, "
+                        f"remote is {(remote_main or 'missing')[:8]}"
+                    )
+
+            # Stage business files only. Collaboration runtime state is outside
+            # the MAIN working tree and is never staged here.
             self._run_git_command(["add", "-A"])
 
-            # Force add database
             db_path = self._repo_path / "database" / "center.db"
             if db_path.exists():
                 self._run_git_command(["add", "--force", "database/center.db"])
 
-            # Force add manifest
             manifest_path = self._repo_path / "manifest.json"
             if manifest_path.exists():
                 self._run_git_command(["add", "--force", "manifest.json"])
 
-            # 🔒 COLLABORATION STATE ISOLATION:
-            # collaboration/ is NEVER staged.
-
             status_out = self._run_git_command(["status", "--porcelain"])
-            if status_out:
-                commit_message = f"{user}: {message}"
-                self._run_git_command(["commit", "-m", commit_message])
-                logger.info(f"Committed: {commit_message}")
-
-                # Push without fetching/pulling first
-                try:
-                    local_commit = self._run_git_command(["rev-parse", "HEAD"])
-                    remote_commit = self._run_git_command(["rev-parse", f"origin/{self._branch}"])
-                    if local_commit != remote_commit:
-                        self._push_only()
-                        logger.info("Push-only successful")
-                    else:
-                        logger.info("Already up to date with remote")
-                except Exception as e:
-                    logger.warning(f"Could not check remote commit, attempting push: {e}")
-                    self._push_only()
-                    logger.info("Push-only successful")
-                return True
-            else:
+            if not status_out:
                 logger.info("No changes to commit")
                 return True
+
+            commit_message = f"{user}: {message}"
+            self._run_git_command(["commit", "-m", commit_message])
+            logger.info(f"Committed: {commit_message}")
+
+            # Exactly one push attempt. If the remote changed, fail safely;
+            # never pull/rebase or repeat the same stale push.
+            self._push_only(expected_remote_commit=expected_main_commit)
+            logger.info("Push-only successful")
+            return True
+        except RepositoryConflictError as e:
+            logger.error(f"Publish-only rejected due to concurrency conflict: {e}")
+            raise PushFailedError(f"Publish rejected: {e}")
         except Exception as e:
             logger.error(f"Publish-only failed: {e}")
             raise PushFailedError(f"Push failed: {e}")

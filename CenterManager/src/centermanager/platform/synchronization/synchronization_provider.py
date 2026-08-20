@@ -34,7 +34,7 @@ class SynchronizationProvider(ABC):
         pass
 
     @abstractmethod
-    def publish_only(self, message: str, user: str) -> bool:
+    def publish_only(self, message: str, user: str, expected_main_commit: Optional[str] = None) -> bool:
         """
         Publish local changes WITHOUT fetching/pulling first.
         Only commit + push.
