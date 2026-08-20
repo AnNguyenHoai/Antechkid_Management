@@ -19,7 +19,16 @@ from centermanager.core.current_user import get_current_user
 from centermanager.ui.permission_helpers import UIPermissionHelper
 
 from centermanager.platform.context import PlatformContext
-from centermanager.platform.collaboration import CollaborationManager, ModeChanged, WriteGranted, WriteReleased, WriteRequested
+from centermanager.platform.collaboration import (
+    CollaborationManager,
+    ModeChanged,
+    WriteGranted,
+    WriteReleased,
+    WriteRequested,
+    CollaborationPoller,
+    CollaborationSnapshot,
+    PollerMode,
+)
 from centermanager.platform.sync import RuntimeSyncService
 from centermanager.platform.business import BusinessModuleRegistry
 from centermanager.platform.sync.events import (
@@ -79,6 +88,7 @@ class MainWindow(QMainWindow):
         notification_service,
         git_config_service,
         event_bus: EventBus,
+        poller: Optional[CollaborationPoller] = None,  # <-- THÊM
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -123,6 +133,7 @@ class MainWindow(QMainWindow):
         self._notification_service = notification_service
         self._git_config_service = git_config_service
         self._event_bus = event_bus
+        self._poller = poller  # <-- LƯU POLLER
 
         # Write Transaction Manager
         self._transaction = transaction_manager
@@ -157,6 +168,9 @@ class MainWindow(QMainWindow):
         self._setup_collaboration_status_bar()
         self._connect_collaboration_events()
         self._connect_domain_events()
+
+        # Connect poller snapshot updates
+        self._connect_poller()  # <-- THÊM
 
         # Waiting user polling timer (2 seconds)
         self._waiting_timer = QTimer()
@@ -272,6 +286,74 @@ class MainWindow(QMainWindow):
         self.admin_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.admin_workspace)
 
+    # ===== Poller Connection =====
+
+    def _connect_poller(self) -> None:
+        """Connect poller snapshot updates to UI."""
+        if self._poller is None:
+            logger.debug("Poller not available, skipping connection")
+            return
+
+        self._poller.snapshot_changed.connect(self._on_poller_snapshot_changed)
+        logger.info("Connected CollaborationPoller to MainWindow")
+
+    def _on_poller_snapshot_changed(self, snapshot: CollaborationSnapshot) -> None:
+        """Handle poller snapshot updates."""
+        # Update lock owner display
+        self._update_lock_owner_display()
+
+        # Update waiting status
+        self._update_waiting_status()
+
+        # Update poller status indicator
+        self._update_poller_status()
+
+        # Update mode indicator if needed
+        if snapshot.is_stale:
+            self.statusBar().showMessage("⚠️ Collaboration state is stale", 3000)
+
+        # If snapshot shows a lock owner different from current, update UI
+        if snapshot.has_lock():
+            owner = snapshot.lock_owner()
+            if owner and owner != self._collaboration_manager.get_session().username:
+                self.statusBar().showMessage(f"🔒 {owner} is editing", 5000)
+
+        # Update write permissions based on lock state
+        current_session = self._collaboration_manager.get_session()
+        if snapshot.has_lock() and current_session:
+            if snapshot.lock_session() != current_session.session_id:
+                # Someone else holds the lock, disable write actions
+                self.set_write_enabled(False)
+            else:
+                # We hold the lock, enable write actions
+                self.set_write_enabled(True)
+        else:
+            # No lock, enable write actions
+            self.set_write_enabled(True)
+
+    def _update_poller_status(self) -> None:
+        """Update poller status indicator."""
+        if self._poller is None:
+            return
+        try:
+            status = self._poller.get_status()
+            mode = status.get("mode", "normal")
+            is_running = status.get("running", False)
+            is_stale = status.get("snapshot_stale", False)
+
+            if not is_running:
+                self.poller_status_label.setText("⏹️")
+                self.poller_status_label.setToolTip("Poller stopped")
+            elif is_stale:
+                self.poller_status_label.setText("⚠️")
+                self.poller_status_label.setToolTip("Poller: stale snapshot")
+            else:
+                self.poller_status_label.setText("✅")
+                self.poller_status_label.setToolTip(f"Poller: {mode} mode")
+        except Exception:
+            self.poller_status_label.setText("❓")
+            self.poller_status_label.setToolTip("Poller status unknown")
+
     # ===== Collaboration Status Bar =====
 
     def _setup_collaboration_status_bar(self) -> None:
@@ -324,6 +406,11 @@ class MainWindow(QMainWindow):
         """)
         self.waiting_indicator.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         layout.addWidget(self.waiting_indicator)
+
+        # Poller status indicator
+        self.poller_status_label = QLabel("🔍")
+        self.poller_status_label.setToolTip("Poller: idle")
+        layout.addWidget(self.poller_status_label)
 
         # Start Editing / Finish Editing buttons
         self.start_edit_btn = QPushButton("✏️ Start Editing")
@@ -434,6 +521,7 @@ class MainWindow(QMainWindow):
 
         self._update_waiting_status()
         self._update_write_actions(is_editing)
+        self._update_poller_status()
 
     def _update_lock_owner_display(self) -> None:
         """Update lock owner display in status bar."""
@@ -553,6 +641,10 @@ class MainWindow(QMainWindow):
             widget = self.central_stack.widget(i)
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(enabled)
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Public method to enable/disable write actions."""
+        self._update_write_actions(enabled)
 
     # ===== Transaction Actions =====
 
@@ -953,5 +1045,9 @@ class MainWindow(QMainWindow):
 
         if self._sync_service is not None:
             self._sync_service.stop()
+        
+        if self._poller is not None:
+            self._poller.stop()
+        
         self._collaboration_manager.shutdown()
         event.accept()

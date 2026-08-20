@@ -28,6 +28,7 @@ from centermanager.platform import (
 )
 from centermanager.platform.sync import StartupSynchronization
 from centermanager.platform.business import BusinessModule
+from centermanager.platform.collaboration import CollaborationPoller, PollerMode  # <-- THÊM
 
 from centermanager.ui.main_window import MainWindow
 from centermanager.services.student_service import StudentService
@@ -245,7 +246,24 @@ def main() -> int:
             runtime_version=platform_context.runtime.manifest.runtime_version,
         )
 
-        # Runtime Sync Service (background)
+        # ============================================
+        # COLLABORATION POLLER (NEW)
+        # ============================================
+        poller = CollaborationPoller(
+            collaboration_manager=collaboration_manager,
+            event_bus=event_bus,
+            normal_interval=10,
+            waiting_interval=3,
+            max_backoff=120,
+            initial_backoff=5,
+        )
+        # Start poller
+        poller.start()
+        logger.info("[STARTUP] CollaborationPoller started")
+
+        # ============================================
+        # RUNTIME SYNC SERVICE (background)
+        # ============================================
         sync_service = RuntimeSyncService(
             sync_manager=sync_manager,
             collab_manager=collaboration_manager,
@@ -419,6 +437,7 @@ def main() -> int:
             notification_service=notification_service,
             git_config_service=git_config_service,
             event_bus=event_bus,
+            poller=poller,  # <-- THÊM poller vào MainWindow
         )
 
         logger.info("[STARTUP] MainWindow instance created")
@@ -434,6 +453,7 @@ def main() -> int:
         # Shutdown
         if sync_service is not None:
             sync_service.stop()
+        poller.stop()  # <-- STOP POLLER
         collaboration_manager.shutdown()
 
         return exit_code
