@@ -556,6 +556,28 @@ class CollaborationManager:
                 logger.info(f"Write released by {self._session.username}")
                 return True
 
+    def refresh_waiting_request(self, request_id: Optional[str] = None) -> bool:
+        """Renew this session's waiting-request lease while the client is alive."""
+        self._ensure_initialized()
+        if self._session is None:
+            return False
+        request = self._queue.get_by_session(self._session.session_id)
+        if request is None:
+            return False
+        if request_id and request.request_id != request_id:
+            return False
+        return self._queue.refresh(request.request_id)
+
+    def has_pending_waiting_request(self, request_id: Optional[str] = None) -> bool:
+        """Return whether this session still owns its waiting request."""
+        self._ensure_initialized()
+        if self._session is None:
+            return False
+        request = self._queue.get_by_session(self._session.session_id)
+        if request is None:
+            return False
+        return not request_id or request.request_id == request_id
+
     def grant_existing_waiting_request(self, request_id: Optional[str] = None) -> bool:
         """Grant WRITE lock to the existing waiting request."""
         self._ensure_initialized()
@@ -572,6 +594,21 @@ class CollaborationManager:
                 logger.info(f"No pending request for session {self._session.session_id}")
                 return False
             request_id = request.request_id
+
+        # A waiting writer may only be granted when it is the current queue
+        # head.  This check is intentionally performed before lock acquisition
+        # so a later waiter cannot bypass an earlier waiter during handoff.
+        queue_head = self._queue.peek()
+        if queue_head is None:
+            logger.info("No queue head, cannot grant waiting request")
+            return False
+        if queue_head.request_id != request_id:
+            logger.info(
+                "Waiting request %s is not queue head (%s), cannot grant",
+                request_id,
+                queue_head.request_id,
+            )
+            return False
 
         # ---- Remote mode: check remote state ----
         if self._sync_provider is not None:
@@ -594,7 +631,9 @@ class CollaborationManager:
                 self._is_writing = True
                 self._lock_acquired = True
                 self._sync_local_lock()
-                self._queue.cancel(request_id)
+                # Notify the waiting transaction before consuming its queue entry.
+                # This prevents a concurrent UI poll from seeing the removed request
+                # and transitioning WAITING -> IDLE before the grant is applied.
                 self._event_bus.publish(WriteGranted(
                     session_id=self._session.session_id,
                     user_id=self._session.user_id,
@@ -603,6 +642,7 @@ class CollaborationManager:
                     queue_position=0,
                 ))
                 self._event_bus.publish(ModeChanged(mode="WRITE"))
+                self._queue.cancel(request_id)
                 self._event_bus.publish(QueueUpdated(
                     queue_length=self._queue.count(),
                     next_writer=self._queue.peek().username if self._queue.peek() else None,
@@ -627,7 +667,7 @@ class CollaborationManager:
             if acquired:
                 self._is_writing = True
                 self._lock_acquired = True
-                self._queue.cancel(request_id)
+                # Same ordering guarantee as remote mode.
                 self._event_bus.publish(WriteGranted(
                     session_id=self._session.session_id,
                     user_id=self._session.user_id,
@@ -636,6 +676,7 @@ class CollaborationManager:
                     queue_position=0,
                 ))
                 self._event_bus.publish(ModeChanged(mode="WRITE"))
+                self._queue.cancel(request_id)
                 self._event_bus.publish(QueueUpdated(
                     queue_length=self._queue.count(),
                     next_writer=self._queue.peek().username if self._queue.peek() else None,
@@ -659,6 +700,66 @@ class CollaborationManager:
             self._lock.release(self._session)
             self._lock_acquired = False
             return True
+
+    def renew_remote_lease(self, force: bool = False) -> bool:
+        """Renew this session's authoritative remote collaboration lease.
+
+        Renewal is deliberately owned by the collaboration lifecycle, not by
+        MAIN synchronization.  It is safe to call from the poller because the
+        synchronization provider performs owner/session/CAS validation.
+
+        Returns True when no renewal is required or when renewal succeeds.
+        Returns False when this session is not writing, the lease is no longer
+        valid, or the remote renewal fails.
+        """
+        self._ensure_initialized()
+        if self._sync_provider is None or not self._is_writing or self._session is None:
+            return True
+
+        try:
+            remote = self._sync_provider.remote_lock_status()
+            if not remote.get("locked", False):
+                logger.warning("Active writer has no remote lock; lease renewal skipped")
+                return False
+
+            if remote.get("session_id") != self._session.session_id:
+                logger.warning(
+                    "Active writer lease ownership changed: remote_session=%s local_session=%s",
+                    remote.get("session_id"), self._session.session_id,
+                )
+                return False
+
+            lease_expires_at = remote.get("lease_expires_at")
+            if not force and lease_expires_at:
+                try:
+                    expires = datetime.fromisoformat(lease_expires_at)
+                    remaining = (expires - datetime.now()).total_seconds()
+                    # Renew at half-life. This leaves a full poll interval of
+                    # tolerance while avoiding a Git commit on every poll.
+                    renewal_threshold = max(1.0, self._lock_timeout / 2.0)
+                    if remaining > renewal_threshold:
+                        return True
+                except Exception:
+                    # Invalid/missing expiry must be treated conservatively:
+                    # attempt renewal and let the provider validate authority.
+                    pass
+
+            renewed = self._sync_provider.renew_lock(
+                self._session.username,
+                self._session.session_id,
+            )
+            if renewed:
+                # Keep the local collaboration mirror aligned with the
+                # authoritative remote lock. This does not touch MAIN Git.
+                self._sync_local_lock()
+                logger.debug("Remote collaboration lease renewed")
+                return True
+
+            logger.warning("Remote collaboration lease renewal failed")
+            return False
+        except Exception as e:
+            logger.warning(f"Remote collaboration lease renewal failed: {e}")
+            return False
 
     def heartbeat(self) -> bool:
         self._ensure_initialized()

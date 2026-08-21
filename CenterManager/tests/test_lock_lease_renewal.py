@@ -157,6 +157,10 @@ class TestLockLeaseRenewal:
         if initial_expiry is not None and new_expiry is not None:
             assert datetime.fromisoformat(new_expiry) > datetime.fromisoformat(initial_expiry)
 
+        # Each successful renewal advances the remote lease revision without
+        # touching MAIN.
+        assert status_after.get("lease_revision", 0) >= status.get("lease_revision", 0) + 1
+
         # Verify owner/session unchanged
         assert status_after.get("owner") == "user_a"
         assert status_after.get("session_id") == "sess_001"

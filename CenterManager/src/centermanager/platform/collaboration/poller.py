@@ -85,6 +85,7 @@ class CollaborationPoller(QObject):
     refresh_requested = Signal(object)
     mode_change_requested = Signal(object)
     stop_requested = Signal()
+    lease_renewal_failed = Signal(object)
 
     def __init__(
         self,
@@ -94,6 +95,7 @@ class CollaborationPoller(QObject):
         waiting_interval: int = 3,
         max_backoff: int = 120,
         initial_backoff: int = 5,
+        lease_renewal_interval: int = 20,
     ):
         super().__init__()
         self._cm = collaboration_manager
@@ -103,6 +105,7 @@ class CollaborationPoller(QObject):
         self._waiting_interval = waiting_interval
         self._max_backoff = max_backoff
         self._initial_backoff = initial_backoff
+        self._lease_renewal_interval = max(1, int(lease_renewal_interval))
 
         self._mode = PollerMode.NORMAL
         self._running = False
@@ -120,6 +123,7 @@ class CollaborationPoller(QObject):
         self.moveToThread(self._thread)
         self._thread.started.connect(self._on_thread_started)
         self._timer: Optional[QTimer] = None
+        self._lease_timer: Optional[QTimer] = None
 
         # For stopping
         self._stop_requested = False
@@ -202,7 +206,10 @@ class CollaborationPoller(QObject):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
-            logger.debug("Timer stopped from poller thread")
+        if self._lease_timer is not None:
+            self._lease_timer.stop()
+            self._lease_timer = None
+        logger.debug("Poller timers stopped from poller thread")
         # No need to quit thread here; stop() will call quit() from main thread.
 
     def _on_thread_started(self) -> None:
@@ -212,6 +219,16 @@ class CollaborationPoller(QObject):
         self._timer = QTimer()
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._poll)
+
+        # Lease renewal has its own cadence and is intentionally independent
+        # from MAIN observation/backoff. A failed MAIN poll must never silence
+        # collaboration lease renewal while the local session is still writing.
+        self._lease_timer = QTimer()
+        self._lease_timer.setSingleShot(False)
+        self._lease_timer.setInterval(self._lease_renewal_interval * 1000)
+        self._lease_timer.timeout.connect(self._renew_active_lease)
+        self._lease_timer.start()
+
         # Preserve production behavior unless explicitly disabled by the caller.
         if self._initial_poll_enabled:
             self._schedule_poll(0)
@@ -226,6 +243,28 @@ class CollaborationPoller(QObject):
         self._timer.setInterval(interval_ms)
         self._timer.start()
         logger.debug(f"Next poll scheduled in {delay_seconds:.1f}s")
+
+    @Slot()
+    def _renew_active_lease(self) -> None:
+        """Renew the current writer's remote lease independently of MAIN sync."""
+        if self._stop_requested or not self._running:
+            return
+        try:
+            renewed = self._cm.renew_remote_lease()
+        except AttributeError:
+            # Compatibility with non-production/test collaboration doubles.
+            return
+        except Exception as e:
+            logger.warning(f"Active editing lease renewal failed: {e}")
+            self.lease_renewal_failed.emit({"error": str(e)})
+            return
+
+        if not renewed:
+            # A false result means the writer no longer owns a valid remote
+            # lease. Do not mutate transaction state here; authority validation
+            # remains the single owner of FINISHING_STALE transitions.
+            logger.warning("Active editing remote lease renewal was not successful")
+            self.lease_renewal_failed.emit({"error": "renewal_failed"})
 
     def _poll(self) -> None:
         """Perform a single poll cycle. Runs in poller thread."""
@@ -365,6 +404,7 @@ class CollaborationPoller(QObject):
             "consecutive_failures": self._consecutive_failures,
             "current_backoff": self._current_backoff,
             "next_poll_delay": self._next_poll_delay,
+            "lease_renewal_interval": self._lease_renewal_interval,
             "last_poll_at": self._last_poll_at.isoformat() if self._last_poll_at else None,
             "last_success_at": self._last_success_at.isoformat() if self._last_success_at else None,
             "has_snapshot": self._last_snapshot is not None,

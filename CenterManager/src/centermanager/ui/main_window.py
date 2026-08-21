@@ -617,13 +617,23 @@ class MainWindow(QMainWindow):
 
         # Auto-grant logic
         if self._transaction.state == WriteTransactionState.WAITING:
+            request_id = self._transaction._waiting_request_id
+            if request_id:
+                # Keep the live waiting request from expiring during a long
+                # handoff chain. This is a liveness renewal, not a new request.
+                if not self._collaboration_manager.refresh_waiting_request(request_id):
+                    logger.warning("Waiting request is no longer present; leaving WAITING state")
+                    self._transaction.cancel_waiting("waiting request expired or was removed")
+                    self._update_write_buttons()
+                    self.waiting_indicator.setText("● Waiting request expired")
+                    self.statusBar().showMessage("Write request expired. Please request WRITE again.", 5000)
+                    return
             if not is_locked:
                 logger.info("Lock is free, granting existing waiting request")
-                request_id = self._transaction._waiting_request_id
                 if request_id:
                     success = self._collaboration_manager.grant_existing_waiting_request(request_id)
                     if success:
-                        self._transaction.on_write_granted()
+                        # _on_write_granted already transitioned WAITING -> EDITING.
                         self._update_write_buttons()
                         self._waiting_users_cache = []
                         self._skip_auto_request_until_next_poll = True
@@ -825,7 +835,15 @@ class MainWindow(QMainWindow):
         self._update_write_buttons()
 
     def _on_write_granted(self, event) -> None:
-        """Handle write granted event."""
+        """Handle write granted event, including automatic waiting handoff."""
+        # WriteGranted is synchronous. Apply the transaction transition before
+        # the collaboration layer consumes the waiting-request file.
+        if (
+            event.session_id == self._collaboration_manager.get_session_id()
+            and self._transaction.state == WriteTransactionState.WAITING
+            and getattr(self._transaction, "_waiting_request_id", "") == event.request_id
+        ):
+            self._transaction.on_write_granted()
         self.statusBar().showMessage(f"Write access granted to {event.username}", 3000)
         self._update_write_buttons()
 

@@ -253,8 +253,10 @@ def test_push_rejected_after_validation(collab_manager):
                         on_publish_failure=lambda e: None
                     )
             assert success is False
-            assert tx.state == WriteTransactionState.FAILED
-            # Không gọi pull (vì chỉ publish_only)
+            assert tx.state == WriteTransactionState.OFFLINE_PENDING_PUBLISH
+            # A push rejection is retained as a pending publication so the
+            # already-prepared local commit can be retried without creating
+            # another MAIN commit. No pull is allowed here.
             mock_provider.pull.assert_not_called()
 
 

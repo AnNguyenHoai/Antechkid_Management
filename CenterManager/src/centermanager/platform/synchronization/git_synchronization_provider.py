@@ -573,6 +573,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
             renewed_lock["lease_expires_at"] = (
                 datetime.now() + timedelta(seconds=self._lease_duration_seconds)
             ).isoformat()
+            renewed_lock["lease_revision"] = int(
+                renewed_lock.get("lease_revision", 0)
+            ) + 1
 
             renewed_lock["finishing_started_at"] = finishing_started_at
             renewed_lock["finishing_deadline"] = finishing_deadline
@@ -833,6 +836,16 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
             status_out = self._run_git_command(["status", "--porcelain"])
             if not status_out:
+                # A previous publish attempt may have created the MAIN commit
+                # successfully but failed during the push. In that case the
+                # working tree is clean while HEAD is still ahead of the
+                # expected remote MAIN. The retry must push that already-created
+                # commit instead of incorrectly reporting success without a push.
+                if expected_main_commit:
+                    local_head = self._run_git_command(["rev-parse", "HEAD"]).strip()
+                    if local_head != expected_main_commit:
+                        self._push_only(expected_remote_commit=expected_main_commit)
+                        return True
                 logger.info("No changes to commit")
                 return True
 
@@ -842,8 +855,10 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
             # Exactly one push attempt. If the remote changed, fail safely;
             # never pull/rebase or repeat the same stale push.
+            # _push_only() owns the single success log for the actual Git push.
+            # Do not emit a second success message here: the publish operation
+            # itself must remain observably single-shot.
             self._push_only(expected_remote_commit=expected_main_commit)
-            logger.info("Push-only successful")
             return True
         except RepositoryConflictError as e:
             logger.error(f"Publish-only rejected due to concurrency conflict: {e}")

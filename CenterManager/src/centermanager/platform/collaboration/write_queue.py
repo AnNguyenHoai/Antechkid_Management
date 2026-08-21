@@ -127,6 +127,29 @@ class WriteQueue:
             return True
         return False
     
+    def refresh(self, request_id: str) -> bool:
+        """Refresh a live waiting request so it does not expire while the client is waiting.
+
+        The request timestamp is its liveness lease. A client that is actively
+        waiting must renew that lease periodically; otherwise a long handoff
+        chain can expire the request even though the application is healthy.
+        """
+        file_path = self._queue_dir / f"{request_id}.json"
+        if not file_path.exists():
+            return False
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("status") != "pending":
+                return False
+            data["timestamp"] = datetime.now().isoformat()
+            AtomicFileWriter(file_path).write_json(data)
+            logger.debug(f"Refreshed waiting request {request_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to refresh waiting request {request_id}: {e}")
+            return False
+
     def has_pending(self, session_id: str) -> bool:
         """Check if a session has a pending request."""
         for req in self._list_requests():

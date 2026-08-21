@@ -446,6 +446,21 @@ class WriteTransactionManager:
     def get_waiting_position(self) -> int:
         return self._waiting_position
 
+    def cancel_waiting(self, reason: str = "Waiting request expired or was removed") -> None:
+        """Leave WAITING when the collaboration layer no longer owns our request.
+
+        This is intentionally narrower than cancel_editing(): a waiting
+        transaction has no business edits or snapshot to roll back.
+        """
+        if self._state != WriteTransactionState.WAITING:
+            return
+        logger.warning(f"Transaction: WAITING -> IDLE ({reason})")
+        self._state = WriteTransactionState.IDLE
+        self._waiting_position = 0
+        self._waiting_request_id = ""
+        self._is_editing = False
+        self._session = None
+
     def on_write_granted(self) -> None:
         """
         Called when write lock is granted to a waiting session (auto-grant).
