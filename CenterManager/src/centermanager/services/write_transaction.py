@@ -203,7 +203,7 @@ class WriteTransactionManager:
             self._is_editing = True
 
             # Capture expected generation
-            self._expected_generation = self._collab_manager._lock.get_lock_generation()
+            self._expected_generation = self._collab_manager.get_lock_generation()
             logger.info(f"Expected generation captured: {self._expected_generation}")
 
             # Capture base MAIN commit for optimistic concurrency
@@ -520,9 +520,20 @@ class WriteTransactionManager:
             )
             return
 
+        # A remote grant can legitimately be observed while the local
+        # transaction is still WAITING.  The authoritative handoff path must
+        # consume that observation through the explicit GRANTING gate rather
+        # than attempting the forbidden WAITING -> EDITING shortcut.
+        if self._state == WriteTransactionState.WAITING:
+            if not self._transition_to(
+                WriteTransactionState.GRANTING,
+                "remote grant observed",
+            ):
+                return
+
         if not self._transition_to(
             WriteTransactionState.EDITING,
-            "remote grant",
+            "remote grant confirmed",
         ):
             return
 
@@ -530,7 +541,7 @@ class WriteTransactionManager:
         # This is what makes repeated WRITE_GRANTED events idempotent.
         self._is_editing = True
         self._session = self._collab_manager.get_session()
-        self._expected_generation = self._collab_manager._lock.get_lock_generation()
+        self._expected_generation = self._collab_manager.get_lock_generation()
 
         self._base_main_commit = None
         if self._collab_manager._sync_provider:
@@ -582,7 +593,7 @@ class WriteTransactionManager:
                 return {"success": False, "reason": reason, "state": "STALE"}
 
         # 2. Generation fencing
-        current_gen = self._collab_manager._lock.get_lock_generation()
+        current_gen = self._collab_manager.get_lock_generation()
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
             self._state = WriteTransactionState.FINISHING_STALE
@@ -657,7 +668,7 @@ class WriteTransactionManager:
 
         if auth.get("valid", False):
             # Still valid, check generation against expected
-            current_gen = self._collab_manager._lock.get_lock_generation()
+            current_gen = self._collab_manager.get_lock_generation()
             if current_gen != self._expected_generation:
                 self._state = WriteTransactionState.FINISHING_STALE
                 reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"

@@ -1037,6 +1037,37 @@ class CollaborationManager:
                 return False
         return True
 
+    def get_lock_generation(self) -> int:
+        """Return the authoritative current collaboration lock generation.
+
+        In remote collaboration mode the remote lock is the authority.  Reading
+        only the local RuntimeLock can return a stale generation after another
+        client acquires/releases the lease, which in turn can fence a valid
+        finish or leave clients stuck observing an old owner.
+
+        Test doubles are still supported through the local fallback.
+        """
+        if self._sync_provider is not None:
+            try:
+                remote = self._get_remote_lock_status()
+                if remote.get("locked", False):
+                    return int(remote.get("lock_generation", 0) or 0)
+
+                # A successful authoritative read that says "unlocked" is also
+                # authoritative: do not retain a stale local generation.
+                return 0
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read authoritative remote lock generation: %s",
+                    exc,
+                )
+
+        lock = getattr(self, "_lock", None)
+        getter = getattr(lock, "get_lock_generation", None)
+        if callable(getter):
+            return int(getter())
+        return 0
+
     def validate_write_authority(self, session) -> Dict[str, Any]:
         """
         Validate write authority for a session.

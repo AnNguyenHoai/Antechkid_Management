@@ -88,3 +88,19 @@ def test_duplicate_grant_failure_is_idempotent():
 
     assert tx.state == WriteTransactionState.WAITING
 
+
+
+def test_remote_generation_is_authoritative_for_transaction_fencing():
+    from centermanager.platform.collaboration.collaboration_manager import CollaborationManager
+
+    class Remote:
+        def remote_lock_status(self):
+            return {
+                "locked": True,
+                "lock_generation": 9,
+                "session_id": "remote-session",
+            }
+
+    cm = CollaborationManager(sync_provider=Remote())
+    # The local RuntimeLock has never been acquired; remote authority must win.
+    assert cm.get_lock_generation() == 9
