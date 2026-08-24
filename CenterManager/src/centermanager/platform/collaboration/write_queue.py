@@ -30,6 +30,7 @@ class WriteRequest:
         timestamp: datetime,
         reason: str = "",
         status: str = "pending",
+        enqueue_timestamp: Optional[datetime] = None,
     ):
         self.request_id = request_id
         self.session_id = session_id
@@ -38,6 +39,8 @@ class WriteRequest:
         self.role = role
         self.priority = priority
         self.timestamp = timestamp
+        # Immutable FIFO key. timestamp is a renewable liveness lease.
+        self.enqueue_timestamp = enqueue_timestamp or timestamp
         self.reason = reason
         self.status = status  # pending, granted, cancelled, expired
     
@@ -50,6 +53,7 @@ class WriteRequest:
             "role": self.role,
             "priority": self.priority,
             "timestamp": self.timestamp.isoformat(),
+            "enqueue_timestamp": self.enqueue_timestamp.isoformat(),
             "reason": self.reason,
             "status": self.status,
         }
@@ -64,6 +68,7 @@ class WriteRequest:
             role=data["role"],
             priority=data["priority"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
+            enqueue_timestamp=datetime.fromisoformat(data.get("enqueue_timestamp", data["timestamp"])),
             reason=data.get("reason", ""),
             status=data.get("status", "pending"),
         )
@@ -96,7 +101,7 @@ class WriteQueue:
         if not requests:
             return None
         
-        requests.sort(key=lambda r: (-r.priority, r.timestamp))
+        requests.sort(key=lambda r: (-r.priority, r.enqueue_timestamp))
         request = requests[0]
         self._delete_request(request.request_id)
         return request
@@ -107,12 +112,19 @@ class WriteQueue:
         if not requests:
             return None
         
-        requests.sort(key=lambda r: (-r.priority, r.timestamp))
+        requests.sort(key=lambda r: (-r.priority, r.enqueue_timestamp))
         return requests[0]
     
     def get_requests(self) -> List[WriteRequest]:
-        """Get all pending requests."""
-        return self._list_requests()
+        """Get all pending requests in canonical priority/FIFO order.
+
+        _list_requests() reads one-file-per-request storage and filesystem glob
+        order is not a queue ordering contract. Every public queue view must
+        therefore use the same canonical ordering as peek()/dequeue().
+        """
+        requests = self._list_requests()
+        requests.sort(key=lambda r: (-r.priority, r.enqueue_timestamp))
+        return requests
     
     def count(self) -> int:
         """Get number of pending requests."""
@@ -167,7 +179,7 @@ class WriteQueue:
     def get_position(self, session_id: str) -> int:
         """Get queue position (1-based) of a session."""
         requests = self._list_requests()
-        requests.sort(key=lambda r: (-r.priority, r.timestamp))
+        requests.sort(key=lambda r: (-r.priority, r.enqueue_timestamp))
         for idx, req in enumerate(requests, start=1):
             if req.session_id == session_id:
                 return idx

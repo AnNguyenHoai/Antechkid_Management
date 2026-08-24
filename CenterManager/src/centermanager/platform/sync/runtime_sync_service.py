@@ -102,6 +102,58 @@ class RuntimeSyncService:
         logger.info("Manual check_for_updates triggered")
         return self._perform_check()
 
+    def execute_write_handoff_sync(self) -> bool:
+        """Synchronize runtime state before a queued writer starts editing.
+
+        This deliberately bypasses AutoPullPolicy. Background sync is deferred
+        while a queue exists, but the queue handoff is a mandatory consistency
+        boundary.
+        """
+        provider = self._sync_manager.provider() if self._sync_manager else None
+        if provider is None:
+            logger.warning("Write handoff sync unavailable: no synchronization provider")
+            return False
+        with self._state_mutex:
+            if self._status == SyncStatus.SYNCHRONIZING:
+                logger.warning("Write handoff sync blocked: synchronization already in progress")
+                return False
+        try:
+            check = self._sync_manager.check_updates()
+            remote_version = check.remote_version
+            current_version = self._get_repository_version()
+            logger.info("Write handoff sync check: current=%s, remote=%s", current_version, remote_version)
+            if remote_version is None:
+                return False
+            if remote_version > current_version:
+                with self._state_mutex:
+                    self._current_version = current_version
+                    self._remote_version = remote_version
+                    self._pending_update = True
+                if not self._perform_sync():
+                    return False
+            elif remote_version < current_version:
+                logger.error("Write handoff refused: local repository version %s ahead of remote %s", current_version, remote_version)
+                return False
+
+            paths = get_paths()
+            runtime_manifest = paths.runtime_root / "manifest.json"
+            runtime_version = None
+            if runtime_manifest.exists():
+                with open(runtime_manifest, "r", encoding="utf-8") as f:
+                    runtime_version = json.load(f).get("runtime_version")
+            repository_version = self._get_repository_version()
+            if runtime_version != remote_version or repository_version != remote_version:
+                logger.error(
+                    "Write handoff verification failed: runtime=%s repository=%s remote=%s",
+                    runtime_version, repository_version, remote_version,
+                )
+                return False
+            logger.info("Write handoff sync completed and verified at version %s", remote_version)
+            return True
+        except Exception as exc:
+            logger.exception("Write handoff sync failed: %s", exc)
+            return False
+
     def execute_sync(self) -> bool:
         return self._perform_sync()
 

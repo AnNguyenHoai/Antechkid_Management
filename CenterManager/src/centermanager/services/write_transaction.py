@@ -26,6 +26,7 @@ class WriteTransactionState(Enum):
     FAILED = auto()
     OFFLINE_PENDING_PUBLISH = auto()
     WAITING = auto()
+    GRANTING = auto()
     # Finishing states
     FINISHING = auto()
     FINISHING_WAITING_FOR_COLLABORATION = auto()
@@ -461,12 +462,20 @@ class WriteTransactionManager:
         self._is_editing = False
         self._session = None
 
+    def begin_grant(self) -> bool:
+        """Enter GRANTING while the collaboration layer completes a handoff."""
+        if self._state != WriteTransactionState.WAITING:
+            return False
+        self._state = WriteTransactionState.GRANTING
+        logger.info("Transaction: WAITING -> GRANTING")
+        return True
+
     def on_write_granted(self) -> None:
         """
         Called when write lock is granted to a waiting session (auto-grant).
         This is the callback from CollaborationManager when auto-grant succeeds.
         """
-        if self._state == WriteTransactionState.WAITING:
+        if self._state in (WriteTransactionState.WAITING, WriteTransactionState.GRANTING):
             self._state = WriteTransactionState.EDITING
             self._is_editing = True
             self._session = self._collab_manager.get_session()
@@ -487,6 +496,12 @@ class WriteTransactionManager:
             logger.info(f"Transaction: WAITING -> EDITING (auto-grant), expected gen: {self._expected_generation}")
         else:
             logger.warning(f"on_write_granted called in state {self._state}, ignoring")
+
+    def on_grant_failed(self) -> None:
+        """Return from GRANTING to WAITING when authoritative acquisition fails."""
+        if self._state == WriteTransactionState.GRANTING:
+            self._state = WriteTransactionState.WAITING
+            logger.info("Transaction: GRANTING -> WAITING")
 
     # ---- Finishing methods ----
     def enter_finishing(self) -> Dict[str, Any]:

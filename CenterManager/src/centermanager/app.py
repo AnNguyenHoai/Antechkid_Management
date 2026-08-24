@@ -247,6 +247,23 @@ def main() -> int:
         )
 
         # ============================================
+        # RUNTIME SYNC SERVICE (background)
+        # ============================================
+        sync_service = RuntimeSyncService(
+            sync_manager=sync_manager,
+            collab_manager=collaboration_manager,
+            context_manager=context_manager,
+            event_bus=event_bus,
+            poll_interval=30,
+        )
+
+        # Install the mandatory data-consistency barrier BEFORE the collaboration
+        # poller can grant any queued writer.
+        collaboration_manager.set_write_handoff_guard(
+            sync_service.execute_write_handoff_sync
+        )
+
+        # ============================================
         # COLLABORATION POLLER (NEW)
         # ============================================
         poller = CollaborationPoller(
@@ -257,20 +274,8 @@ def main() -> int:
             max_backoff=120,
             initial_backoff=5,
         )
-        # Start poller
         poller.start()
         logger.info("[STARTUP] CollaborationPoller started")
-
-        # ============================================
-        # RUNTIME SYNC SERVICE (background)
-        # ============================================
-        sync_service = RuntimeSyncService(
-            sync_manager=sync_manager,
-            collab_manager=collaboration_manager,
-            context_manager=context_manager,
-            event_bus=event_bus,
-            poll_interval=30,
-        )
         sync_service.start()
 
         # ============================================

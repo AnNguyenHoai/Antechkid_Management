@@ -622,28 +622,47 @@ class MainWindow(QMainWindow):
                 # Keep the live waiting request from expiring during a long
                 # handoff chain. This is a liveness renewal, not a new request.
                 if not self._collaboration_manager.refresh_waiting_request(request_id):
-                    logger.warning("Waiting request is no longer present; leaving WAITING state")
-                    self._transaction.cancel_waiting("waiting request expired or was removed")
-                    self._update_write_buttons()
-                    self.waiting_indicator.setText("● Waiting request expired")
-                    self.statusBar().showMessage("Write request expired. Please request WRITE again.", 5000)
+                    # The collaboration runtime is replicated asynchronously.  A
+                    # transient local view of the queue may miss our request while
+                    # the poll/sync cycle is applying a remote handoff.  Do not
+                    # convert WAITING -> IDLE from that observation alone: doing so
+                    # can make the subsequent WriteGranted event get ignored.
+                    logger.info(
+                        "Waiting request %s is not visible locally yet; retaining WAITING and resyncing",
+                        request_id,
+                    )
+                    if self._sync_service is not None:
+                        try:
+                            self._sync_service.check_for_updates()
+                        except Exception:
+                            logger.exception("Failed to trigger collaboration resync while waiting")
+                    QTimer.singleShot(500, self._update_waiting_status)
                     return
             if not is_locked:
-                logger.info("Lock is free, granting existing waiting request")
+                logger.info("Lock is free, attempting authoritative waiting grant")
                 if request_id:
+                    # GRANTING prevents any queue-observation callback from
+                    # treating a consumed request as a cancellation while the
+                    # remote acquire/handoff protocol is in flight.
+                    self._transaction.begin_grant()
                     success = self._collaboration_manager.grant_existing_waiting_request(request_id)
                     if success:
-                        # _on_write_granted already transitioned WAITING -> EDITING.
                         self._update_write_buttons()
                         self._waiting_users_cache = []
                         self._skip_auto_request_until_next_poll = True
                         self.statusBar().showMessage("Write lock automatically granted.", 3000)
                     else:
-                        logger.warning("Failed to grant waiting request, retrying in 2s")
-                        QTimer.singleShot(2000, self._update_waiting_status)
+                        self._transaction.on_grant_failed()
+                        # Do not spin a fixed retry loop. A failed attempt can
+                        # mean that another waiter is the FIFO head, the remote
+                        # state changed, or the request is awaiting replication.
+                        # Re-enter through the normal poll/sync path.
+                        logger.info("Waiting grant not completed; awaiting authoritative queue update")
+                        if self._sync_service is not None:
+                            QTimer.singleShot(500, self._sync_service.check_for_updates)
+                        QTimer.singleShot(750, self._update_waiting_status)
                 else:
                     logger.warning("No request_id available, cannot auto-grant")
-                    QTimer.singleShot(2000, self._update_waiting_status)
 
     def _update_write_actions(self, enabled: bool) -> None:
         """Enable/disable write actions in all workspaces."""
@@ -840,7 +859,7 @@ class MainWindow(QMainWindow):
         # the collaboration layer consumes the waiting-request file.
         if (
             event.session_id == self._collaboration_manager.get_session_id()
-            and self._transaction.state == WriteTransactionState.WAITING
+            and self._transaction.state in (WriteTransactionState.WAITING, WriteTransactionState.GRANTING)
             and getattr(self._transaction, "_waiting_request_id", "") == event.request_id
         ):
             self._transaction.on_write_granted()

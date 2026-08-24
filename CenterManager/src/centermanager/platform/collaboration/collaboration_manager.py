@@ -6,7 +6,7 @@ import uuid
 import threading
 import json
 from enum import Enum
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -110,8 +110,13 @@ class CollaborationManager:
         self._is_writing = False
         self._lock_acquired = False
         self._state_mutex = threading.RLock()
+        self._write_handoff_guard: Optional[Callable[[], bool]] = None
 
         logger.info(f"CollaborationManager initialized at {self._collab_dir}")
+
+    def set_write_handoff_guard(self, guard: Optional[Callable[[], bool]]) -> None:
+        """Set synchronous runtime-sync guard for queued write handoff."""
+        self._write_handoff_guard = guard
 
     # ===================== Helper methods =====================
 
@@ -588,12 +593,22 @@ class CollaborationManager:
             logger.warning("No session, cannot grant waiting request")
             return False
 
-        if not request_id:
-            request = self._queue.get_by_session(self._session.session_id)
-            if not request:
-                logger.info(f"No pending request for session {self._session.session_id}")
-                return False
-            request_id = request.request_id
+        # Always resolve the request from the current session.  The caller's
+        # request_id is only an identity guard; the local queue can be refreshed
+        # asynchronously after a remote handoff and must not be treated as an
+        # authority that the request has permanently disappeared.
+        request = self._queue.get_by_session(self._session.session_id)
+        if request is None:
+            logger.info("No pending request for session %s", self._session.session_id)
+            return False
+        if request_id and request.request_id != request_id:
+            logger.info(
+                "Waiting request identity changed from %s to %s; retaining WAITING",
+                request_id,
+                request.request_id,
+            )
+            return False
+        request_id = request.request_id
 
         # A waiting writer may only be granted when it is the current queue
         # head.  This check is intentionally performed before lock acquisition
@@ -631,6 +646,38 @@ class CollaborationManager:
                 self._is_writing = True
                 self._lock_acquired = True
                 self._sync_local_lock()
+
+                # Handoff invariant: a queued writer must synchronize its local
+                # runtime snapshot before it becomes EDITING. Keep the queue entry
+                # intact if synchronization fails so the request can be retried.
+                if self._write_handoff_guard is not None:
+                    try:
+                        logger.info(
+                            "Write handoff: syncing runtime before granting request %s",
+                            request_id,
+                        )
+                        if not self._write_handoff_guard():
+                            logger.warning(
+                                "Write handoff sync failed for %s; releasing lock and retaining queue entry",
+                                request_id,
+                            )
+                            try:
+                                self._sync_provider.release_lock(self._session.username)
+                            finally:
+                                self._lock._force_release()
+                                self._lock_acquired = False
+                                self._is_writing = False
+                            return False
+                    except Exception as exc:
+                        logger.exception("Write handoff sync raised for %s: %s", request_id, exc)
+                        try:
+                            self._sync_provider.release_lock(self._session.username)
+                        finally:
+                            self._lock._force_release()
+                            self._lock_acquired = False
+                            self._is_writing = False
+                        return False
+
                 # Notify the waiting transaction before consuming its queue entry.
                 # This prevents a concurrent UI poll from seeing the removed request
                 # and transitioning WAITING -> IDLE before the grant is applied.
