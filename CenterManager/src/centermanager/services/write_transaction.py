@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class WriteTransactionState(Enum):
     """State machine for write transaction."""
     IDLE = auto()
+    ACQUIRING = auto()
     EDITING = auto()
     LOCAL_SAVED = auto()
     PUBLISHING = auto()
@@ -104,6 +105,30 @@ class WriteTransactionManager:
     def mark_dirty(self) -> None:
         self._has_changes = True
 
+    _ALLOWED_TRANSITIONS = {
+        WriteTransactionState.IDLE: {WriteTransactionState.ACQUIRING},
+        WriteTransactionState.ACQUIRING: {WriteTransactionState.EDITING, WriteTransactionState.WAITING, WriteTransactionState.IDLE},
+        WriteTransactionState.WAITING: {WriteTransactionState.GRANTING, WriteTransactionState.IDLE},
+        WriteTransactionState.GRANTING: {WriteTransactionState.EDITING, WriteTransactionState.WAITING},
+    }
+
+    def _transition_to(self, target: WriteTransactionState, reason: str = "") -> bool:
+        """Single owner for collaboration-entry state transitions.
+
+        Existing publish/finishing substates are retained for compatibility,
+        while the contention path is explicitly fenced here.
+        """
+        current = self._state
+        if current == target:
+            return True
+        allowed = self._ALLOWED_TRANSITIONS.get(current)
+        if allowed is not None and target not in allowed:
+            logger.warning("Invalid transaction transition: %s -> %s (%s)", current.name, target.name, reason)
+            return False
+        self._state = target
+        logger.info("Transaction transition: %s -> %s%s", current.name, target.name, f" ({reason})" if reason else "")
+        return True
+
     def _reset_to_idle(self) -> None:
         """Reset transaction state to IDLE after completion."""
         self._state = WriteTransactionState.IDLE
@@ -165,9 +190,13 @@ class WriteTransactionManager:
             logger.warning(f"Start editing called in state {self._state}, ignoring")
             return False
 
+        if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
+            return False
+
         result = self._collab_manager.request_write()
         if result.is_granted:
-            self._state = WriteTransactionState.EDITING
+            if not self._transition_to(WriteTransactionState.EDITING, "write granted"):
+                return False
             self._save_callback = save_callback
             self._has_changes = False
             self._session = self._collab_manager.get_session()
@@ -190,12 +219,13 @@ class WriteTransactionManager:
             logger.info("Write transaction started: EDITING")
             return True
         elif result.is_waiting:
-            self._state = WriteTransactionState.WAITING
+            self._transition_to(WriteTransactionState.WAITING, "queued")
             self._waiting_position = result.position
             self._waiting_request_id = result.request_id
             logger.info(f"Write transaction waiting (position {result.position})")
             return False
         else:
+            self._transition_to(WriteTransactionState.IDLE, "request rejected")
             logger.warning(f"Failed to acquire write lock: {result.message}")
             return False
 
@@ -466,42 +496,65 @@ class WriteTransactionManager:
         """Enter GRANTING while the collaboration layer completes a handoff."""
         if self._state != WriteTransactionState.WAITING:
             return False
-        self._state = WriteTransactionState.GRANTING
-        logger.info("Transaction: WAITING -> GRANTING")
-        return True
+        return self._transition_to(WriteTransactionState.GRANTING, "remote handoff")
 
     def on_write_granted(self) -> None:
         """
-        Called when write lock is granted to a waiting session (auto-grant).
-        This is the callback from CollaborationManager when auto-grant succeeds.
+        Apply an authoritative remote write grant exactly once.
+
+        Collaboration observations may be repeated by the poller/event bus.
+        The first grant consumes the WAITING/GRANTING -> EDITING transition and
+        performs its side effects. Later copies of the same grant are no-ops.
         """
-        if self._state in (WriteTransactionState.WAITING, WriteTransactionState.GRANTING):
-            self._state = WriteTransactionState.EDITING
-            self._is_editing = True
-            self._session = self._collab_manager.get_session()
-            # Capture expected generation
-            self._expected_generation = self._collab_manager._lock.get_lock_generation()
-            # Capture base MAIN commit
-            self._base_main_commit = None
-            if self._collab_manager._sync_provider:
-                try:
-                    self._base_main_commit = self._collab_manager._sync_provider.get_remote_main_commit()
-                except Exception:
-                    pass
-            # Reset waiting position
-            self._waiting_position = 0
-            self._waiting_request_id = ""
-            # Create snapshot for the new session
-            self._create_snapshot()
-            logger.info(f"Transaction: WAITING -> EDITING (auto-grant), expected gen: {self._expected_generation}")
-        else:
-            logger.warning(f"on_write_granted called in state {self._state}, ignoring")
+        if self._state == WriteTransactionState.EDITING:
+            logger.debug("Duplicate write grant ignored: transaction already EDITING")
+            return
+
+        if self._state not in (
+            WriteTransactionState.WAITING,
+            WriteTransactionState.GRANTING,
+        ):
+            logger.debug(
+                "Write grant ignored in non-grantable state %s",
+                self._state.name,
+            )
+            return
+
+        if not self._transition_to(
+            WriteTransactionState.EDITING,
+            "remote grant",
+        ):
+            return
+
+        # All grant side effects live behind the successful transition gate.
+        # This is what makes repeated WRITE_GRANTED events idempotent.
+        self._is_editing = True
+        self._session = self._collab_manager.get_session()
+        self._expected_generation = self._collab_manager._lock.get_lock_generation()
+
+        self._base_main_commit = None
+        if self._collab_manager._sync_provider:
+            try:
+                self._base_main_commit = (
+                    self._collab_manager._sync_provider.get_remote_main_commit()
+                )
+            except Exception:
+                pass
+
+        self._waiting_position = 0
+        self._waiting_request_id = ""
+        self._create_snapshot()
+
+        logger.info(
+            "Transaction: WAITING/GRANTING -> EDITING (auto-grant), "
+            "expected gen: %s",
+            self._expected_generation,
+        )
 
     def on_grant_failed(self) -> None:
         """Return from GRANTING to WAITING when authoritative acquisition fails."""
         if self._state == WriteTransactionState.GRANTING:
-            self._state = WriteTransactionState.WAITING
-            logger.info("Transaction: GRANTING -> WAITING")
+            self._transition_to(WriteTransactionState.WAITING, "grant failed")
 
     # ---- Finishing methods ----
     def enter_finishing(self) -> Dict[str, Any]:
@@ -652,14 +705,32 @@ class WriteTransactionManager:
         return datetime.now() >= self._finishing_deadline
 
     def reset_finishing(self) -> None:
-        self._finishing_started_at = None
-        self._finishing_deadline = None
-        self._publish_intent = False
-        self._finishing_retry_count = 0
-        if self._collab_manager and hasattr(self._collab_manager, '_lock'):
-            self._collab_manager._lock.clear_finishing_data()
-        if self._state in (WriteTransactionState.FINISHING,
-                           WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
-                           WriteTransactionState.FINISHING_STALE):
-            self._state = WriteTransactionState.EDITING
-        logger.info("Finishing state reset to EDITING")
+        """Reset local finishing state and collaboration finishing metadata."""
+        self._is_finishing = False
+
+        if self._collab_manager is None:
+            return
+
+        # Prefer a public CollaborationManager API.
+        clear_remote = getattr(
+            self._collab_manager,
+            "clear_finishing_data",
+            None,
+        )
+
+        if callable(clear_remote):
+            clear_remote()
+            return
+
+        # Backward-compatible fallback for the production collaboration lock.
+        # Do not assume _lock is the remote lock: test doubles may use a
+        # threading.RLock for internal synchronization.
+        remote_lock = getattr(self._collab_manager, "_lock", None)
+        clear_lock_data = getattr(
+            remote_lock,
+            "clear_finishing_data",
+            None,
+        )
+
+        if callable(clear_lock_data):
+            clear_lock_data()
