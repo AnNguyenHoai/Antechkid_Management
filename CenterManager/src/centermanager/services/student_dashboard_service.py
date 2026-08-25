@@ -59,6 +59,7 @@ class QuickInsights:
     avg_age: float
     total_parents: int
     assessment_completion_rate: float
+    parent_coverage_rate: float
 
 
 @dataclass
@@ -79,7 +80,7 @@ class StudentDashboardService:
         with self._session_factory() as session:
             repo = StudentRepository(session)
             all_students = repo.list_all_including_deleted()
-            total = len(all_students)
+            total = sum(1 for s in all_students if s.deleted_at is None)
             
             # Active: deleted_at is None AND status != 'ARCHIVED'
             # Archived: deleted_at is None AND status == 'ARCHIVED'
@@ -220,18 +221,39 @@ class StudentDashboardService:
             scores = [a.overall_score for a in all_assessments if a.overall_score is not None]
             avg_score = sum(scores) / len(scores) if scores else 0
 
-            parent_count = session.query(Parent).count()
+            # Parent Coverage means the percentage of active students that have
+            # at least one parent record. Count only parents attached to the same
+            # active population used by this insight.
+            active_student_ids = {s.id for s in active_students}
+            students_with_parent = {
+                student_id
+                for (student_id,) in session.query(Parent.student_id)
+                .filter(Parent.student_id.in_(active_student_ids))
+                .distinct()
+                .all()
+            } if active_student_ids else set()
+            parent_count = len(students_with_parent)
+            parent_coverage_rate = (
+                len(students_with_parent) / total_students if total_students > 0 else 0
+            )
 
-            students_with_assessment = set()
-            for a in all_assessments:
-                students_with_assessment.add(a.student_id)
-            completion_rate = len(students_with_assessment) / total_students if total_students > 0 else 0
+            students_with_assessment = {
+                student_id
+                for (student_id,) in session.query(Assessment.student_id)
+                .filter(Assessment.student_id.in_(active_student_ids))
+                .distinct()
+                .all()
+            } if active_student_ids else set()
+            completion_rate = (
+                len(students_with_assessment) / total_students if total_students > 0 else 0
+            )
 
             return QuickInsights(
                 avg_assessment_score=round(avg_score, 1),
                 avg_age=round(avg_age, 1),
                 total_parents=parent_count,
-                assessment_completion_rate=round(completion_rate * 100, 1)
+                assessment_completion_rate=round(completion_rate * 100, 1),
+                parent_coverage_rate=round(parent_coverage_rate * 100, 1)
             )
 
     def get_today_summary(self) -> TodaySummary:

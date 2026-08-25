@@ -530,8 +530,14 @@ class StudentDetailPage(QWidget):
         self.go_to_finance.emit()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        """Propagate write mode to child widgets."""
-        self.quick_actions.set_write_enabled(enabled)
-        self.assessment_section.set_write_enabled(enabled)
-        self.notes_widget.set_write_enabled(enabled)
-        self.documents_widget.set_write_enabled(enabled)
+        """Propagate write mode to all child mutation surfaces."""
+        for widget in (
+            self.quick_actions,
+            self.assessment_section,
+            self.notes_widget,
+            self.documents_widget,
+            self.attendance_widget,
+            self.report_list_widget,
+        ):
+            if hasattr(widget, "set_write_enabled"):
+                widget.set_write_enabled(enabled)

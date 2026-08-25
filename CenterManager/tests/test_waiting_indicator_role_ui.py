@@ -6,12 +6,12 @@ SOURCE = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
 
 def test_writer_role_uses_transaction_editing_state():
     assert "if self._transaction.is_editing:" in SOURCE
-    assert 'self.waiting_indicator.setText(f"⚠️ Waiting: {waiting_count}")' in SOURCE
+    assert 'self.waiting_indicator.setText("✏️ You are editing")' in SOURCE
 
 
-def test_writer_default_is_waiting_zero():
-    assert 'self.waiting_indicator = QLabel("⚠️ Waiting: 0")' in SOURCE
-    assert 'self.waiting_indicator.setText("⚠️ Waiting: 0")' in SOURCE
+def test_default_is_no_active_editor():
+    assert 'self.waiting_indicator = QLabel("● No active editor")' in SOURCE
+    assert 'self.waiting_indicator.setText("● No active editor")' in SOURCE
 
 
 def test_non_writer_sees_lock_owner():

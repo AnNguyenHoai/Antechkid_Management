@@ -252,6 +252,7 @@ class StudentWorkspaceShell(WorkspaceBase):
             return
         logger.info("[StudentWorkspace] Disposing")
         self._event_subscriptions.clear()
+        self._write_enabled = False
         self._is_initialized = False
         logger.info("[StudentWorkspace] Disposed")
 
@@ -358,7 +359,10 @@ class StudentWorkspaceShell(WorkspaceBase):
         if QThread.currentThread() != self.thread():
             QTimer.singleShot(0, lambda: self.set_write_enabled(enabled))
             return
-        for widget in [self.list_page, self.detail_page]:
+        self._write_enabled = enabled
+        # Central UI projection: read-only mode affects every student mutation
+        # surface, while services remain protected by WriteGuard.
+        for widget in [self.dashboard_page, self.list_page, self.detail_page]:
             if hasattr(widget, 'set_write_enabled'):
                 widget.set_write_enabled(enabled)
 

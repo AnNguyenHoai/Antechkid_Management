@@ -143,3 +143,7 @@ class ReportListWidget(QWidget):
                 subprocess.run(['xdg-open', str(file_path)])
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể mở file: {str(e)}")
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Reports list is read-only; keep API consistent with workspace."""
+        self._write_enabled = enabled

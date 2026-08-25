@@ -14,12 +14,16 @@ class StudentAnalyticsService:
 
     def get_dashboard_analytics(self) -> Dict[str, Any]:
         with self._session_factory() as session:
-            # Total students
-            total_students = session.query(Student).count()
+            # Student Workspace population rule: exclude soft-deleted students.
+            student_query = session.query(Student).filter(Student.deleted_at.is_(None))
+
+            # Total students includes active + archived students, matching the
+            # Student Dashboard population definition.
+            total_students = student_query.count()
 
             # Enrollment trend (last 6 months)
             six_months_ago = datetime.now() - timedelta(days=180)
-            students = session.query(Student).filter(
+            students = student_query.filter(
                 Student.created_at >= six_months_ago
             ).all()
             month_counts = Counter()
@@ -36,7 +40,7 @@ class StudentAnalyticsService:
             # Age distribution
             age_counts = Counter()
             today = datetime.now().date()
-            for s in session.query(Student).all():
+            for s in student_query.all():
                 if s.date_of_birth:
                     age = today.year - s.date_of_birth.year - (
                         (today.month, today.day) < (s.date_of_birth.month, s.date_of_birth.day)
@@ -63,11 +67,11 @@ class StudentAnalyticsService:
             last_month_start = last_month.replace(day=1)
             two_months_ago_start = two_months_ago.replace(day=1)
 
-            last_month_count = session.query(Student).filter(
+            last_month_count = student_query.filter(
                 Student.created_at >= last_month_start,
                 Student.created_at < last_month_start + timedelta(days=32)
             ).count()
-            two_months_ago_count = session.query(Student).filter(
+            two_months_ago_count = student_query.filter(
                 Student.created_at >= two_months_ago_start,
                 Student.created_at < two_months_ago_start + timedelta(days=32)
             ).count()
@@ -89,6 +93,8 @@ class StudentAnalyticsService:
 
     def get_recent_students(self, limit: int = 5) -> List[Student]:
         with self._session_factory() as session:
-            return session.query(Student).order_by(
+            return session.query(Student).filter(
+                Student.deleted_at.is_(None)
+            ).order_by(
                 Student.created_at.desc()
             ).limit(limit).all()
