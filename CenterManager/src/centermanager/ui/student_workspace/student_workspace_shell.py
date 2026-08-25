@@ -18,7 +18,7 @@ from centermanager.ui.student_workspace.student_analytics_page import StudentAna
 from centermanager.platform.context import PlatformContext
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.business import WriteGuard, PermissionGuard
-from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased, WriteRequested
+from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
 from centermanager.events.synchronization_events import VersionUpdated, SynchronizationCompleted
 from centermanager.platform.sync.events import ReloadRequired
 
@@ -225,9 +225,6 @@ class StudentWorkspaceShell(WorkspaceBase):
                 event_bus.register(WriteReleased, self._on_write_released)
             )
             self._event_subscriptions.append(
-                event_bus.register(WriteRequested, self._on_write_requested)
-            )
-            self._event_subscriptions.append(
                 event_bus.register(SynchronizationCompleted, self._on_sync_completed)
             )
             self._event_subscriptions.append(
@@ -321,24 +318,6 @@ class StudentWorkspaceShell(WorkspaceBase):
             QTimer.singleShot(0, lambda: self.set_write_enabled(False))
         else:
             self.set_write_enabled(False)
-
-    def _on_write_requested(self, event: WriteRequested) -> None:
-        """Handle write requested event."""
-        logger.info(f"[StudentWorkspace] Write requested by {event.username}")
-        # Cập nhật UI waiting status
-        if QThread.currentThread() != self.thread():
-            QTimer.singleShot(0, self._update_waiting_status)
-        else:
-            self._update_waiting_status()
-
-    def _update_waiting_status(self) -> None:
-        """Update waiting status indicator."""
-        # Delegate to main window
-        parent = self.parent()
-        while parent and not hasattr(parent, '_update_waiting_status'):
-            parent = parent.parent()
-        if parent and hasattr(parent, '_update_waiting_status'):
-            parent._update_waiting_status()
 
     def _on_sync_completed(self, event: SynchronizationCompleted) -> None:
         """Handle sync completed event."""

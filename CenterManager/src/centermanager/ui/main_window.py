@@ -139,14 +139,8 @@ class MainWindow(QMainWindow):
         self._transaction = transaction_manager
         self._closing_requested = False
 
-        # Event cache for immediate local waiting notifications.
-        self._waiting_users_cache = []
-        # Latest authoritative waiting queue observed by CollaborationPoller.
-        # Remote queue state is not guaranteed to be present in this client's
-        # local queue directory, so the status bar must render the snapshot
-        # rather than assuming the local WriteQueue is authoritative.
-        self._snapshot_waiting_requests = []
-        self._waiting_snapshot_seen = False
+        # Waiting requests remain internal coordination state and are not
+        # projected to the writer status UI.
         # Flag to prevent self-enqueue after finish
         self._skip_auto_request_until_next_poll = False
 
@@ -178,10 +172,6 @@ class MainWindow(QMainWindow):
         # Connect poller snapshot updates
         self._connect_poller()  # <-- THÊM
 
-        # Waiting user polling timer (2 seconds)
-        self._waiting_timer = QTimer()
-        self._waiting_timer.timeout.connect(self._update_waiting_status)
-        self._waiting_timer.start(2000)
 
         # Start with home
         self.central_stack.setCurrentWidget(self.home_page)
@@ -304,52 +294,11 @@ class MainWindow(QMainWindow):
         logger.info("Connected CollaborationPoller to MainWindow")
 
     def _on_poller_snapshot_changed(self, snapshot: CollaborationSnapshot) -> None:
-        """Handle poller snapshot updates."""
-        # Update lock owner display
-        self._update_lock_owner_display()
-
-        # The poller snapshot contributes remote queue evidence.  Do not let a
-        # transient empty snapshot erase a WriteRequested event immediately:
-        # collaboration runtime replication can expose the request event before
-        # the remote queue snapshot has converged.
-        queue = getattr(snapshot, "queue", None) or {}
-        requests = queue.get("requests", []) if isinstance(queue, dict) else []
-        snapshot_requests = [
-            request for request in requests
-            if isinstance(request, dict) and request.get("status", "pending") == "pending"
-        ]
-        if snapshot_requests:
-            self._snapshot_waiting_requests = snapshot_requests
-            self._waiting_snapshot_seen = True
-
-        # Update waiting status from all currently known queue evidence.
-        self._update_waiting_status()
-
-        # Update poller status indicator
-        self._update_poller_status()
-
-        # Update mode indicator if needed
-        if snapshot.is_stale:
-            self.statusBar().showMessage("⚠️ Collaboration state is stale", 3000)
-
-        # If snapshot shows a lock owner different from current, update UI
-        if snapshot.has_lock():
-            owner = snapshot.lock_owner()
-            if owner and owner != self._collaboration_manager.get_session().username:
-                self.statusBar().showMessage(f"🔒 {owner} is editing", 5000)
-
-        # Update write permissions based on lock state
-        current_session = self._collaboration_manager.get_session()
-        if snapshot.has_lock() and current_session:
-            if snapshot.lock_session() != current_session.session_id:
-                # Someone else holds the lock, disable write actions
-                self.set_write_enabled(False)
-            else:
-                # We hold the lock, enable write actions
-                self.set_write_enabled(True)
+        """Refresh only lock ownership projection when collaboration changes."""
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self._update_waiting_status)
         else:
-            # No lock, enable write actions
-            self.set_write_enabled(True)
+            self._update_waiting_status()
 
     def _update_poller_status(self) -> None:
         """Update poller status indicator."""
@@ -413,7 +362,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         # Waiting indicator
-        self.waiting_indicator = QLabel("● No waiting")
+        self.waiting_indicator = QLabel("● No active editor")
         self.waiting_indicator.setStyleSheet("""
             QLabel {
                 background-color: #f0f0f0;
@@ -567,181 +516,50 @@ class MainWindow(QMainWindow):
         self._update_waiting_status()
         
     def _update_waiting_status(self) -> None:
-        """Update waiting indicator and lock owner display."""
-        if not self._collaboration_manager.is_initialized():
-            return
-
-        lock_status = self._collaboration_manager.get_lock_status()
-
-        # Waiting UI is a visibility projection.  Merge the remote poller
-        # snapshot, local queue view and immediate WriteRequested event cache.
-        # Each source may converge at a different time, so replacing one source
-        # with another empty/transient view causes the indicator to flicker.
-        waiting_requests = []
-        seen_waiting = set()
-
-        def _add_waiting(request):
-            if not isinstance(request, dict):
-                return
-            if request.get("status", "pending") != "pending":
-                return
-            key = (
-                request.get("request_id")
-                or request.get("session_id")
-                or request.get("username")
-            )
-            if key in seen_waiting:
-                return
-            seen_waiting.add(key)
-            waiting_requests.append(request)
-
-        for request in self._snapshot_waiting_requests:
-            _add_waiting(request)
-        for request in self._collaboration_manager.get_waiting_requests():
-            _add_waiting(request)
-        for request in self._waiting_users_cache:
-            _add_waiting(request)
+        """Project writer ownership; waiting remains internal coordination state."""
+        try:
+            lock_status = self._collaboration_manager.get_lock_status()
+        except Exception:
+            logger.exception("Failed to read collaboration lock status")
+            lock_status = {}
 
         is_locked = lock_status.get("locked", False)
         owner = lock_status.get("owner") or lock_status.get("username")
         lock_session = lock_status.get("session_id")
         current_session = self._collaboration_manager.get_session_id()
 
-        # Cập nhật mode label
         mode = "WRITE" if self._transaction.is_editing else "READ"
         if is_locked and lock_session != current_session:
-            self.mode_label.setText(f"Mode: {mode} (locked by {owner})")
+            self.mode_label.setText(f"Mode: {mode}")
             self.mode_label.setStyleSheet("font-weight: bold; color: #d32f2f;")
         elif self._transaction.is_editing:
-            self.mode_label.setText(f"Mode: {mode} (you own the lock)")
+            self.mode_label.setText(f"Mode: {mode}")
             self.mode_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
         else:
             self.mode_label.setText(f"Mode: {mode}")
             self.mode_label.setStyleSheet("font-weight: bold;")
 
-        # Role-specific indicator:
-        #   - lock owner sees how many OTHER clients are waiting
-        #   - non-owner sees who currently holds WRITE
-        # Waiting count is therefore never shown to a requester.
-        if is_locked and lock_session == current_session:
-            own_request_id = getattr(self._transaction, "_waiting_request_id", None)
-            own_waiting_session = current_session
-            other_waiting_requests = [
-                request for request in waiting_requests
-                if request.get("session_id") != own_waiting_session
-                and request.get("request_id") != own_request_id
-            ]
-            waiting_count = len(other_waiting_requests)
-
-            if waiting_count:
-                self.waiting_indicator.setText(f"⚠️ Waiting: {waiting_count}")
-                self.waiting_indicator.setStyleSheet("""
-                    QLabel {
-                        background-color: #ff9800;
-                        color: #ffffff;
-                        padding: 3px 12px;
-                        border-radius: 12px;
-                        font-weight: 700;
-                        font-size: 12px;
-                    }
-                """)
-            else:
-                self.waiting_indicator.setText("● No waiting")
-                self.waiting_indicator.setStyleSheet("""
-                    QLabel {
-                        background-color: #f0f0f0;
-                        color: #999;
-                        padding: 3px 12px;
-                        border-radius: 12px;
-                        font-weight: 500;
-                        font-size: 12px;
-                    }
-                """)
-        elif is_locked and lock_session != current_session:
-            self.waiting_indicator.setText(f"🔒 {owner} is editing")
+        if self._transaction.is_editing:
+            self.waiting_indicator.setText("✏️ You are editing")
             self.waiting_indicator.setStyleSheet("""
-                QLabel {
-                    background-color: #d32f2f;
-                    color: #ffffff;
-                    padding: 3px 12px;
-                    border-radius: 12px;
-                    font-weight: 700;
-                    font-size: 12px;
-                }
+                QLabel { background-color: #2e7d32; color: #ffffff; padding: 3px 12px;
+                         border-radius: 12px; font-weight: 700; font-size: 12px; }
+            """)
+        elif is_locked:
+            owner_text = owner or "Another user"
+            self.waiting_indicator.setText(f"🔒 {owner_text} is editing")
+            self.waiting_indicator.setStyleSheet("""
+                QLabel { background-color: #d32f2f; color: #ffffff; padding: 3px 12px;
+                         border-radius: 12px; font-weight: 700; font-size: 12px; }
             """)
             if self._transaction.state == WriteTransactionState.WAITING:
-                self.statusBar().showMessage(f"Waiting for write lock (held by {owner})")
+                self.statusBar().showMessage(f"Waiting for write lock (held by {owner_text})")
         else:
-            self.waiting_indicator.setText("● No waiting")
+            self.waiting_indicator.setText("● No active editor")
             self.waiting_indicator.setStyleSheet("""
-                QLabel {
-                    background-color: #f0f0f0;
-                    color: #999;
-                    padding: 3px 12px;
-                    border-radius: 12px;
-                    font-weight: 500;
-                    font-size: 12px;
-                }
+                QLabel { background-color: #f0f0f0; color: #777; padding: 3px 12px;
+                         border-radius: 12px; font-weight: 500; font-size: 12px; }
             """)
-            if not waiting_requests:
-                self.statusBar().showMessage("")
-
-        # Auto-grant logic
-        if self._transaction.state == WriteTransactionState.WAITING:
-            request_id = self._transaction._waiting_request_id
-            if request_id:
-                # Keep the live waiting request from expiring during a long
-                # handoff chain. This is a liveness renewal, not a new request.
-                if not self._collaboration_manager.refresh_waiting_request(request_id):
-                    # The collaboration runtime is replicated asynchronously.  A
-                    # transient local view of the queue may miss our request while
-                    # the poll/sync cycle is applying a remote handoff.  Do not
-                    # convert WAITING -> IDLE from that observation alone: doing so
-                    # can make the subsequent WriteGranted event get ignored.
-                    logger.info(
-                        "Waiting request %s is not visible locally yet; retaining WAITING and resyncing",
-                        request_id,
-                    )
-                    if self._sync_service is not None:
-                        try:
-                            self._sync_service.check_for_updates()
-                        except Exception:
-                            logger.exception("Failed to trigger collaboration resync while waiting")
-                    QTimer.singleShot(500, self._update_waiting_status)
-                    return
-            if not is_locked:
-                logger.info("Lock is free, attempting authoritative waiting grant")
-                if request_id:
-                    # GRANTING prevents any queue-observation callback from
-                    # treating a consumed request as a cancellation while the
-                    # remote acquire/handoff protocol is in flight.
-                    self._transaction.begin_grant()
-                    success = self._collaboration_manager.grant_existing_waiting_request(request_id)
-                    if success:
-                        self._update_write_buttons()
-                        current_session_id = self._collaboration_manager.get_session_id()
-                        self._waiting_users_cache = [
-                            request for request in self._waiting_users_cache
-                            if request.get("session_id") != current_session_id
-                        ]
-                        self._snapshot_waiting_requests = [
-                            request for request in self._snapshot_waiting_requests
-                            if request.get("session_id") != current_session_id
-                        ]
-                        self._skip_auto_request_until_next_poll = True
-                        self.statusBar().showMessage("Write lock automatically granted.", 3000)
-                    else:
-                        self._transaction.on_grant_failed()
-                        # Do not spin a fixed retry loop. A failed attempt can
-                        # mean that another waiter is the FIFO head, the remote
-                        # state changed, or the request is awaiting replication.
-                        # Re-enter through the normal poll/sync path.
-                        logger.info("Waiting grant not completed; awaiting authoritative queue update")
-                        if self._sync_service is not None:
-                            QTimer.singleShot(500, self._sync_service.check_for_updates)
-                        QTimer.singleShot(750, self._update_waiting_status)
-                else:
-                    logger.warning("No request_id available, cannot auto-grant")
 
     def _update_write_actions(self, enabled: bool) -> None:
         """Enable/disable write actions in all workspaces."""
@@ -843,9 +661,6 @@ class MainWindow(QMainWindow):
         # owner. Clear the former-owner projection immediately instead of
         # leaving an old "Waiting: N" badge visible until another poll arrives.
         if success and not self._transaction.is_editing:
-            self._snapshot_waiting_requests = []
-            self._waiting_users_cache = []
-            self._waiting_snapshot_seen = False
             self._update_waiting_status()
 
         self._update_write_buttons()
@@ -929,7 +744,6 @@ class MainWindow(QMainWindow):
         self._collaboration_manager._event_bus.register(ModeChanged, self._on_mode_changed)
         self._collaboration_manager._event_bus.register(WriteGranted, self._on_write_granted)
         self._collaboration_manager._event_bus.register(WriteReleased, self._on_write_released)
-        self._collaboration_manager._event_bus.register(WriteRequested, self._on_write_requested)
 
         if self._sync_service is not None:
             self._sync_service._event_bus.register(SyncStatusChanged, self._on_sync_status_changed)
@@ -953,6 +767,7 @@ class MainWindow(QMainWindow):
             self._transaction.on_write_granted()
         self.statusBar().showMessage(f"Write access granted to {event.username}", 3000)
         self._update_write_buttons()
+        self._update_waiting_status()
 
     def _on_write_released(self, event) -> None:
         """Handle write released event."""
@@ -967,31 +782,11 @@ class MainWindow(QMainWindow):
             logger.info("WriteReleased: triggering check_for_updates")
             QTimer.singleShot(500, self._sync_service.check_for_updates)
 
-    def _on_write_requested(self, event) -> None:
-        """Handle write requested event."""
-        logger.info(f"WriteRequested received from {event.username} (session={event.session_id})")
-        # Add to cache if not already present
-        if not any(u.get("session_id") == event.session_id for u in self._waiting_users_cache):
-            self._waiting_users_cache.append({
-                "username": event.username,
-                "session_id": event.session_id,
-                "priority": getattr(event, 'priority', 0),
-                "request_id": getattr(event, 'request_id', ''),
-                "timestamp": getattr(event, 'timestamp', None),
-            })
-        if QThread.currentThread() != self.thread():
-            QTimer.singleShot(0, self._update_waiting_status)
-        else:
-            self._update_waiting_status()
-
     def _on_cancel_waiting(self) -> None:
         """Cancel waiting request."""
         if self._transaction.state == WriteTransactionState.WAITING:
             if self._transaction.cancel_editing():
                 self.statusBar().showMessage("Write request cancelled.")
-                self._waiting_users_cache = []
-                self._snapshot_waiting_requests = []
-                self._waiting_snapshot_seen = False
                 self._update_write_buttons()
             else:
                 self.statusBar().showMessage("Failed to cancel request.", 3000)
