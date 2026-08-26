@@ -20,11 +20,13 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 
 
 class ReportListWidget(QWidget):
+    report_changed = Signal()
     def __init__(self, report_service: ReportService, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._service = report_service
         self._student_id: Optional[int] = None
         self._reports: List[Report] = []
+        self._write_enabled = False
 
         self._setup_ui()
         self._show_empty()
@@ -127,6 +129,12 @@ class ReportListWidget(QWidget):
         open_btn.clicked.connect(lambda: self._open_report(report.id))
         layout.addWidget(open_btn)
 
+        delete_btn = QPushButton("🗑️ Xóa")
+        delete_btn.setFixedWidth(70)
+        delete_btn.setEnabled(self._write_enabled)
+        delete_btn.clicked.connect(lambda: self._delete_report(report.id))
+        layout.addWidget(delete_btn)
+
         return widget
 
     def _open_report(self, report_id: int):
@@ -144,6 +152,24 @@ class ReportListWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không thể mở file: {str(e)}")
 
+    def _delete_report(self, report_id: int):
+        if not self._write_enabled:
+            QMessageBox.warning(self, "Read mode", "Start Editing before deleting a report.")
+            return
+        if QMessageBox.question(
+            self, "Xác nhận xóa", "Xóa báo cáo này?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._service.delete_report(report_id)
+            self._load_reports()
+            self.report_changed.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi", f"Không thể xóa báo cáo: {e}")
+
     def set_write_enabled(self, enabled: bool) -> None:
         """Reports list is read-only; keep API consistent with workspace."""
         self._write_enabled = enabled
+        if self._student_id is not None:
+            self._update_list()

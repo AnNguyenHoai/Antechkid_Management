@@ -130,7 +130,7 @@ class StudentListPage(WorkspaceBase):
         toolbar_layout.addLayout(top_row)
 
         self.filter_bar = FilterBar([
-            {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived"]},
+            {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived", "Deleted"]},
             {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
             {"key": "assessment", "label": "Assessment", "type": "combo", "options": ["Has Assessment", "No Assessment"]},
         ])
@@ -198,8 +198,11 @@ class StudentListPage(WorkspaceBase):
 
     def refresh(self) -> None:
         self.loading.setVisible(True)
+        self._selected_ids = []
+        self._update_bulk_bar()
         try:
             self._students = self._student_service.list_students()
+            self._filtered_base = self._students[:]
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Failed to refresh student list")
@@ -228,14 +231,37 @@ class StudentListPage(WorkspaceBase):
         self._populate_table()
 
     def _filter_students(self, text: str) -> List[Student]:
+        """Search over the current lifecycle-filtered result set."""
+        base = getattr(self, "_filtered_base", self._students)
         if not text.strip():
-            return self._students[:]
-        try:
-            return self._student_service.search_students(text.strip())
-        except Exception:
-            lower = text.strip().lower()
-            return [s for s in self._students
-                    if lower in s.student_code.lower() or lower in s.full_name.lower()]
+            return base[:]
+
+        lower = text.strip().lower()
+        results = []
+        for student in base:
+            student_code = (student.student_code or "").lower()
+            full_name = (student.full_name or "").lower()
+            if lower in student_code or lower in full_name:
+                results.append(student)
+                continue
+
+            # Keep the search promise in the UI honest: parent name/phone are
+            # part of the supported quick search and failures for one student
+            # must not break the entire list.
+            try:
+                parents = self._parent_service.get_parents_by_student(student.id)
+            except Exception:
+                parents = []
+
+            for parent in parents or []:
+                parent_name = (getattr(parent, "full_name", None)
+                               or getattr(parent, "name", None)
+                               or "").lower()
+                parent_phone = (getattr(parent, "phone", None) or "").lower()
+                if lower in parent_name or lower in parent_phone:
+                    results.append(student)
+                    break
+        return results
 
     def _populate_table(self) -> None:
         data = []
@@ -249,6 +275,12 @@ class StudentListPage(WorkspaceBase):
                 "_id": s.id,
             })
         self.data_table.set_data(data, len(data))
+        if not data:
+            self.data_table.setToolTip(
+                "No students match the current search and filters. Clear filters or refresh the list."
+            )
+        else:
+            self.data_table.setToolTip("")
         self.data_updated.emit()
 
     def _on_search(self, text: str) -> None:
@@ -256,7 +288,7 @@ class StudentListPage(WorkspaceBase):
 
     def _on_filter_changed(self, filters: Dict[str, str]) -> None:
         from centermanager.dto.student_filter_dto import StudentFilter
-        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
+        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
         enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
         assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
 
@@ -266,7 +298,7 @@ class StudentListPage(WorkspaceBase):
             assessment_status=assessment_map.get(filters.get("assessment", ""), None),
         )
         try:
-            self._filtered = self._filter_service.filter_students(filter_dto)
+            self._filtered_base = self._filter_service.filter_students(filter_dto)
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Filter failed")
@@ -340,7 +372,9 @@ class StudentListPage(WorkspaceBase):
         view_action.triggered.connect(lambda: self.student_selected.emit(student.id))
         menu.addAction(view_action)
 
+        can_write = self.can_write()
         edit_action = QAction("Edit Student", self)
+        edit_action.setEnabled(can_write)
         edit_action.triggered.connect(lambda: self._edit_student(student.id))
         menu.addAction(edit_action)
 
@@ -348,15 +382,18 @@ class StudentListPage(WorkspaceBase):
 
         if student.status == "ARCHIVED":
             activate_action = QAction("Activate Student", self)
+            activate_action.setEnabled(can_write)
             activate_action.triggered.connect(lambda: self._activate_student(student.id))
             menu.addAction(activate_action)
         else:
             archive_action = QAction("Archive Student", self)
+            archive_action.setEnabled(can_write)
             archive_action.triggered.connect(lambda: self._archive_student(student.id))
             menu.addAction(archive_action)
 
         menu.addSeparator()
         delete_action = QAction("Delete Student", self)
+        delete_action.setEnabled(can_write)
         delete_action.triggered.connect(lambda: self._delete_student(student.id))
         menu.addAction(delete_action)
 
@@ -446,8 +483,8 @@ class StudentListPage(WorkspaceBase):
             filter_criteria = dialog.get_filter()
             if filter_criteria:
                 try:
-                    self._filtered = self._filter_service.filter_students(filter_criteria)
-                    self._populate_table()
+                    self._filtered_base = self._filter_service.filter_students(filter_criteria)
+                    self._apply_filters_and_sort()
                 except Exception as e:
                     QMessageBox.critical(self, "Filter Error", str(e))
 

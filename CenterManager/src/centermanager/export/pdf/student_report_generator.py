@@ -14,7 +14,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Image, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -233,6 +233,20 @@ class StudentReportGenerator:
         story.append(Paragraph("THÔNG TIN HỌC SINH", heading_style))
         student: Student = data["student"]
         parents: List[Parent] = data["parents"]
+
+        # Optional profile image. A missing/corrupt image must never prevent
+        # the latest report from being generated.
+        profile_image_path = getattr(student, "profile_image_path", None)
+        if profile_image_path:
+            image_path = Path(profile_image_path)
+            if not image_path.is_absolute():
+                image_path = get_paths().attachment_dir / image_path
+            if image_path.exists():
+                try:
+                    story.append(Image(str(image_path), width=3.0 * cm, height=3.0 * cm))
+                    story.append(Spacer(1, 0.25 * cm))
+                except Exception:
+                    logger.warning("Unable to embed student profile image: %s", image_path)
 
         primary_parent = next((p for p in parents if p.is_primary_contact), parents[0] if parents else None)
 

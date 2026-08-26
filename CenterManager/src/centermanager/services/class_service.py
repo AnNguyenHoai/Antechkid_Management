@@ -265,82 +265,60 @@ class ClassService:
     # ===== Enrollment =====
 
     def enroll_student(self, class_id: int, student_id: int) -> Enrollment:
-        with self._session_factory() as session:
-            # Check class exists and not archived
-            class_repo = ClassRepository(session)
-            class_obj = class_repo.get_by_id(class_id)
-            if class_obj is None or class_obj.deleted_at is not None:
-                raise ClassNotFoundError("Class not found or archived.")
+        """Compatibility facade. EnrollmentService owns the canonical lifecycle."""
+        from centermanager.services.enrollment_service import (
+            EnrollmentService, EnrollmentAlreadyActiveError, EnrollmentCapacityError
+        )
+        try:
+            enrollment = EnrollmentService(self._session_factory).enroll(student_id, class_id)
+        except EnrollmentAlreadyActiveError as exc:
+            raise StudentAlreadyEnrolledError(str(exc)) from exc
+        except EnrollmentCapacityError as exc:
+            raise ClassFullError(str(exc)) from exc
 
-            # Check student exists
-            from centermanager.repositories.student_repository import StudentRepository
-            student_repo = StudentRepository(session)
-            student = student_repo.get_by_id(student_id)
-            if student is None or student.deleted_at is not None:
-                raise StudentValidationError("Student not found or inactive.")
-
-            # Check capacity
-            if class_obj.capacity is not None and class_obj.student_count >= class_obj.capacity:
-                raise ClassFullError(f"Class capacity ({class_obj.capacity}) reached.")
-
-            # Check if already enrolled
-            enroll_repo = EnrollmentRepository(session)
-            if enroll_repo.exists(student_id, class_id):
-                raise StudentAlreadyEnrolledError("Student already enrolled in this class.")
-
-            enrollment = Enrollment(
-                student_id=student_id,
+        if self._timeline_service:
+            with self._session_factory() as session:
+                student = __import__(
+                    "centermanager.repositories.student_repository",
+                    fromlist=["StudentRepository"]
+                ).StudentRepository(session).get_by_id(student_id)
+            self._timeline_service.log_event(
                 class_id=class_id,
-                class_name=class_obj.name,
-                course_name=class_obj.course,
+                event_type=ClassTimelineEventType.STUDENT_ENROLLED,
+                title="Student Enrolled",
+                description=f"{student.full_name if student else 'Student'} enrolled in class.",
+                metadata={"student_id": student_id},
             )
-            enroll_repo.add(enrollment)
-            session.commit()
-            session.refresh(enrollment)
-
-            if self._timeline_service:
-                self._timeline_service.log_event(
-                    class_id=class_id,
-                    event_type=ClassTimelineEventType.STUDENT_ENROLLED,
-                    title="Student Enrolled",
-                    description=f"{student.full_name} ({student.student_code}) enrolled in {class_obj.name}.",
-                    metadata={"student_id": student_id, "student_name": student.full_name},
-                )
-            return enrollment
+        return enrollment
 
     def remove_student(self, class_id: int, student_id: int) -> None:
+        """Compatibility facade: remove now preserves history as WITHDRAWN."""
+        from centermanager.services.enrollment_service import EnrollmentService, EnrollmentNotFoundError
+        service = EnrollmentService(self._session_factory)
         with self._session_factory() as session:
-            enroll_repo = EnrollmentRepository(session)
-            enrollment = session.query(Enrollment).filter(
-                Enrollment.class_id == class_id,
-                Enrollment.student_id == student_id
-            ).first()
+            enrollment = EnrollmentRepository(session).get_active(student_id, class_id)
             if enrollment is None:
-                raise ClassNotFoundError("Enrollment not found.")
+                raise ClassNotFoundError("Active enrollment not found.")
+            enrollment_id = enrollment.id
+        try:
+            service.withdraw(enrollment_id)
+        except EnrollmentNotFoundError as exc:
+            raise ClassNotFoundError("Enrollment not found.") from exc
 
-            # Get student name for timeline
-            from centermanager.repositories.student_repository import StudentRepository
-            student_repo = StudentRepository(session)
-            student = student_repo.get_by_id(student_id)
-
-            enroll_repo.delete(enrollment)
-            session.commit()
-
-            if self._timeline_service:
-                student_name = student.full_name if student else "Student"
-                self._timeline_service.log_event(
-                    class_id=class_id,
-                    event_type=ClassTimelineEventType.STUDENT_REMOVED,
-                    title="Student Removed",
-                    description=f"{student_name} removed from class.",
-                    metadata={"student_id": student_id},
-                )
+        if self._timeline_service:
+            self._timeline_service.log_event(
+                class_id=class_id,
+                event_type=ClassTimelineEventType.STUDENT_REMOVED,
+                title="Student Removed",
+                description="Student withdrawn from class.",
+                metadata={"student_id": student_id},
+            )
 
     def get_enrolled_students(self, class_id: int) -> List[Student]:
         with self._session_factory() as session:
             enroll_repo = EnrollmentRepository(session)
             enrollments = enroll_repo.get_by_class_with_student(class_id)
-            return [e.student for e in enrollments if e.student]
+            return [e.student for e in enrollments if e.student and e.status == "ACTIVE"]
 
     # ===== Teacher Assignment (using existing TeacherAssignmentService) =====
 

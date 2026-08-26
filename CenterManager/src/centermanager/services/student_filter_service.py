@@ -26,11 +26,12 @@ class StudentFilterService:
         with self._session_factory() as session:
             q = session.query(Student).filter(Student.deleted_at.is_(None))
 
-            # Status filter (for archived)
+            # Archive is a lifecycle status. Soft-deleted students are already
+            # excluded by the base query above.
             if filter_criteria.status == "ARCHIVED":
-                q = q.filter(Student.deleted_at.isnot(None))
+                q = q.filter(Student.status == "ARCHIVED")
             elif filter_criteria.status == "ACTIVE":
-                q = q.filter(Student.deleted_at.is_(None))
+                q = q.filter(Student.status == "ACTIVE")
 
             # Enrollment status
             if filter_criteria.enrollment_status == "enrolled":

@@ -45,3 +45,14 @@ class StudentUpdated(Event):
     student_name: str
     changes: List[str]
     timestamp: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class StudentEnrollmentChanged(Event):
+    """Event emitted after an enrollment lifecycle mutation is committed."""
+    student_id: int
+    enrollment_id: int
+    class_id: int
+    action: str
+    previous_status: Optional[str]
+    current_status: str
+    timestamp: datetime = field(default_factory=datetime.now)

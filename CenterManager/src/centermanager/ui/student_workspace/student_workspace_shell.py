@@ -54,6 +54,7 @@ class StudentWorkspaceShell(WorkspaceBase):
         import_service,
         income_service,
         class_service,
+        enrollment_service,
         permission_service,
         outstanding_service,
         attendance_service,
@@ -81,6 +82,7 @@ class StudentWorkspaceShell(WorkspaceBase):
         self._import_service = import_service
         self._income_service = income_service
         self._class_service = class_service
+        self._enrollment_service = enrollment_service
         self._permission_service = permission_service
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
@@ -181,6 +183,7 @@ class StudentWorkspaceShell(WorkspaceBase):
             document_service=self._document_service,
             income_service=self._income_service,
             class_service=self._class_service,
+            enrollment_service=self._enrollment_service,
             permission_service=self._permission_service,
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,

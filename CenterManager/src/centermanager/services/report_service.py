@@ -72,21 +72,29 @@ class ReportService:
         if output_path is None:
             reports_root = get_paths().runtime_root / "Reports" / "Student" / student.student_code
             reports_root.mkdir(parents=True, exist_ok=True)
-            event_part = trigger_event or report_type.capitalize()
-            date_str = datetime.now().strftime("%Y%m%d_%H%M")
-            filename = f"BaoCao_{event_part}_{date_str}.pdf"
-            output_path = reports_root / filename
+            # One student owns one materialized latest profile report.
+            output_path = reports_root / "StudentProfile.pdf"
 
-        # Generate PDF
-        file_path = self._generator.generate(student_id, output_path)
+        # Generate to a temporary file first, then atomically replace the
+        # current report so a failed generation never destroys the last good PDF.
+        temp_path = output_path.with_suffix(".tmp.pdf")
+        try:
+            file_path = self._generator.generate(student_id, temp_path)
+            file_path.replace(output_path)
+            file_path = output_path
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
-        # Save metadata
+        # Save metadata (replace existing singleton record)
         with self._session_factory() as session:
             repo = ReportRepository(session)
             metadata = {
                 "center_name": "AN TECHKIDS",
                 "academic_year": "2026-2027",
             }
+            for existing in repo.get_by_student(student_id):
+                repo.delete(existing)
             report = Report(
                 student_id=student_id,
                 file_path=str(file_path.relative_to(get_paths().runtime_root)),

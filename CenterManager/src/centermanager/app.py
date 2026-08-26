@@ -75,6 +75,7 @@ from centermanager.platform.notification import NotificationService
 from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
 from centermanager.platform.version import VersionManager
 from centermanager.services.write_transaction import WriteTransactionManager
+from centermanager.services.enrollment_service import EnrollmentService
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +333,7 @@ def main() -> int:
 
         class_timeline_service = ClassTimelineService(session_factory)
         class_service = ClassService(session_factory, timeline_service=class_timeline_service)
+        enrollment_service = EnrollmentService(session_factory, event_bus=event_bus)
 
         expense_timeline_service = ExpenseTimelineService(session_factory)
         expense_service = ExpenseService(
@@ -425,6 +427,7 @@ def main() -> int:
             teacher_document_service=teacher_document_service,
             teacher_timeline_service=teacher_timeline_service,
             class_service=class_service,
+            enrollment_service=enrollment_service,
             class_timeline_service=class_timeline_service,
             teacher_assignment_service_for_class=teacher_assignment_service_for_class,
             permission_service=permission_service,

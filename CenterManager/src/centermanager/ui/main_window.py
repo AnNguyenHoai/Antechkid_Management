@@ -40,7 +40,7 @@ from centermanager.platform.sync.events import (
 
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 from centermanager.events.event_bus import EventBus
-from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated, StudentEnrollmentChanged
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         teacher_document_service,
         teacher_timeline_service,
         class_service,
+        enrollment_service,
         class_timeline_service,
         teacher_assignment_service_for_class,
         permission_service: PermissionService,
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self._teacher_document_service = teacher_document_service
         self._teacher_timeline_service = teacher_timeline_service
         self._class_service = class_service
+        self._enrollment_service = enrollment_service
         self._class_timeline_service = class_timeline_service
         self._teacher_assignment_service_for_class = teacher_assignment_service_for_class
         self._permission_service = permission_service
@@ -133,6 +135,7 @@ class MainWindow(QMainWindow):
         self._notification_service = notification_service
         self._git_config_service = git_config_service
         self._event_bus = event_bus
+
         self._poller = poller  # <-- LƯU POLLER
 
         # Write Transaction Manager
@@ -210,6 +213,7 @@ class MainWindow(QMainWindow):
             import_service=self._import_service,
             income_service=self._income_service,
             class_service=self._class_service,
+            enrollment_service=self._enrollment_service,
             permission_service=self._permission_service,
             outstanding_service=self._outstanding_service,
             attendance_service=self._attendance_service,
@@ -627,6 +631,29 @@ class MainWindow(QMainWindow):
             return True
 
         def on_publish_success():
+            # Capture the aggregate ids before the transaction lifecycle clears
+            # its dirty set. The callback is intentionally invoked while the
+            # transaction is still PUBLISHED; report generation is a post-publish
+            # artifact and must never run for a failed publication.
+            dirty_student_ids = list(self._transaction.dirty_student_ids)
+            logger.info(
+                "Post-publish Student Workspace artifact generation started: %d dirty student(s)",
+                len(dirty_student_ids),
+            )
+            for student_id in dirty_student_ids:
+                try:
+                    self._report_service.generate_student_report(
+                        student_id,
+                        report_type="latest",
+                        trigger_event="student_updated",
+                        generated_by="system",
+                    )
+                    logger.info(
+                        "Latest student report generated after publish: student_id=%s",
+                        student_id,
+                    )
+                except Exception:
+                    logger.exception("Latest student report generation failed for %s", student_id)
             self.statusBar().showMessage("✅ Changes published successfully!", 3000)
             logger.info("Publish success - updating UI")
             self._update_write_buttons()
@@ -703,6 +730,7 @@ class MainWindow(QMainWindow):
             self._event_bus.register(StudentArchived, self._on_student_archived_event)
             self._event_bus.register(StudentActivated, self._on_student_activated_event)
             self._event_bus.register(StudentUpdated, self._on_student_updated_event)
+            self._event_bus.register(StudentEnrollmentChanged, self._on_student_enrollment_changed_event)
             self._event_bus.register(StudentDeleted, self._on_student_deleted_event)
             # Parent events
             from centermanager.services.parent_service import ParentAdded, ParentUpdated, ParentDeleted
@@ -712,25 +740,49 @@ class MainWindow(QMainWindow):
             logger.info("MainWindow registered Student and Parent events")
 
     def _on_parent_event(self, event) -> None:
-        """Handle parent events to mark dirty."""
+        """Track parent changes as changes to the owning Student aggregate."""
         if self._transaction.is_editing:
-            self._transaction.mark_dirty()
-            logger.info(f"Transaction marked dirty: parent event {event.__class__.__name__}")
-            
+            student_id = getattr(event, "student_id", None)
+            if student_id is not None:
+                self._transaction.mark_student_dirty(student_id)
+                logger.info(
+                    "Transaction marked dirty: student aggregate parent event %s (student_id=%s)",
+                    event.__class__.__name__, student_id,
+                )
+            else:
+                self._transaction.mark_dirty()
+                logger.warning(
+                    "Parent event %s has no student_id; only transaction marked dirty",
+                    event.__class__.__name__,
+                )
+
     def _on_student_archived_event(self, event: StudentArchived) -> None:
         if self._transaction.is_editing:
-            self._transaction.mark_dirty()
+            self._transaction.mark_student_dirty(event.student_id)
             logger.info(f"Transaction marked dirty: student archive (id={event.student_id}, code={event.student_code})")
 
     def _on_student_activated_event(self, event: StudentActivated) -> None:
         if self._transaction.is_editing:
-            self._transaction.mark_dirty()
+            self._transaction.mark_student_dirty(event.student_id)
             logger.info(f"Transaction marked dirty: student activate (id={event.student_id}, code={event.student_code})")
 
     def _on_student_updated_event(self, event: StudentUpdated) -> None:
         if self._transaction.is_editing:
-            self._transaction.mark_dirty()
-            logger.info(f"Transaction marked dirty: student update (id={event.student_id}, code={event.student_code})")
+            self._transaction.mark_student_dirty(event.student_id)
+            logger.info(
+                "Transaction marked dirty: student update "
+                f"(id={event.student_id}, code={event.student_code})"
+            )
+
+    def _on_student_enrollment_changed_event(self, event: StudentEnrollmentChanged) -> None:
+        """Enrollment changes are part of the Student aggregate publish contract."""
+        if self._transaction.is_editing:
+            self._transaction.mark_student_dirty(event.student_id)
+            logger.info(
+                "Transaction marked dirty: enrollment %s "
+                "(student_id=%s, enrollment_id=%s, class_id=%s)",
+                event.action, event.student_id, event.enrollment_id, event.class_id,
+            )
 
     def _on_student_deleted_event(self, event: StudentDeleted) -> None:
         if self._transaction.is_editing:

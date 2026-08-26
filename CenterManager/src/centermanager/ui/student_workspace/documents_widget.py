@@ -98,7 +98,9 @@ class DocumentsWidget(QWidget):
         super().__init__(parent)
         self._service = doc_service
         self._student_id: Optional[int] = None
+        self._student_code: Optional[str] = None
         self._documents: List[Document] = []
+        self._write_enabled = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -124,8 +126,10 @@ class DocumentsWidget(QWidget):
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 
-    def set_student(self, student_id: int) -> None:
+    def set_student(self, student_id: int, student_code: Optional[str] = None) -> None:
         self._student_id = student_id
+        if student_code is not None:
+            self._student_code = student_code
         self._load_documents()
 
     def _load_documents(self) -> None:
@@ -133,8 +137,9 @@ class DocumentsWidget(QWidget):
             return
         try:
             self._documents = self._service.get_documents_for_student(self._student_id)
-        except Exception:
+        except Exception as e:
             self._documents = []
+            QMessageBox.warning(self, "Documents", f"Could not load documents: {e}")
         self._update_ui()
 
     def _update_ui(self) -> None:
@@ -168,16 +173,11 @@ class DocumentsWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc_type, description = dialog.get_data()
             try:
-                from centermanager.services.student_service import StudentService
-                from centermanager.database.engine import create_production_engine
-                from sqlalchemy.orm import sessionmaker
-                engine = create_production_engine()
-                session_factory = sessionmaker(bind=engine)
-                student_service = StudentService(session_factory)
-                student = student_service.get_student(self._student_id)
+                if not self._student_code:
+                    raise ValueError("Student identity is not loaded.")
                 self._service.upload_document(
                     student_id=self._student_id,
-                    student_code=student.student_code,
+                    student_code=self._student_code,
                     source_path=Path(file_path),
                     file_name=Path(file_path).name,
                     document_type=doc_type,
@@ -204,7 +204,10 @@ class DocumentsWidget(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def set_write_enabled(self, enabled: bool) -> None:
+        self._write_enabled = enabled
         self.upload_btn.setEnabled(enabled)
+        for card in self.container.findChildren(DocumentCard):
+            card.delete_btn.setEnabled(enabled)
 
 
 class UploadDocumentDialog(QDialog):

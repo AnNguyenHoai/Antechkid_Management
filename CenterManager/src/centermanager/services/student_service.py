@@ -23,7 +23,7 @@ from centermanager.services.exceptions import (
     StudentNotDeletedError,
 )
 from centermanager.services.timeline_service import TimelineService
-from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated
 from centermanager.events.event_bus import EventBus
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -254,6 +254,14 @@ class StudentService:
                         old_path.unlink()
                     student.profile_image_path = None
             session.commit()
+            if self._event_bus:
+                self._event_bus.publish(StudentUpdated(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    changes=["profile_image_path"],
+                ))
+                logger.info("StudentUpdated event published for profile image change: %s", student.id)
 
     def update_student(
         self,

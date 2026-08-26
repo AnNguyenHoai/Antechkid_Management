@@ -52,6 +52,7 @@ class WriteTransactionManager:
         self._sync_service = None
         self._version_manager = None
         self._has_changes = False
+        self._dirty_student_ids: set[int] = set()
         self._pending_version: Optional[int] = None
         self._snapshot_path: Optional[Path] = None
         self._waiting_position: int = 0
@@ -105,6 +106,14 @@ class WriteTransactionManager:
     def mark_dirty(self) -> None:
         self._has_changes = True
 
+    def mark_student_dirty(self, student_id: int) -> None:
+        self._has_changes = True
+        self._dirty_student_ids.add(student_id)
+
+    @property
+    def dirty_student_ids(self) -> set[int]:
+        return set(self._dirty_student_ids)
+
     _ALLOWED_TRANSITIONS = {
         WriteTransactionState.IDLE: {WriteTransactionState.ACQUIRING},
         WriteTransactionState.ACQUIRING: {WriteTransactionState.EDITING, WriteTransactionState.WAITING, WriteTransactionState.IDLE},
@@ -137,6 +146,7 @@ class WriteTransactionManager:
         self._on_publish_success = None
         self._on_publish_failure = None
         self._has_changes = False
+        self._dirty_student_ids.clear()
         self._pending_version = None
         self._snapshot_path = None
         self._waiting_position = 0
@@ -165,6 +175,20 @@ class WriteTransactionManager:
                 logger.info(f"Snapshot created at {snapshot_path}")
         except Exception as e:
             logger.exception("Failed to create snapshot")
+
+    def _delete_snapshot(self) -> None:
+        """Delete the transaction snapshot only after it is no longer needed."""
+        snapshot_path = self._snapshot_path
+        if snapshot_path is None:
+            return
+        try:
+            if snapshot_path.exists():
+                snapshot_path.unlink()
+                logger.info("Snapshot deleted: %s", snapshot_path)
+            self._snapshot_path = None
+        except Exception:
+            # Do not fail a successfully published transaction because cleanup failed.
+            logger.exception("Failed to delete snapshot: %s", snapshot_path)
 
     def _restore_snapshot(self) -> bool:
         if self._snapshot_path and self._snapshot_path.exists():
@@ -322,6 +346,8 @@ class WriteTransactionManager:
 
         if self._collab_manager.is_writing():
             self._collab_manager.release_write()
+        # Cancelled transactions are terminal: restored/no-longer-needed snapshots can be removed.
+        self._delete_snapshot()
         self._reset_to_idle()
         logger.info("Transaction: IDLE (cancelled)")
         return True
@@ -419,6 +445,7 @@ class WriteTransactionManager:
                 self._finishing_started_at = None
                 self._publish_intent = False
                 self._release_lock()
+                self._delete_snapshot()
                 self._reset_to_idle()
                 return True
             else:
