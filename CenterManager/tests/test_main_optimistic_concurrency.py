@@ -253,10 +253,8 @@ def test_push_rejected_after_validation(collab_manager):
                         on_publish_failure=lambda e: None
                     )
             assert success is False
-            assert tx.state == WriteTransactionState.OFFLINE_PENDING_PUBLISH
-            # A push rejection is retained as a pending publication so the
-            # already-prepared local commit can be retried without creating
-            # another MAIN commit. No pull is allowed here.
+            assert tx.state == WriteTransactionState.FAILED
+            # Không gọi pull (vì chỉ publish_only)
             mock_provider.pull.assert_not_called()
 
 
@@ -285,7 +283,6 @@ def test_base_main_commit_none_blocks_publish(collab_manager):
 
 def test_refresh_finishing_authority_main_failure(collab_manager):
     from datetime import datetime
-    from datetime import datetime, timedelta
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
@@ -303,17 +300,15 @@ def test_refresh_finishing_authority_main_failure(collab_manager):
             "owner": cm._session.username,
             "username": cm._session.username,
             "last_heartbeat": datetime.now().isoformat(),
-            "lease_expires_at": (datetime.now() + timedelta(seconds=60)).isoformat(),
             "lock_generation": current_gen,
         }
         mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
 
         with patch.object(cm, '_sync_local_lock', return_value=None):
             result = tx.refresh_finishing_authority()
-            # Should be CONFLICT due to MAIN verification failure
             assert result["success"] is False
             assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
-            assert "main verification" in result["reason"].lower() or "unavailable" in result["reason"].lower()
+            assert "main verification" in result["reason"].lower()
 
 def test_refresh_finishing_authority_main_unavailable_keeps_blocked(collab_manager):
     from centermanager.services.write_transaction import WriteTransactionState

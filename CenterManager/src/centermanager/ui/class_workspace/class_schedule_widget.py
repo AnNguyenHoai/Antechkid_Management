@@ -5,7 +5,9 @@ ClassScheduleWidget - display weekly schedule with assessment view.
 import logging
 from typing import Optional, List
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
@@ -19,6 +21,7 @@ from centermanager.services.student_highlight_service import StudentHighlightSer
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.attendance_service import AttendanceService
+from centermanager.services.session_report_service import SessionReportService
 from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
@@ -39,6 +42,7 @@ class ClassScheduleWidget(QWidget):
         attendance_service: AttendanceService,
         collaboration_manager: CollaborationManager,
         notification_service: NotificationService,
+        session_report_service: Optional[SessionReportService] = None,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -50,6 +54,9 @@ class ClassScheduleWidget(QWidget):
         self._attendance_service = attendance_service
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
+        self._session_report_service = session_report_service or SessionReportService(
+            session_service, note_service, attendance_service, class_service
+        )
 
         self._class_id: Optional[int] = None
         self._sessions: List[Session] = []
@@ -133,11 +140,23 @@ class ClassScheduleWidget(QWidget):
                 status_text = "⭐ Highlights only"
             self.table.setItem(row, 4, QTableWidgetItem(status_text))
 
-            # Actions: View button
+            # Actions: View + manual parent-group PDF export.
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(2, 0, 2, 0)
+            action_layout.setSpacing(4)
+
             view_btn = QPushButton("View")
             view_btn.setFixedWidth(60)
-            view_btn.clicked.connect(lambda checked, sid=sess.id: self._open_session_detail(sid))
-            self.table.setCellWidget(row, 5, view_btn)
+            view_btn.clicked.connect(lambda checked=False, sid=sess.id: self._open_session_detail(sid))
+            action_layout.addWidget(view_btn)
+
+            export_btn = QPushButton("Export PDF")
+            export_btn.setFixedWidth(95)
+            export_btn.clicked.connect(lambda checked=False, sid=sess.id: self._export_session_pdf(sid))
+            action_layout.addWidget(export_btn)
+
+            self.table.setCellWidget(row, 5, action_widget)
 
         self.table.setVisible(True)
 
@@ -150,6 +169,48 @@ class ClassScheduleWidget(QWidget):
         self.table.setItem(0, 4, QTableWidgetItem(""))
         self.table.setCellWidget(0, 5, None)
         self.table.setVisible(True)
+
+    def _export_session_pdf(self, session_id: int) -> None:
+        """Manual export is read-only and is therefore available outside WRITE mode."""
+        try:
+            output_path = self._session_report_service.generate_session_report(session_id)
+            self._notification_service.notify(
+                "Session PDF generated successfully.",
+                "success",
+            )
+            self._show_export_success_dialog(output_path)
+            logger.info("Manual session PDF export completed: session_id=%s path=%s", session_id, output_path)
+        except Exception as e:
+            logger.exception("Could not export session PDF for session %s", session_id)
+            QMessageBox.critical(self, "Export PDF Error", f"Could not generate session PDF: {str(e)}")
+
+    def _show_export_success_dialog(self, output_path) -> None:
+        """Let the user immediately open the exact folder containing latest.pdf."""
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setWindowTitle("Export PDF Complete")
+        message.setText("Session PDF generated successfully.")
+        message.setInformativeText(
+            f"File: {output_path.name}\nLocation: {output_path.parent}"
+        )
+
+        open_folder_button = message.addButton(
+            "Open Save Location",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        message.addButton(QMessageBox.StandardButton.Close)
+        message.exec()
+
+        if message.clickedButton() is open_folder_button:
+            opened = QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(output_path.parent))
+            )
+            if not opened:
+                QMessageBox.warning(
+                    self,
+                    "Open Save Location",
+                    f"Could not open the folder automatically:\n{output_path.parent}",
+                )
 
     def _open_session_detail(self, session_id: int) -> None:
         logger.info(f"Opening session detail for session {session_id}")

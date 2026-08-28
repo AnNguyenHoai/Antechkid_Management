@@ -12,6 +12,8 @@ from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
 from centermanager.repositories.teacher_repository import TeacherRepository
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
+from centermanager.events.event_bus import EventBus
+from centermanager.events.teacher_events import TeacherCreated, TeacherUpdated, TeacherArchived, TeacherRestored
 
 
 UNSET = object()
@@ -41,10 +43,12 @@ class TeacherService:
     def __init__(
         self,
         session_factory: sessionmaker,
-        timeline_service: Optional[TeacherTimelineService] = None
+        timeline_service: Optional[TeacherTimelineService] = None,
+        event_bus: Optional[EventBus] = None
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._event_bus = event_bus
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -59,6 +63,13 @@ class TeacherService:
         normalized = self._normalize_text(full_name)
         if not normalized:
             raise TeacherValidationError("Full name is required and cannot be blank.")
+        return normalized
+
+    def _validate_status(self, status: Optional[str]) -> str:
+        normalized = (self._normalize_text(status) or Teacher.STATUS_ACTIVE).upper()
+        if normalized not in Teacher.VALID_STATUSES:
+            allowed = ", ".join(sorted(Teacher.VALID_STATUSES))
+            raise TeacherValidationError(f"Invalid teacher status '{normalized}'. Allowed values: {allowed}.")
         return normalized
 
     def _validate_email(self, email: Optional[str]) -> Optional[str]:
@@ -93,6 +104,7 @@ class TeacherService:
         norm_phone = self._normalize_text(phone)
         norm_email = self._validate_email(email)
         norm_address = self._normalize_text(address)
+        norm_status = self._validate_status(status)
 
         with self._session_factory() as session:
             teacher_code = self._generate_teacher_code(session)
@@ -105,7 +117,7 @@ class TeacherService:
                 email=norm_email,
                 address=norm_address,
                 join_date=join_date or date.today(),
-                status=status,
+                status=norm_status,
             )
             repo = TeacherRepository(session)
             repo.add(teacher)
@@ -120,6 +132,12 @@ class TeacherService:
                     description=f"{teacher.full_name} ({teacher.teacher_code}) was added.",
                     metadata={"teacher_code": teacher.teacher_code},
                 )
+            if self._event_bus:
+                self._event_bus.publish(TeacherCreated(
+                    teacher_id=teacher.id,
+                    teacher_code=teacher.teacher_code,
+                    teacher_name=teacher.full_name,
+                ))
             return teacher
 
     def get_teacher(self, teacher_id: int) -> Teacher:
@@ -148,6 +166,17 @@ class TeacherService:
             repo = TeacherRepository(session)
             return repo.search_teachers(query)
 
+    def list_archived_teachers(self) -> List[Teacher]:
+        with self._session_factory() as session:
+            return TeacherRepository(session).list_archived()
+
+    def get_archived_teacher(self, teacher_id: int) -> Teacher:
+        with self._session_factory() as session:
+            teacher = TeacherRepository(session).get_by_id(teacher_id)
+            if teacher is None or teacher.deleted_at is None:
+                raise TeacherNotFoundError(f"Archived teacher {teacher_id} not found.")
+            return teacher
+
     def update_teacher(
         self,
         teacher_id: int,
@@ -165,6 +194,10 @@ class TeacherService:
             teacher = repo.get_by_id(teacher_id)
             if teacher is None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
+            if teacher.deleted_at is not None:
+                raise TeacherAlreadyDeletedError(
+                    f"Teacher {teacher_id} is archived and must be restored before editing."
+                )
 
             changes = []
 
@@ -218,7 +251,7 @@ class TeacherService:
                 teacher.join_date = join_date
 
             if status is not UNSET:
-                new_val = self._normalize_text(status) or "ACTIVE"
+                new_val = self._validate_status(status)
                 old_val = teacher.status
                 if old_val != new_val:
                     changes.append(f"status: '{old_val}' -> '{new_val}'")
@@ -238,6 +271,13 @@ class TeacherService:
                     description="Updated: " + "; ".join(changes),
                     metadata={"changes": changes},
                 )
+            if self._event_bus:
+                self._event_bus.publish(TeacherUpdated(
+                    teacher_id=teacher.id,
+                    teacher_code=teacher.teacher_code,
+                    teacher_name=teacher.full_name,
+                    changes=list(changes),
+                ))
             return teacher
 
     def delete_teacher(self, teacher_id: int) -> None:
@@ -258,6 +298,12 @@ class TeacherService:
                     title="Teacher Archived",
                     description=f"{teacher.full_name} was archived.",
                 )
+            if self._event_bus:
+                self._event_bus.publish(TeacherArchived(
+                    teacher_id=teacher.id,
+                    teacher_code=teacher.teacher_code,
+                    teacher_name=teacher.full_name,
+                ))
 
     def restore_teacher(self, teacher_id: int) -> None:
         with self._session_factory() as session:
@@ -277,6 +323,12 @@ class TeacherService:
                     title="Teacher Restored",
                     description=f"{teacher.full_name} was restored.",
                 )
+            if self._event_bus:
+                self._event_bus.publish(TeacherRestored(
+                    teacher_id=teacher.id,
+                    teacher_code=teacher.teacher_code,
+                    teacher_name=teacher.full_name,
+                ))
 
     def get_teacher_with_details(self, teacher_id: int) -> Teacher:
         with self._session_factory() as session:

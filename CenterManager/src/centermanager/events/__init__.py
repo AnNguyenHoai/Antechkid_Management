@@ -16,6 +16,14 @@ from .collaboration_events import (
     RetryFinished,
 )
 from .highlight_events import StudentHighlightCreated
+from .teacher_events import (
+    TeacherCreated,
+    TeacherUpdated,
+    TeacherArchived,
+    TeacherRestored,
+    TeacherAssignmentChanged,
+    TeacherDocumentChanged,
+)
 from .student_events import (
     StudentArchived,
     StudentActivated,
@@ -47,4 +55,17 @@ __all__ = [
     "StudentActivated",
     "StudentDeleted",
     "StudentUpdated",
+    "TeacherCreated",
+    "TeacherUpdated",
+    "TeacherArchived",
+    "TeacherRestored",
+    "TeacherAssignmentChanged",
+    "TeacherDocumentChanged",
 ]
+from .class_events import (
+    ClassCreated,
+    ClassUpdated,
+    ClassArchived,
+    ClassRestored,
+    ClassSessionChanged,
+)

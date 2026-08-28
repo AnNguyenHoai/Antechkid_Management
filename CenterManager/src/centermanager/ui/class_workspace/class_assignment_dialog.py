@@ -4,28 +4,34 @@ ClassAssignmentDialog - assign teacher to class.
 """
 from typing import Optional, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMessageBox
 )
 
 from centermanager.services.class_service import ClassService
-from centermanager.repositories.teacher_repository import TeacherRepository
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
+from centermanager.core.current_user import get_current_user
+from centermanager.models.role import RoleDefinitions
 
 
 class ClassAssignmentDialog(QDialog):
+    assignment_changed = Signal(int)
     def __init__(
         self,
         class_service: ClassService,
         class_id: int,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._class_id = class_id
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._all_teachers: List = []
         self._assigned_ids: List[int] = []
 
@@ -35,6 +41,7 @@ class ClassAssignmentDialog(QDialog):
 
         self._setup_ui()
         self._load_data()
+        self._update_write_state()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -73,18 +80,32 @@ class ClassAssignmentDialog(QDialog):
         done_btn.clicked.connect(self.accept)
         layout.addWidget(done_btn)
 
+    def _can_manage_assignments(self) -> bool:
+        user = get_current_user()
+        role_name = getattr(getattr(user, "role", None), "name", None) if user else None
+        return role_name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER}
+
+    def _ensure_assignment_write(self, action: str) -> bool:
+        if not self._can_manage_assignments():
+            self._notification_service.notify(
+                "Only Admin or Manager accounts can manage teacher class assignments.",
+                "warning",
+            )
+            return False
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(f"You must be in WRITE mode to {action}.", "warning")
+            return False
+        return True
+
+    def _update_write_state(self) -> None:
+        enabled = self._can_manage_assignments() and self._collaboration_manager.ensure_write()
+        self.assign_btn.setEnabled(enabled)
+        self.unassign_btn.setEnabled(enabled)
+
     def _load_data(self) -> None:
-        engine = create_production_engine()
-        session_factory = sessionmaker(bind=engine)
-
-        with session_factory() as session:
-            repo = TeacherRepository(session)
-            self._all_teachers = repo.list_active()
-
-        # Get currently assigned teachers
+        self._all_teachers = self._class_service.list_active_teachers()
         class_obj = self._class_service.get_class_with_details(self._class_id)
         self._assigned_ids = [t.id for t in class_obj.teachers]
-
         self._update_lists()
 
     def _update_lists(self) -> None:
@@ -104,6 +125,8 @@ class ClassAssignmentDialog(QDialog):
                 self.available_list.addItem(item)
 
     def _assign_selected(self) -> None:
+        if not self._ensure_assignment_write("assign a teacher"):
+            return
         items = self.available_list.selectedItems()
         if not items:
             QMessageBox.warning(self, "Warning", "Please select a teacher.")
@@ -115,10 +138,13 @@ class ClassAssignmentDialog(QDialog):
             self._class_service.assign_teacher(self._class_id, teacher_id)
             self._assigned_ids.append(teacher_id)
             self._update_lists()
+            self.assignment_changed.emit(self._class_id)
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
     def _unassign_selected(self) -> None:
+        if not self._ensure_assignment_write("remove a teacher"):
+            return
         items = self.assigned_list.selectedItems()
         if not items:
             QMessageBox.warning(self, "Warning", "Please select a teacher.")
@@ -130,5 +156,6 @@ class ClassAssignmentDialog(QDialog):
             self._class_service.remove_teacher(self._class_id, teacher_id)
             self._assigned_ids.remove(teacher_id)
             self._update_lists()
+            self.assignment_changed.emit(self._class_id)
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))

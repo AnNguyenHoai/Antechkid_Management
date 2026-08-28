@@ -15,10 +15,18 @@ def test_document_write_mode_covers_upload_and_existing_delete_controls():
 def test_detail_passes_student_code_to_documents():
     assert "self.documents_widget.set_student(student.id, student.student_code)" in DETAIL
 
-def test_report_generation_requires_write_mode():
+def test_report_generation_is_read_only_and_does_not_require_write_mode():
     start = DETAIL.index("def _export_pdf")
-    body = DETAIL[start:start+700]
-    assert "ensure_write()" in body
+    end = DETAIL.index("def _on_open_finance", start)
+    body = DETAIL[start:end]
+
+    # Generating a PDF is a read-only artifact operation. It must remain
+    # available without WRITE ownership and must not mutate the Student
+    # aggregate itself.
+    assert "ensure_write()" not in body
+    assert "_write_guard.require_write()" not in body
+    assert "generate_student_report(" in body
+    assert 'report_type="manual"' in body
 
 def test_report_list_supports_write_guarded_delete_and_refresh():
     assert "report_changed = Signal()" in REPORTS

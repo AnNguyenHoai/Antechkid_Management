@@ -70,6 +70,7 @@ class ClassDetailPage(QWidget):
         self._notification_service = notification_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
+        self._write_enabled = False
 
         self._setup_ui()
         self._show_empty()
@@ -291,6 +292,20 @@ class ClassDetailPage(QWidget):
         events = self._timeline_service.get_class_timeline(class_obj.id)
         self.timeline_widget.set_events(events)
 
+    def _can_manage_teacher_assignments(self) -> bool:
+        from centermanager.core.current_user import get_current_user
+        from centermanager.models.role import RoleDefinitions
+        user = get_current_user()
+        role_name = getattr(getattr(user, "role", None), "name", None) if user else None
+        return role_name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER}
+
+    def _apply_dynamic_write_state(self) -> None:
+        teacher_enabled = self._write_enabled and self._can_manage_teacher_assignments()
+        for button in self.teacher_container.findChildren(QPushButton):
+            button.setEnabled(teacher_enabled)
+        for button in self.student_container.findChildren(QPushButton):
+            button.setEnabled(self._write_enabled)
+
     def _update_teachers(self, teachers: List[Teacher]) -> None:
         self._clear_layout(self.teacher_layout)
 
@@ -299,6 +314,7 @@ class ClassDetailPage(QWidget):
             btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_assign_teacher)
             self.teacher_layout.addWidget(btn)
+            self._apply_dynamic_write_state()
             return
 
         for teacher in teachers:
@@ -319,6 +335,7 @@ class ClassDetailPage(QWidget):
         add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_assign_teacher)
         self.teacher_layout.addWidget(add_btn)
+        self._apply_dynamic_write_state()
 
     def _update_students(self) -> None:
         self._clear_layout(self.student_layout)
@@ -336,6 +353,7 @@ class ClassDetailPage(QWidget):
             btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_enroll_student)
             self.student_layout.addWidget(btn)
+            self._apply_dynamic_write_state()
             return
 
         for student in students:
@@ -356,6 +374,7 @@ class ClassDetailPage(QWidget):
         add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_enroll_student)
         self.student_layout.addWidget(add_btn)
+        self._apply_dynamic_write_state()
 
     def _clear_layout(self, layout) -> None:
         while layout.count():
@@ -383,8 +402,11 @@ class ClassDetailPage(QWidget):
         dialog = ClassAssignmentDialog(
             self._class_service,
             self._current_class_id,
+            self._collaboration_manager,
+            self._notification_service,
             parent=self
         )
+        dialog.assignment_changed.connect(self._on_assignment_changed)
         if dialog.exec() == ClassAssignmentDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
@@ -417,8 +439,11 @@ class ClassDetailPage(QWidget):
         dialog = ClassEnrollmentDialog(
             self._class_service,
             self._current_class_id,
+            self._collaboration_manager,
+            self._notification_service,
             parent=self
         )
+        dialog.enrollment_changed.connect(self._on_enrollment_changed)
         if dialog.exec() == ClassEnrollmentDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
@@ -465,13 +490,24 @@ class ClassDetailPage(QWidget):
             logger.exception("Error adding session")
             QMessageBox.critical(self, "Error", f"Could not add session: {str(e)}")
 
+    def _on_assignment_changed(self, class_id: int) -> None:
+        if self._current_class_id == class_id:
+            self.load_class(class_id)
+        self.class_updated.emit()
+
+    def _on_enrollment_changed(self, class_id: int) -> None:
+        if self._current_class_id == class_id:
+            self.load_class(class_id)
+        self.class_updated.emit()
+
     def _on_data_changed(self) -> None:
         if self._current_class_id:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
 
     def set_write_enabled(self, enabled: bool) -> None:
+        self._write_enabled = enabled
         self.edit_btn.setEnabled(enabled)
         self.add_session_btn.setEnabled(enabled)
-        # Disable buttons inside teacher and student sections (they are created dynamically)
+        self._apply_dynamic_write_state()
         # We'll handle this by checking write mode in the slots themselves, so no need to disable buttons here.

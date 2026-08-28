@@ -25,6 +25,7 @@ class EnrollmentNotFoundError(EnrollmentError): pass
 class EnrollmentAlreadyActiveError(EnrollmentError): pass
 class InvalidEnrollmentTransitionError(EnrollmentError): pass
 class EnrollmentCapacityError(EnrollmentError): pass
+class EnrollmentValidationError(EnrollmentError): pass
 
 
 class EnrollmentService:
@@ -85,6 +86,11 @@ class EnrollmentService:
             enrollment = EnrollmentRepository(session).get_by_id(enrollment_id)
             if enrollment is None:
                 raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
+            class_obj = ClassRepository(session).get_by_id(enrollment.class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise EnrollmentValidationError(
+                    f"Archived class {enrollment.class_id} cannot change enrollments until restored."
+                )
             if enrollment.status != EnrollmentStatus.ACTIVE.value:
                 raise InvalidEnrollmentTransitionError(
                     f"Cannot transition {enrollment.status!r} enrollment to {target.value}."

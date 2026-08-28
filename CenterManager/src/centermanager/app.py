@@ -299,8 +299,8 @@ def main() -> int:
             event_bus
         )
 
-        assessment_service = AssessmentService(session_factory, timeline_service)
-        session_service = SessionService(session_factory)
+        assessment_service = AssessmentService(session_factory, timeline_service, event_bus=event_bus)
+        session_service = SessionService(session_factory, event_bus=event_bus)
         note_service = SessionNoteService(session_factory, session_service)
         student_note_service = StudentNoteService(session_factory, timeline_service)
         document_service = StudentDocumentService(session_factory, timeline_service)
@@ -326,13 +326,19 @@ def main() -> int:
         analytics_service = StudentAnalyticsService(session_factory)
 
         teacher_timeline_service = TeacherTimelineService(session_factory)
-        teacher_service = TeacherService(session_factory, teacher_timeline_service)
-        teacher_assignment_service = TeacherAssignmentService(session_factory, teacher_timeline_service)
-        teacher_document_service = TeacherDocumentService(session_factory, teacher_timeline_service)
+        teacher_service = TeacherService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
+        teacher_assignment_service = TeacherAssignmentService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
+        teacher_document_service = TeacherDocumentService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
         teacher_assignment_service_for_class = teacher_assignment_service
 
         class_timeline_service = ClassTimelineService(session_factory)
-        class_service = ClassService(session_factory, timeline_service=class_timeline_service)
+        class_service = ClassService(session_factory, timeline_service=class_timeline_service, event_bus=event_bus)
         enrollment_service = EnrollmentService(session_factory, event_bus=event_bus)
 
         expense_timeline_service = ExpenseTimelineService(session_factory)

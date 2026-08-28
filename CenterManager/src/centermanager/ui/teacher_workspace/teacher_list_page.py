@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QWidget, QComboBox, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QMessageBox, QMenu, QSizePolicy
 )
 from PySide6.QtGui import QAction
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class TeacherListPage(QWidget):
     teacher_selected = Signal(int)
+    teacher_changed = Signal()
 
     def __init__(
         self,
@@ -56,6 +57,8 @@ class TeacherListPage(QWidget):
         self._sort_key: Optional[str] = None
         self._sort_asc: bool = True
         self._selected_ids: List[int] = []
+        self._status_filter: str = "ACTIVE"
+        self._assignment_filter: str = "ALL"
 
         self._setup_ui()
         self.refresh()
@@ -82,6 +85,23 @@ class TeacherListPage(QWidget):
         self.search_bar = SearchBar("Search by code, name, phone, email...")
         self.search_bar.text_changed.connect(self._on_search)
         top_row.addWidget(self.search_bar)
+
+        self.status_filter = QComboBox()
+        self.status_filter.addItem("Active", "ACTIVE")
+        self.status_filter.addItem("Inactive", "INACTIVE")
+        self.status_filter.addItem("Archived", "ARCHIVED")
+        self.status_filter.addItem("All Current", "ALL")
+        self.status_filter.currentIndexChanged.connect(self._on_status_filter_changed)
+        self.status_filter.setMinimumWidth(130)
+        top_row.addWidget(self.status_filter)
+
+        self.assignment_filter = QComboBox()
+        self.assignment_filter.addItem("All Assignments", "ALL")
+        self.assignment_filter.addItem("Has Classes", "ASSIGNED")
+        self.assignment_filter.addItem("No Classes", "UNASSIGNED")
+        self.assignment_filter.currentIndexChanged.connect(self._on_assignment_filter_changed)
+        self.assignment_filter.setMinimumWidth(150)
+        top_row.addWidget(self.assignment_filter)
 
         self.refresh_btn = SecondaryButton("🔄 Refresh")
         self.refresh_btn.setFixedHeight(34)
@@ -142,7 +162,11 @@ class TeacherListPage(QWidget):
     def refresh(self) -> None:
         self.loading.setVisible(True)
         try:
-            self._teachers = self._teacher_service.list_teachers()
+            if self._status_filter == "ARCHIVED":
+                self._teachers = self._teacher_service.list_archived_teachers()
+            else:
+                self._teachers = self._teacher_service.list_teachers()
+            self._clear_selection()
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Failed to refresh teacher list")
@@ -158,14 +182,29 @@ class TeacherListPage(QWidget):
         self._populate_table()
 
     def _filter_teachers(self, text: str) -> List[Teacher]:
+        teachers = self._teachers[:]
+
+        if self._status_filter == "ACTIVE":
+            teachers = [t for t in teachers if t.status == Teacher.STATUS_ACTIVE]
+        elif self._status_filter == "INACTIVE":
+            teachers = [t for t in teachers if t.status == Teacher.STATUS_INACTIVE]
+
+        if self._assignment_filter == "ASSIGNED":
+            teachers = [t for t in teachers if bool(t.assigned_classes)]
+        elif self._assignment_filter == "UNASSIGNED":
+            teachers = [t for t in teachers if not bool(t.assigned_classes)]
+
         if not text.strip():
-            return self._teachers[:]
-        try:
-            return self._teacher_service.search_teachers(text.strip())
-        except Exception:
-            lower = text.strip().lower()
-            return [t for t in self._teachers
-                    if lower in t.teacher_code.lower() or lower in t.full_name.lower()]
+            return teachers
+
+        lower = text.strip().lower()
+        return [
+            t for t in teachers
+            if lower in (t.teacher_code or "").lower()
+            or lower in (t.full_name or "").lower()
+            or lower in (t.phone or "").lower()
+            or lower in (t.email or "").lower()
+        ]
 
     def _populate_table(self) -> None:
         data = []
@@ -176,13 +215,24 @@ class TeacherListPage(QWidget):
                 "full_name": t.full_name,
                 "phone": t.phone or "-",
                 "email": t.email or "-",
-                "status": t.status or "-",
+                "status": "ARCHIVED" if t.deleted_at is not None else (t.status or "-"),
                 "classes": classes,
                 "_id": t.id,
             })
         self.data_table.set_data(data, len(data))
 
     def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_status_filter_changed(self) -> None:
+        self._status_filter = self.status_filter.currentData()
+        archived = self._status_filter == "ARCHIVED"
+        self.assignment_filter.setEnabled(not archived)
+        self.add_btn.setEnabled(not archived)
+        self.refresh()
+
+    def _on_assignment_filter_changed(self) -> None:
+        self._assignment_filter = self.assignment_filter.currentData()
         self._apply_filters_and_sort()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
@@ -199,7 +249,8 @@ class TeacherListPage(QWidget):
 
     def _update_bulk_bar(self) -> None:
         count = len(self._selected_ids)
-        self.bulk_bar.setVisible(count > 0)
+        can_archive = self._status_filter != "ARCHIVED"
+        self.bulk_bar.setVisible(count > 0 and can_archive)
         self.bulk_count_label.setText(f"{count} selected")
 
     def _clear_selection(self) -> None:
@@ -224,6 +275,7 @@ class TeacherListPage(QWidget):
                     self._teacher_service.delete_teacher(tid)
                 self._clear_selection()
                 self.refresh()
+                self.teacher_changed.emit()
             except Exception as e:
                 logger.exception("Bulk archive failed")
                 QMessageBox.critical(self, "Error", "Failed to archive teachers.")
@@ -241,16 +293,44 @@ class TeacherListPage(QWidget):
         view_action.triggered.connect(lambda: self.teacher_selected.emit(teacher.id))
         menu.addAction(view_action)
 
-        edit_action = QAction("Edit Teacher", self)
-        edit_action.triggered.connect(lambda: self._edit_teacher(teacher.id))
-        menu.addAction(edit_action)
+        if teacher.deleted_at is not None:
+            restore_action = QAction("Restore Teacher", self)
+            restore_action.triggered.connect(lambda: self._restore_teacher(teacher.id))
+            menu.addAction(restore_action)
+        else:
+            edit_action = QAction("Edit Teacher", self)
+            edit_action.triggered.connect(lambda: self._edit_teacher(teacher.id))
+            menu.addAction(edit_action)
 
-        menu.addSeparator()
-        archive_action = QAction("Archive Teacher", self)
-        archive_action.triggered.connect(lambda: self._archive_teacher(teacher.id))
-        menu.addAction(archive_action)
+            menu.addSeparator()
+            archive_action = QAction("Archive Teacher", self)
+            archive_action.triggered.connect(lambda: self._archive_teacher(teacher.id))
+            menu.addAction(archive_action)
 
         menu.exec(pos)
+
+    def _restore_teacher(self, teacher_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(
+                "You must be in WRITE mode to restore a teacher.", "warning"
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Restore",
+            "Restore this teacher? The teacher will return to the current teacher list.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._teacher_service.restore_teacher(teacher_id)
+            self.refresh()
+            self.teacher_changed.emit()
+            self._notification_service.notify("Teacher restored successfully.", "success")
+        except Exception:
+            logger.exception("Restore teacher failed")
+            QMessageBox.critical(self, "Error", "Failed to restore teacher.")
 
     def _edit_teacher(self, teacher_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
@@ -259,6 +339,7 @@ class TeacherListPage(QWidget):
         dialog = TeacherFormDialog(self._teacher_service, teacher_id=teacher_id, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
             self.refresh()
+            self.teacher_changed.emit()
 
     def _archive_teacher(self, teacher_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
@@ -273,6 +354,7 @@ class TeacherListPage(QWidget):
             try:
                 self._teacher_service.delete_teacher(teacher_id)
                 self.refresh()
+                self.teacher_changed.emit()
             except Exception as e:
                 logger.exception("Archive failed")
                 QMessageBox.critical(self, "Error", "Failed to archive teacher.")
@@ -284,7 +366,8 @@ class TeacherListPage(QWidget):
         dialog = TeacherFormDialog(self._teacher_service, parent=self)
         if dialog.exec() == TeacherFormDialog.DialogCode.Accepted:
             self.refresh()
+            self.teacher_changed.emit()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        self.add_btn.setEnabled(enabled)
-        self.bulk_archive_btn.setEnabled(enabled)
+        self.add_btn.setEnabled(enabled and self._status_filter != "ARCHIVED")
+        self.bulk_archive_btn.setEnabled(enabled and self._status_filter != "ARCHIVED")

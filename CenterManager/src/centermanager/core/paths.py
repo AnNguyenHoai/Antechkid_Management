@@ -30,6 +30,10 @@ class Paths:
         return self.export_dir / "StudentProfile"
 
     @property
+    def session_report_dir(self) -> Path:
+        return self.export_dir / "SessionReports"
+
+    @property
     def excel_export_dir(self) -> Path:
         return self.export_dir / "Excel"
 
@@ -70,6 +74,7 @@ class Paths:
             self.database_dir,
             self.export_dir,
             self.student_profile_dir,
+            self.session_report_dir,
             self.excel_export_dir,
             self.attachment_dir,
             self.config_dir,
@@ -133,3 +138,6 @@ def temp_dir() -> Path:
 
 def metadata_dir() -> Path:
     return get_paths().metadata_dir
+
+def session_report_dir() -> Path:
+    return get_paths().session_report_dir

@@ -12,6 +12,8 @@ from centermanager.models.assessment import Assessment, AssessmentType
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.services.timeline_service import TimelineService
+from centermanager.events.event_bus import EventBus
+from centermanager.events.student_events import StudentAssessmentChanged
 
 if TYPE_CHECKING:
     from centermanager.services.report_policy import ReportPolicy
@@ -37,11 +39,13 @@ class AssessmentService:
         timeline_service: Optional[TimelineService] = None,
         report_policy: Optional["ReportPolicy"] = None,
         report_service: Optional["ReportService"] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._report_policy = report_policy
         self._report_service = report_service
+        self._event_bus = event_bus
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -65,20 +69,27 @@ class AssessmentService:
         return score
 
     def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
-        """Helper method to trigger report policy if available."""
-        if self._report_policy and self._report_service:
-            triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
-            for trigger in triggers:
-                try:
-                    self._report_service.generate_student_report(
-                        student_id,
-                        report_type="automatic",
-                        trigger_event=trigger,
-                        generated_by="system"
-                    )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
+        """Evaluate legacy report policy without generating before publish.
+
+        The canonical StudentProfile lifecycle is:
+        committed mutation -> Student report-relevant event -> dirty tracking
+        -> successful publish -> one latest StudentProfile artifact.
+        """
+        if self._report_policy:
+            self._report_policy.check_and_trigger(student_id, event_type, event_data)
+
+    def _publish_assessment_changed(
+        self,
+        student_id: int,
+        assessment_id: int,
+        action: str,
+    ) -> None:
+        if self._event_bus:
+            self._event_bus.publish(StudentAssessmentChanged(
+                student_id=student_id,
+                assessment_id=assessment_id,
+                action=action,
+            ))
 
     def create_assessment(
         self,
@@ -134,8 +145,10 @@ class AssessmentService:
                     metadata={"assessment_id": assessment.id},
                 )
 
-            # Trigger report policy
+            # Evaluate policy for compatibility, then publish the committed
+            # Student-report-relevant mutation for transaction dirty tracking.
             self._trigger_report_policy(student_id, "assessment_created", {"assessment_id": assessment.id})
+            self._publish_assessment_changed(student_id, assessment.id, "created")
 
             return assessment
 
@@ -248,8 +261,10 @@ class AssessmentService:
                     metadata={"assessment_id": assessment.id, "changes": changes},
                 )
 
-            # Trigger report policy
+            # Evaluate policy for compatibility, then publish the committed
+            # Student-report-relevant mutation for transaction dirty tracking.
             self._trigger_report_policy(assessment.student_id, "assessment_updated", {"assessment_id": assessment.id})
+            self._publish_assessment_changed(assessment.student_id, assessment.id, "updated")
 
             return assessment
 
@@ -272,7 +287,10 @@ class AssessmentService:
                     metadata={"assessment_id": assessment_id},
                 )
 
-            # Không trigger report khi xóa
+            # Deletion is also report-relevant: the next published StudentProfile
+            # must no longer contain the removed assessment.
+            self._trigger_report_policy(student_id, "assessment_deleted", {"assessment_id": assessment_id})
+            self._publish_assessment_changed(student_id, assessment_id, "deleted")
 
     def get_all_assessments_with_student(self) -> List[Assessment]:
         with self._session_factory() as session:

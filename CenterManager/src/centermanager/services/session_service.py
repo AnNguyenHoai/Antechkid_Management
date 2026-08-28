@@ -10,6 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from centermanager.models.session import Session, SessionStatus
 from centermanager.repositories.session_repository import SessionRepository
 from centermanager.repositories.class_repository import ClassRepository
+from centermanager.events.event_bus import EventBus
+from centermanager.events.class_events import ClassSessionChanged
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.core.permission_guard import require_permission
 from sqlalchemy.orm import selectinload
@@ -28,8 +30,17 @@ class SessionValidationError(SessionServiceError):
 
 
 class SessionService:
-    def __init__(self, session_factory: sessionmaker) -> None:
+    def __init__(self, session_factory: sessionmaker, event_bus: Optional[EventBus] = None) -> None:
         self._session_factory = session_factory
+        self._event_bus = event_bus
+
+    def _publish_class_session_changed(self, session_obj: Session, action: str) -> None:
+        if self._event_bus is not None:
+            self._event_bus.publish(ClassSessionChanged(
+                class_id=session_obj.class_id,
+                session_id=session_obj.id,
+                action=action,
+            ))
 
     # ----- Helpers -----
 
@@ -69,6 +80,16 @@ class SessionService:
             latest = repo.get_latest_session_number(class_id)
             return (latest or 0) + 1
 
+    def _require_active_class(self, db_session, class_id: int):
+        class_obj = ClassRepository(db_session).get_by_id(class_id)
+        if class_obj is None:
+            raise SessionValidationError(f"Class with id {class_id} not found.")
+        if class_obj.deleted_at is not None:
+            raise SessionValidationError(
+                f"Archived class {class_id} cannot change sessions until restored."
+            )
+        return class_obj
+
     # ----- CRUD -----
 
     @require_permission("lesson.create")
@@ -93,12 +114,9 @@ class SessionService:
         start_time, end_time = self._validate_time(start_time, end_time) if start_time and end_time else (None, None)
         status = self._validate_status(status)
 
-        # Validate class exists
-        with self._session_factory() as session:
-            class_repo = ClassRepository(session)
-            class_obj = class_repo.get_by_id(class_id)
-            if class_obj is None:
-                raise SessionValidationError(f"Class with id {class_id} not found.")
+        # Validate that the class is active before creating a new session.
+        with self._session_factory() as db_session:
+            self._require_active_class(db_session, class_id)
 
         session_number = self._get_next_session_number(class_id)
 
@@ -130,6 +148,7 @@ class SessionService:
                 description=f"Title: {norm_title}, Date: {scheduled_date}",
                 metadata={"session_id": session_obj.id}
             )
+            self._publish_class_session_changed(session_obj, action="created")
             return session_obj
 
     @require_permission("lesson.view")
@@ -166,6 +185,7 @@ class SessionService:
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
+            self._require_active_class(db_session, session_obj.class_id)
 
             changes = []
 
@@ -250,6 +270,7 @@ class SessionService:
                 description="; ".join(changes),
                 metadata={"session_id": session_obj.id}
             )
+            self._publish_class_session_changed(session_obj, action="updated")
             return session_obj
 
     @require_permission("lesson.cancel")
@@ -282,5 +303,17 @@ class SessionService:
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
+
+            self._require_active_class(db_session, session_obj.class_id)
+            class_id = session_obj.class_id
+            deleted_session_id = session_obj.id
+
             repo.delete(session_obj)
             db_session.commit()
+
+            if self._event_bus is not None:
+                self._event_bus.publish(ClassSessionChanged(
+                    class_id=class_id,
+                    session_id=deleted_session_id,
+                    action="deleted",
+                ))

@@ -40,7 +40,7 @@ from centermanager.platform.sync.events import (
 
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 from centermanager.events.event_bus import EventBus
-from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated, StudentEnrollmentChanged
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated, StudentEnrollmentChanged, StudentAssessmentChanged
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,8 @@ class MainWindow(QMainWindow):
             attendance_service=self._attendance_service,
             platform_context=self._platform_context,
             collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
+            event_bus=self._event_bus,
         )
         self.class_workspace.go_home.connect(self._go_home)
         self.class_workspace.attendance_updated.connect(self._on_attendance_updated)
@@ -730,6 +732,7 @@ class MainWindow(QMainWindow):
             self._event_bus.register(StudentArchived, self._on_student_archived_event)
             self._event_bus.register(StudentActivated, self._on_student_activated_event)
             self._event_bus.register(StudentUpdated, self._on_student_updated_event)
+            self._event_bus.register(StudentAssessmentChanged, self._on_student_assessment_changed_event)
             self._event_bus.register(StudentEnrollmentChanged, self._on_student_enrollment_changed_event)
             self._event_bus.register(StudentDeleted, self._on_student_deleted_event)
             # Parent events
@@ -772,6 +775,18 @@ class MainWindow(QMainWindow):
             logger.info(
                 "Transaction marked dirty: student update "
                 f"(id={event.student_id}, code={event.student_code})"
+            )
+
+    def _on_student_assessment_changed_event(self, event: StudentAssessmentChanged) -> None:
+        """Track assessment mutations as StudentProfile report-relevant changes."""
+        if self._transaction.is_editing:
+            self._transaction.mark_student_dirty(event.student_id)
+            logger.info(
+                "Transaction marked dirty: student assessment %s "
+                "(student_id=%s, assessment_id=%s)",
+                event.action,
+                event.student_id,
+                event.assessment_id,
             )
 
     def _on_student_enrollment_changed_event(self, event: StudentEnrollmentChanged) -> None:

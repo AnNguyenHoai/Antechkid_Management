@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingService:
+    TUITION_INCOME_TYPE = "Tuition"
+    NO_TUITION_CONFIGURED_STATUS = OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
     """
     Outstanding Tuition Engine.
     Read-only business rule engine.
@@ -33,17 +35,17 @@ class OutstandingService:
         self._session_factory = session_factory
 
     def _get_total_paid(self, student_id: int, class_id: int) -> int:
-        """Calculate total paid amount for a student in a specific class."""
+        """Calculate only Tuition income paid for a student in a specific class."""
         with self._session_factory() as session:
             repo = IncomeRepository(session)
             incomes = repo.list_active(
                 student_id=student_id,
                 class_id=class_id,
+                income_type=self.TUITION_INCOME_TYPE,
                 offset=0,
-                limit=10000  # get all
+                limit=10000,
             )
-            total = sum(inc.amount for inc in incomes)
-            return int(total)
+            return int(sum(inc.amount for inc in incomes))
 
     def get_outstanding_for_enrollment(
         self,
@@ -73,12 +75,8 @@ class OutstandingService:
             if class_obj is None:
                 logger.warning(f"Class {class_id} not found")
                 return None
-            if class_obj.fee is None or class_obj.fee == 0:
-                # No fee defined, skip
-                logger.debug(f"Class {class_id} has no fee, skipping")
-                return None
-
-            expected = class_obj.fee
+            configured = class_obj.fee is not None and class_obj.fee > 0
+            expected = int(class_obj.fee) if configured else 0
             paid = self._get_total_paid(student_id, class_id)
 
             # Get student
@@ -95,7 +93,8 @@ class OutstandingService:
                 class_id=class_id,
                 class_name=class_obj.name,
                 expected_tuition=expected,
-                paid=paid
+                paid=paid,
+                tuition_configured=configured,
             )
 
     def get_all_outstanding(
@@ -177,6 +176,11 @@ class OutstandingService:
                 )
                 if dto is not None:
                     details.append(dto)
+            total_paid += dto.paid
+            if dto.tuition_configured:
+                total_expected += dto.expected_tuition
+            else:
+                has_unconfigured_tuition = True
                     total_expected += dto.expected_tuition
                     total_paid += dto.paid
 

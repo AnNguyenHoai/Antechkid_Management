@@ -75,18 +75,19 @@ class StudentService:
         return f"HS{next_num:03d}"
 
     def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
-        if self._report_policy and self._report_service:
+        """Legacy policy seam.
+
+        STUDENT-2.7 makes the Student Workspace publish lifecycle the canonical
+        trigger for the singleton StudentProfile report. This service method is
+        intentionally non-generating to prevent a pre-publish duplicate report.
+        """
+        if self._report_policy:
             triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
-            for trigger in triggers:
-                try:
-                    self._report_service.generate_student_report(
-                        student_id,
-                        report_type="automatic",
-                        trigger_event=trigger,
-                        generated_by="system"
-                    )
-                except Exception as e:
-                    logger.exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
+            logger.debug(
+                "Report policy evaluated for student %s: %s (generation deferred to publish lifecycle)",
+                student_id,
+                triggers,
+            )
 
     def create_student(
         self,
@@ -360,6 +361,22 @@ class StudentService:
                     )
 
                 self._trigger_report_policy(student.id, "student_updated", {"changes": changes})
+
+                # Student aggregate mutations must be visible to the transaction
+                # dirty tracker. Without this domain event, Finish Editing cannot
+                # know which StudentProfile artifact must be regenerated.
+                if self._event_bus:
+                    self._event_bus.publish(StudentUpdated(
+                        student_id=student.id,
+                        student_code=student.student_code,
+                        student_name=student.full_name,
+                        changes=changes,
+                    ))
+                    logger.info(
+                        "StudentUpdated event published for student %s with %d change(s)",
+                        student.id,
+                        len(changes),
+                    )
                 return student
             except Exception:
                 session.rollback()
@@ -439,6 +456,7 @@ class StudentService:
                     .selectinload(Class.teachers),
                     selectinload(Student.parents),
                     selectinload(Student.notes_structured),
+                    selectinload(Student.assessments),
                 )
                 .filter(Student.id == student_id, Student.deleted_at.is_(None))
                 .first()

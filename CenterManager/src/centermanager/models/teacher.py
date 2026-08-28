@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 
 class Teacher(Base, TimestampMixin):
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_INACTIVE = "INACTIVE"
+    VALID_STATUSES = {STATUS_ACTIVE, STATUS_INACTIVE}
     __tablename__ = "teachers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -48,6 +51,18 @@ class Teacher(Base, TimestampMixin):
         back_populates="teachers",
         lazy="selectin"
     )
+
+    @property
+    def is_archived(self) -> bool:
+        return self.deleted_at is not None
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE and not self.is_archived
+
+    @property
+    def can_accept_new_assignments(self) -> bool:
+        return self.is_active
 
     def __repr__(self) -> str:
         return f"<Teacher(id={self.id}, code='{self.teacher_code}', name='{self.full_name}')>"

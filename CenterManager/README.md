@@ -1,19 +1,30 @@
-# TASK 3.3.3-A — DIRECT FIX v8
+# CenterManager
 
-Final test-harness correction for expired lease visibility.
+**CenterManager** là ứng dụng desktop quản lý trung tâm giáo dục, tập trung vào hồ sơ học sinh và hoạt động giảng dạy.
 
-Root cause:
-`CollaborationSnapshot.is_stale` means the poll operation failed and is not
-the semantic representation of an expired remote lease. The poller correctly
-keeps the raw remote lock payload in a successful snapshot.
+## Tải và cài đặt
 
-Therefore the test now verifies:
-- B poll completed successfully.
-- B observed `lease_expires_at`.
-- `lease_expires_at` is in the past.
-- snapshot is not marked stale merely because the remote lease is expired.
+- Tải file ZIP từ quản trị viên.
+- Giải nén và chạy `CenterManager.exe`.
+- Xem `docs/INSTALL.md` để biết hướng dẫn chi tiết.
 
-No production code changed.
+## Hướng dẫn sử dụng
 
-Expected targeted result:
-5 passed, 2 skipped.
+- Đăng nhập với tài khoản được cấp.
+- Sử dụng thanh tìm kiếm để tìm học sinh.
+- Làm việc trong các Workspace: Học sinh, Giáo viên, Lớp học, Tài chính, Quản trị.
+
+## Tài liệu
+
+- [Hướng dẫn cài đặt](docs/INSTALL.md)
+- [Hướng dẫn triển khai cho quản trị viên](docs/DEPLOYMENT.md)
+- [Cập nhật ứng dụng](docs/UPDATE.md)
+- [Xử lý sự cố](docs/TROUBLESHOOTING.md)
+
+## Phát triển
+
+Dành cho nhà phát triển: xem `docs/DEPLOYMENT.md` để biết cách build từ mã nguồn.
+
+## Giấy phép
+
+Proprietary – Liên hệ quản trị viên để biết thêm chi tiết.

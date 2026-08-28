@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingListPage(QWidget):
+    STATUS_NO_TUITION_CONFIGURED = "No Tuition Configured"
     student_selected = Signal(int)
 
     def __init__(

@@ -97,63 +97,45 @@ def test_finishing_deadline_absolute(collab_manager):
 
 
 def test_collaboration_unavailable_blocks_publish(collab_manager):
+    """Test that when collaboration unavailable, MAIN publish is blocked."""
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
     tx.start_editing(lambda: True)
 
-    # Mock collaboration unavailable
+    # Mock is_collaboration_available to return False
     with patch.object(cm, 'is_collaboration_available', return_value=False):
-        # Also need to ensure remote_lock_status returns a valid lock
-        with patch.object(cm, '_sync_provider') as mock_provider:
-            mock_provider.remote_lock_status.return_value = {
-                "locked": True,
-                "session_id": cm._session.session_id,
-                "owner": cm._session.username,
-                "lease_expires_at": (datetime.now() + timedelta(seconds=60)).isoformat(),
-                "lock_generation": 1,  # <-- ADDED
-            }
-            result = tx.enter_finishing()
-            assert result["success"] is False
-            assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+        result = tx.enter_finishing()
+        assert result["success"] is False
+        assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+        # Verify reason contains unavailable
+        assert "unavailable" in result["reason"].lower()
 
 
 def test_collaboration_recovery_after_unavailable(collab_manager):
+    """Test that when collaboration becomes available again, we return to FINISHING."""
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
     tx.start_editing(lambda: True)
 
-    # Simulate collaboration unavailable
     with patch.object(cm, 'is_collaboration_available', return_value=False):
-        with patch.object(cm, '_sync_provider') as mock_provider:
-            mock_provider.remote_lock_status.return_value = {
-                "locked": True,
-                "session_id": cm._session.session_id,
-                "owner": cm._session.username,
-                "lease_expires_at": (datetime.now() + timedelta(seconds=60)).isoformat(),
-                "lock_generation": 1,  # <-- ADDED
-            }
-            result = tx.enter_finishing()
-            assert result["success"] is False
-            assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+        tx.enter_finishing()
+        assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
 
-    # Now collaboration is available again, but lease still valid
+    # Now restore availability
     with patch.object(cm, 'is_collaboration_available', return_value=True):
-        with patch.object(cm, '_sync_provider') as mock_provider:
-            mock_provider.remote_lock_status.return_value = {
-                "locked": True,
-                "session_id": cm._session.session_id,
-                "owner": cm._session.username,
-                "lease_expires_at": (datetime.now() + timedelta(seconds=60)).isoformat(),
-                "lock_generation": 1,  # <-- ADDED
-            }
-            result = tx.refresh_finishing_authority()
-            assert result["success"] is True
-            assert tx.state == WriteTransactionState.FINISHING
+        # Set a valid deadline
+        now = datetime.now()
+        deadline = now + timedelta(seconds=120)
+        cm._lock.set_finishing_data(now, deadline, True)
+        result = tx.refresh_finishing_authority()
+        assert result["success"] is True
+        assert tx.state == WriteTransactionState.FINISHING
 
 
 def test_deadline_expiry_while_waiting(collab_manager):
+    """Test that if deadline expires while waiting for collaboration, session becomes stale."""
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
@@ -161,24 +143,17 @@ def test_deadline_expiry_while_waiting(collab_manager):
 
     past = datetime.now() - timedelta(seconds=10)
     tx._finishing_deadline = past
+    cm._lock.set_finishing_data(past - timedelta(seconds=120), past, True)
 
     with patch.object(cm, 'is_collaboration_available', return_value=False):
-        with patch.object(cm, '_sync_provider') as mock_provider:
-            mock_provider.remote_lock_status.return_value = {
-                "locked": True,
-                "session_id": cm._session.session_id,
-                "owner": cm._session.username,
-                "lease_expires_at": (datetime.now() + timedelta(seconds=60)).isoformat(),
-                "lock_generation": 1,
-            }
-            tx.enter_finishing()
-            assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+        tx.enter_finishing()
+        assert tx.state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
 
-            result = tx.refresh_finishing_authority()
-            assert result["success"] is False
-            # Deadline expired → stale
-            assert tx.state == WriteTransactionState.FINISHING_STALE
-            assert "Deadline expired" in result["reason"]
+        # Refresh should detect deadline expired
+        result = tx.refresh_finishing_authority()
+        assert result["success"] is False
+        assert tx.state == WriteTransactionState.FINISHING_STALE
+        assert "Deadline expired" in result["reason"]
 
 
 def test_stale_session_cannot_publish(collab_manager):
@@ -205,34 +180,22 @@ def test_stale_session_cannot_publish(collab_manager):
 
 
 def test_heartbeat_timeout_during_finishing(collab_manager):
+    """Test that heartbeat timeout is ignored during FINISHING."""
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
     tx.start_editing(lambda: True)
+    tx.enter_finishing()
 
-    # Create lock with valid lease and finishing deadline
+    # Set heartbeat cũ (70s ago) nhưng deadline còn hiệu lực
     lock_data = cm._lock._read_lock()
-    now = datetime.now()
-    lock_data["lease_expires_at"] = (now + timedelta(seconds=60)).isoformat()
-    lock_data["finishing_started_at"] = now.isoformat()
-    lock_data["finishing_deadline"] = (now + timedelta(seconds=120)).isoformat()
-    lock_data["publish_intent"] = True
-    cm._lock._write_lock(lock_data)
-
-    # Push to remote if in remote mode
-    if cm._sync_provider is not None:
-        expected_oid = cm._sync_provider._remote_lock_oid()
-        commit_sha = cm._sync_provider._create_lock_commit_plumbing(lock_data, expected_oid)
-        cm._sync_provider._push_lock_branch(commit_sha, expected_oid)
-        cm._sync_local_lock()
-
-    # Set stale heartbeat
-    lock_data["last_heartbeat"] = (now - timedelta(seconds=70)).isoformat()
+    old_hb = (datetime.now() - timedelta(seconds=70)).isoformat()
+    lock_data["last_heartbeat"] = old_hb
     cm._lock._write_lock(lock_data)
 
     auth = cm.validate_write_authority(cm.get_session())
-    # In FINISHING, heartbeat stale is ignored → valid should be True
     assert auth["valid"] is True
+    assert "heartbeat" not in auth["reason"].lower()
 
 
 def test_absolute_deadline_expiry(collab_manager):
@@ -253,7 +216,7 @@ def test_absolute_deadline_expiry(collab_manager):
 
 
 def test_normal_editing_heartbeat_timeout(collab_manager):
-    """Test that heartbeat timeout still applies in normal EDITING (local mode only)."""
+    """Test that heartbeat timeout still applies in normal EDITING."""
     cm = collab_manager
     cm.request_write()
     tx = WriteTransactionManager(cm)
@@ -266,14 +229,5 @@ def test_normal_editing_heartbeat_timeout(collab_manager):
     cm._lock._write_lock(lock_data)
 
     auth = cm.validate_write_authority(cm.get_session())
-    # Nếu ở remote mode, lease vẫn hợp lệ nên valid=True
-    # Nếu ở local mode, heartbeat stale nên valid=False
-    # Test này được viết cho local mode, nhưng fixture collab_manager có thể ở remote mode
-    # Chúng ta chỉ kiểm tra kết quả phù hợp với mode hiện tại
-    if cm._sync_provider is not None:
-        # Remote mode: lease still valid → valid should be True
-        assert auth["valid"] is True
-    else:
-        # Local mode: heartbeat stale → valid should be False
-        assert auth["valid"] is False
-        assert "stale" in auth["reason"].lower() or "heartbeat" in auth["reason"].lower()
+    assert auth["valid"] is False
+    assert "heartbeat timeout" in auth["reason"].lower()

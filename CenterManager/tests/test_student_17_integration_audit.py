@@ -15,10 +15,18 @@ REPORT_GENERATOR = (ROOT / "export/pdf/student_report_generator.py").read_text(e
 
 
 def test_finish_flow_generates_reports_only_from_dirty_student_aggregates():
-    assert "def on_publish_success()" in MAIN
-    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in MAIN
-    assert "generate_student_report(" in MAIN
-    assert "trigger_event=\"student_updated\"" in MAIN
+    # Audit the actual post-publish callback instead of coupling this
+    # integration test to one exact trigger_event literal. The contract is:
+    # dirty student aggregates are captured and each dirty student receives
+    # the latest report only after publish succeeds.
+    start = MAIN.index("def on_publish_success()")
+    end = MAIN.index("def on_publish_failure", start)
+    section = MAIN[start:end]
+
+    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in section
+    assert "for student_id in dirty_student_ids:" in section
+    assert "generate_student_report(" in section
+    assert 'report_type="latest"' in section
 
 
 def test_parent_changes_dirty_the_owning_student_aggregate():

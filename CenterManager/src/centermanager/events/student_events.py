@@ -56,3 +56,12 @@ class StudentEnrollmentChanged(Event):
     previous_status: Optional[str]
     current_status: str
     timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class StudentAssessmentChanged(Event):
+    """Event emitted after a committed assessment mutation affecting a Student report."""
+    student_id: int
+    assessment_id: int
+    action: str
+    timestamp: datetime = field(default_factory=datetime.now)

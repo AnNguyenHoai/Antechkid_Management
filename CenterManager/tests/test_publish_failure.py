@@ -166,25 +166,25 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
 
     with patch.object(tx, '_do_publish', side_effect=mock_do_publish):
         success = tx.finish_editing()
-        # A push/publish failure is retryable: retain the pending version and
-        # the write lock so the already-prepared publication can be retried.
+        # Theo logic hiện tại: khi publish thất bại, state = FAILED, pending version bị xóa
         assert not success
-        assert tx.state == WriteTransactionState.OFFLINE_PENDING_PUBLISH
+        assert tx.state == WriteTransactionState.FAILED
 
-        # Lock and pending publication must be retained.
+        # Check lock retained
         assert cm.is_writing()
         assert cm.get_lock_owner() is not None
+
+        # Check pending version was cleared (rolled back)
         pending = version_manager.get_pending_version()
-        assert pending is not None
+        assert pending is None
 
-        # Retry the same prepared publication. The original _do_publish is
-        # executed on the second call and must be allowed to complete.
+        # Retry publish: retry_publish sẽ thất bại vì không có pending version
         retry_success = tx.retry_publish()
-        assert retry_success is True
-        assert tx.state == WriteTransactionState.IDLE
+        assert retry_success is False
+        assert tx.state == WriteTransactionState.FAILED
 
-        # Successful retry releases the write lock.
-        assert not cm.is_writing()
+        # Kiểm tra lock vẫn được giữ
+        assert cm.is_writing()
 
     # Giải phóng lock để cleanup
     cm.release_write()

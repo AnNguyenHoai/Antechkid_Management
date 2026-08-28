@@ -529,9 +529,8 @@ class StudentDetailPage(QWidget):
             self.student_updated.emit()
 
     def _export_pdf(self) -> None:
-        if not self._collaboration_manager.ensure_write():
-            QMessageBox.warning(self, "Read mode", "Start Editing before generating a report.")
-            return
+        # Report export is a read-only artifact operation. It must not require
+        # write ownership because it does not mutate the Student aggregate.
         if self._current_student_id is None:
             QMessageBox.warning(self, "Lỗi", "Chưa chọn học sinh.")
             return

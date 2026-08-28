@@ -107,21 +107,33 @@ class StudentReportGenerator:
         outstanding_summary = self._outstanding_service.get_student_summary(student_id)
 
         enrollments: List[Enrollment] = student.enrollments
+        active_enrollments = [e for e in enrollments if e.status == "ACTIVE"]
+        completed_enrollments = [e for e in enrollments if e.status == "COMPLETED"]
+        withdrawn_enrollments = [e for e in enrollments if e.status == "WITHDRAWN"]
+
         class_info: List[Dict] = []
         all_sessions: List[Session] = []
-        for enrollment in enrollments:
+        for enrollment in active_enrollments:
             cls: Optional[Class] = enrollment.class_
             if cls:
-                teacher_names = ", ".join([t.full_name for t in cls.teachers]) if cls.teachers else ""
+                teacher_names = ", ".join([teacher.full_name for teacher in cls.teachers]) if cls.teachers else ""
                 class_info.append({
                     "name": cls.name,
                     "course": cls.course or "",
                     "teacher": teacher_names,
-                    "start_date": cls.start_date,
-                    "end_date": cls.end_date,
+                    "level": getattr(enrollment, "level", None) or getattr(student, "current_level", None) or "",
+                    "start_date": enrollment.start_date,
+                    "end_date": enrollment.end_date,
+                    "status": enrollment.status,
                 })
-                sessions = self._session_service.get_sessions_for_class(cls.id)
-                all_sessions.extend(sessions)
+                all_sessions.extend(self._session_service.get_sessions_for_class(cls.id))
+
+        latest_assessment = None
+        if getattr(student, "assessments", None):
+            latest_assessment = max(
+                student.assessments,
+                key=lambda assessment: assessment.assessment_date or datetime.min.date(),
+            )
 
         total_sessions = len(all_sessions)
         present_count = sum(1 for a in attendances if a.status == "Present")
@@ -154,6 +166,10 @@ class StudentReportGenerator:
             "notes": notes,
             "class_info": class_info,
             "all_sessions": all_sessions,
+            "active_enrollments": active_enrollments,
+            "completed_enrollments": completed_enrollments,
+            "withdrawn_enrollments": withdrawn_enrollments,
+            "latest_assessment": latest_assessment,
             "latest_attendances": latest_attendances,
             "latest_notes": latest_notes,
             "expected": expected,
@@ -255,25 +271,9 @@ class StudentReportGenerator:
             ("Họ và tên", student.full_name),
             ("Giới tính", student.gender or ""),
             ("Ngày sinh", student.date_of_birth.strftime("%d/%m/%Y") if student.date_of_birth else ""),
-            ("Số điện thoại", ""),
-            ("Email", ""),
-            ("Địa chỉ", ""),
             ("Trạng thái", student.status or ""),
             ("Ngày nhập học", student.enrollment_date.strftime("%d/%m/%Y") if student.enrollment_date else ""),
         ]
-
-        if primary_parent:
-            profile_items.append(("Tên phụ huynh", primary_parent.name or ""))
-            profile_items.append(("SĐT phụ huynh", primary_parent.phone or ""))
-            profile_items.append(("Email phụ huynh", primary_parent.email or ""))
-            profile_items.append(("Địa chỉ phụ huynh", primary_parent.address or ""))
-        else:
-            profile_items.extend([
-                ("Tên phụ huynh", ""),
-                ("SĐT phụ huynh", ""),
-                ("Email phụ huynh", ""),
-                ("Địa chỉ phụ huynh", ""),
-            ])
 
         class_info = data["class_info"]
         if class_info:
@@ -307,6 +307,30 @@ class StudentReportGenerator:
             )
         )
         story.append(profile_table)
+        story.append(Spacer(1, 0.2 * cm))
+
+        story.append(Paragraph("THÔNG TIN PHỤ HUYNH / NGƯỜI GIÁM HỘ", subheading_style))
+        if parents:
+            parent_rows = [["Họ tên", "Quan hệ", "Số điện thoại", "Email", "Liên hệ chính"]]
+            for parent in parents:
+                parent_rows.append([
+                    parent.name or "",
+                    getattr(parent, "relationship", "") or "",
+                    parent.phone or "",
+                    parent.email or "",
+                    "Có" if getattr(parent, "is_primary_contact", False) else "",
+                ])
+            parent_table = Table(parent_rows, colWidths=[3*cm, 2.5*cm, 3*cm, 3.5*cm, 2*cm])
+            parent_table.setStyle(TableStyle([
+                ("FONTNAME", (0,0), (-1,-1), font_name),
+                ("FONTSIZE", (0,0), (-1,-1), 8),
+                ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+                ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ]))
+            story.append(parent_table)
+        else:
+            story.append(Paragraph("Chưa có thông tin phụ huynh / người giám hộ.", normal_style))
         story.append(Spacer(1, 0.3 * cm))
 
         # ---- Section 2: Tình hình học tập ----
@@ -352,6 +376,49 @@ class StudentReportGenerator:
             )
         )
         story.append(academic_table)
+        story.append(Spacer(1, 0.2 * cm))
+
+        story.append(Paragraph("TỔNG QUAN GHI DANH", subheading_style))
+        enrollment_rows = [["Lớp", "Khóa học", "Bắt đầu", "Kết thúc", "Trạng thái"]]
+        for enrollment in (data["active_enrollments"] + data["completed_enrollments"] + data["withdrawn_enrollments"]):
+            cls = enrollment.class_
+            enrollment_rows.append([
+                cls.name if cls else "",
+                (cls.course or "") if cls else "",
+                enrollment.start_date.strftime("%d/%m/%Y") if enrollment.start_date else "",
+                enrollment.end_date.strftime("%d/%m/%Y") if enrollment.end_date else "",
+                enrollment.status or "",
+            ])
+        if len(enrollment_rows) > 1:
+            enrollment_table = Table(enrollment_rows, colWidths=[3*cm, 3*cm, 2.2*cm, 2.2*cm, 2.4*cm])
+            enrollment_table.setStyle(TableStyle([
+                ("FONTNAME", (0,0), (-1,-1), font_name),
+                ("FONTSIZE", (0,0), (-1,-1), 8),
+                ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+                ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ]))
+            story.append(enrollment_table)
+        else:
+            story.append(Paragraph("Chưa có lịch sử ghi danh.", normal_style))
+
+        latest_assessment = data["latest_assessment"]
+        story.append(Paragraph("ĐÁNH GIÁ GẦN NHẤT", subheading_style))
+        if latest_assessment:
+            assessment_items = [
+                ("Ngày", latest_assessment.assessment_date.strftime("%d/%m/%Y") if latest_assessment.assessment_date else ""),
+                ("Loại", latest_assessment.assessment_type or ""),
+                ("Điểm tổng", str(latest_assessment.overall_score) if latest_assessment.overall_score is not None else ""),
+                ("Điểm mạnh", latest_assessment.strengths or ""),
+                ("Cần cải thiện", latest_assessment.improvements or latest_assessment.areas_for_improvement or ""),
+                ("Mục tiêu tiếp theo", latest_assessment.next_goal or ""),
+                ("Nhận xét giáo viên", latest_assessment.teacher_comment or latest_assessment.comments or ""),
+            ]
+            for label, value in assessment_items:
+                if value:
+                    story.append(Paragraph(f"<b>{label}:</b> {value}", normal_style))
+        else:
+            story.append(Paragraph("Chưa có đánh giá.", normal_style))
         story.append(Spacer(1, 0.3 * cm))
 
         # ---- Section 3: Thông tin học phí ----

@@ -50,3 +50,7 @@ class TeacherTimelineService:
         with self._session_factory() as session:
             repo = TeacherTimelineRepository(session)
             return repo.get_by_teacher(teacher_id, limit)
+    def get_recent_events(self, limit: int = 10) -> List[TeacherTimelineEvent]:
+        with self._session_factory() as session:
+            repo = TeacherTimelineRepository(session)
+            return repo.get_recent_events(limit=limit)

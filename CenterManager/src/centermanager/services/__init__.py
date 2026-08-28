@@ -19,6 +19,7 @@ from .session_service import SessionService
 from .session_note_service import SessionNoteService
 from .report_service import ReportService
 from .report_policy import ReportPolicy
+from .session_report_service import SessionReportService
 
 # Teacher
 from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
@@ -53,6 +54,7 @@ __all__ = [
     "SessionNoteService",
     "ReportService",
     "ReportPolicy",
+    "SessionReportService",
     "TeacherService",
     "TeacherNotFoundError",
     "TeacherValidationError",

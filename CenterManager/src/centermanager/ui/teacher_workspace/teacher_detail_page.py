@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.teacher import Teacher
+from centermanager.core.current_user import get_current_user
+from centermanager.models.role import RoleDefinitions
 from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
@@ -22,6 +24,7 @@ from centermanager.ui.design_system import (
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
+from centermanager.ui.teacher_workspace.teacher_assignment_dialog import TeacherAssignmentDialog
 from centermanager.ui.teacher_workspace.teacher_documents_widget import TeacherDocumentsWidget
 from centermanager.ui.timeline import TimelineWidget
 from centermanager.platform.collaboration import CollaborationManager
@@ -123,6 +126,12 @@ class TeacherDetailPage(QWidget):
         self.edit_btn.clicked.connect(self._on_edit)
         profile_layout.addWidget(self.edit_btn)
 
+        self.restore_btn = PrimaryButton("↩ Restore")
+        self.restore_btn.setFixedHeight(34)
+        self.restore_btn.clicked.connect(self._on_restore)
+        self.restore_btn.setVisible(False)
+        profile_layout.addWidget(self.restore_btn)
+
         container_layout.addWidget(self.profile_widget)
 
         # Divider
@@ -139,8 +148,15 @@ class TeacherDetailPage(QWidget):
         self.classes_widget = QWidget()
         classes_layout = QVBoxLayout(self.classes_widget)
         classes_layout.setContentsMargins(0, 0, 0, 0)
+        classes_header_row = QHBoxLayout()
         classes_header = SectionHeader("Assigned Classes")
-        classes_layout.addWidget(classes_header)
+        classes_header_row.addWidget(classes_header)
+        classes_header_row.addStretch()
+        self.manage_classes_btn = SecondaryButton("Manage Classes")
+        self.manage_classes_btn.setFixedHeight(32)
+        self.manage_classes_btn.clicked.connect(self._on_manage_classes)
+        classes_header_row.addWidget(self.manage_classes_btn)
+        classes_layout.addLayout(classes_header_row)
         self.classes_container = QWidget()
         self.classes_container_layout = QVBoxLayout(self.classes_container)
         self.classes_container_layout.setSpacing(SPACING['sm'])
@@ -225,7 +241,10 @@ class TeacherDetailPage(QWidget):
 
     def load_teacher(self, teacher_id: int) -> None:
         try:
-            teacher = self._teacher_service.get_teacher_with_details(teacher_id)
+            try:
+                teacher = self._teacher_service.get_teacher_with_details(teacher_id)
+            except Exception:
+                teacher = self._teacher_service.get_archived_teacher(teacher_id)
             self._current_teacher_id = teacher.id
             self._current_teacher = teacher
             self._populate(teacher)
@@ -238,7 +257,15 @@ class TeacherDetailPage(QWidget):
         self.avatar.set_name(teacher.full_name)
         self.name_label.setText(teacher.full_name)
         self.code_label.setText(teacher.teacher_code)
-        self.status_badge.set_status(teacher.status or "")
+        status_text = "ARCHIVED" if teacher.deleted_at is not None else (teacher.status or "")
+        self.status_badge.set_status(status_text)
+        self.restore_btn.setVisible(teacher.deleted_at is not None)
+        self.edit_btn.setVisible(teacher.deleted_at is None)
+        self.manage_classes_btn.setEnabled(
+            teacher.deleted_at is None
+            and self.edit_btn.isEnabled()
+            and self._can_manage_class_assignments()
+        )
         self.email_phone_label.setText(f"{teacher.email or '-'}  •  {teacher.phone or '-'}")
 
         # Professional info
@@ -288,6 +315,77 @@ class TeacherDetailPage(QWidget):
             btn.clicked.connect(lambda checked, cid=cls.id: self.class_clicked.emit(cid))
             self.classes_container_layout.addWidget(btn)
 
+    def _can_manage_class_assignments(self) -> bool:
+        """Only administrators and managers may change teacher assignments."""
+        user = get_current_user()
+        role_name = (
+            getattr(getattr(user, "role", None), "name", None)
+            if user is not None
+            else None
+        )
+        return role_name in {
+            RoleDefinitions.ADMIN,
+            RoleDefinitions.MANAGER,
+        }
+
+    def _on_manage_classes(self) -> None:
+        if not self._can_manage_class_assignments():
+            self._notification_service.notify(
+                "Only Admin or Manager accounts can manage teacher class assignments.",
+                "warning",
+            )
+            return
+        if self._current_teacher is None or self._current_teacher_id is None:
+            return
+        if self._current_teacher.deleted_at is not None:
+            self._notification_service.notify(
+                "Archived teachers must be restored before managing classes.", "warning"
+            )
+            return
+
+        dialog = TeacherAssignmentDialog(
+            assignment_service=self._assignment_service,
+            teacher_id=self._current_teacher_id,
+            collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
+            teacher_is_active=(
+                self._current_teacher.status == Teacher.STATUS_ACTIVE
+            ),
+            parent=self,
+        )
+        dialog.assignments_changed.connect(self._on_assignment_changed)
+        dialog.exec()
+
+    def _on_assignment_changed(self) -> None:
+        if self._current_teacher_id:
+            self.load_teacher(self._current_teacher_id)
+            self.teacher_updated.emit()
+
+    def _on_restore(self) -> None:
+        if self._current_teacher_id is None:
+            return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(
+                "You must be in WRITE mode to restore a teacher.", "warning"
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Restore",
+            "Restore this teacher?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._teacher_service.restore_teacher(self._current_teacher_id)
+            self.load_teacher(self._current_teacher_id)
+            self.teacher_updated.emit()
+            self._notification_service.notify("Teacher restored successfully.", "success")
+        except Exception:
+            logger.exception("Restore teacher failed")
+            QMessageBox.critical(self, "Error", "Failed to restore teacher.")
+
     def _on_edit(self) -> None:
         if self._current_teacher_id is None:
             return
@@ -305,7 +403,23 @@ class TeacherDetailPage(QWidget):
             self.teacher_updated.emit()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        self.edit_btn.setEnabled(enabled)
+        if self._current_teacher is None:
+            self.edit_btn.setEnabled(enabled)
+            if hasattr(self, "manage_classes_btn"):
+                self.manage_classes_btn.setEnabled(enabled and self._can_manage_class_assignments())
+        else:
+            archived = self._current_teacher.deleted_at is not None
+            self.edit_btn.setEnabled(enabled and not archived)
+            if hasattr(self, "manage_classes_btn"):
+                # Keep lifecycle/write-state semantics explicit, then apply
+                # the additional role authorization layer.
+                self.manage_classes_btn.setEnabled(enabled and not archived)
+                if self.manage_classes_btn.isEnabled():
+                    self.manage_classes_btn.setEnabled(
+                        self._can_manage_class_assignments()
+                    )
+            if hasattr(self, "restore_btn"):
+                self.restore_btn.setEnabled(enabled and archived)
         # Documents upload button is inside documents_widget, need to propagate
         if hasattr(self.documents_widget, 'set_write_enabled'):
             self.documents_widget.set_write_enabled(enabled)
