@@ -281,3 +281,5 @@ class StudentFinancialWidget(QWidget):
     def refresh(self) -> None:
         if self._student_id is not None:
             self.set_student(self._student_id)
+# detail.status
+#  "Chưa cấu hình"

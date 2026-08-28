@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction
 
 from centermanager.models.user import User
-from centermanager.services.permission_service import PermissionService, UserNotFoundError
+from centermanager.services.permission_service import PermissionService, UserNotFoundError, UserLifecycleError
 from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.admin_workspace.user_form_dialog import UserFormDialog
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
+from centermanager.ui.admin_workspace.access import can_write, notify
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class UserListPage(QWidget):
         self._service = permission_service
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
+        self._write_enabled = can_write(self._collaboration_manager)
         self._users: List[User] = []
         self._filtered: List[User] = []
 
@@ -139,6 +141,8 @@ class UserListPage(QWidget):
 
     def _on_row_double_clicked(self, row: int) -> None:
         if row < len(self._filtered):
+            if not self._write_enabled:
+                return
             self._show_edit_dialog(self._filtered[row].id)
 
     def _on_context_menu(self, pos, row: int) -> None:
@@ -147,10 +151,12 @@ class UserListPage(QWidget):
         user = self._filtered[row]
         menu = QMenu(self)
         edit_action = QAction("Edit", self)
+        edit_action.setEnabled(self._write_enabled)
         edit_action.triggered.connect(lambda: self._show_edit_dialog(user.id))
         menu.addAction(edit_action)
 
         reset_action = QAction("Reset Password", self)
+        reset_action.setEnabled(self._write_enabled)
         reset_action.triggered.connect(lambda: self._reset_password(user.id))
         menu.addAction(reset_action)
 
@@ -158,39 +164,42 @@ class UserListPage(QWidget):
 
         if user.is_active:
             deactivate_action = QAction("Deactivate", self)
+            deactivate_action.setEnabled(self._write_enabled)
             deactivate_action.triggered.connect(lambda: self._toggle_active(user.id, False))
             menu.addAction(deactivate_action)
         else:
             activate_action = QAction("Activate", self)
+            activate_action.setEnabled(self._write_enabled)
             activate_action.triggered.connect(lambda: self._toggle_active(user.id, True))
             menu.addAction(activate_action)
 
         if user.is_locked:
             unlock_action = QAction("Unlock", self)
+            unlock_action.setEnabled(self._write_enabled)
             unlock_action.triggered.connect(lambda: self._unlock_user(user.id))
             menu.addAction(unlock_action)
 
         menu.exec(pos)
 
     def _show_add_dialog(self) -> None:
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to add a user.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to add a user.", "warning")
             return
         dialog = UserFormDialog(self._service, parent=self)
         if dialog.exec() == UserFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _show_edit_dialog(self, user_id: int) -> None:
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to edit a user.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to edit a user.", "warning")
             return
         dialog = UserFormDialog(self._service, user_id=user_id, parent=self)
         if dialog.exec() == UserFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _reset_password(self, user_id: int) -> None:
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to reset password.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to reset password.", "warning")
             return
         reply = QMessageBox.question(
             self,
@@ -212,8 +221,8 @@ class UserListPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _toggle_active(self, user_id: int, active: bool) -> None:
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to change user status.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to change user status.", "warning")
             return
         action = "Activate" if active else "Deactivate"
         reply = QMessageBox.question(
@@ -226,13 +235,15 @@ class UserListPage(QWidget):
             try:
                 self._service.set_user_active(user_id, active)
                 self.refresh()
+            except UserLifecycleError as e:
+                QMessageBox.warning(self, "Action blocked", str(e))
             except Exception as e:
                 logger.exception(f"{action} failed")
                 QMessageBox.critical(self, "Error", str(e))
 
     def _unlock_user(self, user_id: int) -> None:
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to unlock a user.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to unlock a user.", "warning")
             return
         try:
             self._service.unlock_user(user_id)
@@ -243,4 +254,5 @@ class UserListPage(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     def set_write_enabled(self, enabled: bool) -> None:
-        self.add_btn.setEnabled(enabled)
+        self._write_enabled = bool(enabled)
+        self.add_btn.setEnabled(self._write_enabled)

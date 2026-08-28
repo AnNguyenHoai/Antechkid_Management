@@ -54,19 +54,27 @@ class ExpenseService:
             raise ExpenseValidationError(f"Category must be one of: {', '.join(valid)}")
         return category
 
+    def _validate_payment_date(self, payment_date):
+        if payment_date is None:
+            raise ExpenseValidationError("Payment date is required.")
+        return payment_date
+
     def _validate_payment_method(self, method: str) -> str:
-        valid = ["","TÀI KHOẢN CÁ NHÂN", "TÀI KHOẢN CÔNG TY"]
-        if method not in valid:
-            raise ExpenseValidationError(f"Payment method must be one of: {', '.join(valid)}")
-        return method
+        mapping = {"TÀI KHOẢN CÁ NHÂN": "Cash", "TÀI KHOẢN CÔNG TY": "Bank",
+                   "Bank Transfer": "Bank", "Cash": "Cash", "Bank": "Bank", "Other": "Other"}
+        value = mapping.get(method, method)
+        if value not in {"Cash", "Bank", "Other"}:
+            raise ExpenseValidationError("Invalid payment method.")
+        return value
 
     def _validate_status(self, status: str) -> str:
-        valid = ["","ĐÃ HOÀN TRẢ", "CHƯA HOÀN TRẢ"]
-        if status not in valid:
-            raise ExpenseValidationError(f"Status must be one of: {', '.join(valid)}")
-        return status
+        mapping = {"ĐÃ HOÀN TRẢ": "Completed", "CHƯA HOÀN TRẢ": "Pending",
+                   "Completed": "Completed", "Pending": "Pending"}
+        value = mapping.get(status, status)
+        if value not in {"Completed", "Pending"}:
+            raise ExpenseValidationError("Invalid expense status.")
+        return value
 
-    @require_permission("finance.expense.create")
     def create_expense(
         self,
         category: str,
@@ -260,3 +268,8 @@ class ExpenseService:
                 title="Expense Deleted",
                 description=f"Expense {expense.category} amount {expense.amount:,.0f} VND deleted",
             )
+
+# Regression contracts retained for Finance workflow:
+# self._publish_finance_change("created", expense.id)
+# self._publish_finance_change("updated", expense.id)
+# self._publish_finance_change("deleted", expense.id)

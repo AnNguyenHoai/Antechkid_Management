@@ -10,7 +10,11 @@ from typing import List, Optional, Tuple, Dict
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import or_
 
-from centermanager.dto.outstanding_dto import OutstandingDTO, StudentOutstandingSummary
+from centermanager.dto.outstanding_dto import (
+    OutstandingDTO,
+    StudentOutstandingSummary,
+    OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
+)
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
@@ -163,10 +167,18 @@ class OutstandingService:
             enrollments = enroll_repo.get_by_student(student_id)
 
             details = []
+            seen_pairs = set()
+            seen_class_ids = set()
             total_expected = 0
             total_paid = 0
+            has_unconfigured_tuition = False
 
             for enrollment in enrollments:
+                pair = (enrollment.student_id, enrollment.class_id)
+                if pair in seen_pairs or enrollment.class_id in seen_class_ids:
+                    continue
+                seen_pairs.add(pair)
+                seen_class_ids.add(enrollment.class_id)
                 if enrollment.class_id is None:
                     continue
                 dto = self.get_outstanding_for_enrollment(
@@ -176,13 +188,11 @@ class OutstandingService:
                 )
                 if dto is not None:
                     details.append(dto)
-            total_paid += dto.paid
-            if dto.tuition_configured:
-                total_expected += dto.expected_tuition
-            else:
-                has_unconfigured_tuition = True
-                    total_expected += dto.expected_tuition
                     total_paid += dto.paid
+                    if dto.tuition_configured:
+                        total_expected += dto.expected_tuition
+                    else:
+                        has_unconfigured_tuition = True
 
             total_outstanding = total_expected - total_paid
             if total_outstanding == 0:

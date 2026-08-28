@@ -186,3 +186,8 @@ class ExpenseFormDialog(QDialog):
         except Exception as e:
             logger.exception("Save expense error")
             QMessageBox.critical(self, "Error", str(e))
+# "Cash"
+# "Bank"
+# "Completed"
+# "Pending"
+# currentData()

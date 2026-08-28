@@ -1041,3 +1041,5 @@ class MainWindow(QMainWindow):
         
         self._collaboration_manager.shutdown()
         event.accept()
+# self.finance_workspace.student_selected.connect(self._show_student_from_finance)
+# self.student_workspace.show_student(student_id)

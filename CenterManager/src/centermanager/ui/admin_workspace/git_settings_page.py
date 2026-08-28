@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from centermanager.services.git_config_service import GitConfigService, GitConfigValidationError
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
+from centermanager.ui.admin_workspace.access import can_write, notify
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class GitSettingsPage(QWidget):
         self._git_config_service = git_config_service
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
+        self._write_enabled = can_write(self._collaboration_manager)
+        self._bundle_valid = False
 
         self._setup_ui()
         self._load_status()
@@ -189,15 +192,26 @@ class GitSettingsPage(QWidget):
     def _on_bundle_changed(self) -> None:
         """Update button state when bundle changes."""
         bundle = self.bundle_edit.toPlainText().strip()
-        has_text = bool(bundle)
-        self.save_btn.setEnabled(has_text)
-        self.test_btn.setEnabled(has_text)
+        self._bundle_valid = False
+        self._update_buttons()
 
     def _update_buttons(self) -> None:
-        """Update button states based on write mode."""
-        can_write = self._collaboration_manager.ensure_write()
-        self.save_btn.setEnabled(can_write)
-        self.change_btn.setEnabled(can_write)
+        """Update button states without assuming Collaboration is initialized."""
+        self._write_enabled = can_write(self._collaboration_manager)
+        has_text = bool(self.bundle_edit.toPlainText().strip())
+        editable = not self.bundle_edit.isReadOnly()
+
+        self.change_btn.setEnabled(
+            self._write_enabled and self._git_config_service is not None
+        )
+        self.test_btn.setEnabled(
+            self._write_enabled and editable and has_text
+            and self._git_config_service is not None
+        )
+        self.save_btn.setEnabled(
+            self._write_enabled and editable and has_text and self._bundle_valid
+            and self._git_config_service is not None
+        )
 
     def _test_connection(self) -> None:
         """Test the encrypted configuration connection."""
@@ -216,23 +230,27 @@ class GitSettingsPage(QWidget):
             if result.success:
                 self.message_label.setText("✅ Connection successful!")
                 self.message_label.setStyleSheet("color: #2e7d32; font-size: 13px;")
-                self.save_btn.setEnabled(True)
+                self._bundle_valid = True
+                self._update_buttons()
             else:
                 self.message_label.setText(f"❌ Connection failed: {result.message}")
                 self.message_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
-                self.save_btn.setEnabled(False)
+                self._bundle_valid = False
+                self._update_buttons()
         except GitConfigValidationError as e:
             self.message_label.setText(f"❌ Invalid bundle: {str(e)}")
             self.message_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
-            self.save_btn.setEnabled(False)
+            self._bundle_valid = False
+            self._update_buttons()
         except Exception as e:
             logger.exception("Test connection failed")
             self.message_label.setText(f"❌ Error: {str(e)}")
             self.message_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
-            self.save_btn.setEnabled(False)
+            self._bundle_valid = False
+            self._update_buttons()
         finally:
             self.progress.setVisible(False)
-            self.test_btn.setEnabled(True)
+            self._update_buttons()
 
     def _save_config(self) -> None:
         """Save the encrypted configuration."""
@@ -241,8 +259,8 @@ class GitSettingsPage(QWidget):
             QMessageBox.warning(self, "Error", "Please paste an encrypted configuration bundle.")
             return
 
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to save Git configuration.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to save Git configuration.", "warning")
             return
 
         try:
@@ -250,10 +268,12 @@ class GitSettingsPage(QWidget):
             self._load_status()
             self.message_label.setText("✅ Configuration saved successfully!")
             self.message_label.setStyleSheet("color: #2e7d32; font-size: 13px;")
+            self._bundle_valid = False
+            self._update_buttons()
             self.config_changed.emit()
 
             if self._notification_service:
-                self._notification_service.notify("Git configuration updated.", "success")
+                notify(self._notification_service, "Git configuration updated.", "success")
 
             QMessageBox.information(self, "Success", "Git configuration saved successfully.")
 
@@ -269,5 +289,6 @@ class GitSettingsPage(QWidget):
         self._update_buttons()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        """Enable/disable write actions."""
+        """Receive WRITE state from the workspace transaction controller."""
+        self._write_enabled = bool(enabled)
         self._update_buttons()

@@ -19,6 +19,7 @@ from centermanager.core.paths import get_paths
 from centermanager.core.config import get_config, save_config
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
+from centermanager.ui.admin_workspace.access import can_write, notify
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
+        self._write_enabled = can_write(self._collaboration_manager)
         self._setup_ui()
         self._load_settings()
 
@@ -220,8 +222,8 @@ class SettingsPage(QWidget):
 
     def _save_settings(self) -> None:
         """Save all settings to config."""
-        if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to save settings.", "warning")
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to save settings.", "warning")
             return
 
         try:
@@ -250,7 +252,7 @@ class SettingsPage(QWidget):
 
             save_config(data)
             QMessageBox.information(self, "Success", "Settings saved successfully.")
-            self._notification_service.notify("Settings updated.", "success")
+            notify(self._notification_service, "Settings updated.", "success")
 
         except Exception as e:
             logger.exception("Error saving settings")
@@ -258,4 +260,5 @@ class SettingsPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         """Enable/disable save button based on write mode."""
+        self._write_enabled = enabled
         self.save_btn.setEnabled(enabled)

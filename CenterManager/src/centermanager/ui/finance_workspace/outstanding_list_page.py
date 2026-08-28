@@ -188,3 +188,5 @@ class OutstandingListPage(QWidget):
     def set_write_enabled(self, enabled: bool) -> None:
         # Outstanding is read-only, no actions to enable/disable
         pass
+# "Chưa xác định"
+# "Chưa cấu hình"

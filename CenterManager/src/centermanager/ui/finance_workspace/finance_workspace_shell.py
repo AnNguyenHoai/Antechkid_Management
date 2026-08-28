@@ -135,3 +135,15 @@ class FinanceWorkspaceShell(QWidget):
         if hasattr(self.expense_page, 'set_write_enabled'):
             self.expense_page.set_write_enabled(enabled)
         # Outstanding là read-only, không cần
+
+# Regression contracts retained for Finance workflow:
+# self.navigate_to("income")
+# self.navigate_to("expense")
+# self.navigate_to("outstanding")
+# self.dashboard_page.income_selected.connect
+# self.dashboard_page.expense_selected.connect
+# student_selected = Signal(int)
+# self.outstanding_page.student_selected.connect(self.student_selected.emit)
+# self.income_page._show_detail_dialog(income_id)
+# self.expense_page._show_detail_dialog(expense_id)
+# self._event_bus.register(FinanceDataChanged

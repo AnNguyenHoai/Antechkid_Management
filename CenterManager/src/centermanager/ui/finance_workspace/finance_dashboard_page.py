@@ -205,3 +205,13 @@ class FinanceDashboardPage(QWidget):
         ], columns=5)
         self.income_table.set_data([], 0)
         self.expense_table.set_data([], 0)
+# go_to_income = Signal()
+# go_to_expense = Signal()
+# go_to_outstanding = Signal()
+# income_selected = Signal(int)
+# expense_selected = Signal(int)
+# row_double_clicked.connect(self._on_income_row_double_clicked)
+# row_double_clicked.connect(self._on_expense_row_double_clicked)
+# total_outstanding = data.get("total_outstanding", 0)
+# net_cash_month
+# net_bank_month

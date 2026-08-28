@@ -449,17 +449,19 @@ class WriteTransactionManager:
                 self._reset_to_idle()
                 return True
             else:
-                # Keep the pending version and local commit intact so the exact
-                # same publication can be retried after a transient/conflict failure.
-                self._state = WriteTransactionState.OFFLINE_PENDING_PUBLISH
-                logger.info("Transaction: OFFLINE_PENDING_PUBLISH (publish failed; pending version retained)")
+                self._state = WriteTransactionState.FAILED
+                if self._version_manager:
+                    self._version_manager.clear_pending_version()
+                self._pending_version = None
+                logger.error("Transaction: FAILED (publish returned False)")
                 if self._on_publish_failure:
                     self._on_publish_failure("Publish operation failed (push failed)")
                 return False
         except Exception as e:
-            # A failed push is retryable. Do not clear the pending version or
-            # release the write lock here.
-            self._state = WriteTransactionState.OFFLINE_PENDING_PUBLISH
+            self._state = WriteTransactionState.FAILED
+            if self._version_manager:
+                self._version_manager.clear_pending_version()
+            self._pending_version = None
             logger.exception(f"Publish exception: {e}")
             if self._on_publish_failure:
                 self._on_publish_failure(str(e))
@@ -603,6 +605,12 @@ class WriteTransactionManager:
         if not session:
             return {"success": False, "reason": "No active session"}
 
+        if not self._collab_manager.is_collaboration_available():
+            self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+            reason = "Collaboration unavailable"
+            logger.warning(f"Entered FINISHING_WAITING_FOR_COLLABORATION due to: {reason}")
+            return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
+
         # 1. Validate collaboration authority (includes availability, lease, heartbeat)
         auth = self._collab_manager.validate_write_authority(session)
 
@@ -675,11 +683,41 @@ class WriteTransactionManager:
         }
 
     def refresh_finishing_authority(self) -> Dict[str, Any]:
-        if self._state not in (WriteTransactionState.FINISHING,
-                               WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION):
+        if self._state not in (
+            WriteTransactionState.FINISHING,
+            WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
+        ):
             return {"success": False, "reason": f"Not in finishing state: {self._state.name}"}
 
-        # Check if deadline expired
+        # Once already waiting, the finishing deadline remains absolute.
+        if (
+            self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+            and self._finishing_deadline
+            and datetime.now() >= self._finishing_deadline
+        ):
+            self._state = WriteTransactionState.FINISHING_STALE
+            logger.warning("Finishing deadline expired while waiting -> FINISHING_STALE")
+            return {"success": False, "reason": "Deadline expired", "state": "STALE"}
+
+        # Collaboration availability is the highest-priority gate for a normal
+        # FINISHING refresh.
+        if not self._collab_manager.is_collaboration_available():
+            if self._state != WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
+                self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+                logger.warning("Collaboration unavailable -> FINISHING_WAITING_FOR_COLLABORATION")
+            return {
+                "success": False,
+                "reason": "Collaboration unavailable",
+                "state": "WAITING_FOR_COLLABORATION",
+            }
+
+        # Once collaboration is available again, restore FINISHING and only
+        # then evaluate deadline/authority. This preserves the explicit paused
+        # state expected by the finishing-authority contract.
+        if self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
+            self._state = WriteTransactionState.FINISHING
+            logger.info("Collaboration restored -> FINISHING")
+
         if self._finishing_deadline and datetime.now() >= self._finishing_deadline:
             self._state = WriteTransactionState.FINISHING_STALE
             logger.warning("Finishing deadline expired -> FINISHING_STALE")
@@ -690,49 +728,82 @@ class WriteTransactionManager:
             self._state = WriteTransactionState.FINISHING_STALE
             return {"success": False, "reason": "No session", "state": "STALE"}
 
-        # Validate authority
         auth = self._collab_manager.validate_write_authority(session)
 
         if auth.get("valid", False):
-            # Still valid, check generation against expected
             current_gen = self._collab_manager.get_lock_generation()
             if current_gen != self._expected_generation:
                 self._state = WriteTransactionState.FINISHING_STALE
-                reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
-                logger.warning(f"Authority refresh failed: {reason}")
+                reason = (
+                    f"Generation mismatch: expected {self._expected_generation}, "
+                    f"current {current_gen}"
+                )
                 return {"success": False, "reason": reason, "state": "STALE"}
 
-            # Check MAIN concurrency
             if self._base_main_commit and self._collab_manager._sync_provider:
                 try:
                     current_main = self._collab_manager._sync_provider.get_remote_main_commit()
-                    if current_main is None:
-                        self._state = WriteTransactionState.PUBLISH_CONFLICT
-                        reason = "MAIN verification failed: cannot get remote commit"
-                        logger.warning(f"Authority refresh -> PUBLISH_CONFLICT: {reason}")
-                        return {"success": False, "reason": reason, "state": "CONFLICT"}
-                    if current_main != self._base_main_commit:
-                        self._state = WriteTransactionState.PUBLISH_CONFLICT
-                        reason = f"MAIN conflict: base={self._base_main_commit[:8]}, current={current_main[:8]}"
-                        logger.warning(f"Authority refresh -> PUBLISH_CONFLICT: {reason}")
-                        return {"success": False, "reason": reason, "state": "CONFLICT"}
                 except Exception as e:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
                     reason = f"MAIN verification unavailable: {e}"
-                    logger.warning(f"Authority refresh -> PUBLISH_CONFLICT: {reason}")
+                    return {"success": False, "reason": reason, "state": "CONFLICT"}
+                if current_main is None:
+                    self._state = WriteTransactionState.PUBLISH_CONFLICT
+                    reason = "MAIN verification failed: cannot get remote commit"
+                    return {"success": False, "reason": reason, "state": "CONFLICT"}
+                if current_main != self._base_main_commit:
+                    self._state = WriteTransactionState.PUBLISH_CONFLICT
+                    reason = (
+                        f"MAIN conflict: base={self._base_main_commit[:8]}, "
+                        f"current={current_main[:8]}"
+                    )
                     return {"success": False, "reason": reason, "state": "CONFLICT"}
 
-            if self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
-                self._state = WriteTransactionState.FINISHING
-                logger.info("Collaboration restored and generation valid -> back to FINISHING")
             return {"success": True, "reason": "Authority valid", "state": self._state.name}
 
         reason = auth.get("reason", "Unknown")
         if "unavailable" in reason.lower():
-            if self._state != WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
-                self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
-                logger.warning(f"Collaboration unavailable -> FINISHING_WAITING_FOR_COLLABORATION: {reason}")
-            return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
+            self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+            return {
+                "success": False,
+                "reason": reason,
+                "state": "WAITING_FOR_COLLABORATION",
+            }
+
+        # Preserve the special optimistic-concurrency fence for a lease
+        # observation gap while remote identity still proves our session.
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if (
+            "lease expired or missing" in reason.lower()
+            and provider is not None
+            and self._base_main_commit
+        ):
+            try:
+                remote = provider.remote_lock_status()
+                if (
+                    isinstance(remote, dict)
+                    and remote.get("locked")
+                    and remote.get("session_id") == session.session_id
+                    and remote.get("lock_generation") == self._expected_generation
+                ):
+                    try:
+                        current_main = provider.get_remote_main_commit()
+                    except Exception as exc:
+                        self._state = WriteTransactionState.PUBLISH_CONFLICT
+                        return {
+                            "success": False,
+                            "reason": f"MAIN verification unavailable: {exc}",
+                            "state": "CONFLICT",
+                        }
+                    if current_main is None or current_main != self._base_main_commit:
+                        self._state = WriteTransactionState.PUBLISH_CONFLICT
+                        return {
+                            "success": False,
+                            "reason": "MAIN verification failed",
+                            "state": "CONFLICT",
+                        }
+            except Exception:
+                pass
 
         self._state = WriteTransactionState.FINISHING_STALE
         logger.warning(f"Authority invalid -> FINISHING_STALE: {reason}")

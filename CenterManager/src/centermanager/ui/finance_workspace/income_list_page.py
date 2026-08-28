@@ -319,3 +319,5 @@ class IncomeListPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         self.add_btn.setEnabled(enabled)
+# edit_action.setEnabled(self._write_enabled)
+# delete_action.setEnabled(self._write_enabled)

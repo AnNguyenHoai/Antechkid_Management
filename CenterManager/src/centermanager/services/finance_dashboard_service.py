@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 class FinanceDashboardService:
     """Aggregate financial data for dashboard. Read-only."""
 
-    def __init__(self, income_service: IncomeService, expense_service: ExpenseService):
+    def __init__(self, income_service: IncomeService, expense_service: ExpenseService, outstanding_service=None):
         self._income_service = income_service
         self._expense_service = expense_service
+        self._outstanding_service = outstanding_service
+        self._outstanding_service = outstanding_service
 
     def _get_today_date(self) -> date:
         return date.today()
@@ -117,7 +119,7 @@ class FinanceDashboardService:
         for inc in incomes:
             method = inc.payment_method or "Other"
             result[method] = result.get(method, 0.0) + inc.amount
-        return result
+        return {"Cash": result.get("Cash", 0), "Bank": result.get("Bank", result.get("Bank Transfer", 0)), "Other": result.get("Other", 0)}
 
     def get_expense_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
         """Return expense breakdown by payment method."""
@@ -131,7 +133,7 @@ class FinanceDashboardService:
         for exp in expenses:
             method = exp.payment_method or "Other"
             result[method] = result.get(method, 0.0) + exp.amount
-        return result
+        return {"Cash": result.get("Cash", 0), "Bank": result.get("Bank", result.get("Bank Transfer", 0)), "Other": result.get("Other", 0)}
 
     def get_dashboard_data(self) -> Dict[str, Any]:
         today = self._get_today_date()
@@ -147,3 +149,25 @@ class FinanceDashboardService:
             "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
             "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
         }
+    @staticmethod
+    def _normalize_payment_method(value):
+        mapping = {"Bank Transfer": "Bank", "Bank": "Bank", "Cash": "Cash", "Other": "Other"}
+        return mapping.get(value, "Other")
+
+    def get_dashboard_snapshot(self):
+        from types import SimpleNamespace
+        today = date.today()
+        revenue = self.get_revenue_by_payment_method(today, today)
+        expense = self.get_expense_by_payment_method(today, today)
+        stats = self._outstanding_service.get_outstanding_stats() if self._outstanding_service else {}
+        return SimpleNamespace(
+            cash_in_month=revenue.get("Cash", 0),
+            bank_in_month=revenue.get("Bank", 0),
+            cash_out_month=expense.get("Cash", 0),
+            bank_out_month=expense.get("Bank", 0),
+            net_cash_month=revenue.get("Cash", 0) - expense.get("Cash", 0),
+            net_bank_month=revenue.get("Bank", 0) - expense.get("Bank", 0),
+            total_outstanding=stats.get("total_outstanding", 0),
+            students_with_debt=stats.get("total_students_with_debt", 0),
+            unconfigured_tuition_count=stats.get("total_unconfigured_tuition", 0),
+        )

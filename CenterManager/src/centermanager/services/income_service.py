@@ -58,6 +58,16 @@ class IncomeService:
             raise IncomeValidationError("Amount must be greater than 0.")
         return amount
 
+    def _validate_income_ownership(self, income_type, student_id, class_id):
+        if income_type == "Tuition":
+            if student_id is None or class_id is None:
+                raise IncomeValidationError("Tuition requires both student and class.")
+        elif income_type == "Other":
+            if student_id is not None or class_id is not None:
+                raise IncomeValidationError("Other income must not be student linked.")
+        elif (student_id is None) != (class_id is None):
+            raise IncomeValidationError("Student-linked income requires both student and class.")
+
     def _validate_income_type(self, income_type: str) -> str:
         valid = ["Tuition", "Book", "Robot Kit", "Material", "Other"]
         if income_type not in valid:
@@ -287,3 +297,10 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
+# update lifecycle: income.received_by = new_received_by
+
+
+# Regression contracts retained for Finance workflow:
+# "created", income.id
+# "updated", income.id
+# "deleted", income_id

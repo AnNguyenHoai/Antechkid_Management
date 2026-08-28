@@ -354,9 +354,11 @@ def main() -> int:
             timeline_service=timeline_service,
             permission_service=permission_service,
         )
-        finance_dashboard_service = FinanceDashboardService(income_service, expense_service)
         outstanding_service = OutstandingService(session_factory)
-
+        finance_dashboard_service = FinanceDashboardService(
+            income_service, expense_service, outstanding_service
+        )
+        
         attendance_service = AttendanceService(
             session_factory=session_factory,
             timeline_service=timeline_service,

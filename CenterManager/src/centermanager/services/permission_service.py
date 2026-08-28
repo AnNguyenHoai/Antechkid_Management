@@ -26,6 +26,11 @@ class UserNotFoundError(Exception):
     pass
 
 
+class UserLifecycleError(ValueError):
+    """Raised when a user-management action would violate account invariants."""
+    pass
+
+
 class PermissionService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
@@ -105,6 +110,36 @@ class PermissionService:
 
     # ===== User Management =====
 
+    def _current_user_id(self) -> Optional[int]:
+        current = get_current_user()
+        return getattr(current, "id", None) if current is not None else None
+
+    def _count_active_admins(self, session) -> int:
+        admin_role = RoleRepository(session).get_by_name(RoleDefinitions.ADMIN)
+        if admin_role is None:
+            return 0
+        return session.query(User).filter(
+            User.role_id == admin_role.id,
+            User.is_active == True,
+        ).count()
+
+    def _is_last_active_admin(self, session, user: User) -> bool:
+        return bool(
+            user.is_active
+            and user.role is not None
+            and user.role.name == RoleDefinitions.ADMIN
+            and self._count_active_admins(session) <= 1
+        )
+
+    def _ensure_not_current_user(self, user_id: int, action: str) -> None:
+        if self._current_user_id() == user_id:
+            raise UserLifecycleError(f"You cannot {action} your own account.")
+
+    def _ensure_not_last_admin(self, session, user: User, action: str) -> None:
+        if self._is_last_active_admin(session, user):
+            raise UserLifecycleError(f"Cannot {action} the last active administrator.")
+
+
     def get_user(self, user_id: int) -> Optional[User]:
         with self._session_factory() as session:
             repo = UserRepository(session)
@@ -122,9 +157,9 @@ class PermissionService:
         set_current_user(user)
 
     def get_all_users(self) -> List[User]:
+        """Return all accounts, including inactive accounts, for administration."""
         with self._session_factory() as session:
-            repo = UserRepository(session)
-            return repo.list_active()
+            return session.query(User).all()
 
     def create_user(
         self,
@@ -135,6 +170,9 @@ class PermissionService:
         role_name: str = RoleDefinitions.RECEPTION,
     ) -> User:
         with self._session_factory() as session:
+            repo = UserRepository(session)
+            if repo.get_by_username(username) is not None:
+                raise ValueError(f"Username '{username}' already exists.")
             role_repo = RoleRepository(session)
             role = role_repo.get_by_name(role_name)
             if role is None:
@@ -148,7 +186,6 @@ class PermissionService:
                 role_id=role.id,
                 is_active=True,
             )
-            repo = UserRepository(session)
             repo.add(user)
             session.commit()
             session.refresh(user)
@@ -160,12 +197,12 @@ class PermissionService:
             user = user_repo.get_by_id_with_role(user_id)
             if user is None:
                 raise UserNotFoundError(f"User {user_id} not found.")
-
-            role_repo = RoleRepository(session)
-            role = role_repo.get_by_name(role_name)
+            role = RoleRepository(session).get_by_name(role_name)
             if role is None:
                 raise ValueError(f"Role '{role_name}' not found.")
-
+            if user.role is not None and user.role.name == RoleDefinitions.ADMIN and role.name != RoleDefinitions.ADMIN:
+                self._ensure_not_current_user(user_id, "remove administrator access from")
+                self._ensure_not_last_admin(session, user, "remove administrator access from")
             user.role_id = role.id
             session.commit()
             session.refresh(user)
@@ -174,69 +211,56 @@ class PermissionService:
     def delete_user(self, user_id: int) -> None:
         with self._session_factory() as session:
             repo = UserRepository(session)
-            user = repo.get_by_id(user_id)
+            user = repo.get_by_id_with_role(user_id)
             if user is None:
                 raise UserNotFoundError(f"User {user_id} not found.")
+            self._ensure_not_current_user(user_id, "delete")
+            self._ensure_not_last_admin(session, user, "delete")
             repo.delete(user)
             session.commit()
 
-    # ===== Permission Management =====
-
-    def get_all_permissions(self) -> List[Permission]:
+    def set_user_active(self, user_id: int, active: bool) -> User:
         with self._session_factory() as session:
-            repo = PermissionRepository(session)
-            return repo.list_all()
-
-    def get_permissions_by_category(self, category: str) -> List[Permission]:
-        with self._session_factory() as session:
-            repo = PermissionRepository(session)
-            return repo.get_by_category(category)
-
-# src/centermanager/services/permission_service.py (thêm các method)
+            user_repo = UserRepository(session)
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+            if not active:
+                self._ensure_not_current_user(user_id, "deactivate")
+                self._ensure_not_last_admin(session, user, "deactivate")
+            user.is_active = active
+            session.commit()
+            session.refresh(user)
+            logger.info("User account status changed: user_id=%s active=%s", user_id, active)
+            return user
 
     def create_user_with_temp_password(
-        self,
-        username: str,
-        full_name: str,
-        role_name: str,
-        email: Optional[str] = None,
-        phone: Optional[str] = None,
+        self, username: str, full_name: str, role_name: str,
+        email: Optional[str] = None, phone: Optional[str] = None,
         temp_password: Optional[str] = None,
     ) -> User:
-        """Create a new user with a temporary password."""
-        import hashlib
-        from centermanager.models.role import RoleDefinitions
-
-        # Validate role
-        valid_roles = [RoleDefinitions.ADMIN, RoleDefinitions.TEACHER,
-                       RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE,RoleDefinitions.MANAGER, ]
+        import hashlib, secrets, string
+        valid_roles = {
+            RoleDefinitions.ADMIN, RoleDefinitions.TEACHER,
+            RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE,
+            RoleDefinitions.MANAGER,
+        }
         if role_name not in valid_roles:
-            raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+            raise ValueError(f"Invalid role: {role_name}")
 
         with self._session_factory() as session:
-            role_repo = RoleRepository(session)
-            role = role_repo.get_by_name(role_name)
+            user_repo = UserRepository(session)
+            if user_repo.get_by_username(username) is not None:
+                raise ValueError(f"Username '{username}' already exists.")
+            role = RoleRepository(session).get_by_name(role_name)
             if role is None:
                 raise ValueError(f"Role '{role_name}' not found.")
-
-            # Check username uniqueness
-            user_repo = UserRepository(session)
-            existing = user_repo.get_by_username(username)
-            if existing:
-                raise ValueError(f"Username '{username}' already exists.")
-
-            # Generate temp password if not provided
             if temp_password is None:
-                import secrets
-                import string
                 alphabet = string.ascii_letters + string.digits
-                temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
-
-            password_hash = hashlib.sha256(temp_password.encode()).hexdigest()
-
+                temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
             user = User(
                 username=username,
-                password_hash=password_hash,
+                password_hash=hashlib.sha256(temp_password.encode()).hexdigest(),
                 full_name=full_name,
                 email=email,
                 phone=phone,
@@ -248,47 +272,25 @@ class PermissionService:
             user_repo.add(user)
             session.commit()
             session.refresh(user)
-
-            # Log user creation (could use timeline or separate audit)
-            logger.info(f"User created: {username} with role {role_name}")
-
+            logger.info("User created: username=%s role=%s", username, role_name)
             return user
 
     def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:
-        """Reset user password, return the new temporary password."""
-        import hashlib
-        import secrets
-        import string
-
+        import hashlib, secrets, string
         with self._session_factory() as session:
-            user_repo = UserRepository(session)
-            user = user_repo.get_by_id_with_role(user_id)
+            user = UserRepository(session).get_by_id_with_role(user_id)
             if user is None:
                 raise UserNotFoundError(f"User {user_id} not found.")
-
             if temp_password is None:
                 alphabet = string.ascii_letters + string.digits
-                temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
-
+                temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
             user.password_hash = hashlib.sha256(temp_password.encode()).hexdigest()
             user.force_password_change = True
             user.login_attempts = 0
             user.locked_until = None
-
             session.commit()
-            logger.info(f"Password reset for user {user.username}")
+            logger.info("Password reset for user_id=%s", user_id)
             return temp_password
-
-    def set_user_active(self, user_id: int, active: bool) -> User:
-        with self._session_factory() as session:
-            user_repo = UserRepository(session)
-            user = user_repo.get_by_id_with_role(user_id)
-            if user is None:
-                raise UserNotFoundError(f"User {user_id} not found.")
-            user.is_active = active
-            session.commit()
-            session.refresh(user)
-            return user
 
     def update_user(self, user_id: int, full_name: Optional[str] = None,
                     email: Optional[str] = None, phone: Optional[str] = None,
@@ -310,6 +312,9 @@ class PermissionService:
                 role = role_repo.get_by_name(role_name)
                 if role is None:
                     raise ValueError(f"Role '{role_name}' not found.")
+                if user.role is not None and user.role.name == RoleDefinitions.ADMIN and role.name != RoleDefinitions.ADMIN:
+                    self._ensure_not_current_user(user_id, "remove administrator access from")
+                    self._ensure_not_last_admin(session, user, "remove administrator access from")
                 user.role_id = role.id
 
             session.commit()
