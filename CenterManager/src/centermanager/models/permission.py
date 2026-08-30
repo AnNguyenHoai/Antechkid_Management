@@ -90,6 +90,10 @@ class PermissionDefinitions:
     USER_UPDATE = "user.update"
     USER_DELETE = "user.delete"
     USER_RESET_PASSWORD = "user.reset_password"
+
+    # Role administration
+    ROLE_VIEW = "role.view"
+    ROLE_MANAGE = "role.manage"
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -127,6 +131,8 @@ class PermissionDefinitions:
             cls.USER_UPDATE,
             cls.USER_DELETE,
             cls.USER_RESET_PASSWORD,
+            cls.ROLE_VIEW,
+            cls.ROLE_MANAGE,
         ]
 
     @classmethod
@@ -166,6 +172,8 @@ class PermissionDefinitions:
             cls.USER_UPDATE: "admin",
             cls.USER_DELETE: "admin",
             cls.USER_RESET_PASSWORD: "admin",
+            cls.ROLE_VIEW: "admin",
+            cls.ROLE_MANAGE: "admin",
         }
 
         return category_map.get(permission_name, "other")

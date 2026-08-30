@@ -29,7 +29,8 @@ class RoleRepository(BaseRepository[Role]):
     def list_all_with_permissions(self) -> List[Role]:
         """List all roles with permissions loaded."""
         return self._session.query(Role).options(
-            joinedload(Role.permissions)
+            joinedload(Role.permissions),
+            joinedload(Role.users)
         ).all()
 
     def add(self, role: Role) -> Role:

@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QPushButton, QHBoxLayout, QMessageBox, QLabel, QWidget
 )
 
-from centermanager.models.role import RoleDefinitions
 from centermanager.services.permission_service import PermissionService
 
 logger = logging.getLogger(__name__)
@@ -70,15 +69,12 @@ class UserFormDialog(QDialog):
 
         # Role
         self.role_combo = QComboBox()
-        roles = [
-            (RoleDefinitions.ADMIN, "Administrator"),
-            (RoleDefinitions.TEACHER, "Teacher"),
-            (RoleDefinitions.RECEPTION, "Reception"),
-            (RoleDefinitions.FINANCE, "Finance"),
-            (RoleDefinitions.MANAGER, "Manager"),
-        ]
-        for name, display in roles:
-            self.role_combo.addItem(display, name)
+        try:
+            roles = self._service.get_all_roles()
+            for role in roles:
+                self.role_combo.addItem(role.display_name, role.name)
+        except Exception:
+            self.role_combo.addItem("Reception", "reception")
         form.addRow("Role *", self.role_combo)
 
         # For new user, show temporary password field

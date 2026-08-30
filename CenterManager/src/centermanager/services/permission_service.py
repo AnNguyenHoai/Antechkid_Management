@@ -31,6 +31,11 @@ class UserLifecycleError(ValueError):
     pass
 
 
+class RoleLifecycleError(ValueError):
+    """Raised when a role operation would violate RBAC invariants."""
+    pass
+
+
 class PermissionService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
@@ -107,6 +112,86 @@ class PermissionService:
         if user is None:
             return False
         return user.is_reception
+
+    # ===== Role & Permission Management =====
+
+    def get_all_roles(self) -> List[Role]:
+        with self._session_factory() as session:
+            return RoleRepository(session).list_all_with_permissions()
+
+    def get_role(self, role_id: int) -> Optional[Role]:
+        with self._session_factory() as session:
+            return RoleRepository(session).get_by_id_with_permissions(role_id)
+
+    def get_permissions_by_category(self):
+        with self._session_factory() as session:
+            permissions = PermissionRepository(session).list_all()
+            grouped = {}
+            for permission in permissions:
+                grouped.setdefault(permission.category or "other", []).append(permission)
+            return grouped
+
+    @staticmethod
+    def _validate_role_name(name: str) -> None:
+        if not name:
+            raise ValueError("Role key is required.")
+        normalized = name.replace("_", "")
+        if not normalized.isalnum() or name != name.lower():
+            raise ValueError("Role key must use lowercase letters, numbers and underscores only.")
+
+    def _resolve_permissions(self, session, permission_names: Set[str]) -> List[Permission]:
+        known = {p.name: p for p in PermissionRepository(session).list_all()}
+        unknown = sorted(set(permission_names) - set(known))
+        if unknown:
+            raise ValueError(f"Unknown permissions: {', '.join(unknown)}")
+        return [known[name] for name in sorted(permission_names)]
+
+    def create_role(self, name: str, display_name: str, description: Optional[str], permission_names: Set[str]) -> Role:
+        name = name.strip(); display_name = display_name.strip()
+        self._validate_role_name(name)
+        if not display_name:
+            raise ValueError("Display name is required.")
+        with self._session_factory() as session:
+            repo = RoleRepository(session)
+            if repo.get_by_name(name) is not None:
+                raise ValueError(f"Role '{name}' already exists.")
+            role = Role(name=name, display_name=display_name, description=description, is_system=False)
+            role.permissions = self._resolve_permissions(session, permission_names)
+            repo.add(role); session.commit(); session.refresh(role)
+            logger.info("Custom role created: %s", name)
+            return role
+
+    def update_role(self, role_id: int, display_name: str, description: Optional[str], permission_names: Set[str]) -> Role:
+        display_name = display_name.strip()
+        if not display_name:
+            raise ValueError("Display name is required.")
+        with self._session_factory() as session:
+            role = RoleRepository(session).get_by_id_with_permissions(role_id)
+            if role is None:
+                raise ValueError("Role not found.")
+            role.display_name = display_name
+            role.description = description
+            if role.is_system:
+                current = role.permission_names
+                if set(permission_names) != current:
+                    raise RoleLifecycleError("Permissions of protected system roles cannot be changed.")
+            else:
+                role.permissions = self._resolve_permissions(session, permission_names)
+            session.commit(); session.refresh(role)
+            logger.info("Role updated: %s", role.name)
+            return role
+
+    def delete_role(self, role_id: int) -> None:
+        with self._session_factory() as session:
+            role = RoleRepository(session).get_by_id_with_permissions(role_id)
+            if role is None:
+                raise ValueError("Role not found.")
+            if role.is_system:
+                raise RoleLifecycleError("Protected system roles cannot be deleted.")
+            if role.users:
+                raise RoleLifecycleError("A role assigned to users cannot be deleted. Reassign its users first.")
+            RoleRepository(session).delete(role); session.commit()
+            logger.info("Custom role deleted: %s", role.name)
 
     # ===== User Management =====
 

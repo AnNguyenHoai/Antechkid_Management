@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.admin_workspace.user_list_page import UserListPage
+from centermanager.ui.admin_workspace.role_list_page import RoleListPage
 from centermanager.ui.admin_workspace.settings_page import SettingsPage
 from centermanager.ui.admin_workspace.git_settings_page import GitSettingsPage
 from centermanager.ui.diagnostics_page import DiagnosticsPage
@@ -38,6 +39,7 @@ class AdminWorkspaceShell(QWidget):
         self._notification_service = notification_service or NotificationService()
         self._page_permissions = {
             "users": PermissionDefinitions.USER_MANAGE,
+            "roles": PermissionDefinitions.ROLE_MANAGE,
             "settings": PermissionDefinitions.SETTING_UPDATE,
             "git": PermissionDefinitions.SETTING_UPDATE,
             "diagnostics": PermissionDefinitions.USER_MANAGE,
@@ -62,6 +64,7 @@ class AdminWorkspaceShell(QWidget):
 
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"},
+            {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
             {"id": "git", "icon": "🔐", "label": "Git Config"},
             {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
@@ -79,6 +82,13 @@ class AdminWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.users_page)
+
+        self.roles_page = RoleListPage(
+            self._permission_service,
+            self._collaboration_manager,
+            self._notification_service,
+        )
+        self.content_stack.addWidget(self.roles_page)
 
         self.settings_page = SettingsPage(
             self._collaboration_manager,
@@ -122,6 +132,11 @@ class AdminWorkspaceShell(QWidget):
             self.nav.set_active_page("users")
             self.header.set_context("Admin Workspace", "Users")
             self.users_page.refresh()
+        elif page_id == "roles":
+            self.content_stack.setCurrentWidget(self.roles_page)
+            self.nav.set_active_page("roles")
+            self.header.set_context("Admin Workspace", "Roles & Permissions")
+            self.roles_page.refresh()
         elif page_id == "settings":
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
@@ -141,6 +156,8 @@ class AdminWorkspaceShell(QWidget):
         self.set_write_enabled(self._current_write_enabled())
         if self.content_stack.currentWidget() is self.users_page:
             self.users_page.refresh()
+        elif self.content_stack.currentWidget() is self.roles_page:
+            self.roles_page.refresh()
         elif self.content_stack.currentWidget() is self.git_settings_page:
             self.git_settings_page.refresh()
         elif self.content_stack.currentWidget() is self.diagnostics_page:
@@ -153,6 +170,8 @@ class AdminWorkspaceShell(QWidget):
     def set_write_enabled(self, enabled: bool) -> None:
         if hasattr(self.users_page, 'set_write_enabled'):
             self.users_page.set_write_enabled(enabled)
+        if hasattr(self.roles_page, 'set_write_enabled'):
+            self.roles_page.set_write_enabled(enabled)
         if hasattr(self.settings_page, 'set_write_enabled'):
             self.settings_page.set_write_enabled(enabled)
         if hasattr(self.git_settings_page, 'set_write_enabled'):
