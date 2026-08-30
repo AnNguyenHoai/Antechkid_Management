@@ -14,6 +14,7 @@ from centermanager.repositories.enrollment_repository import EnrollmentRepositor
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.permission_guard import require_permission
+from centermanager.events.student_events import StudentUpdated
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,14 @@ class AttendanceService:
         permission_service: PermissionService,
         report_policy: Optional[Any] = None,    # ReportPolicy instance, can be None
         report_service: Optional[Any] = None,   # ReportService instance, can be None
+        event_bus: Optional[Any] = None,
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._permission_service = permission_service
         self._report_policy = report_policy
         self._report_service = report_service
+        self._event_bus = event_bus
 
     def _validate_status(self, status: str) -> str:
         valid = [e.value for e in AttendanceStatus]
@@ -114,28 +117,18 @@ class AttendanceService:
                     metadata={"session_id": session_id, "status": status}
                 )
 
-                # Trigger report policy
-                self._trigger_report_policy(student_id, session_id, status)
+                # Attendance is report-relevant student data. Generation is
+                # deferred until Finish Editing publishes successfully.
+                if self._event_bus is not None:
+                    self._event_bus.publish(
+                        StudentUpdated(student_id=student_id, student_code="", student_name="", changes=["attendance"])
+                    )
 
                 return attendance
     def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
-        """Helper method to trigger report policy if available."""
-        if self._report_policy and self._report_service:
-            triggers = self._report_policy.check_and_trigger(
-                student_id,
-                "attendance_updated",
-                {"session_id": session_id, "status": status}
-            )
-            for trigger in triggers:
-                try:
-                    self._report_service.generate_student_report(
-                        student_id,
-                        report_type="automatic",
-                        trigger_event=trigger,
-                        generated_by="system"
-                    )
-                except Exception as e:
-                    logger.exception(f"Failed to generate automatic report for student {student_id}, trigger {trigger}: {e}")
+        """Deprecated compatibility hook; generation is deferred to publish lifecycle."""
+        return None
+
     @require_permission("attendance.create")
     def batch_update_attendance(
         self,

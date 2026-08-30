@@ -44,43 +44,56 @@ class AutoReportService:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
     def run_daily_check(self) -> None:
-        """Kiểm tra và tạo báo cáo tự động cho tất cả học sinh nếu đã qua ít nhất 1 ngày."""
+        """Generate one daily report per student and retry incomplete students."""
         today = date.today()
         last_run = self._get_last_run_date()
-
-        if today <= last_run:
-            logger.info(f"Auto report already run today (last run: {last_run}), skipping.")
+        if last_run >= today:
+            logger.info("Auto report already completed today (%s), skipping.", last_run)
             return
-
-        logger.info(f"Running auto report for all students (last run: {last_run}, today: {today})")
         try:
             students = self._student_service.list_students()
-            if not students:
-                logger.info("No active students found, skipping auto report.")
-                self._save_last_run_date(today)
-                return
+        except Exception:
+            logger.exception("Failed to load students for daily auto report.")
+            return
+        if not students:
+            self._save_last_run_date(today)
+            return
 
-            generated_count = 0
+        failed = False
+        generated_count = 0
+        for student in students:
+            try:
+                if self._report_service.report_exists_on_date(student.id, "daily", today):
+                    continue
+                self._report_service.generate_student_report(
+                    student.id, report_type="automatic",
+                    trigger_event="daily", generated_by="system"
+                )
+                generated_count += 1
+            except Exception:
+                failed = True
+                logger.exception(
+                    "Failed to generate daily report for student %s; will retry later.",
+                    student.id,
+                )
+
+        complete = not failed
+        if complete:
             for student in students:
                 try:
-                    # Kiểm tra xem đã có báo cáo daily trong ngày hôm nay chưa
-                    if self._report_service.report_exists(student.id, "daily") and self._report_service.report_exists(student.id, "daily"):
-                        # Nếu đã có thì bỏ qua (nhưng vẫn tạo nếu chưa có)
-                        pass  # có thể bỏ qua
-                    # Tạo báo cáo với trigger_event = "daily"
-                    self._report_service.generate_student_report(
-                        student.id,
-                        report_type="automatic",
-                        trigger_event="daily",
-                        generated_by="system"
-                    )
-                    generated_count += 1
-                except Exception as e:
-                    logger.exception(f"Failed to generate daily report for student {student.id}: {e}")
+                    if not self._report_service.report_exists_on_date(student.id, "daily", today):
+                        complete = False
+                        break
+                except Exception:
+                    complete = False
+                    break
 
-            logger.info(f"Auto report completed. Generated {generated_count} reports for {len(students)} students.")
-        except Exception as e:
-            logger.exception("Failed to run daily auto report.")
-        finally:
-            # Luôn cập nhật ngày chạy, kể cả khi có lỗi, để tránh lặp vô hạn
+        if complete:
             self._save_last_run_date(today)
+            logger.info("Auto report completed: generated=%s total=%s",
+                        generated_count, len(students))
+        else:
+            logger.warning(
+                "Auto report incomplete; completion state was not advanced so retry remains enabled."
+            )
+

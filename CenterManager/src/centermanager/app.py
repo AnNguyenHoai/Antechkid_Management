@@ -365,6 +365,7 @@ def main() -> int:
             permission_service=permission_service,
             report_policy=None,
             report_service=None,
+            event_bus=event_bus,
         )
 
         report_service = ReportService(

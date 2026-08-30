@@ -141,3 +141,12 @@ class ReportService:
         with self._session_factory() as session:
             repo = ReportRepository(session)
             return repo.get_by_student_and_trigger(student_id, trigger_event) is not None
+
+    def report_exists_on_date(self, student_id: int, trigger_event: str, target_date) -> bool:
+        """Check whether this student already has this trigger's report on target_date."""
+        with self._session_factory() as session:
+            repo = ReportRepository(session)
+            return repo.exists_for_student_trigger_on_date(
+                student_id, trigger_event, target_date
+            )
+
