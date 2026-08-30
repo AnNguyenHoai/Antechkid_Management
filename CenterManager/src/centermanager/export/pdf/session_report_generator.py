@@ -20,6 +20,18 @@ from reportlab.pdfbase.ttfonts import TTFont
 logger = logging.getLogger(__name__)
 
 
+_STATUS_LABELS = {
+    "Scheduled": "Đã lên lịch",
+    "Completed": "Hoàn thành",
+    "Cancelled": "Đã hủy",
+    "Postponed": "Hoãn",
+}
+
+
+def localize_status(status: str) -> str:
+    return _STATUS_LABELS.get(status or "", status or "")
+
+
 def register_vietnamese_font() -> str:
     candidates = []
     if sys.platform == "win32":
@@ -86,8 +98,14 @@ class SessionReportGenerator:
             f"Xuất lúc {datetime.now().strftime('%d/%m/%Y %H:%M')}", subtitle
         ))
 
-        teachers = ", ".join(t.full_name for t in getattr(class_obj, "teachers", []) if getattr(t, "full_name", None))
-        date_value = session.actual_date or session.scheduled_date
+        teacher_name = data.get("teacher_name")
+        if not teacher_name:
+            teachers = ", ".join(
+                t.full_name for t in getattr(class_obj, "teachers", [])
+                if getattr(t, "full_name", None)
+            )
+            teacher_name = teachers or (getattr(class_obj, "teacher", "") or "")
+
         time_value = ""
         if session.start_time and session.end_time:
             time_value = f"{session.start_time.strftime('%H:%M')} - {session.end_time.strftime('%H:%M')}"
@@ -96,11 +114,20 @@ class SessionReportGenerator:
             ["Lớp", class_obj.name or ""],
             ["Khóa học", class_obj.course or ""],
             ["Buổi học", f"Buổi {session.session_number}: {session.title or ''}"],
-            ["Ngày học", date_value.strftime("%d/%m/%Y") if date_value else ""],
-            ["Thời gian", time_value],
-            ["Giáo viên", teachers or (getattr(class_obj, "teacher", "") or "")],
-            ["Trạng thái", session.status or ""],
         ]
+        if session.actual_date and session.scheduled_date and session.actual_date != session.scheduled_date:
+            info.extend([
+                ["Ngày dự kiến", session.scheduled_date.strftime("%d/%m/%Y")],
+                ["Ngày thực tế", session.actual_date.strftime("%d/%m/%Y")],
+            ])
+        else:
+            date_value = session.actual_date or session.scheduled_date
+            info.append(["Ngày học", date_value.strftime("%d/%m/%Y") if date_value else ""])
+        info.extend([
+            ["Thời gian", time_value],
+            ["Giáo viên", teacher_name],
+            ["Trạng thái", localize_status(session.status)],
+        ])
         info_table = Table(info, colWidths=[3.2*cm, 14.5*cm])
         info_table.setStyle(TableStyle([
             ("FONTNAME", (0,0), (-1,-1), font),
@@ -141,6 +168,34 @@ class SessionReportGenerator:
         else:
             story.append(Paragraph("Chưa có nhận xét tổng quan cho buổi học.", normal))
 
+        highlights = data.get("highlights") or []
+        if highlights:
+            story.append(Paragraph("ĐIỂM NỔI BẬT HỌC SINH", heading))
+            highlight_rows = [["Học sinh", "Nội dung"]]
+            for item in highlights:
+                student = getattr(item, "student", None)
+                student_name = getattr(student, "full_name", None) or "Học sinh"
+                type_label = getattr(item, "type", "")
+                title_text = getattr(item, "title", "") or ""
+                description = getattr(item, "description", None)
+                content = title_text
+                if description:
+                    content = f"{content}: {description}" if content else description
+                if type_label:
+                    content = f"[{type_label}] {content}".strip()
+                highlight_rows.append([student_name, content or ""])
+            highlight_table = Table(highlight_rows, colWidths=[5.0*cm, 12.7*cm])
+            highlight_table.setStyle(TableStyle([
+                ("FONTNAME", (0,0), (-1,-1), font),
+                ("FONTSIZE", (0,0), (-1,-1), 10),
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#F2F5F8")),
+                ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#D8DEE6")),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                ("TOPPADDING", (0,0), (-1,-1), 6),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+            ]))
+            story.append(highlight_table)
+
         story.append(Paragraph("BÀI TẬP VỀ NHÀ", heading))
         homework = getattr(note, "homework", None) if note else None
         story.append(Paragraph((homework or "Không có bài tập về nhà.").replace("\n", "<br/>"), normal))
@@ -167,7 +222,6 @@ class SessionReportGenerator:
         ]))
         story.append(attendance_table)
 
-        # Do not include individual student names/highlights: this PDF is intended for parent groups.
         story.append(Spacer(1, 0.4*cm))
         story.append(Paragraph(
             "Báo cáo được tạo để chia sẻ thông tin chung của buổi học với phụ huynh.",

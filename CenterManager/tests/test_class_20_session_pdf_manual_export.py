@@ -22,8 +22,9 @@ def test_pdf_contains_parent_group_session_sections():
         assert text in GENERATOR
 
 
-def test_pdf_excludes_individual_student_details():
-    assert "Do not include individual student names/highlights" in GENERATOR
+def test_pdf_includes_selected_session_highlights():
+    assert "ĐIỂM NỔI BẬT HỌC SINH" in GENERATOR
+    assert 'data.get("highlights")' in GENERATOR
 
 
 def test_schedule_has_manual_export_action():

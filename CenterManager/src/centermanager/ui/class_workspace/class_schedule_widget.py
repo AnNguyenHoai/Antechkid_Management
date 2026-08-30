@@ -55,7 +55,7 @@ class ClassScheduleWidget(QWidget):
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._session_report_service = session_report_service or SessionReportService(
-            session_service, note_service, attendance_service, class_service
+            session_service, note_service, attendance_service, class_service, highlight_service
         )
 
         self._class_id: Optional[int] = None

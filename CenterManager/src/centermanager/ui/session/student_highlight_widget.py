@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 from centermanager.models.student_highlight import HighlightType, StudentHighlight
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
+from centermanager.services.class_service import ClassService
+from centermanager.services.session_service import SessionService
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +31,16 @@ class StudentHighlightWidget(QWidget):
         highlight_service: StudentHighlightService,
         session_id: int,
         student_service: StudentService,
+        class_service: ClassService,
+        session_service: SessionService,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._service = highlight_service
         self._session_id = session_id
         self._student_service = student_service
+        self._class_service = class_service
+        self._session_service = session_service
         self._highlights: List[StudentHighlight] = []
         self._setup_ui()
         self._load_highlights()
@@ -91,7 +97,8 @@ class StudentHighlightWidget(QWidget):
     def _load_students(self) -> None:
         """Load students into combo box, keeping placeholder at index 0."""
         try:
-            students = self._student_service.list_students()
+            session = self._session_service.get_session(self._session_id)
+            students = self._class_service.get_enrolled_students(session.class_id)
             # Keep the placeholder at index 0
             while self.student_combo.count() > 1:
                 self.student_combo.removeItem(1)
