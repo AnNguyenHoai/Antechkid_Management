@@ -4,6 +4,7 @@
 from .synchronization_manager import SynchronizationManager
 from .synchronization_provider import SynchronizationProvider
 from .git_synchronization_provider import GitSynchronizationProvider   # <-- ĐỔI TỪ git_provider
+from .git_origin_reconciliation import install_origin_reconciliation
 from .synchronization_policy import SynchronizationPolicy, SyncPolicy
 from .version_resolver import VersionResolver, VersionStatus
 from .synchronization_result import SynchronizationResult, SyncResult
@@ -32,6 +33,11 @@ from .exceptions import (
     PullFailedError,
     PushFailedError,
 )
+
+# Runtime clones can outlive configuration changes. Reconcile the Git origin
+# after the provider opens an existing repository so sync operations always
+# target the configured repository without rewriting the provider implementation.
+install_origin_reconciliation(GitSynchronizationProvider)
 
 __all__ = [
     "SynchronizationManager",
