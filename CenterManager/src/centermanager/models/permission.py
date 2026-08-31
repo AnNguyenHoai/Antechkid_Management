@@ -97,6 +97,14 @@ class PermissionDefinitions:
 
     # Audit
     AUDIT_VIEW = "audit.view"
+
+    # System operations
+    SYSTEM_DIAGNOSTICS_VIEW = "system.diagnostics.view"
+
+    # Backup administration
+    BACKUP_VIEW = "backup.view"
+    BACKUP_CREATE = "backup.create"
+    BACKUP_RESTORE = "backup.restore"
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -137,6 +145,10 @@ class PermissionDefinitions:
             cls.ROLE_VIEW,
             cls.ROLE_MANAGE,
             cls.AUDIT_VIEW,
+            cls.SYSTEM_DIAGNOSTICS_VIEW,
+            cls.BACKUP_VIEW,
+            cls.BACKUP_CREATE,
+            cls.BACKUP_RESTORE,
         ]
 
     @classmethod
@@ -179,6 +191,10 @@ class PermissionDefinitions:
             cls.ROLE_VIEW: "admin",
             cls.ROLE_MANAGE: "admin",
             cls.AUDIT_VIEW: "admin",
+            cls.SYSTEM_DIAGNOSTICS_VIEW: "admin",
+            cls.BACKUP_VIEW: "admin",
+            cls.BACKUP_CREATE: "admin",
+            cls.BACKUP_RESTORE: "admin",
         }
 
         return category_map.get(permission_name, "other")

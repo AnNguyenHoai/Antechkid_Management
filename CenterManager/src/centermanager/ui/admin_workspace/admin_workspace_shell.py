@@ -19,6 +19,10 @@ from centermanager.services.audit_service import AuditService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
 from centermanager.models.permission import PermissionDefinitions
+from centermanager.services.system_operations_service import SystemOperationsService
+from centermanager.ui.admin_workspace.system_operations_page import SystemOperationsPage
+from centermanager.ui.admin_workspace.backup_recovery_page import BackupRecoveryPage
+from centermanager.services.backup_operations_service import BackupOperationsService
 
 
 class AdminWorkspaceShell(QWidget):
@@ -44,8 +48,10 @@ class AdminWorkspaceShell(QWidget):
             "roles": PermissionDefinitions.ROLE_MANAGE,
             "settings": PermissionDefinitions.SETTING_UPDATE,
             "git": PermissionDefinitions.SETTING_UPDATE,
-            "diagnostics": PermissionDefinitions.USER_MANAGE,
+            "operations": PermissionDefinitions.SYSTEM_DIAGNOSTICS_VIEW,
+            "diagnostics": PermissionDefinitions.SETTING_UPDATE,
             "audit": PermissionDefinitions.AUDIT_VIEW,
+            "backup": PermissionDefinitions.BACKUP_VIEW,
         }
 
         self._setup_ui()
@@ -70,6 +76,8 @@ class AdminWorkspaceShell(QWidget):
             {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
             {"id": "audit", "icon": "📋", "label": "Audit Log"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
+            {"id": "operations", "icon": "🖥️", "label": "System Operations"},
+            {"id": "backup", "icon": "🗄️", "label": "Backup & Recovery"},
             {"id": "git", "icon": "🔐", "label": "Git Config"},
             {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
         ]
@@ -103,6 +111,16 @@ class AdminWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.settings_page)
+
+        self.system_operations_service = SystemOperationsService(
+            self._collaboration_manager, self._git_config_service
+        )
+        self.system_operations_page = SystemOperationsPage(self.system_operations_service)
+        self.content_stack.addWidget(self.system_operations_page)
+
+        self.backup_operations_service = BackupOperationsService(audit_service=self.audit_service)
+        self.backup_page = BackupRecoveryPage(self.backup_operations_service, self._permission_service, self._collaboration_manager, self._notification_service)
+        self.content_stack.addWidget(self.backup_page)
 
         self.git_settings_page = GitSettingsPage(
             self._git_config_service,
@@ -154,6 +172,16 @@ class AdminWorkspaceShell(QWidget):
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
             self.header.set_context("Admin Workspace", "Settings")
+        elif page_id == "operations":
+            self.content_stack.setCurrentWidget(self.system_operations_page)
+            self.nav.set_active_page("operations")
+            self.header.set_context("Admin Workspace", "System Operations")
+            self.system_operations_page.refresh()
+        elif page_id == "backup":
+            self.content_stack.setCurrentWidget(self.backup_page)
+            self.nav.set_active_page("backup")
+            self.header.set_context("Admin Workspace", "Backup & Recovery")
+            self.backup_page.refresh()
         elif page_id == "git":
             self.content_stack.setCurrentWidget(self.git_settings_page)
             self.nav.set_active_page("git")
@@ -173,6 +201,10 @@ class AdminWorkspaceShell(QWidget):
             self.roles_page.refresh()
         elif self.content_stack.currentWidget() is self.audit_page:
             self.audit_page.refresh()
+        elif self.content_stack.currentWidget() is self.system_operations_page:
+            self.system_operations_page.refresh()
+        elif self.content_stack.currentWidget() is self.backup_page:
+            self.backup_page.refresh()
         elif self.content_stack.currentWidget() is self.git_settings_page:
             self.git_settings_page.refresh()
         elif self.content_stack.currentWidget() is self.diagnostics_page:
@@ -189,5 +221,7 @@ class AdminWorkspaceShell(QWidget):
             self.roles_page.set_write_enabled(enabled)
         if hasattr(self.settings_page, 'set_write_enabled'):
             self.settings_page.set_write_enabled(enabled)
+        if hasattr(self.backup_page, 'set_write_enabled'):
+            self.backup_page.set_write_enabled(enabled)
         if hasattr(self.git_settings_page, 'set_write_enabled'):
             self.git_settings_page.set_write_enabled(enabled)
