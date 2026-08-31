@@ -199,8 +199,8 @@ def _create_admin_user(session: Session, admin_role: Role) -> None:
             session.flush()
         return
 
-    import hashlib
-    password_hash = hashlib.sha256("admin123".encode()).hexdigest()
+    from centermanager.security.password import hash_password
+    password_hash = hash_password("admin123")
 
     admin = User(
         username="admin",

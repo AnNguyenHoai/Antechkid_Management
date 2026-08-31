@@ -341,15 +341,8 @@ class PermissionService:
         email: Optional[str] = None, phone: Optional[str] = None,
         temp_password: Optional[str] = None,
     ) -> User:
-        import hashlib, secrets, string
-        valid_roles = {
-            RoleDefinitions.ADMIN, RoleDefinitions.TEACHER,
-            RoleDefinitions.RECEPTION, RoleDefinitions.FINANCE,
-            RoleDefinitions.MANAGER,
-        }
-        if role_name not in valid_roles:
-            raise ValueError(f"Invalid role: {role_name}")
-
+        from centermanager.security.password import hash_password
+        import secrets, string
         with self._session_factory() as session:
             user_repo = UserRepository(session)
             if user_repo.get_by_username(username) is not None:
@@ -362,7 +355,7 @@ class PermissionService:
                 temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
             user = User(
                 username=username,
-                password_hash=hashlib.sha256(temp_password.encode()).hexdigest(),
+                password_hash=hash_password(temp_password),
                 full_name=full_name,
                 email=email,
                 phone=phone,
@@ -376,10 +369,12 @@ class PermissionService:
             session.refresh(user)
             logger.info("User created: username=%s role=%s", username, role_name)
             self._audit("USER_CREATED", user, {"role": role_name})
+            user._temporary_password = temp_password
             return user
 
     def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:
-        import hashlib, secrets, string
+        from centermanager.security.password import hash_password
+        import secrets, string
         with self._session_factory() as session:
             user = UserRepository(session).get_by_id_with_role(user_id)
             if user is None:
@@ -387,7 +382,7 @@ class PermissionService:
             if temp_password is None:
                 alphabet = string.ascii_letters + string.digits
                 temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
-            user.password_hash = hashlib.sha256(temp_password.encode()).hexdigest()
+            user.password_hash = hash_password(temp_password)
             user.force_password_change = True
             user.login_attempts = 0
             user.locked_until = None

@@ -164,7 +164,7 @@ class UserFormDialog(QDialog):
                     QMessageBox.information(
                         self,
                         "User Created",
-                        f"User {username} created with temporary password: {user.password_hash[:8]}...\n"
+                        f"User {username} created with temporary password: {getattr(user, "_temporary_password", "")}\n"
                         "Please provide this to the user."
                     )
                 else:

@@ -2,7 +2,6 @@
 """
 ChangePasswordDialog - Force user to change password on first login.
 """
-import hashlib
 import logging
 from typing import Optional
 
@@ -114,7 +113,8 @@ class ChangePasswordDialog(QDialog):
         try:
             with self._permission_service._session_factory() as session:
                 user = session.merge(self._user)
-                new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+                from centermanager.security.password import hash_password
+                new_hash = hash_password(new_password)
                 user.password_hash = new_hash
                 user.force_password_change = False
                 user.login_attempts = 0

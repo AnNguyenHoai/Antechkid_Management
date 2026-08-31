@@ -4,9 +4,18 @@ from centermanager.services.audit_service import AuditService
 
 class BackupOperationsService:
     """Admin-facing backup/recovery orchestration with audit hooks."""
-    def __init__(self, session_factory=None, backup_service=None):
+    def __init__(self, session_factory=None, backup_service=None, audit_service=None):
+        """Create the backup/recovery orchestration service.
+
+        ``audit_service`` is accepted for dependency injection from the Admin
+        workspace. ``session_factory`` remains supported for backwards
+        compatibility and is used to construct an AuditService only when an
+        explicit audit service was not supplied.
+        """
         self._backup = backup_service or BackupService()
-        self._audit = AuditService(session_factory) if session_factory is not None else None
+        self._audit = audit_service or (
+            AuditService(session_factory) if session_factory is not None else None
+        )
 
     def list_backups(self):
         return self._backup.list_backups()

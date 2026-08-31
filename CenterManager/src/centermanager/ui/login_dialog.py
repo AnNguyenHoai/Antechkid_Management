@@ -2,7 +2,6 @@
 """
 LoginDialog - simple login dialog for authentication.
 """
-import hashlib
 import logging
 from datetime import datetime
 from typing import Optional
@@ -117,13 +116,6 @@ class LoginDialog(QDialog):
             return
 
         try:
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-        except Exception as e:
-            logger.exception("Hashing error")
-            self._show_error("Internal error during login.")
-            return
-
-        try:
             logger.info(f"Attempting login for user: {username}")
 
             user = self._permission_service.get_user_by_username(username)
@@ -142,7 +134,9 @@ class LoginDialog(QDialog):
                     self._show_error("Account is locked. Please try again later.")
                     return
 
-                if user.password_hash != password_hash:
+                from centermanager.security.password import verify_password, hash_password
+                password_valid, needs_upgrade = verify_password(password, user.password_hash)
+                if not password_valid:
                     user.increment_login_attempts()
                     session.commit()
                     remaining = 5 - user.login_attempts
@@ -152,6 +146,9 @@ class LoginDialog(QDialog):
                         self._show_error("Account locked due to too many failed attempts.")
                     return
 
+                if needs_upgrade:
+                    user.password_hash = hash_password(password)
+                    logger.info("Upgraded legacy password hash for user: %s", username)
                 user.reset_login_attempts()
                 user.last_login = datetime.now()
                 session.commit()

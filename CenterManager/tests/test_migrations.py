@@ -13,7 +13,7 @@ def _get_migration_files():
     return [f for f in versions_dir.glob("*.py") if f.name != "__init__.py"]
 
 def test_migration_upgrade(test_db_path):
-    """Test that initial migration creates all 8 tables."""
+    """Test that initial migration creates the schema at Alembic head."""
     migration_files = _get_migration_files()
     if not migration_files:
         pytest.fail("No migration files found. Run 'alembic revision --autogenerate -m \"Initial schema\"' first.")
@@ -37,6 +37,8 @@ def test_migration_upgrade(test_db_path):
     }
     actual_tables = set(inspector.get_table_names())
     assert expected_tables.issubset(actual_tables)
+    assert "audit_logs" in actual_tables
+    assert "alembic_version" in actual_tables
 
 
 def test_migration_downgrade(test_db_path):

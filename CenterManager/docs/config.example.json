@@ -6,7 +6,7 @@
   "git": {
     "repository_url": "https://github.com/AnNguyenHoai/Antechkid_CenterManager.git",
     "branch": "main",
-    "token": "",
+    "token": "<set-via-secure-configuration>",
     "username": "AnNguyenHoai",
     "email": "nguyenhoaianvtqh@gmail.com"
   }
