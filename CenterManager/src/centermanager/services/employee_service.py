@@ -42,3 +42,14 @@ class EmployeeService:
             if not e: raise EmployeeNotFoundError(f'Employee {employee_id} not found.')
             e.employment_status=self._validate_status(status); e.termination_date=termination_date
             s.commit(); s.refresh(e); return e
+    def update_employee(self, employee_id:int, **data)->Employee:
+        with self._session_factory() as s:
+            e=EmployeeRepository(s).get_by_id(employee_id)
+            if not e: raise EmployeeNotFoundError(f'Employee {employee_id} not found.')
+            for key in ('full_name','phone','email','address','department','position','gender'):
+                if key in data: setattr(e,key,self._text(data[key]))
+            if 'full_name' in data and not e.full_name: raise EmployeeValidationError('Full name is required.')
+            if e.email and '@' not in e.email: raise EmployeeValidationError('Invalid email format.')
+            if 'employment_status' in data: e.employment_status=self._validate_status(data['employment_status'])
+            if 'hire_date' in data: e.hire_date=data['hire_date']
+            s.commit(); s.refresh(e); return e

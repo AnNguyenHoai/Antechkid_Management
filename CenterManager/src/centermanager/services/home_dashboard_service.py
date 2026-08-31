@@ -12,6 +12,7 @@ from centermanager.models.assessment import Assessment
 from centermanager.models.class_ import Class
 from centermanager.models.session import Session
 from centermanager.models.teacher import Teacher
+from centermanager.models.employee import Employee
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
@@ -189,6 +190,17 @@ class HomeDashboardService:
                     quick_action_target="finance"
                 )
                 summaries.append(finance_ws)
+
+            # Employee Workspace
+            if user and (user.has_permission("employee.view") or user.is_admin):
+                employee_count = session.query(Employee).filter(Employee.employment_status != "ARCHIVED").count()
+                active_employee_count = session.query(Employee).filter(Employee.employment_status == "ACTIVE").count()
+                summaries.append(WorkspaceSummary(
+                    workspace_id="employee", name="Employee Workspace", icon="👥",
+                    description="Manage employee profiles and HR information",
+                    summary_text=f"{employee_count} employees, {active_employee_count} active",
+                    health_status="good", health_details="", quick_action_label="Open →", quick_action_target="employee"
+                ))
 
             # Admin Workspace
             if user and (user.has_permission("user.manage") or user.is_admin):

@@ -15,7 +15,7 @@ class Employee(Base, TimestampMixin):
     STATUS_ACTIVE="ACTIVE"; STATUS_ON_LEAVE="ON_LEAVE"; STATUS_SUSPENDED="SUSPENDED"; STATUS_TERMINATED="TERMINATED"; STATUS_ARCHIVED="ARCHIVED"
     VALID_STATUSES={STATUS_ACTIVE,STATUS_ON_LEAVE,STATUS_SUSPENDED,STATUS_TERMINATED,STATUS_ARCHIVED}
     id: Mapped[int] = mapped_column(primary_key=True)
-    employee_code: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    employee_code: Mapped[str] = mapped_column(String(30), nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     gender: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
@@ -27,6 +27,6 @@ class Employee(Base, TimestampMixin):
     employment_status: Mapped[str] = mapped_column(String(30), nullable=False, default=STATUS_ACTIVE)
     hire_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     termination_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, unique=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     user: Mapped[Optional["User"]] = relationship("User", lazy="selectin")
     __table_args__=(UniqueConstraint("employee_code", name="uq_employee_code"), UniqueConstraint("user_id", name="uq_employee_user"))

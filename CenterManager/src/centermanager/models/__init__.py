@@ -25,6 +25,7 @@ from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.models.role_permission import RolePermission
 from centermanager.models.audit_log import AuditLog
 from centermanager.models.employee import Employee
+from centermanager.models.employee_document import EmployeeDocument
 
 # Teacher
 from centermanager.models.teacher import Teacher
@@ -70,6 +71,7 @@ __all__ = [
     "RolePermission",
     "AuditLog",
     "Employee",
+    "EmployeeDocument",
     "Teacher",
     "TeacherDocument",
     "TeacherTimelineEvent",

@@ -13,6 +13,7 @@ from centermanager.ui.teacher_workspace.teacher_workspace_shell import TeacherWo
 from centermanager.ui.class_workspace.class_workspace_shell import ClassWorkspaceShell
 from centermanager.ui.finance_workspace import FinanceWorkspaceShell
 from centermanager.ui.admin_workspace import AdminWorkspaceShell
+from centermanager.ui.employee_workspace import EmployeeWorkspaceShell
 
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
@@ -70,6 +71,8 @@ class MainWindow(QMainWindow):
         teacher_assignment_service,
         teacher_document_service,
         teacher_timeline_service,
+        employee_service,
+        employee_document_service,
         class_service,
         enrollment_service,
         class_timeline_service,
@@ -117,6 +120,8 @@ class MainWindow(QMainWindow):
         self._teacher_timeline_service = teacher_timeline_service
         self._class_service = class_service
         self._enrollment_service = enrollment_service
+        self._employee_service = employee_service
+        self._employee_document_service = employee_document_service
         self._class_timeline_service = class_timeline_service
         self._teacher_assignment_service_for_class = teacher_assignment_service_for_class
         self._permission_service = permission_service
@@ -165,6 +170,7 @@ class MainWindow(QMainWindow):
         self._setup_teacher_workspace()
         self._setup_class_workspace()
         self._setup_finance_workspace()
+        self._setup_employee_workspace()
         self._setup_admin_workspace()
 
         # Collaboration status bar
@@ -276,6 +282,12 @@ class MainWindow(QMainWindow):
         )
         self.finance_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.finance_workspace)
+
+    def _setup_employee_workspace(self) -> None:
+        """Setup employee workspace."""
+        self.employee_workspace = EmployeeWorkspaceShell(self._employee_service, self._employee_document_service)
+        self.employee_workspace.go_home.connect(self._go_home)
+        self.central_stack.addWidget(self.employee_workspace)
 
     def _setup_admin_workspace(self) -> None:
         """Setup admin workspace."""
@@ -925,6 +937,7 @@ class MainWindow(QMainWindow):
             "teacher": "teacher.view",
             "class": "class.view",
             "finance": "finance.view",
+            "employee": "employee.view",
             "admin": "user.manage",
         }
 
@@ -958,6 +971,11 @@ class MainWindow(QMainWindow):
             self.central_stack.setCurrentWidget(self.finance_workspace)
             self.finance_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Finance Workspace")
+            self._update_waiting_status()
+        elif workspace_id == "employee":
+            self.central_stack.setCurrentWidget(self.employee_workspace)
+            self.employee_workspace.navigate_to("employees")
+            self.statusBar().showMessage("Employee Workspace")
             self._update_waiting_status()
         elif workspace_id == "admin":
             self.central_stack.setCurrentWidget(self.admin_workspace)

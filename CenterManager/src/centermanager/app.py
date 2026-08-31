@@ -56,6 +56,8 @@ from centermanager.events.handlers.highlight_timeline_handler import HighlightTi
 from centermanager.services.home_dashboard_service import HomeDashboardService
 from centermanager.ui.login_dialog import LoginDialog
 from centermanager.services.teacher_service import TeacherService
+from centermanager.services.employee_service import EmployeeService
+from centermanager.services.employee_document_service import EmployeeDocumentService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
@@ -322,6 +324,9 @@ def main() -> int:
 
         analytics_service = StudentAnalyticsService(session_factory)
 
+        employee_service = EmployeeService(session_factory)
+        employee_document_service = EmployeeDocumentService(session_factory, paths.runtime_root / "Attachments")
+
         teacher_timeline_service = TeacherTimelineService(session_factory)
         teacher_service = TeacherService(
             session_factory, teacher_timeline_service, event_bus=event_bus
@@ -432,6 +437,8 @@ def main() -> int:
             teacher_assignment_service=teacher_assignment_service,
             teacher_document_service=teacher_document_service,
             teacher_timeline_service=teacher_timeline_service,
+            employee_service=employee_service,
+            employee_document_service=employee_document_service,
             class_service=class_service,
             enrollment_service=enrollment_service,
             class_timeline_service=class_timeline_service,
