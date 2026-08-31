@@ -28,6 +28,7 @@ from .events import (
 )
 from .auto_pull_policy import AutoPullPolicy
 from .reload_decision_service import ReloadDecisionService, ReloadDecision, ReloadState
+from .qt_event_bus import ThreadSafeEventBusProxy
 
 from ..synchronization import (
     SynchronizationManager,
@@ -60,7 +61,7 @@ class RuntimeSyncService:
         self._sync_manager = sync_manager
         self._collab_manager = collab_manager
         self._context_manager = context_manager
-        self._event_bus = event_bus or EventBus()
+        self._event_bus = ThreadSafeEventBusProxy(event_bus or EventBus())
         self._policy = policy or AutoPullPolicy()
         self._reload_service = reload_service or ReloadDecisionService()
         self._poll_interval = poll_interval
