@@ -33,6 +33,12 @@ class Permission(Enum):
     FINANCE_EXPENSE_DELETE = "finance.expense.delete"
     REPORT_VIEW = "report.view"
     SETTING_UPDATE = "setting.update"
+    EMPLOYEE_VIEW_SELF = "employee.view.self"
+    EMPLOYEE_VIEW_ALL = "employee.view.all"
+    EMPLOYEE_UPDATE_SELF = "employee.update.self"
+    EMPLOYEE_CREATE = "employee.create"
+    EMPLOYEE_UPDATE = "employee.update"
+    EMPLOYEE_ARCHIVE = "employee.archive"
 
 
 def has_permission(permission: Permission, user=None) -> bool:

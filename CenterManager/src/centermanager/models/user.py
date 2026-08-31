@@ -17,6 +17,7 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.role import Role
+    from centermanager.models.employee import Employee
 
 
 class User(Base, TimestampMixin):
@@ -39,6 +40,9 @@ class User(Base, TimestampMixin):
 
     # Relationships
     role: Mapped[Optional[Role]] = relationship("Role", back_populates="users", lazy="selectin")
+    employee: Mapped[Optional["Employee"]] = relationship(
+        "Employee", back_populates="user", uselist=False, lazy="selectin"
+    )
 
     __table_args__ = (
         UniqueConstraint('username', name='uq_user_username'),

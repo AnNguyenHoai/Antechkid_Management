@@ -749,6 +749,31 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.error(f"Push-only failed: {e}")
             raise PushFailedError(f"Push failed: {e}")
 
+    def _sync_employee_attachments_to_repository(self) -> None:
+        """Mirror runtime Employee attachments into the repository working tree.
+
+        Employee documents are business data and must travel with the database.
+        Deleting/replacing the repository mirror first also propagates deletions.
+        """
+        runtime_root = self._repo_path.parent / "Attachments" / "Employees"
+        repo_root = self._repo_path / "Attachments" / "Employees"
+        try:
+            if repo_root.exists():
+                shutil.rmtree(repo_root)
+            if runtime_root.exists():
+                repo_root.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(runtime_root, repo_root)
+                logger.info(
+                    "Employee attachments staged from runtime: %s -> %s",
+                    runtime_root, repo_root,
+                )
+            else:
+                repo_root.parent.mkdir(parents=True, exist_ok=True)
+                logger.info("No runtime Employee attachments; repository mirror cleared.")
+        except Exception:
+            logger.exception("Failed to synchronize Employee attachments to repository")
+            raise
+
     def publish(self, message: str, user: str) -> bool:
         self._ensure_repo()
         try:
@@ -757,6 +782,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 self.pull()
             except Exception as e:
                 logger.warning(f"Pull before publish failed: {e}")
+
+            # Materialize runtime Employee documents into the Git repository
+            # before staging. The runtime copy is local UI state; the repository
+            # copy is the cross-machine source of truth.
+            self._sync_employee_attachments_to_repository()
 
             # Stage business files
             self._run_git_command(["add", "-A"])
@@ -821,6 +851,10 @@ class GitSynchronizationProvider(SynchronizationProvider):
                         f"MAIN changed before publish: expected {expected_main_commit[:8]}, "
                         f"remote is {(remote_main or 'missing')[:8]}"
                     )
+
+            # Synchronize Employee documents into the repository before the
+            # publish-only staging boundary.
+            self._sync_employee_attachments_to_repository()
 
             # Stage business files only. Collaboration runtime state is outside
             # the MAIN working tree and is never staged here.

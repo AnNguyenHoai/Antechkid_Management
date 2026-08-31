@@ -29,7 +29,7 @@ class UserFormDialog(QDialog):
         self._user_id = user_id
         self._is_edit = user_id is not None
 
-        self.setWindowTitle("Edit User" if self._is_edit else "Add User")
+        self.setWindowTitle("Edit User" if self._is_edit else "Create Employee Account")
         self.setMinimumWidth(400)
         self.setModal(True)
 
@@ -85,6 +85,9 @@ class UserFormDialog(QDialog):
             self.temp_password_edit.setVisible(False)
         else:
             form.addRow("Temporary Password", self.temp_password_edit)
+            info = QLabel("Creating this account automatically creates the employee profile.")
+            info.setWordWrap(True)
+            form.addRow("", info)
 
         layout.addLayout(form)
 
@@ -164,11 +167,12 @@ class UserFormDialog(QDialog):
                     QMessageBox.information(
                         self,
                         "User Created",
-                        f"User {username} created with temporary password: {getattr(user, "_temporary_password", "")}\n"
-                        "Please provide this to the user."
+                        f"Account {username} created. Employee profile was created automatically.\n\n"
+                        f"Temporary password: {getattr(user, "_temporary_password", "")}\n"
+                        "Please provide this to the employee."
                     )
                 else:
-                    QMessageBox.information(self, "User Created", f"User {username} created successfully.")
+                    QMessageBox.information(self, "Employee Account Created", f"Account {username} and its employee profile were created successfully.")
             self.accept()
         except ValueError as e:
             QMessageBox.warning(self, "Validation", str(e))

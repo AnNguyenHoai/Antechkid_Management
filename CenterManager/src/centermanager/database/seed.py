@@ -54,6 +54,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.ATTENDANCE_VIEW,
             PermissionDefinitions.ATTENDANCE_CREATE,
             PermissionDefinitions.ATTENDANCE_UPDATE,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
         ]
     )
 
@@ -71,6 +73,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.TEACHER_VIEW,
             PermissionDefinitions.CLASS_VIEW,
             PermissionDefinitions.ATTENDANCE_VIEW,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
         ]
     )
 
@@ -90,6 +94,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.FINANCE_EXPENSE_UPDATE,
             PermissionDefinitions.FINANCE_EXPENSE_DELETE,
             PermissionDefinitions.REPORT_VIEW,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
         ]
     )
 

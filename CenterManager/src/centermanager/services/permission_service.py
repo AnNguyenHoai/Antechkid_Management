@@ -11,6 +11,7 @@ from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.repositories.user_repository import UserRepository
+from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.role_repository import RoleRepository
 from centermanager.repositories.permission_repository import PermissionRepository
 from centermanager.core.current_user import get_current_user, set_current_user
@@ -317,6 +318,16 @@ class PermissionService:
                 raise UserNotFoundError(f"User {user_id} not found.")
             self._ensure_not_current_user(user_id, "delete")
             self._ensure_not_last_admin(session, user, "delete")
+            # An account is now the identity anchor for an Employee. Deleting it
+            # would create an employee without an account, so lifecycle must use
+            # deactivate/archive instead.
+            from centermanager.models.employee import Employee
+            linked_employee = session.query(Employee).filter(Employee.user_id == user_id).first()
+            if linked_employee is not None:
+                raise UserLifecycleError(
+                    "This account is linked to employee "
+                    f"{linked_employee.employee_code}. Deactivate the account instead of deleting it."
+                )
             repo.delete(user)
             session.commit()
 
@@ -365,11 +376,35 @@ class PermissionService:
                 login_attempts=0,
             )
             user_repo.add(user)
+            session.flush()
+
+            # Every newly-created system account owns exactly one Employee profile.
+            # The profile is created automatically; Employee Workspace never creates
+            # standalone employees.
+            from centermanager.models.employee import Employee
+            employee_repo = EmployeeRepository(session)
+            next_number = (employee_repo.get_highest_employee_number() or 0) + 1
+            employee = Employee(
+                employee_code=f"EMP-{next_number:05d}",
+                full_name=full_name,
+                phone=phone,
+                email=email,
+                employment_status=Employee.STATUS_ACTIVE,
+                hire_date=None,
+                user_id=user.id,
+            )
+            employee_repo.add(employee)
+
             session.commit()
             session.refresh(user)
-            logger.info("User created: username=%s role=%s", username, role_name)
-            self._audit("USER_CREATED", user, {"role": role_name})
+            session.refresh(employee)
+            logger.info(
+                "User created with employee profile: username=%s role=%s employee_id=%s",
+                username, role_name, employee.id,
+            )
+            self._audit("USER_CREATED", user, {"role": role_name, "employee_id": employee.id})
             user._temporary_password = temp_password
+            user._employee_id = employee.id
             return user
 
     def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:

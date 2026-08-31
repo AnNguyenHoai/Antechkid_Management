@@ -13,6 +13,7 @@ from centermanager.ui.finance_workspace.finance_dashboard_page import FinanceDas
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
+from centermanager.core.current_user import get_current_user
 
 
 class FinanceWorkspaceShell(QWidget):
@@ -42,7 +43,18 @@ class FinanceWorkspaceShell(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-        self.navigate_to("dashboard")
+        # Protected workspaces are instantiated by MainWindow for stack wiring,
+        # but must not execute permission-guarded data loads for unauthorized users.
+        if self._has_finance_access():
+            self.navigate_to("dashboard")
+
+    def _has_finance_access(self) -> bool:
+        """Return whether the current account may load Finance data."""
+        try:
+            user = get_current_user()
+            return bool(user and (user.has_permission("finance.view") or user.is_admin))
+        except Exception:
+            return False
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -108,6 +120,8 @@ class FinanceWorkspaceShell(QWidget):
         self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
+        if not self._has_finance_access():
+            return
         if page_id == "dashboard":
             self.content_stack.setCurrentWidget(self.dashboard_page)
             self.nav.set_active_page("dashboard")

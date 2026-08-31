@@ -102,7 +102,10 @@ class PermissionDefinitions:
     SYSTEM_DIAGNOSTICS_VIEW = "system.diagnostics.view"
 
     # Employee
-    EMPLOYEE_VIEW = "employee.view"
+    EMPLOYEE_VIEW = "employee.view"  # legacy/all-view compatibility; not used for self authorization
+    EMPLOYEE_VIEW_SELF = "employee.view.self"
+    EMPLOYEE_VIEW_ALL = "employee.view.all"
+    EMPLOYEE_UPDATE_SELF = "employee.update.self"
     EMPLOYEE_CREATE = "employee.create"
     EMPLOYEE_UPDATE = "employee.update"
     EMPLOYEE_ARCHIVE = "employee.archive"
@@ -156,6 +159,9 @@ class PermissionDefinitions:
             cls.BACKUP_CREATE,
             cls.BACKUP_RESTORE,
             cls.EMPLOYEE_VIEW,
+            cls.EMPLOYEE_VIEW_SELF,
+            cls.EMPLOYEE_VIEW_ALL,
+            cls.EMPLOYEE_UPDATE_SELF,
             cls.EMPLOYEE_CREATE,
             cls.EMPLOYEE_UPDATE,
             cls.EMPLOYEE_ARCHIVE,
@@ -206,6 +212,9 @@ class PermissionDefinitions:
             cls.BACKUP_CREATE: "admin",
             cls.BACKUP_RESTORE: "admin",
             cls.EMPLOYEE_VIEW: "employee",
+            cls.EMPLOYEE_VIEW_SELF: "employee",
+            cls.EMPLOYEE_VIEW_ALL: "employee",
+            cls.EMPLOYEE_UPDATE_SELF: "employee",
             cls.EMPLOYEE_CREATE: "employee",
             cls.EMPLOYEE_UPDATE: "employee",
             cls.EMPLOYEE_ARCHIVE: "employee",

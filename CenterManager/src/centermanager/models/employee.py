@@ -28,5 +28,5 @@ class Employee(Base, TimestampMixin):
     hire_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     termination_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    user: Mapped[Optional["User"]] = relationship("User", lazy="selectin")
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="employee", lazy="selectin")
     __table_args__=(UniqueConstraint("employee_code", name="uq_employee_code"), UniqueConstraint("user_id", name="uq_employee_user"))

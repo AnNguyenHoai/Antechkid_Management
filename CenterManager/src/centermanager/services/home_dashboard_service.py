@@ -192,13 +192,19 @@ class HomeDashboardService:
                 summaries.append(finance_ws)
 
             # Employee Workspace
-            if user and (user.has_permission("employee.view") or user.is_admin):
-                employee_count = session.query(Employee).filter(Employee.employment_status != "ARCHIVED").count()
-                active_employee_count = session.query(Employee).filter(Employee.employment_status == "ACTIVE").count()
+            if user and (user.has_permission("employee.view.self") or user.has_permission("employee.view.all") or user.is_admin):
+                if user.is_admin or user.has_permission("employee.view.all"):
+                    employee_count = session.query(Employee).filter(Employee.employment_status != "ARCHIVED").count()
+                    active_employee_count = session.query(Employee).filter(Employee.employment_status == "ACTIVE").count()
+                    summary_text = f"{employee_count} employees, {active_employee_count} active"
+                    description = "Manage employee profiles and HR information"
+                else:
+                    summary_text = "My employee profile and attendance"
+                    description = "View your employee profile and attendance"
                 summaries.append(WorkspaceSummary(
                     workspace_id="employee", name="Employee Workspace", icon="👥",
-                    description="Manage employee profiles and HR information",
-                    summary_text=f"{employee_count} employees, {active_employee_count} active",
+                    description=description,
+                    summary_text=summary_text,
                     health_status="good", health_details="", quick_action_label="Open →", quick_action_target="employee"
                 ))
 

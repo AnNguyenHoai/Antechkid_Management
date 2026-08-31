@@ -109,6 +109,14 @@ class StudentFinancialWidget(QWidget):
         """)
         self.open_finance_btn.setFixedHeight(40)
         self.open_finance_btn.clicked.connect(self.open_finance_clicked.emit)
+        # This is a navigation shortcut, not a permission boundary. Hide it for
+        # users who cannot enter Finance so they never hit a misleading popup.
+        try:
+            can_open_finance = self._permission_service.has_permission("finance.view")
+            self.open_finance_btn.setVisible(bool(can_open_finance))
+        except Exception:
+            logger.exception("Failed to evaluate finance workspace visibility")
+            self.open_finance_btn.setVisible(False)
         btn_layout.addStretch()
         btn_layout.addWidget(self.open_finance_btn)
         layout.addLayout(btn_layout)
@@ -178,12 +186,28 @@ class StudentFinancialWidget(QWidget):
 
     def set_student(self, student_id: int) -> None:
         self._student_id = student_id
+        # Finance data is protected independently from the Student Workspace.
+        # Non-finance roles may still open student records, but must never invoke
+        # finance.view-protected services.  Permission denial is an expected
+        # authorization outcome, not an application error to log.
+        if not self._can_view_finance():
+            self._incomes = []
+            self._summary = None
+            self._show_empty()
+            return
         self._load_incomes()
         self._load_outstanding_summary()
         self._update_ui()
 
+    def _can_view_finance(self) -> bool:
+        try:
+            return bool(self._permission_service.has_permission("finance.view"))
+        except Exception:
+            logger.exception("Failed to evaluate finance data permission")
+            return False
+
     def _load_incomes(self) -> None:
-        if self._student_id is None:
+        if self._student_id is None or not self._can_view_finance():
             self._incomes = []
             return
         try:
@@ -198,7 +222,7 @@ class StudentFinancialWidget(QWidget):
             self._incomes = []
 
     def _load_outstanding_summary(self) -> None:
-        if self._student_id is None:
+        if self._student_id is None or not self._can_view_finance():
             self._summary = None
             return
         try:

@@ -285,7 +285,9 @@ class MainWindow(QMainWindow):
 
     def _setup_employee_workspace(self) -> None:
         """Setup employee workspace."""
-        self.employee_workspace = EmployeeWorkspaceShell(self._employee_service, self._employee_document_service)
+        self.employee_workspace = EmployeeWorkspaceShell(
+            self._employee_service, self._employee_document_service, self._permission_service
+        )
         self.employee_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.employee_workspace)
 
@@ -937,7 +939,7 @@ class MainWindow(QMainWindow):
             "teacher": "teacher.view",
             "class": "class.view",
             "finance": "finance.view",
-            "employee": "employee.view",
+            "employee": None,
             "admin": "user.manage",
         }
 
@@ -945,6 +947,12 @@ class MainWindow(QMainWindow):
         if required_perm:
             if not self._permission_helper.has_permission(required_perm):
                 self.statusBar().showMessage(f"Permission denied for {workspace_id}")
+                return
+
+        if workspace_id == "employee":
+            user = get_current_user()
+            if not self._employee_service.can_access_workspace(user):
+                self.statusBar().showMessage("Permission denied for employee workspace")
                 return
 
         if workspace_id == "student":
@@ -974,7 +982,11 @@ class MainWindow(QMainWindow):
             self._update_waiting_status()
         elif workspace_id == "employee":
             self.central_stack.setCurrentWidget(self.employee_workspace)
-            self.employee_workspace.navigate_to("employees")
+            user = get_current_user()
+            if self._employee_service.can_view_all(user):
+                self.employee_workspace.navigate_to("employees")
+            else:
+                self.employee_workspace.navigate_to("profile")
             self.statusBar().showMessage("Employee Workspace")
             self._update_waiting_status()
         elif workspace_id == "admin":

@@ -122,6 +122,11 @@ class StartupSynchronization:
 
             logger.info(f"Runtime database updated from repository: {self._runtime_db_path}")
 
+            # Business documents are versioned in the repository alongside the
+            # database. Materialize Employee attachments into runtime so every
+            # client can open the same files after startup synchronization.
+            self._sync_employee_attachments_from_repository()
+
             # Copy manifest
             repo_manifest = self._repo_path / "manifest.json"
             if repo_manifest.exists():
@@ -158,6 +163,30 @@ class StartupSynchronization:
         except Exception as e:
             logger.exception(f"Failed to copy runtime data: {e}")
             return False
+
+    def _sync_employee_attachments_from_repository(self) -> None:
+        """Mirror repository Employee attachments into the local runtime.
+
+        The repository is the collaboration source of truth. Runtime/Attachments
+        is only the local materialized copy used by the desktop UI.
+        """
+        repo_root = self._repo_path / "Attachments" / "Employees"
+        runtime_root = self._paths.runtime_root / "Attachments" / "Employees"
+        try:
+            if runtime_root.exists():
+                shutil.rmtree(runtime_root)
+            if repo_root.exists():
+                runtime_root.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(repo_root, runtime_root)
+                logger.info(
+                    "Employee attachments synchronized from repository: %s -> %s",
+                    repo_root, runtime_root,
+                )
+            else:
+                logger.info("No Employee attachments found in repository; runtime mirror cleared.")
+        except Exception:
+            logger.exception("Failed to synchronize Employee attachments from repository")
+            raise
 
     def _refresh_database_sessions(self):
         try:

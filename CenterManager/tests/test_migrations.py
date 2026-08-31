@@ -125,3 +125,19 @@ def test_migration_downgrade(test_db_path):
         "employees", "employee_documents",
     }
     assert not domain_tables.intersection(set(inspector.get_table_names()))
+
+
+def test_employee_access_permissions_exist_after_migration(test_db_path):
+    """Employee self/all permissions are part of the persisted schema contract."""
+    from sqlalchemy import text
+    from sqlalchemy import create_engine
+    _upgrade_to_head(test_db_path)
+    engine = create_engine(f"sqlite:///{test_db_path}")
+    with engine.connect() as conn:
+        names = {
+            row[0] for row in conn.execute(
+                text("SELECT name FROM permissions WHERE name IN "
+                     "('employee.view.self', 'employee.view.all')")
+            )
+        }
+    assert names == {"employee.view.self", "employee.view.all"}

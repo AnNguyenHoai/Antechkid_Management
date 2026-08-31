@@ -178,7 +178,16 @@ class StudentDetailPage(QWidget):
         )
         self.financial_tab.open_finance_clicked.connect(self._on_open_finance)
         self.financial_tab.financial_updated.connect(self._on_data_changed)
-        self.tab_widget.addTab(self.financial_tab, "💰 Financial")
+        # Finance is a protected workspace. Do not expose a tab that will
+        # immediately fail with finance.view for non-finance roles.
+        self._finance_tab_index = self.tab_widget.addTab(self.financial_tab, "💰 Financial")
+        try:
+            can_view_finance = self._permission_service.has_permission("finance.view")
+        except Exception:
+            logger.exception("Failed to evaluate finance tab visibility")
+            can_view_finance = False
+        self.financial_tab.setVisible(bool(can_view_finance))
+        self.tab_widget.setTabVisible(self._finance_tab_index, bool(can_view_finance))
 
         # Tab 3: Attendance
         self.attendance_widget = StudentAttendanceWidget(
@@ -561,6 +570,18 @@ class StudentDetailPage(QWidget):
             QMessageBox.critical(self, "Lỗi xuất", f"Không thể tạo báo cáo PDF: {str(e)}")
 
     def _on_open_finance(self) -> None:
+        try:
+            if not self._permission_service.has_permission("finance.view"):
+                logger.warning("Finance navigation denied for current user")
+                QMessageBox.information(
+                    self,
+                    "Finance Workspace",
+                    "You do not have permission to open the Finance Workspace.",
+                )
+                return
+        except Exception:
+            logger.exception("Failed to validate finance navigation permission")
+            return
         self.go_to_finance.emit()
 
     def set_write_enabled(self, enabled: bool) -> None:
