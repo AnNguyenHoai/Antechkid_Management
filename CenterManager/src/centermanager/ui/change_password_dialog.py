@@ -93,8 +93,10 @@ class ChangePasswordDialog(QDialog):
         new_password = self.new_password_edit.text()
         confirm = self.confirm_password_edit.text()
 
-        current_hash = hashlib.sha256(current.encode()).hexdigest()
-        if self._user.password_hash != current_hash:
+        from centermanager.security.password import verify_password
+
+        password_valid, _ = verify_password(current, self._user.password_hash)
+        if not password_valid:
             self._show_error("Current password is incorrect.")
             return
 

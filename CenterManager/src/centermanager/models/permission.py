@@ -101,6 +101,12 @@ class PermissionDefinitions:
     # System operations
     SYSTEM_DIAGNOSTICS_VIEW = "system.diagnostics.view"
 
+    # Employee
+    EMPLOYEE_VIEW = "employee.view"
+    EMPLOYEE_CREATE = "employee.create"
+    EMPLOYEE_UPDATE = "employee.update"
+    EMPLOYEE_ARCHIVE = "employee.archive"
+
     # Backup & recovery
     BACKUP_VIEW = "backup.view"
     BACKUP_CREATE = "backup.create"
@@ -149,6 +155,10 @@ class PermissionDefinitions:
             cls.BACKUP_VIEW,
             cls.BACKUP_CREATE,
             cls.BACKUP_RESTORE,
+            cls.EMPLOYEE_VIEW,
+            cls.EMPLOYEE_CREATE,
+            cls.EMPLOYEE_UPDATE,
+            cls.EMPLOYEE_ARCHIVE,
         ]
 
     @classmethod
@@ -195,6 +205,10 @@ class PermissionDefinitions:
             cls.BACKUP_VIEW: "admin",
             cls.BACKUP_CREATE: "admin",
             cls.BACKUP_RESTORE: "admin",
+            cls.EMPLOYEE_VIEW: "employee",
+            cls.EMPLOYEE_CREATE: "employee",
+            cls.EMPLOYEE_UPDATE: "employee",
+            cls.EMPLOYEE_ARCHIVE: "employee",
         }
 
         return category_map.get(permission_name, "other")
