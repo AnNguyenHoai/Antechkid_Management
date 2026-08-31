@@ -10,7 +10,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def _setup(self):
         root=QVBoxLayout(self); root.setContentsMargins(28,24,28,24); root.setSpacing(12)
         title=QLabel("Work Registrations"); title.setStyleSheet("font-size:24px;font-weight:700;"); root.addWidget(title)
-        hint=QLabel("Each employee has one monthly registration containing all availability blocks. Review it before building the official schedule."); hint.setWordWrap(True); hint.setStyleSheet("color:#68737d;"); root.addWidget(hint)
+        hint=QLabel("Each employee has one monthly registration containing all availability blocks. Review and accept registrations before building the official schedule."); hint.setWordWrap(True); hint.setStyleSheet("color:#68737d;"); root.addWidget(hint)
         bar=QHBoxLayout(); self.month=QLabel(); self.month.setStyleSheet("font-size:15px;font-weight:600;"); bar.addWidget(self.month); bar.addStretch(); self.accept_btn=QPushButton("Accept Selected"); self.reopen_btn=QPushButton("Reopen Selected"); self.close_btn=QPushButton("Close Registration Month"); self.refresh_btn=QPushButton("Refresh")
         for b in (self.accept_btn,self.reopen_btn,self.close_btn,self.refresh_btn):bar.addWidget(b)
         root.addLayout(bar)
@@ -31,7 +31,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def _selected(self):
         i=self.table.currentRow(); return self._rows[i] if 0<=i<len(self._rows) else None
     def _update_actions(self):
-        r=self._selected(); self.accept_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_SUBMITTED)); self.reopen_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_ACCEPTED)); self.close_btn.setEnabled(any(x.status==EmployeeWorkRegistration.STATUS_SUBMITTED for x in self._rows))
+        r=self._selected(); all_accepted=bool(self._rows) and all(x.status==EmployeeWorkRegistration.STATUS_ACCEPTED for x in self._rows); self.accept_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_SUBMITTED)); self.reopen_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_ACCEPTED)); self.close_btn.setEnabled(all_accepted)
     def accept_selected(self):
         r=self._selected();
         if not r:return
@@ -46,6 +46,6 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         except Exception as exc:QMessageBox.warning(self,"Reopen Registration",str(exc))
     def close_month(self):
         y,m=self._period()
-        if QMessageBox.question(self,"Close registration month",f"Close the {m:02d}/{y} registration period after planning?")==QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self,"Close registration month",f"Close the {m:02d}/{y} registration period after all registrations are accepted?")==QMessageBox.StandardButton.Yes:
             try:self._rs.close_month(y,m);self.refresh()
             except Exception as exc:QMessageBox.warning(self,"Close Registration",str(exc))
