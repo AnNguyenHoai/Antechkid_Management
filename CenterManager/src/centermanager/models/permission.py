@@ -101,7 +101,7 @@ class PermissionDefinitions:
     # System operations
     SYSTEM_DIAGNOSTICS_VIEW = "system.diagnostics.view"
 
-    # Backup administration
+    # Backup & recovery
     BACKUP_VIEW = "backup.view"
     BACKUP_CREATE = "backup.create"
     BACKUP_RESTORE = "backup.restore"

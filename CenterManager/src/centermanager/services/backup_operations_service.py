@@ -1,23 +1,29 @@
 from pathlib import Path
-from typing import Optional
-from centermanager.platform.backup import BackupService
-from centermanager.core.current_user import get_current_user
+from centermanager.platform.backup.backup_service import BackupService
 from centermanager.services.audit_service import AuditService
 
 class BackupOperationsService:
-    """Administrative facade around runtime backups with audit integration."""
-    def __init__(self, backup_service: Optional[BackupService]=None, audit_service: Optional[AuditService]=None):
-        self._backup=backup_service or BackupService()
-        self._audit=audit_service
-    def list_backups(self): return self._backup.list_backups()
-    def create_backup(self, label="manual"):
-        result=self._backup.create_backup(label)
-        if self._audit: self._audit.record('BACKUP_CREATED','admin','backup',str(result.backup_path) if result.backup_path else None,label,result='success' if result.success else 'failed',details={'error':result.error},actor=get_current_user())
+    """Admin-facing backup/recovery orchestration with audit hooks."""
+    def __init__(self, session_factory=None, backup_service=None):
+        self._backup = backup_service or BackupService()
+        self._audit = AuditService(session_factory) if session_factory is not None else None
+
+    def list_backups(self):
+        return self._backup.list_backups()
+
+    def create_backup(self, label='manual'):
+        result = self._backup.create_backup(label=label)
+        if result.success and self._audit:
+            self._audit.record('BACKUP_CREATED', 'admin', 'backup', str(result.backup_path), label, details={'path': str(result.backup_path)})
         return result
-    def restore_backup(self, path):
-        # Always capture current state before a destructive restore.
-        safety=self._backup.create_backup('pre_restore')
-        if not safety.success: return type(safety)(False,error=f'Pre-restore backup failed: {safety.error}')
-        result=self._backup.restore_backup(Path(path))
-        if self._audit: self._audit.record('BACKUP_RESTORED','admin','backup',str(path),Path(path).name,result='success' if result.success else 'failed',details={'safety_backup':str(safety.backup_path),'error':result.error},actor=get_current_user())
+
+    def restore_backup(self, backup_path):
+        backup_path = Path(backup_path)
+        # Safety snapshot must be taken before destructive restore.
+        safety = self._backup.create_backup(label='pre_restore')
+        if not safety.success:
+            return type(safety)(success=False, error=f'Pre-restore backup failed: {safety.error}')
+        result = self._backup.restore_backup(backup_path)
+        if result.success and self._audit:
+            self._audit.record('BACKUP_RESTORED', 'admin', 'backup', str(backup_path), backup_path.name, details={'pre_restore_backup': str(safety.backup_path)})
         return result
