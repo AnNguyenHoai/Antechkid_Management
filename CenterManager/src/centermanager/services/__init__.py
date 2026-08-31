@@ -38,6 +38,13 @@ from .expense_timeline_service import ExpenseTimelineService
 from .outstanding_service import OutstandingService
 from .finance_dashboard_service import FinanceDashboardService
 
+# Write transaction safety guard. Importing the package happens before
+# centermanager.services.write_transaction is requested by MainWindow, so the
+# guard is installed without changing the transaction manager implementation.
+from .write_transaction import WriteTransactionManager
+from .write_transaction_guard import install_write_transaction_guard
+install_write_transaction_guard(WriteTransactionManager)
+
 __all__ = [
     "StudentService",
     "ParentService",
@@ -72,4 +79,5 @@ __all__ = [
     "ExpenseTimelineService",
     "OutstandingService",
     "FinanceDashboardService",
+    "WriteTransactionManager",
 ]
