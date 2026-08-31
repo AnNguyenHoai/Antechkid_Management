@@ -174,7 +174,9 @@ class EmployeeWorkspaceShell(QWidget):
         if self.management_mode:
             self.nav = WorkspaceNavigation(
                 "Employee Workspace",
-                [{"id": "employees", "icon": "👥", "label": "Employees"}],
+                [{"id": "employees", "icon": "👥", "label": "Employees"},
+                 {"id": "registrations", "icon": "📝", "label": "Work Registrations"},
+                 {"id": "my_registration", "icon": "👤", "label": "My Work Registration"}],
             )
             self.nav.page_selected.connect(self.navigate_to)
             body.addWidget(self.nav)
@@ -183,6 +185,22 @@ class EmployeeWorkspaceShell(QWidget):
             self.profile_page = None
             self.list_page.set_profile_opener(self.open_employee_profile)
             self.stack.addWidget(self.list_page)
+            from centermanager.ui.employee_workspace.employee_work_registration_review_page import EmployeeWorkRegistrationReviewPage
+            self.registration_review_page = EmployeeWorkRegistrationReviewPage(self._es, self._work_registration_service, parent=self)
+            self.stack.addWidget(self.registration_review_page)
+            self.management_self_registration = None
+            try:
+                management_employee = self._es.get_current_employee(user)
+            except Exception:
+                management_employee = None
+            if management_employee:
+                from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
+                self.management_self_registration = EmployeeWorkRegistrationWidget(self._work_registration_service, management_employee, editable=self._write_enabled, parent=self)
+                self.stack.addWidget(self.management_self_registration)
+            else:
+                self.management_self_registration = QLabel("No employee profile is linked to this account.")
+                self.management_self_registration.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.stack.addWidget(self.management_self_registration)
             body.addWidget(self.stack, 1)
         else:
             self.nav = WorkspaceNavigation(
@@ -260,10 +278,21 @@ class EmployeeWorkspaceShell(QWidget):
 
     def navigate_to(self, page_id):
         if self.management_mode:
-            self.stack.setCurrentWidget(self.list_page)
-            self.nav.set_active_page("employees")
-            self.header.set_context("Employee Workspace", "Employees")
-            self.list_page.refresh()
+            if page_id == "registrations":
+                self.stack.setCurrentWidget(self.registration_review_page)
+                self.nav.set_active_page("registrations")
+                self.header.set_context("Employee Workspace", "Work Registrations")
+                self.registration_review_page.refresh()
+            elif page_id == "my_registration":
+                self.stack.setCurrentWidget(self.management_self_registration)
+                self.nav.set_active_page("my_registration")
+                self.header.set_context("Employee Workspace", "My Work Registration")
+                if hasattr(self.management_self_registration, "refresh"): self.management_self_registration.refresh()
+            else:
+                self.stack.setCurrentWidget(self.list_page)
+                self.nav.set_active_page("employees")
+                self.header.set_context("Employee Workspace", "Employees")
+                self.list_page.refresh()
         else:
             if page_id == "attendance":
                 self._ensure_attendance_page()
@@ -290,6 +319,8 @@ class EmployeeWorkspaceShell(QWidget):
         self._write_enabled = bool(enabled)
         if self.management_mode:
             self.list_page.set_write_enabled(self._write_enabled)
+            if hasattr(self.management_self_registration, "set_editable"):
+                self.management_self_registration.set_editable(self._write_enabled)
         else:
             self.self_page.set_write_enabled(self._write_enabled)
             # ``attendance_page`` starts life as a QLabel placeholder and is

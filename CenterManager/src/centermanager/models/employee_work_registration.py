@@ -13,9 +13,11 @@ class EmployeeWorkRegistration(Base, TimestampMixin):
 
     STATUS_DRAFT = "DRAFT"
     STATUS_SUBMITTED = "SUBMITTED"
+    STATUS_CLOSED = "CLOSED"
+    # APPROVED/REJECTED are retained as legacy values for old databases only.
     STATUS_APPROVED = "APPROVED"
     STATUS_REJECTED = "REJECTED"
-    VALID_STATUSES = {STATUS_DRAFT, STATUS_SUBMITTED, STATUS_APPROVED, STATUS_REJECTED}
+    VALID_STATUSES = {STATUS_DRAFT, STATUS_SUBMITTED, STATUS_CLOSED, STATUS_APPROVED, STATUS_REJECTED}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)

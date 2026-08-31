@@ -41,3 +41,32 @@ def test_registration_is_own_employee_only(tmp_path):
     Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
     with CurrentUserContext(u):
         with pytest.raises(EmployeeWorkRegistrationAccessDeniedError): svc.list_for_employee(other.id,*svc.next_month(date(2026,8,31)))
+
+def test_employee_can_submit_entire_next_month_registration(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    with CurrentUserContext(u):
+        y,m=svc.next_month(date(2026,8,31))
+        svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
+        svc.create(emp.id,date(y,m,4),time(13),time(17),'WORK')
+        rows=svc.submit_month(emp.id,y,m)
+        assert len(rows)==2
+        assert {r.status for r in rows}=={'SUBMITTED'}
+
+
+def test_manager_can_view_all_and_close_submitted_registrations(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    with CurrentUserContext(u):
+        y,m=svc.next_month(date(2026,8,31))
+        svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
+        svc.submit_month(emp.id,y,m)
+    with CurrentUserContext(u2):
+        # u2 is not manager in the fixture; this verifies self-scope remains enforced.
+        with pytest.raises(EmployeeWorkRegistrationAccessDeniedError): svc.list_all(y,m)
+    with Session() as s:
+        manager=s.query(User).filter_by(username='manager').one()
+    with CurrentUserContext(manager):
+        rows=svc.list_all(y,m)
+        assert len(rows)==1 and rows[0].employee_id==emp.id
+        assert svc.close_month(y,m)==1
+        rows=svc.list_all(y,m)
+        assert rows[0].status=='CLOSED'
