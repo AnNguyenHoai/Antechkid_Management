@@ -16,10 +16,10 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.core.paths import get_paths
-from centermanager.core.config import get_config, save_config
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 from centermanager.ui.admin_workspace.access import can_write, notify
+from centermanager.services.configuration_service import ConfigurationService, ConfigurationValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ class SettingsPage(QWidget):
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._write_enabled = can_write(self._collaboration_manager)
+        self._configuration_service = ConfigurationService()
+        self._loading = True
         self._setup_ui()
         self._load_settings()
 
@@ -55,6 +57,8 @@ class SettingsPage(QWidget):
         header = QLabel("System Configuration")
         header.setStyleSheet("font-size: 20px; font-weight: bold;")
         container_layout.addWidget(header)
+        self.status_label = QLabel("No unsaved changes")
+        container_layout.addWidget(self.status_label)
 
         # Tab widget
         self.tab_widget = QTabWidget()
@@ -103,6 +107,7 @@ class SettingsPage(QWidget):
             }
         """)
         self.save_btn.clicked.connect(self._save_settings)
+        self._connect_dirty_tracking()
         btn_layout.addWidget(self.save_btn)
 
         container_layout.addLayout(btn_layout)
@@ -192,12 +197,27 @@ class SettingsPage(QWidget):
 
         return tab
 
+    def _connect_dirty_tracking(self) -> None:
+        for widget in (
+            self.center_name_edit, self.address_edit, self.phone_edit, self.email_edit,
+            self.currency_edit, self.timezone_edit, self.academic_year_edit,
+        ):
+            widget.textChanged.connect(self._mark_dirty)
+        for widget in (self.heartbeat_interval, self.lock_timeout, self.retry_count):
+            widget.valueChanged.connect(self._mark_dirty)
+        self.backup_before_publish.toggled.connect(self._mark_dirty)
+
+    def _mark_dirty(self, *_args) -> None:
+        if not self._loading:
+            self.status_label.setText("Unsaved changes")
+
     def _load_settings(self) -> None:
-        """Load general settings from config."""
+        """Load the complete validated configuration lifecycle state."""
+        self._loading = True
         try:
-            config = get_config()
-            data = config.raw
-            settings = data.get("system", {})
+            data = self._configuration_service.load()
+            settings = data["system"]
+            collab = data["collaboration"]
             self.center_name_edit.setText(settings.get("center_name", ""))
             self.address_edit.setText(settings.get("address", ""))
             self.phone_edit.setText(settings.get("phone", ""))
@@ -205,55 +225,56 @@ class SettingsPage(QWidget):
             self.currency_edit.setText(settings.get("currency", "VND"))
             self.timezone_edit.setText(settings.get("timezone", "Asia/Ho_Chi_Minh"))
             self.academic_year_edit.setText(settings.get("academic_year", ""))
-        except Exception as e:
-            logger.exception("Error loading general settings")
+            self.heartbeat_interval.setValue(collab.get("heartbeat_interval", 10))
+            self.lock_timeout.setValue(collab.get("lock_timeout", 60))
+            self.retry_count.setValue(collab.get("retry_count", 3))
+            self.backup_before_publish.setChecked(collab.get("backup_before_publish", True))
+            self.status_label.setText("No unsaved changes")
+        except Exception:
+            logger.exception("Error loading settings")
+        finally:
+            self._loading = False
 
     def _load_collaboration_settings(self) -> None:
-        """Load collaboration settings from config."""
-        try:
-            config = get_config()
-            settings = config.get_collaboration_settings()
-            self.heartbeat_interval.setValue(settings.get("heartbeat_interval", 10))
-            self.lock_timeout.setValue(settings.get("lock_timeout", 60))
-            self.retry_count.setValue(settings.get("retry_count", 3))
-            self.backup_before_publish.setChecked(settings.get("backup_before_publish", True))
-        except Exception as e:
-            logger.exception("Error loading collaboration settings")
+        # Compatibility hook; lifecycle loading is centralized in _load_settings.
+        return
 
-    def _save_settings(self) -> None:
-        """Save all settings to config."""
-        if not can_write(self._collaboration_manager):
-            notify(self._notification_service, "You must be in WRITE mode to save settings.", "warning")
-            return
-
-        try:
-            config = get_config()
-            data = config.raw
-
-            # Save general settings
-            data["system"] = {
+    def _collect_settings(self) -> dict:
+        return {
+            "system": {
                 "center_name": self.center_name_edit.text().strip(),
                 "address": self.address_edit.text().strip(),
                 "phone": self.phone_edit.text().strip(),
                 "email": self.email_edit.text().strip(),
-                "currency": self.currency_edit.text().strip() or "VND",
+                "currency": self.currency_edit.text().strip().upper() or "VND",
                 "timezone": self.timezone_edit.text().strip() or "Asia/Ho_Chi_Minh",
                 "academic_year": self.academic_year_edit.text().strip(),
-            }
-
-            # Save collaboration settings
-            data["collaboration"] = {
+            },
+            "collaboration": {
                 "heartbeat_interval": self.heartbeat_interval.value(),
                 "lock_timeout": self.lock_timeout.value(),
                 "retry_count": self.retry_count.value(),
                 "backup_before_publish": self.backup_before_publish.isChecked(),
-                "auto_release": False,  # future
-            }
+                "auto_release": False,
+            },
+        }
 
-            save_config(data)
-            QMessageBox.information(self, "Success", "Settings saved successfully.")
+    def _save_settings(self) -> None:
+        if not can_write(self._collaboration_manager):
+            notify(self._notification_service, "You must be in WRITE mode to save settings.", "warning")
+            return
+        try:
+            result = self._configuration_service.save(self._collect_settings())
+            self.status_label.setText("All changes saved")
+            message = "Settings saved successfully."
+            if result.get("restart_required"):
+                message += "\n\nRestart recommended to apply collaboration settings."
+            QMessageBox.information(self, "Success", message)
             notify(self._notification_service, "Settings updated.", "success")
-
+        except ConfigurationValidationError as e:
+            errors = e.args[0] if e.args else {}
+            message = "\n".join(f"• {key}: {value}" for key, value in errors.items()) if isinstance(errors, dict) else str(e)
+            QMessageBox.warning(self, "Invalid settings", message)
         except Exception as e:
             logger.exception("Error saving settings")
             QMessageBox.critical(self, "Error", f"Could not save settings: {str(e)}")
