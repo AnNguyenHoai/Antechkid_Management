@@ -40,13 +40,21 @@ class FinanceWorkspaceShell(QWidget):
         self._outstanding_service = outstanding_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
+        self._authorized = False
 
         self._setup_ui()
         self._connect_signals()
         # Protected workspaces are instantiated by MainWindow for stack wiring,
         # but must not execute permission-guarded data loads for unauthorized users.
-        if self._has_finance_access():
+        self._authorized = self._has_finance_access()
+        if self._authorized:
             self.navigate_to("dashboard")
+        else:
+            # Protected pages are intentionally left uninitialized. They are
+            # still present in the main stack for navigation wiring, but no
+            # Finance service may be touched for unauthorized accounts.
+            self.nav.setEnabled(False)
+            self.header.set_context("Finance Workspace", "Access restricted")
 
     def _has_finance_access(self) -> bool:
         """Return whether the current account may load Finance data."""
@@ -116,11 +124,16 @@ class FinanceWorkspaceShell(QWidget):
         layout.addLayout(body)
 
     def _connect_signals(self) -> None:
-        self.nav.page_selected.connect(self.navigate_to)
-        self.header.back_home_clicked.connect(self.go_home.emit)
+        # Navigation/header signals are connected during _setup_ui.
+        # Keep this hook for future workspace-level signals without creating
+        # duplicate connections.
+        pass
 
     def navigate_to(self, page_id: str) -> None:
-        if not self._has_finance_access():
+        # Re-check at the navigation boundary because the authenticated user
+        # or permissions may change while the application is running.
+        self._authorized = self._has_finance_access()
+        if not self._authorized:
             return
         if page_id == "dashboard":
             self.content_stack.setCurrentWidget(self.dashboard_page)

@@ -6,7 +6,7 @@ Read-only. No write actions needed.
 import logging
 from typing import Optional, List
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QMessageBox, QComboBox, QLineEdit, QSizePolicy
@@ -40,7 +40,8 @@ class OutstandingListPage(QWidget):
         self._notification_service = notification_service
         self._items: List[OutstandingDTO] = []
         self._setup_ui()
-        QTimer.singleShot(100, self.refresh)
+        # Do not load protected Finance data during construction. The shell
+        # refreshes this page only after finance.view authorization succeeds.
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)

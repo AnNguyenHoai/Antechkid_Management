@@ -5,7 +5,7 @@ FinanceDashboardPage - Real dashboard with KPIs and recent transactions.
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
     QLabel, QSizePolicy, QListWidget, QListWidgetItem
@@ -28,7 +28,6 @@ class FinanceDashboardPage(QWidget):
         super().__init__(parent)
         self._service = dashboard_service
         self._setup_ui()
-        QTimer.singleShot(100, self.refresh)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)

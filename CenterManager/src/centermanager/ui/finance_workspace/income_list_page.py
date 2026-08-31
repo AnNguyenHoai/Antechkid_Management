@@ -54,7 +54,8 @@ class IncomeListPage(QWidget):
         self._selected_ids = []
 
         self._setup_ui()
-        self.refresh()
+        # Do not load protected Finance data during construction. The shell
+        # refreshes this page only after finance.view authorization succeeds.
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)

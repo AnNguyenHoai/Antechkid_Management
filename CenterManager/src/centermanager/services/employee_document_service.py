@@ -77,12 +77,24 @@ class EmployeeDocumentService:
             repo_path.relative_to(repo_root)
         except ValueError as exc:
             raise ValueError("Employee document repository path escapes the repository root.") from exc
+        runtime_exists = runtime_path.is_file()
+        repository_exists = repo_path.is_file()
+        checksum_match = False
+        if runtime_exists and repository_exists:
+            try:
+                checksum_match = self.file_sha256(runtime_path) == self.file_sha256(repo_path)
+            except OSError:
+                checksum_match = False
+
         return {
             "runtime_path": runtime_path,
             "repository_path": repo_path,
-            "runtime_exists": runtime_path.is_file(),
-            "repository_exists": repo_path.is_file(),
-            "synced": runtime_path.is_file() and repo_path.is_file(),
+            "runtime_exists": runtime_exists,
+            "repository_exists": repository_exists,
+            # "synced" means the two physical copies exist and contain the
+            # same bytes, not merely that both paths exist.
+            "checksum_match": checksum_match,
+            "synced": runtime_exists and repository_exists and checksum_match,
         }
 
     def file_sha256(self, path: Path) -> str:
@@ -92,6 +104,27 @@ class EmployeeDocumentService:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    def verify_repository_sync(self, document: EmployeeDocument) -> dict:
+        """Return a deterministic sync diagnostic for a document.
+
+        A document is considered synchronized only when both the local runtime
+        materialization and the repository copy exist and have identical SHA-256
+        content. This makes cross-machine verification explicit.
+        """
+        result = self.document_sync_locations(document)
+        logger.info(
+            "Employee document sync check: document_id=%s runtime=%s repository=%s "
+            "runtime_exists=%s repository_exists=%s checksum_match=%s synced=%s",
+            getattr(document, "id", None),
+            result["runtime_path"],
+            result["repository_path"],
+            result["runtime_exists"],
+            result["repository_exists"],
+            result["checksum_match"],
+            result["synced"],
+        )
+        return result
 
     def upload(self, employee, source_path, document_type='CV', notes=None):
         src = Path(source_path).resolve()

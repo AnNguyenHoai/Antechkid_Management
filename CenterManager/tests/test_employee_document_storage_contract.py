@@ -43,3 +43,31 @@ def test_employee_document_repository_path_cannot_be_absolute(tmp_path):
         assert "relative" in str(exc).lower()
     else:
         raise AssertionError("Absolute document paths must be rejected")
+
+
+def test_employee_document_sync_requires_matching_file_contents(tmp_path):
+    runtime = tmp_path / "runtime"
+    attachments = runtime / "Attachments"
+    service = EmployeeDocumentService(sessionmaker(), attachments)
+    doc = EmployeeDocument(
+        relative_path="Attachments/Employees/EMP-00001/CV/test.docx",
+        original_filename="test.docx",
+        employee_id=1,
+    )
+    runtime_path = service.resolve_document_path(doc)
+    repository_path = service.document_sync_locations(doc)["repository_path"]
+    runtime_path.parent.mkdir(parents=True)
+    repository_path.parent.mkdir(parents=True)
+    runtime_path.write_bytes(b"same-content")
+    repository_path.write_bytes(b"different-content")
+
+    locations = service.verify_repository_sync(doc)
+    assert locations["runtime_exists"] is True
+    assert locations["repository_exists"] is True
+    assert locations["checksum_match"] is False
+    assert locations["synced"] is False
+
+    repository_path.write_bytes(b"same-content")
+    locations = service.verify_repository_sync(doc)
+    assert locations["checksum_match"] is True
+    assert locations["synced"] is True
