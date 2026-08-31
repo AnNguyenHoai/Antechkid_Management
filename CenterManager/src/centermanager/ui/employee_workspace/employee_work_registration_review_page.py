@@ -4,28 +4,48 @@ from PySide6.QtCore import Qt
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
-    """Management view of employee availability used for monthly planning."""
-    def __init__(self, employee_service, registration_service, parent=None):
-        super().__init__(parent); self._es=employee_service; self._rs=registration_service; self._setup(); self.refresh()
+    """Manager view: one row per employee/month, with aggregate actions."""
+    def __init__(self,employee_service,registration_service,parent=None):
+        super().__init__(parent); self._es=employee_service; self._rs=registration_service; self._rows=[]; self._setup(); self.refresh()
     def _setup(self):
         root=QVBoxLayout(self); root.setContentsMargins(28,24,28,24); root.setSpacing(12)
         title=QLabel("Work Registrations"); title.setStyleSheet("font-size:24px;font-weight:700;"); root.addWidget(title)
-        hint=QLabel("Review employee availability for the coming month before creating the official work schedule. Registration is not attendance and does not approve working time."); hint.setWordWrap(True); hint.setStyleSheet("color:#68737d;"); root.addWidget(hint)
-        bar=QHBoxLayout(); self.month=QLabel(); self.month.setStyleSheet("font-size:15px;font-weight:600;"); bar.addWidget(self.month); bar.addStretch(); self.close_btn=QPushButton("Close Registration Month"); self.close_btn.setToolTip("Close submitted availability after planning is complete."); bar.addWidget(self.close_btn); self.refresh_btn=QPushButton("Refresh"); bar.addWidget(self.refresh_btn); root.addLayout(bar)
-        self.table=QTableWidget(0,8); self.table.setHorizontalHeaderLabels(["Employee","Code","Date","From","To","Hours","Type","Status"]); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers); self.table.verticalHeader().setVisible(False)
-        h=self.table.horizontalHeader(); h.setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch); h.setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(2,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(3,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(4,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(5,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(6,QHeaderView.ResizeMode.ResizeToContents); h.setSectionResizeMode(7,QHeaderView.ResizeMode.ResizeToContents)
-        root.addWidget(self.table,1); self.refresh_btn.clicked.connect(self.refresh); self.close_btn.clicked.connect(self.close_month)
-    def _period(self): return self._rs.next_month()
+        hint=QLabel("Each employee has one monthly registration containing all availability blocks. Review it before building the official schedule."); hint.setWordWrap(True); hint.setStyleSheet("color:#68737d;"); root.addWidget(hint)
+        bar=QHBoxLayout(); self.month=QLabel(); self.month.setStyleSheet("font-size:15px;font-weight:600;"); bar.addWidget(self.month); bar.addStretch(); self.accept_btn=QPushButton("Accept Selected"); self.reopen_btn=QPushButton("Reopen Selected"); self.close_btn=QPushButton("Close Registration Month"); self.refresh_btn=QPushButton("Refresh")
+        for b in (self.accept_btn,self.reopen_btn,self.close_btn,self.refresh_btn):bar.addWidget(b)
+        root.addLayout(bar)
+        self.table=QTableWidget(0,7); self.table.setHorizontalHeaderLabels(["Employee","Code","Blocks","Total Hours","Status","Submitted","Accepted"]); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers); self.table.verticalHeader().setVisible(False); h=self.table.horizontalHeader(); h.setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch); [h.setSectionResizeMode(c,QHeaderView.ResizeMode.ResizeToContents) for c in range(1,7)]; root.addWidget(self.table,1)
+        self.refresh_btn.clicked.connect(self.refresh); self.accept_btn.clicked.connect(self.accept_selected); self.reopen_btn.clicked.connect(self.reopen_selected); self.close_btn.clicked.connect(self.close_month); self.table.itemSelectionChanged.connect(self._update_actions)
+    def _period(self):return self._rs.next_month()
     def refresh(self):
         try:
-            y,m=self._period(); rows=self._rs.list_all(y,m); self.month.setText(f"Planning input: {m:02d}/{y}  •  Next month"); self.table.setRowCount(0)
-            for r in rows:
-                i=self.table.rowCount(); self.table.insertRow(i); e=r.employee; mins=(r.end_time.hour*60+r.end_time.minute)-(r.start_time.hour*60+r.start_time.minute); vals=[e.full_name or "-",e.employee_code or "-",r.work_date.strftime("%d/%m/%Y"),r.start_time.strftime("%H:%M"),r.end_time.strftime("%H:%M"),f"{mins/60:.2f}",r.work_type,r.status]
-                for c,v in enumerate(vals): self.table.setItem(i,c,QTableWidgetItem(v))
-            self.close_btn.setEnabled(any(r.status==EmployeeWorkRegistration.STATUS_SUBMITTED for r in rows))
-        except Exception as exc: QMessageBox.warning(self,"Work Registrations",f"Could not load registrations.\n\n{exc}")
+            y,m=self._period(); self.month.setText(f"Planning input: {m:02d}/{y} • Next month"); self._rows=self._rs.list_all(y,m); self.table.setRowCount(0)
+            for r in self._rows:
+                hours=sum((b.end_time.hour*60+b.end_time.minute)-(b.start_time.hour*60+b.start_time.minute) for b in r.blocks)/60
+                vals=[r.employee.full_name or "-",r.employee.employee_code or "-",str(len(r.blocks)),f"{hours:.2f}",r.status,r.submitted_at.strftime("%d/%m/%Y %H:%M") if r.submitted_at else "-",r.accepted_at.strftime("%d/%m/%Y %H:%M") if r.accepted_at else "-"]
+                i=self.table.rowCount(); self.table.insertRow(i)
+                for c,v in enumerate(vals):self.table.setItem(i,c,QTableWidgetItem(v))
+                self.table.item(i,0).setData(Qt.ItemDataRole.UserRole,r.employee_id)
+            self._update_actions()
+        except Exception as exc:QMessageBox.warning(self,"Work Registrations",f"Could not load registrations.\n\n{exc}")
+    def _selected(self):
+        i=self.table.currentRow(); return self._rows[i] if 0<=i<len(self._rows) else None
+    def _update_actions(self):
+        r=self._selected(); self.accept_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_SUBMITTED)); self.reopen_btn.setEnabled(bool(r and r.status==EmployeeWorkRegistration.STATUS_ACCEPTED)); self.close_btn.setEnabled(any(x.status==EmployeeWorkRegistration.STATUS_SUBMITTED for x in self._rows))
+    def accept_selected(self):
+        r=self._selected();
+        if not r:return
+        y,m=self._period()
+        try:self._rs.accept(r.employee_id,y,m);self.refresh()
+        except Exception as exc:QMessageBox.warning(self,"Accept Registration",str(exc))
+    def reopen_selected(self):
+        r=self._selected();
+        if not r:return
+        y,m=self._period()
+        try:self._rs.reopen(r.employee_id,y,m);self.refresh()
+        except Exception as exc:QMessageBox.warning(self,"Reopen Registration",str(exc))
     def close_month(self):
         y,m=self._period()
-        if QMessageBox.question(self,"Close registration month",f"Close submitted availability for {m:02d}/{y}?\n\nDo this only after the manager has finished using it for planning.")==QMessageBox.StandardButton.Yes:
-            try:self._rs.close_month(y,m); self.refresh()
-            except Exception as exc: QMessageBox.warning(self,"Work Registrations",str(exc))
+        if QMessageBox.question(self,"Close registration month",f"Close the {m:02d}/{y} registration period after planning?")==QMessageBox.StandardButton.Yes:
+            try:self._rs.close_month(y,m);self.refresh()
+            except Exception as exc:QMessageBox.warning(self,"Close Registration",str(exc))
