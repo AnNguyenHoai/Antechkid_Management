@@ -46,7 +46,10 @@ class EmployeeWorkRegistrationWidget(QWidget):
     def set_editable(self,enabled): self.editable=bool(enabled); self._update_actions()
     def _update_actions(self):
         row=self.table.currentRow(); has=row>=0; draft=has and self.table.item(row,5) and self.table.item(row,5).text()==EmployeeWorkRegistration.STATUS_DRAFT
-        self.add.setEnabled(self.editable); self.edit.setEnabled(self.editable and draft); self.delete.setEnabled(self.editable and draft)
+        submitted = any(self.table.item(i,5) and self.table.item(i,5).text() == EmployeeWorkRegistration.STATUS_SUBMITTED for i in range(self.table.rowCount()))
+        closed = any(self.table.item(i,5) and self.table.item(i,5).text() == EmployeeWorkRegistration.STATUS_CLOSED for i in range(self.table.rowCount()))
+        month_editable = self.editable and not submitted and not closed
+        self.add.setEnabled(month_editable); self.edit.setEnabled(month_editable and draft); self.delete.setEnabled(month_editable and draft)
         has_draft=any(self.table.item(i,5) and self.table.item(i,5).text()==EmployeeWorkRegistration.STATUS_DRAFT for i in range(self.table.rowCount()))
         self.submit.setEnabled(self.editable and has_draft)
     def refresh(self):

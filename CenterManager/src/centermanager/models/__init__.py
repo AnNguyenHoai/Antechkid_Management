@@ -29,6 +29,7 @@ from centermanager.models.employee_document import EmployeeDocument
 from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException
 from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 
 # Teacher
 from centermanager.models.teacher import Teacher
@@ -79,6 +80,7 @@ __all__ = [
     "EmployeeScheduleException",
     "EmployeeWorkingTimeEntry",
     "EmployeeWorkRegistration",
+    "EmployeeWorkRegistrationPeriod",
     "Teacher",
     "TeacherDocument",
     "TeacherTimelineEvent",

@@ -122,6 +122,11 @@ class PermissionDefinitions:
     WORKING_TIME_MANAGE = "working_time.manage"
     WORKING_TIME_LOCK = "working_time.lock"
 
+    # Employee monthly work registration
+    WORK_REGISTRATION_SELF = "work_registration.self"
+    WORK_REGISTRATION_VIEW_ALL = "work_registration.view.all"
+    WORK_REGISTRATION_MANAGE = "work_registration.manage"
+
     # Backup & recovery
     BACKUP_VIEW = "backup.view"
     BACKUP_CREATE = "backup.create"
@@ -185,6 +190,9 @@ class PermissionDefinitions:
             cls.WORKING_TIME_CREATE_SELF,
             cls.WORKING_TIME_MANAGE,
             cls.WORKING_TIME_LOCK,
+            cls.WORK_REGISTRATION_SELF,
+            cls.WORK_REGISTRATION_VIEW_ALL,
+            cls.WORK_REGISTRATION_MANAGE,
         ]
 
     @classmethod

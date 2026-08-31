@@ -13,6 +13,9 @@ def setup_db(tmp_path):
     engine=create_engine_for_path(tmp_path/'registration.db'); Base.metadata.create_all(engine); Session=sessionmaker(bind=engine,expire_on_commit=False)
     with Session() as s:
         manager_role=Role(name='manager',display_name='Manager',is_system=True)
+        p_all=Permission(name='work_registration.view.all',description='view all',category='employee')
+        p_manage=Permission(name='work_registration.manage',description='manage',category='employee')
+        manager_role.permissions.extend([p_all,p_manage])
         role=Role(name='teacher',display_name='Teacher',is_system=True)
         p=Permission(name='working_time.registration.self',description='register',category='employee'); role.permissions.append(p)
         other_role=Role(name='teacher2',display_name='Teacher 2',is_system=True); other_role.permissions.append(p)
@@ -32,7 +35,8 @@ def test_registration_is_next_month_only_and_separate_from_actual(tmp_path):
     with CurrentUserContext(u):
         y,m=svc.next_month(date(2026,8,31)); r=svc.create(emp.id,date(y,m,3),time(9),time(12),'TEACHING')
         assert r.status=='DRAFT'
-        svc.submit(r.id)
+        with pytest.raises(EmployeeWorkRegistrationValidationError): svc.submit(r.id)
+        svc.submit_month(emp.id, y, m)
         with pytest.raises(EmployeeWorkRegistrationValidationError): svc.create(emp.id,date(2026,8,31),time(9),time(12),'WORK')
         with pytest.raises(EmployeeWorkRegistrationValidationError): svc.create(emp.id,date(y,m,3),time(11),time(13),'WORK')
 
@@ -70,3 +74,76 @@ def test_manager_can_view_all_and_close_submitted_registrations(tmp_path):
         assert svc.close_month(y,m)==1
         rows=svc.list_all(y,m)
         assert rows[0].status=='CLOSED'
+
+
+
+def test_manager_permission_is_required_even_for_manager_role(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    with Session() as s:
+        manager=s.query(User).filter_by(username='manager').one()
+        # Explicitly remove manager permissions to prove role name is not an authorization bypass.
+        manager.role.permissions.clear(); s.commit(); s.refresh(manager)
+    with CurrentUserContext(manager):
+        with pytest.raises(EmployeeWorkRegistrationAccessDeniedError): svc.list_all(*svc.next_month(date(2026,8,31)))
+
+
+def test_close_month_requires_no_draft_blocks_and_closes_period(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    y,m=svc.next_month(date(2026,8,31))
+    with CurrentUserContext(u):
+        svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
+    with Session() as s: manager=s.query(User).filter_by(username='manager').one()
+    with CurrentUserContext(manager):
+        with pytest.raises(EmployeeWorkRegistrationValidationError): svc.close_month(y,m)
+    with CurrentUserContext(u): svc.submit_month(emp.id,y,m)
+    with CurrentUserContext(manager):
+        assert svc.close_month(y,m)==1
+        period=svc.get_period(y,m,manager)
+        assert period.status == 'CLOSED'
+
+
+def test_closed_period_blocks_new_registration(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    y,m=svc.next_month(date(2026,8,31))
+    with CurrentUserContext(u): svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
+    with Session() as s: manager=s.query(User).filter_by(username='manager').one()
+    with CurrentUserContext(u): svc.submit_month(emp.id,y,m)
+    with CurrentUserContext(manager): svc.close_month(y,m)
+    with CurrentUserContext(u):
+        with pytest.raises(EmployeeWorkRegistrationValidationError): svc.create(emp.id,date(y,m,4),time(13),time(17),'WORK')
+
+
+def test_audit_records_submission_and_period_close(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    y,m=svc.next_month(date(2026,8,31))
+    with CurrentUserContext(u):
+        svc.create(emp.id,date(y,m,5),time(9),time(12),'WORK')
+        svc.submit_month(emp.id,y,m)
+    with Session() as s: manager=s.query(User).filter_by(username='manager').one()
+    with CurrentUserContext(manager): svc.close_month(y,m)
+    with Session() as s:
+        actions=[row.action for row in s.query(__import__('centermanager.models.audit_log',fromlist=['AuditLog']).AuditLog).all()]
+    assert 'WORK_REGISTRATION_CREATED' in actions
+    assert 'WORK_REGISTRATION_SUBMITTED' in actions
+    assert 'WORK_REGISTRATION_PERIOD_CLOSED' in actions
+
+def test_manager_list_all_keeps_employee_relationship_loaded_after_service_session_closes(tmp_path):
+    """Management UI consumes detached rows, so employee must be eagerly loaded."""
+    Session,u,u2,emp,other=setup_db(tmp_path)
+    svc=EmployeeWorkRegistrationService(Session)
+    with CurrentUserContext(u):
+        y,m=svc.next_month(date(2026,8,31))
+        svc.create(emp.id,date(y,m,5),time(9),time(12),'WORK')
+        svc.submit_month(emp.id,y,m)
+
+    with Session() as s:
+        manager=s.query(User).filter_by(username='manager').one()
+
+    with CurrentUserContext(manager):
+        rows=svc.list_all(y,m)
+
+    assert len(rows) == 1
+    # The service session is already closed here. This must not issue a lazy
+    # SELECT against a detached EmployeeWorkRegistration instance.
+    assert rows[0].employee is not None
+    assert rows[0].employee.employee_code == emp.employee_code

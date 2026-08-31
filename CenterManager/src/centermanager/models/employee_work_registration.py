@@ -14,13 +14,15 @@ class EmployeeWorkRegistration(Base, TimestampMixin):
     STATUS_DRAFT = "DRAFT"
     STATUS_SUBMITTED = "SUBMITTED"
     STATUS_CLOSED = "CLOSED"
-    # APPROVED/REJECTED are retained as legacy values for old databases only.
+    # APPROVED/REJECTED are retained only for legacy database compatibility;
+    # the current business lifecycle is DRAFT -> SUBMITTED -> CLOSED.
     STATUS_APPROVED = "APPROVED"
     STATUS_REJECTED = "REJECTED"
     VALID_STATUSES = {STATUS_DRAFT, STATUS_SUBMITTED, STATUS_CLOSED, STATUS_APPROVED, STATUS_REJECTED}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    period_id: Mapped[Optional[int]] = mapped_column(ForeignKey("employee_work_registration_periods.id", ondelete="RESTRICT"), nullable=True, index=True)
     work_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
@@ -31,6 +33,7 @@ class EmployeeWorkRegistration(Base, TimestampMixin):
     reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     employee = relationship("Employee", back_populates="work_registrations")
+    period = relationship("EmployeeWorkRegistrationPeriod", back_populates="registrations", lazy="joined")
     created_by = relationship("User", foreign_keys=[created_by_user_id])
     reviewed_by = relationship("User", foreign_keys=[reviewed_by_user_id])
 
