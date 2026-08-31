@@ -20,10 +20,12 @@ logger = logging.getLogger(__name__)
 class MyEmployeeProfilePage(QWidget):
     """Self-service profile page. Personal data is editable; employment data is read-only."""
 
-    def __init__(self, employee_service, document_service, parent=None):
+    def __init__(self, employee_service, document_service, schedule_service, working_time_service, parent=None):
         super().__init__(parent)
         self._service = employee_service
         self._documents = document_service
+        self._schedule_service = schedule_service
+        self._working_time_service = working_time_service
         # WRITE mode is controlled by the application's global write guard.
         self._write_enabled = False
         self._setup()
@@ -110,7 +112,7 @@ class MyEmployeeProfilePage(QWidget):
             return
         try:
             dialog = EmployeeProfileDialog(
-                self._service, self._documents, self.employee, self, self_mode=True,
+                self._service, self._documents, self._schedule_service, self._working_time_service, self.employee, self, self_mode=True,
                 editable=self._write_enabled
             )
             if dialog.exec():
@@ -120,13 +122,35 @@ class MyEmployeeProfilePage(QWidget):
             QMessageBox.critical(self, "My Profile", f"Could not open profile.\n\nReason: {exc}")
 
 
+class MyEmployeeSchedulePage(QWidget):
+    """Read-only schedule view for the authenticated employee."""
+    def __init__(self, employee_service, schedule_service, parent=None):
+        super().__init__(parent); self._es=employee_service; self._ss=schedule_service; self._widget=None; self._setup()
+    def _setup(self):
+        self.root=QVBoxLayout(self); self.root.setContentsMargins(28,24,28,24); self.title=QLabel("My Schedule"); self.title.setStyleSheet("font-size:24px;font-weight:700;"); self.root.addWidget(self.title)
+        self.body=QLabel("Loading schedule…"); self.root.addWidget(self.body); self.root.addStretch()
+    def refresh(self):
+        try:
+            employee=self._es.get_current_employee()
+            if self._widget is None:
+                from centermanager.ui.employee_workspace.employee_schedule_widget import EmployeeScheduleWidget
+                self._widget=EmployeeScheduleWidget(self._ss, employee, editable=False, parent=self)
+                self.root.replaceWidget(self.body, self._widget); self.body.deleteLater()
+            else: self._widget.employee=employee; self._widget.refresh()
+        except Exception as exc:
+            self.body.setText(f"Could not load schedule.\n\n{exc}")
+
+
 class EmployeeWorkspaceShell(QWidget):
     go_home = Signal()
 
-    def __init__(self, employee_service, document_service, permission_service, parent=None):
+    def __init__(self, employee_service, document_service, schedule_service, working_time_service, work_registration_service, permission_service, parent=None):
         super().__init__(parent)
         self._es = employee_service
         self._ds = document_service
+        self._schedule_service = schedule_service
+        self._working_time_service = working_time_service
+        self._work_registration_service = work_registration_service
         self._ps = permission_service
         # Global WRITE mode is OFF until MainWindow explicitly grants it.
         self._write_enabled = False
@@ -155,32 +179,84 @@ class EmployeeWorkspaceShell(QWidget):
             self.nav.page_selected.connect(self.navigate_to)
             body.addWidget(self.nav)
             self.stack = QStackedWidget()
-            self.list_page = EmployeeListPage(self._es, self._ds, self._ps, parent=self)
+            self.list_page = EmployeeListPage(self._es, self._ds, self._schedule_service, self._working_time_service, self._ps, parent=self)
+            self.profile_page = None
+            self.list_page.set_profile_opener(self.open_employee_profile)
             self.stack.addWidget(self.list_page)
             body.addWidget(self.stack, 1)
         else:
             self.nav = WorkspaceNavigation(
                 "Employee Workspace",
                 [{"id": "profile", "icon": "👤", "label": "My Profile"},
-                 {"id": "attendance", "icon": "🕒", "label": "Attendance"}],
+                 {"id": "attendance", "icon": "🕒", "label": "Attendance"},
+                 {"id": "registration", "icon": "📝", "label": "Work Registration"},
+                 {"id": "schedule", "icon": "📅", "label": "Schedule"}],
             )
             self.nav.page_selected.connect(self.navigate_to)
             body.addWidget(self.nav)
             self.stack = QStackedWidget()
-            self.self_page = MyEmployeeProfilePage(self._es, self._ds, self)
+            self.self_page = MyEmployeeProfilePage(self._es, self._ds, self._schedule_service, self)
             self.self_page.set_write_enabled(self._write_enabled)
             self.stack.addWidget(self.self_page)
-            attendance = QLabel(
-                "Attendance / Working Time\n\n"
-                "Working-time booking will be implemented in EMPLOYEE 1.4."
-            )
+            attendance = QLabel("Select Attendance to load your working time.")
             attendance.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.attendance_page = attendance
+            self._attendance_widget = None
             self.stack.addWidget(attendance)
+            from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
+            employee = None
+            try:
+                employee = self._es.get_current_employee()
+            except Exception:
+                pass
+            self.registration_page = EmployeeWorkRegistrationWidget(self._work_registration_service, employee, editable=self._write_enabled, parent=self) if employee else QLabel("No employee profile is linked to this account.")
+            self.stack.addWidget(self.registration_page)
+            self.schedule_page = MyEmployeeSchedulePage(self._es, self._schedule_service, self)
+            self.stack.addWidget(self.schedule_page)
             body.addWidget(self.stack, 1)
 
         root.addLayout(body)
         if not self.management_mode:
             self.self_page.refresh()
+
+    def _ensure_attendance_page(self):
+        if self._attendance_widget is not None:
+            return
+        try:
+            from centermanager.ui.employee_workspace.employee_working_time_widget import EmployeeWorkingTimeWidget
+            employee = self._es.get_current_employee()
+            widget = EmployeeWorkingTimeWidget(self._working_time_service, employee, editable=self._write_enabled, management=False, parent=self)
+            self._attendance_widget = widget
+            self.stack.removeWidget(self.attendance_page)
+            self.attendance_page.deleteLater()
+            self.attendance_page = widget
+            self.stack.insertWidget(1, widget)
+        except Exception as exc:
+            self.attendance_page.setText(f"Could not load attendance.\n\n{exc}")
+
+    def open_employee_profile(self, employee):
+        """Show management profile as an in-window page, never as a modal dialog."""
+        if self.profile_page is not None:
+            self.stack.removeWidget(self.profile_page)
+            self.profile_page.deleteLater()
+        self.profile_page = EmployeeProfileDialog(
+            self._es, self._ds, self._schedule_service, self._working_time_service,
+            employee, self, self_mode=False, editable=self._write_enabled, embedded=True
+        )
+        self.profile_page.profile_saved.connect(self.list_page.refresh)
+        self.profile_page.back_requested.connect(self._close_employee_profile)
+        self.stack.addWidget(self.profile_page)
+        self.stack.setCurrentWidget(self.profile_page)
+        self.header.set_context("Employee Workspace", f"Employee Profile • {employee.employee_code}")
+
+    def _close_employee_profile(self):
+        if self.profile_page is not None:
+            self.stack.setCurrentWidget(self.list_page)
+            self.profile_page.deleteLater()
+            self.profile_page = None
+        self.header.set_context("Employee Workspace", "Employees")
+        self.nav.set_active_page("employees")
+        self.list_page.refresh()
 
     def navigate_to(self, page_id):
         if self.management_mode:
@@ -190,9 +266,20 @@ class EmployeeWorkspaceShell(QWidget):
             self.list_page.refresh()
         else:
             if page_id == "attendance":
+                self._ensure_attendance_page()
                 self.stack.setCurrentIndex(1)
                 self.header.set_context("Employee Workspace", "Attendance")
                 self.nav.set_active_page("attendance")
+            elif page_id == "registration":
+                self.stack.setCurrentWidget(self.registration_page)
+                self.header.set_context("Employee Workspace", "Work Registration")
+                self.nav.set_active_page("registration")
+                if hasattr(self.registration_page, "refresh"): self.registration_page.refresh()
+            elif page_id == "schedule":
+                self.stack.setCurrentIndex(3)
+                self.header.set_context("Employee Workspace", "Schedule")
+                self.nav.set_active_page("schedule")
+                self.schedule_page.refresh()
             else:
                 self.stack.setCurrentIndex(0)
                 self.header.set_context("Employee Workspace", "My Profile")
@@ -205,3 +292,12 @@ class EmployeeWorkspaceShell(QWidget):
             self.list_page.set_write_enabled(self._write_enabled)
         else:
             self.self_page.set_write_enabled(self._write_enabled)
+            # ``attendance_page`` starts life as a QLabel placeholder and is
+            # replaced lazily by EmployeeWorkingTimeWidget on first navigation.
+            # Never call the widget-only API on that placeholder.  The actual
+            # working-time widget receives the current write state when it is
+            # created in ``_ensure_attendance_page``.
+            if self._attendance_widget is not None:
+                self._attendance_widget.set_editable(self._write_enabled)
+            if hasattr(self.registration_page, "set_editable"):
+                self.registration_page.set_editable(self._write_enabled)

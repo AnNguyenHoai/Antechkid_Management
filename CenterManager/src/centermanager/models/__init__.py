@@ -26,6 +26,9 @@ from centermanager.models.role_permission import RolePermission
 from centermanager.models.audit_log import AuditLog
 from centermanager.models.employee import Employee
 from centermanager.models.employee_document import EmployeeDocument
+from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException
+from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
+from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 
 # Teacher
 from centermanager.models.teacher import Teacher
@@ -72,6 +75,10 @@ __all__ = [
     "AuditLog",
     "Employee",
     "EmployeeDocument",
+    "EmployeeScheduleRule",
+    "EmployeeScheduleException",
+    "EmployeeWorkingTimeEntry",
+    "EmployeeWorkRegistration",
     "Teacher",
     "TeacherDocument",
     "TeacherTimelineEvent",

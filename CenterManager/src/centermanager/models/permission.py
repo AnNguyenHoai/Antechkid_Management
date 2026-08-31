@@ -110,6 +110,18 @@ class PermissionDefinitions:
     EMPLOYEE_UPDATE = "employee.update"
     EMPLOYEE_ARCHIVE = "employee.archive"
 
+    # Employee schedule
+    SCHEDULE_VIEW_SELF = "schedule.view.self"
+    SCHEDULE_VIEW_ALL = "schedule.view.all"
+    SCHEDULE_MANAGE = "schedule.manage"
+
+    # Employee working time
+    WORKING_TIME_VIEW_SELF = "working_time.view.self"
+    WORKING_TIME_VIEW_ALL = "working_time.view.all"
+    WORKING_TIME_CREATE_SELF = "working_time.create.self"
+    WORKING_TIME_MANAGE = "working_time.manage"
+    WORKING_TIME_LOCK = "working_time.lock"
+
     # Backup & recovery
     BACKUP_VIEW = "backup.view"
     BACKUP_CREATE = "backup.create"
@@ -165,6 +177,14 @@ class PermissionDefinitions:
             cls.EMPLOYEE_CREATE,
             cls.EMPLOYEE_UPDATE,
             cls.EMPLOYEE_ARCHIVE,
+            cls.SCHEDULE_VIEW_SELF,
+            cls.SCHEDULE_VIEW_ALL,
+            cls.SCHEDULE_MANAGE,
+            cls.WORKING_TIME_VIEW_SELF,
+            cls.WORKING_TIME_VIEW_ALL,
+            cls.WORKING_TIME_CREATE_SELF,
+            cls.WORKING_TIME_MANAGE,
+            cls.WORKING_TIME_LOCK,
         ]
 
     @classmethod
@@ -218,6 +238,9 @@ class PermissionDefinitions:
             cls.EMPLOYEE_CREATE: "employee",
             cls.EMPLOYEE_UPDATE: "employee",
             cls.EMPLOYEE_ARCHIVE: "employee",
+            cls.SCHEDULE_VIEW_SELF: "employee",
+            cls.SCHEDULE_VIEW_ALL: "employee",
+            cls.SCHEDULE_MANAGE: "employee",
         }
 
         return category_map.get(permission_name, "other")

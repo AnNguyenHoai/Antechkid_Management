@@ -73,6 +73,9 @@ class MainWindow(QMainWindow):
         teacher_timeline_service,
         employee_service,
         employee_document_service,
+        employee_schedule_service,
+        employee_working_time_service,
+        employee_work_registration_service,
         class_service,
         enrollment_service,
         class_timeline_service,
@@ -122,6 +125,9 @@ class MainWindow(QMainWindow):
         self._enrollment_service = enrollment_service
         self._employee_service = employee_service
         self._employee_document_service = employee_document_service
+        self._employee_schedule_service = employee_schedule_service
+        self._employee_working_time_service = employee_working_time_service
+        self._employee_work_registration_service = employee_work_registration_service
         self._class_timeline_service = class_timeline_service
         self._teacher_assignment_service_for_class = teacher_assignment_service_for_class
         self._permission_service = permission_service
@@ -286,7 +292,7 @@ class MainWindow(QMainWindow):
     def _setup_employee_workspace(self) -> None:
         """Setup employee workspace."""
         self.employee_workspace = EmployeeWorkspaceShell(
-            self._employee_service, self._employee_document_service, self._permission_service
+            self._employee_service, self._employee_document_service, self._employee_schedule_service, self._employee_working_time_service, self._employee_work_registration_service, self._permission_service
         )
         self.employee_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.employee_workspace)
@@ -321,27 +327,13 @@ class MainWindow(QMainWindow):
             self._update_waiting_status()
 
     def _update_poller_status(self) -> None:
-        """Update poller status indicator."""
+        """Refresh internal poller state without projecting a status icon into the UI."""
         if self._poller is None:
             return
         try:
-            status = self._poller.get_status()
-            mode = status.get("mode", "normal")
-            is_running = status.get("running", False)
-            is_stale = status.get("snapshot_stale", False)
-
-            if not is_running:
-                self.poller_status_label.setText("⏹️")
-                self.poller_status_label.setToolTip("Poller stopped")
-            elif is_stale:
-                self.poller_status_label.setText("⚠️")
-                self.poller_status_label.setToolTip("Poller: stale snapshot")
-            else:
-                self.poller_status_label.setText("✅")
-                self.poller_status_label.setToolTip(f"Poller: {mode} mode")
+            self._poller.get_status()
         except Exception:
-            self.poller_status_label.setText("❓")
-            self.poller_status_label.setToolTip("Poller status unknown")
+            logger.debug("Unable to read collaboration poller status", exc_info=True)
 
     # ===== Collaboration Status Bar =====
 
@@ -397,9 +389,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.waiting_indicator)
 
         # Poller status indicator
-        self.poller_status_label = QLabel("🔍")
-        self.poller_status_label.setToolTip("Poller: idle")
-        layout.addWidget(self.poller_status_label)
 
         # Start Editing / Finish Editing buttons
         self.start_edit_btn = QPushButton("✏️ Start Editing")
@@ -407,7 +396,7 @@ class MainWindow(QMainWindow):
         self.start_edit_btn.clicked.connect(self._on_start_editing)
         layout.addWidget(self.start_edit_btn)
 
-        self.finish_edit_btn = QPushButton("✅ Finish Editing")
+        self.finish_edit_btn = QPushButton("Finish Editing")
         self.finish_edit_btn.setFixedHeight(28)
         self.finish_edit_btn.setVisible(False)
         self.finish_edit_btn.clicked.connect(self._on_finish_editing)

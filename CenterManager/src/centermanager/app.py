@@ -58,6 +58,9 @@ from centermanager.ui.login_dialog import LoginDialog
 from centermanager.services.teacher_service import TeacherService
 from centermanager.services.employee_service import EmployeeService
 from centermanager.services.employee_document_service import EmployeeDocumentService
+from centermanager.services.employee_schedule_service import EmployeeScheduleService
+from centermanager.services.employee_working_time_service import EmployeeWorkingTimeService
+from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
@@ -326,6 +329,9 @@ def main() -> int:
 
         employee_service = EmployeeService(session_factory)
         employee_document_service = EmployeeDocumentService(session_factory, paths.runtime_root / "Attachments")
+        employee_schedule_service = EmployeeScheduleService(session_factory)
+        employee_working_time_service = EmployeeWorkingTimeService(session_factory, employee_schedule_service)
+        employee_work_registration_service = EmployeeWorkRegistrationService(session_factory)
 
         teacher_timeline_service = TeacherTimelineService(session_factory)
         teacher_service = TeacherService(
@@ -439,6 +445,9 @@ def main() -> int:
             teacher_timeline_service=teacher_timeline_service,
             employee_service=employee_service,
             employee_document_service=employee_document_service,
+            employee_schedule_service=employee_schedule_service,
+            employee_working_time_service=employee_working_time_service,
+            employee_work_registration_service=employee_work_registration_service,
             class_service=class_service,
             enrollment_service=enrollment_service,
             class_timeline_service=class_timeline_service,

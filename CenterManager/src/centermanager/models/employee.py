@@ -29,4 +29,8 @@ class Employee(Base, TimestampMixin):
     termination_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     user: Mapped[Optional["User"]] = relationship("User", back_populates="employee", lazy="selectin")
+    schedule_rules = relationship("EmployeeScheduleRule", back_populates="employee", cascade="all, delete-orphan")
+    schedule_exceptions = relationship("EmployeeScheduleException", back_populates="employee", cascade="all, delete-orphan")
+    working_time_entries = relationship("EmployeeWorkingTimeEntry", back_populates="employee", cascade="all, delete-orphan")
+    work_registrations = relationship("EmployeeWorkRegistration", back_populates="employee", cascade="all, delete-orphan")
     __table_args__=(UniqueConstraint("employee_code", name="uq_employee_code"), UniqueConstraint("user_id", name="uq_employee_user"))
