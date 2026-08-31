@@ -5,15 +5,13 @@ Observes remote lock, queue, and version with bounded frequency.
 """
 
 import logging
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any
 from enum import Enum
 
 from PySide6.QtCore import (
-    QObject, QThread, QTimer, Signal, QCoreApplication,
-    QMetaObject, Qt, Slot
+    QObject, QThread, QTimer, Signal, QMetaObject, Qt, Slot
 )
 
 from centermanager.events.event_bus import EventBus
@@ -36,7 +34,7 @@ class CollaborationSnapshot:
     remote_lock: Dict[str, Any] = field(default_factory=dict)
     queue: Dict[str, Any] = field(default_factory=dict)
     version: int = 0
-    poll_status: str = "unknown"  # "success", "error"
+    poll_status: str = "unknown"
     error: Optional[str] = None
     is_stale: bool = False
 
@@ -79,8 +77,6 @@ class CollaborationPoller(QObject):
     """Background poller for remote collaboration state."""
 
     snapshot_changed = Signal(CollaborationSnapshot)
-    # Emitted after every completed poll cycle (success or failure). This is a
-    # lifecycle/observability signal, not a remote-state-change signal.
     poll_completed = Signal(object)
     refresh_requested = Signal(object)
     mode_change_requested = Signal(object)
@@ -118,20 +114,15 @@ class CollaborationPoller(QObject):
         self._current_backoff = initial_backoff
         self._next_poll_delay = normal_interval
 
-        # Thread and timer - timer will be created in the thread
         self._thread = QThread()
         self.moveToThread(self._thread)
         self._thread.started.connect(self._on_thread_started)
         self._timer: Optional[QTimer] = None
         self._lease_timer: Optional[QTimer] = None
 
-        # For stopping
         self._stop_requested = False
-        # Production keeps the historical default (initial poll on start), while
-        # tests/integrators can disable it to make poll cycles deterministic.
         self._initial_poll_enabled = True
 
-        # Connect signals to slots (queued by default due to different threads)
         self.refresh_requested.connect(self._on_refresh_requested, Qt.QueuedConnection)
         self.mode_change_requested.connect(self._on_mode_change_requested, Qt.QueuedConnection)
         self.stop_requested.connect(self._on_stop_requested, Qt.QueuedConnection)
@@ -148,15 +139,11 @@ class CollaborationPoller(QObject):
         logger.info("CollaborationPoller started")
 
     def stop(self) -> None:
-        """Stop the poller and release resources.
-
-        Uses cooperative shutdown. No QThread.terminate().
-        """
+        """Stop the poller and release resources."""
         if not self._running:
             return
         self._running = False
         self._stop_requested = True
-        # Use blocking invoke to ensure the stop slot runs before we quit
         QMetaObject.invokeMethod(
             self,
             "_on_stop_requested",
@@ -164,7 +151,6 @@ class CollaborationPoller(QObject):
         )
         self._thread.quit()
         if not self._thread.wait(5000):
-            # Do NOT terminate. This is a lifecycle bug that must be fixed.
             logger.error("Poller thread did not stop gracefully")
             raise RuntimeError("Poller thread did not stop gracefully")
         logger.info("CollaborationPoller stopped")
@@ -182,7 +168,6 @@ class CollaborationPoller(QObject):
 
     @Slot(object)
     def _on_refresh_requested(self, reason: Optional[str]) -> None:
-        """Handle refresh request from main thread (runs in poller thread)."""
         if not self._running or self._stop_requested:
             return
         if self._poll_in_progress:
@@ -193,7 +178,6 @@ class CollaborationPoller(QObject):
 
     @Slot(object)
     def _on_mode_change_requested(self, mode: PollerMode) -> None:
-        """Handle mode change from main thread (runs in poller thread)."""
         if self._mode == mode:
             return
         self._mode = mode
@@ -202,7 +186,6 @@ class CollaborationPoller(QObject):
 
     @Slot()
     def _on_stop_requested(self) -> None:
-        """Handle stop request from main thread (runs in poller thread)."""
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
@@ -210,34 +193,26 @@ class CollaborationPoller(QObject):
             self._lease_timer.stop()
             self._lease_timer = None
         logger.debug("Poller timers stopped from poller thread")
-        # No need to quit thread here; stop() will call quit() from main thread.
 
     def _on_thread_started(self) -> None:
-        """Called when the background thread starts. Create timer here."""
         if self._stop_requested:
             return
         self._timer = QTimer()
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._poll)
 
-        # Lease renewal has its own cadence and is intentionally independent
-        # from MAIN observation/backoff. A failed MAIN poll must never silence
-        # collaboration lease renewal while the local session is still writing.
         self._lease_timer = QTimer()
         self._lease_timer.setSingleShot(False)
         self._lease_timer.setInterval(self._lease_renewal_interval * 1000)
         self._lease_timer.timeout.connect(self._renew_active_lease)
         self._lease_timer.start()
 
-        # Preserve production behavior unless explicitly disabled by the caller.
         if self._initial_poll_enabled:
             self._schedule_poll(0)
 
     def _schedule_poll(self, delay_seconds: float) -> None:
-        """Schedule a poll after delay (in seconds). Must be called from poller thread."""
         if self._stop_requested or self._timer is None or not self._running:
             return
-        # Stop any pending timer
         self._timer.stop()
         interval_ms = max(100, int(delay_seconds * 1000))
         self._timer.setInterval(interval_ms)
@@ -246,13 +221,11 @@ class CollaborationPoller(QObject):
 
     @Slot()
     def _renew_active_lease(self) -> None:
-        """Renew the current writer's remote lease independently of MAIN sync."""
         if self._stop_requested or not self._running:
             return
         try:
             renewed = self._cm.renew_remote_lease()
         except AttributeError:
-            # Compatibility with non-production/test collaboration doubles.
             return
         except Exception as e:
             logger.warning(f"Active editing lease renewal failed: {e}")
@@ -260,14 +233,51 @@ class CollaborationPoller(QObject):
             return
 
         if not renewed:
-            # A false result means the writer no longer owns a valid remote
-            # lease. Do not mutate transaction state here; authority validation
-            # remains the single owner of FINISHING_STALE transitions.
             logger.warning("Active editing remote lease renewal was not successful")
             self.lease_renewal_failed.emit({"error": "renewal_failed"})
 
+    def _try_handoff_waiting_request(self, remote_lock: Dict[str, Any], queue: Dict[str, Any]) -> None:
+        """Automatically grant this session when it is the queue head and the lock is free.
+
+        The poller is the process-local observer of the shared collaboration state.
+        The manager remains the authority for arbitration and lock acquisition via
+        grant_existing_waiting_request(); this method only decides when to ask it.
+        """
+        if self._stop_requested or not self._running:
+            return
+        if remote_lock.get("locked", False):
+            return
+        if self._cm.is_writing():
+            return
+
+        session = self._cm.get_session()
+        if session is None:
+            return
+
+        next_request = queue.get("next") or {}
+        if next_request.get("session_id") != session.session_id:
+            return
+
+        request_id = next_request.get("request_id")
+        if not request_id:
+            return
+
+        try:
+            granted = self._cm.grant_existing_waiting_request(request_id)
+            if granted:
+                logger.info(
+                    "Automatic collaboration handoff granted to %s (request=%s)",
+                    session.username,
+                    request_id,
+                )
+        except Exception:
+            logger.exception(
+                "Automatic collaboration handoff failed for %s (request=%s)",
+                session.username,
+                request_id,
+            )
+
     def _poll(self) -> None:
-        """Perform a single poll cycle. Runs in poller thread."""
         if self._poll_in_progress:
             logger.warning("Poll already in progress, skipping")
             return
@@ -280,10 +290,8 @@ class CollaborationPoller(QObject):
         self._last_poll_at = datetime.now()
 
         try:
-            # Observe remote state
             remote_lock = self._cm.get_lock_status()
             queue = self._cm.get_queue()
-            # Get version if available
             version = 0
             try:
                 version = self._cm.get_version()
@@ -300,12 +308,14 @@ class CollaborationPoller(QObject):
                 is_stale=False,
             )
 
-            # Success
             self._consecutive_failures = 0
             self._current_backoff = self._initial_backoff
             self._last_success_at = datetime.now()
 
-            # Check for changes
+            # Auto-handoff must happen from the authoritative, freshly observed
+            # state. The manager performs the final queue-head and CAS lock checks.
+            self._try_handoff_waiting_request(remote_lock, queue)
+
             if self._last_snapshot is None or snapshot.is_changed_from(self._last_snapshot):
                 self._last_snapshot = snapshot
                 self.snapshot_changed.emit(snapshot)
@@ -318,7 +328,6 @@ class CollaborationPoller(QObject):
         except Exception as e:
             logger.exception("Poll failed")
             self._consecutive_failures += 1
-            # Retain last successful snapshot, but mark as stale/error
             if self._last_snapshot is not None:
                 stale_snapshot = CollaborationSnapshot(
                     timestamp=datetime.now(),
@@ -350,7 +359,6 @@ class CollaborationPoller(QObject):
                 if self._event_bus:
                     self._event_bus.publish(CollaborationStateChanged(error_snapshot))
 
-            # Backoff
             self._current_backoff = min(self._current_backoff * 2, self._max_backoff)
             self._schedule_poll(self._current_backoff)
 
@@ -361,12 +369,8 @@ class CollaborationPoller(QObject):
                 logger.debug("Scheduling follow-up poll due to pending refresh")
                 self._schedule_poll(0)
             elif not self._stop_requested and self._running:
-                # No pending refresh, schedule next normal poll/backoff interval.
                 self._update_interval()
 
-            # This signal means a poll cycle actually completed. It must not be
-            # confused with snapshot_changed, which is intentionally emitted only
-            # when the observable collaboration snapshot changes.
             self.poll_completed.emit({
                 "success": self._consecutive_failures == 0,
                 "consecutive_failures": self._consecutive_failures,
@@ -375,11 +379,7 @@ class CollaborationPoller(QObject):
             })
 
     def _update_interval(self) -> None:
-        """Update polling interval based on mode and failure state.
-        Must be called from poller thread.
-        """
         if self._consecutive_failures > 0:
-            # Already in backoff, do nothing
             return
 
         if self._mode == PollerMode.WAITING:
@@ -391,11 +391,9 @@ class CollaborationPoller(QObject):
         logger.debug(f"Next poll in {self._next_poll_delay}s (mode={self._mode.value})")
 
     def get_last_snapshot(self) -> Optional[CollaborationSnapshot]:
-        """Get the last known snapshot (may be stale)."""
         return self._last_snapshot
 
     def get_status(self) -> Dict[str, Any]:
-        """Get poller status for diagnostics."""
         return {
             "running": self._running,
             "mode": self._mode.value,
