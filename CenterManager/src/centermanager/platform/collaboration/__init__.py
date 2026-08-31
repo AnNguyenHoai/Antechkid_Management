@@ -2,6 +2,14 @@
 """Collaboration - Platform collaboration runtime."""
 
 from .collaboration_manager import CollaborationManager, WriteRequestResult, WriteRequestInfo
+from .false_waiting_guard import install_false_waiting_guard
+
+# Keep the restored CollaborationManager implementation intact and install the
+# narrow false-WAITING protection at the package boundary. This avoids changing
+# queue/arbitration APIs while ensuring a free/stale remote lock cannot be shown
+# as WAITING to the user.
+install_false_waiting_guard(CollaborationManager)
+
 from .runtime_session import RuntimeSession
 from .runtime_lock import RuntimeLock
 from .write_queue import WriteQueue, WriteRequest
@@ -39,7 +47,7 @@ from .json_lock_repository import JsonLockRepository
 from .json_metadata_repository import JsonMetadataRepository
 from .metadata_repository import MetadataRepository
 from .lock_repository import LockRepository
-from .poller import CollaborationPoller, CollaborationSnapshot, CollaborationStateChanged, PollerMode  # NEW
+from .poller import CollaborationPoller, CollaborationSnapshot, CollaborationStateChanged, PollerMode
 
 __all__ = [
     "CollaborationManager",
@@ -82,8 +90,8 @@ __all__ = [
     "JsonMetadataRepository",
     "MetadataRepository",
     "LockRepository",
-    "CollaborationPoller",          # NEW
-    "CollaborationSnapshot",        # NEW
-    "CollaborationStateChanged",    # NEW
-    "PollerMode",                   # NEW
+    "CollaborationPoller",
+    "CollaborationSnapshot",
+    "CollaborationStateChanged",
+    "PollerMode",
 ]
