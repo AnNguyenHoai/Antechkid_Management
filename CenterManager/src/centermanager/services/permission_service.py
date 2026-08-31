@@ -40,6 +40,16 @@ class PermissionService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
 
+    def _audit(self, action: str, target=None, details=None) -> None:
+        """Best-effort audit; administration must not fail because audit storage fails."""
+        try:
+            from centermanager.services.audit_service import AuditService
+            module = "admin"
+            target_type = "role" if isinstance(target, Role) else "user" if isinstance(target, User) else None
+            AuditService(self._session_factory).record(action, module, target_type, getattr(target, "id", None), getattr(target, "name", None) or getattr(target, "username", None), details=details)
+        except Exception:
+            logger.exception("Audit logging failed for %s", action)
+
     # ===== Permission Checking =====
 
     def has_permission(self, permission_name: str, user: Optional[User] = None) -> bool:
@@ -159,6 +169,7 @@ class PermissionService:
             role.permissions = self._resolve_permissions(session, permission_names)
             repo.add(role); session.commit(); session.refresh(role)
             logger.info("Custom role created: %s", name)
+            self._audit("ROLE_CREATED", role, {"permissions": sorted(permission_names)})
             return role
 
     def update_role(self, role_id: int, display_name: str, description: Optional[str], permission_names: Set[str]) -> Role:
@@ -179,6 +190,7 @@ class PermissionService:
                 role.permissions = self._resolve_permissions(session, permission_names)
             session.commit(); session.refresh(role)
             logger.info("Role updated: %s", role.name)
+            self._audit("ROLE_UPDATED", role, {"permissions": sorted(permission_names)})
             return role
 
     def delete_role(self, role_id: int) -> None:
@@ -190,8 +202,10 @@ class PermissionService:
                 raise RoleLifecycleError("Protected system roles cannot be deleted.")
             if role.users:
                 raise RoleLifecycleError("A role assigned to users cannot be deleted. Reassign its users first.")
+            role_name = role.name; role_id = role.id
             RoleRepository(session).delete(role); session.commit()
-            logger.info("Custom role deleted: %s", role.name)
+            self._audit("ROLE_DELETED", None, {"role_id": role_id, "role": role_name})
+            logger.info("Custom role deleted: %s", role_name)
 
     # ===== User Management =====
 
@@ -274,6 +288,7 @@ class PermissionService:
             repo.add(user)
             session.commit()
             session.refresh(user)
+            self._audit("USER_CREATED", user, {"role": role_name})
             return user
 
     def update_user_role(self, user_id: int, role_name: str) -> User:
@@ -291,6 +306,7 @@ class PermissionService:
             user.role_id = role.id
             session.commit()
             session.refresh(user)
+            self._audit("USER_UNLOCKED", user)
             return user
 
     def delete_user(self, user_id: int) -> None:
@@ -317,6 +333,7 @@ class PermissionService:
             session.commit()
             session.refresh(user)
             logger.info("User account status changed: user_id=%s active=%s", user_id, active)
+            self._audit("USER_ACTIVATED" if active else "USER_DEACTIVATED", user)
             return user
 
     def create_user_with_temp_password(
@@ -358,6 +375,7 @@ class PermissionService:
             session.commit()
             session.refresh(user)
             logger.info("User created: username=%s role=%s", username, role_name)
+            self._audit("USER_CREATED", user, {"role": role_name})
             return user
 
     def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:
@@ -375,6 +393,7 @@ class PermissionService:
             user.locked_until = None
             session.commit()
             logger.info("Password reset for user_id=%s", user_id)
+            self._audit("USER_PASSWORD_RESET", user)
             return temp_password
 
     def update_user(self, user_id: int, full_name: Optional[str] = None,
@@ -404,6 +423,7 @@ class PermissionService:
 
             session.commit()
             session.refresh(user)
+            self._audit("USER_UPDATED", user)
             return user
 
     def unlock_user(self, user_id: int) -> User:

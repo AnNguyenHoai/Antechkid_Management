@@ -94,6 +94,9 @@ class PermissionDefinitions:
     # Role administration
     ROLE_VIEW = "role.view"
     ROLE_MANAGE = "role.manage"
+
+    # Audit
+    AUDIT_VIEW = "audit.view"
     @classmethod
     def all_permissions(cls) -> List[str]:
         return [
@@ -133,6 +136,7 @@ class PermissionDefinitions:
             cls.USER_RESET_PASSWORD,
             cls.ROLE_VIEW,
             cls.ROLE_MANAGE,
+            cls.AUDIT_VIEW,
         ]
 
     @classmethod
@@ -174,6 +178,7 @@ class PermissionDefinitions:
             cls.USER_RESET_PASSWORD: "admin",
             cls.ROLE_VIEW: "admin",
             cls.ROLE_MANAGE: "admin",
+            cls.AUDIT_VIEW: "admin",
         }
 
         return category_map.get(permission_name, "other")

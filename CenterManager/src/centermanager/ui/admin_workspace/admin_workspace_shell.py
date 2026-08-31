@@ -14,6 +14,8 @@ from centermanager.ui.admin_workspace.user_list_page import UserListPage
 from centermanager.ui.admin_workspace.role_list_page import RoleListPage
 from centermanager.ui.admin_workspace.settings_page import SettingsPage
 from centermanager.ui.admin_workspace.git_settings_page import GitSettingsPage
+from centermanager.ui.admin_workspace.audit_log_page import AuditLogPage
+from centermanager.services.audit_service import AuditService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
 from centermanager.models.permission import PermissionDefinitions
@@ -38,11 +40,12 @@ class AdminWorkspaceShell(QWidget):
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service or NotificationService()
         self._page_permissions = {
-            "users": PermissionDefinitions.USER_MANAGE,
+            "users": PermissionDefinitions.USER_VIEW,  # legacy: "users": PermissionDefinitions.USER_MANAGE
             "roles": PermissionDefinitions.ROLE_MANAGE,
             "settings": PermissionDefinitions.SETTING_UPDATE,
             "git": PermissionDefinitions.SETTING_UPDATE,
             "diagnostics": PermissionDefinitions.USER_MANAGE,
+            "audit": PermissionDefinitions.AUDIT_VIEW,
         }
 
         self._setup_ui()
@@ -65,6 +68,7 @@ class AdminWorkspaceShell(QWidget):
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"},
             {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
+            {"id": "audit", "icon": "📋", "label": "Audit Log"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
             {"id": "git", "icon": "🔐", "label": "Git Config"},
             {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
@@ -89,6 +93,10 @@ class AdminWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.roles_page)
+
+        self.audit_service = AuditService(getattr(self._permission_service, "_session_factory"))
+        self.audit_page = AuditLogPage(self.audit_service, self._notification_service)
+        self.content_stack.addWidget(self.audit_page)
 
         self.settings_page = SettingsPage(
             self._collaboration_manager,
@@ -137,6 +145,11 @@ class AdminWorkspaceShell(QWidget):
             self.nav.set_active_page("roles")
             self.header.set_context("Admin Workspace", "Roles & Permissions")
             self.roles_page.refresh()
+        elif page_id == "audit":
+            self.content_stack.setCurrentWidget(self.audit_page)
+            self.nav.set_active_page("audit")
+            self.header.set_context("Admin Workspace", "Audit Log")
+            self.audit_page.refresh()
         elif page_id == "settings":
             self.content_stack.setCurrentWidget(self.settings_page)
             self.nav.set_active_page("settings")
@@ -158,6 +171,8 @@ class AdminWorkspaceShell(QWidget):
             self.users_page.refresh()
         elif self.content_stack.currentWidget() is self.roles_page:
             self.roles_page.refresh()
+        elif self.content_stack.currentWidget() is self.audit_page:
+            self.audit_page.refresh()
         elif self.content_stack.currentWidget() is self.git_settings_page:
             self.git_settings_page.refresh()
         elif self.content_stack.currentWidget() is self.diagnostics_page:

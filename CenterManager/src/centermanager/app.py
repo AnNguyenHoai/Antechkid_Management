@@ -88,7 +88,34 @@ def ensure_schema():
 
     engine = create_production_engine()
     Base.metadata.create_all(engine)
-    logger.info("Database tables ensured.")
+
+    # SQLite create_all() does not upgrade existing tables. ADMIN 1.4 adds
+    # columns to audit_logs, so perform additive schema upgrades here before
+    # any UI/service queries can access the new model fields.
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "audit_logs" in inspector.get_table_names():
+        existing_columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+        audit_columns = {
+            "actor_id": "INTEGER",
+            "actor_name": "VARCHAR(255)",
+            "action": "VARCHAR(100)",
+            "module": "VARCHAR(100)",
+            "target_type": "VARCHAR(100)",
+            "target_id": "VARCHAR(100)",
+            "target_name": "VARCHAR(255)",
+            "result": "VARCHAR(50)",
+            "details": "TEXT",
+        }
+        missing_columns = [(name, ddl) for name, ddl in audit_columns.items() if name not in existing_columns]
+        if missing_columns:
+            with engine.begin() as connection:
+                for name, ddl in missing_columns:
+                    connection.execute(text(f"ALTER TABLE audit_logs ADD COLUMN {name} {ddl}"))
+            logger.info("Audit log schema upgraded; added columns: %s", ", ".join(name for name, _ in missing_columns))
+
+    logger.info("Database schema ensured.")
 
 
 def main() -> int:
