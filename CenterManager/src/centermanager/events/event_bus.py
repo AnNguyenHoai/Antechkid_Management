@@ -74,9 +74,12 @@ class EventBus:
                 self._handlers.pop(event_class, None)
 
     def publish(self, event: Event) -> None:
-        """Publish safely; worker-thread publications are queued to GUI."""
+        """Publish synchronously on the bridge thread; queue worker publications."""
         if self._bridge is not None:
-            self._bridge.event_ready.emit(event)
+            if QThread.currentThread() is self._qt_thread:
+                self._dispatch(event)
+            else:
+                self._bridge.event_ready.emit(event)
             return
         self._dispatch(event)
 
