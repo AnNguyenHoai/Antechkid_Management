@@ -24,6 +24,26 @@ from centermanager.core.paths import get_paths
 REAL_RUNTIME_PATH = get_paths().runtime_root
 
 
+@pytest.fixture(scope="session", autouse=True)
+def qapplication_session():
+    """Ensure the test process owns a real QApplication before Qt tests run.
+
+    Some collaboration tests only need QCoreApplication and create one
+    directly. If that happens before pytest-qt initializes its qapp fixture,
+    later QWidget tests inherit the QCoreApplication. A single QApplication
+    is compatible with both QCoreApplication and QWidget consumers and gives
+    the whole suite one deterministic Qt application lifetime.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    assert isinstance(app, QApplication)
+    yield app
+    app.processEvents()
+
+
 @pytest.fixture
 def clean_paths():
     """Reset path, config, and clock state."""

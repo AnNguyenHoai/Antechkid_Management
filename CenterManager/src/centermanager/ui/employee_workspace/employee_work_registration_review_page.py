@@ -29,6 +29,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._rows = []
         self._filtered_rows = []
         self._write_enabled = False
+        self._selected_employee_id = None
+        self._selection_is_explicit = False
+        self._selection_syncing = False
         self._setup()
         self.refresh()
 
@@ -91,7 +94,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.reopen_btn.clicked.connect(self.reopen_selected)
         self.refresh_btn.clicked.connect(self.refresh)
         self.close_btn.clicked.connect(self.close_month)
-        self.table.itemSelectionChanged.connect(self._update_actions)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
         self._update_actions()
 
@@ -129,10 +132,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             )
 
     def _apply_filter(self, *_):
-        selected_employee_id = None
-        current_row = self.table.currentRow()
-        if 0 <= current_row < self.table.rowCount():
-            selected_employee_id = self.table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+        # The page owns logical selection. Qt row/current state is only a
+        # presentation detail and is rebuilt during filtering.
+        selected_employee_id = self._selected_employee_id
+        preserve_selection = self._selection_is_explicit
 
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
         filtered_rows = (
@@ -141,19 +144,26 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         )
         self._filtered_rows = filtered_rows
 
-        # Rebuilding a QTableWidget emits selection/item signals while its
-        # internal model is being mutated.  In this page those signals feed
-        # _update_actions(), which reads the same model.  Keep the rebuild
-        # atomic from Qt's signal/paint perspective and update actions once at
-        # the end.  This also makes refresh/filter deterministic in tests and
-        # in the live UI.
         signals_blocked = self.table.blockSignals(True)
         updates_enabled = self.table.updatesEnabled()
         self.table.setUpdatesEnabled(False)
+        self._selection_syncing = True
         try:
             self.table.clearContents()
             self.table.setRowCount(0)
-            restored = False
+
+            target_row = None
+            if preserve_selection and selected_employee_id is not None:
+                for index, registration in enumerate(self._filtered_rows):
+                    if registration.employee_id == selected_employee_id:
+                        target_row = index
+                        break
+
+            # An explicit user selection that is filtered out is cleared.
+            # Only an implicit selection (or no selection) gets the first row.
+            if target_row is None and not preserve_selection and self._filtered_rows:
+                target_row = 0
+
             for registration in self._filtered_rows:
                 values = [
                     registration.employee.full_name or "-",
@@ -168,26 +178,52 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 self.table.insertRow(row)
                 for column, value in enumerate(values):
                     self.table.setItem(row, column, QTableWidgetItem(value))
-                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
-                if registration.employee_id == selected_employee_id:
-                    self.table.selectRow(row)
-                    restored = True
+                self.table.item(row, 0).setData(
+                    Qt.ItemDataRole.UserRole, registration.employee_id
+                )
 
-            if not restored and self._filtered_rows and selected_employee_id is None:
-                self.table.selectRow(0)
+            if target_row is not None:
+                self.table.selectRow(target_row)
+                self._selected_employee_id = self._filtered_rows[target_row].employee_id
+                # A filter-created fallback selection is not a user selection.
+                self._selection_is_explicit = preserve_selection and (
+                    self._filtered_rows[target_row].employee_id == selected_employee_id
+                )
+            else:
+                self._selected_employee_id = None
+                self._selection_is_explicit = False
         finally:
+            self._selection_syncing = False
             self.table.setUpdatesEnabled(updates_enabled)
             self.table.blockSignals(signals_blocked)
 
         self._update_actions()
 
+    def _on_selection_changed(self):
+        if self._selection_syncing:
+            return
+
+        selected_rows = self.table.selectionModel().selectedRows(0)
+        if not selected_rows:
+            self._selected_employee_id = None
+            self._selection_is_explicit = False
+        else:
+            employee_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
+            self._selected_employee_id = employee_id
+            self._selection_is_explicit = employee_id is not None
+        self._update_actions()
+
     def _selected(self):
-        row = self.table.currentRow()
-        if not 0 <= row < self.table.rowCount():
+        employee_id = self._selected_employee_id
+        if employee_id is None:
             return None
-        employee_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+
         return next(
-            (registration for registration in self._filtered_rows if registration.employee_id == employee_id),
+            (
+                registration
+                for registration in self._filtered_rows
+                if registration.employee_id == employee_id
+            ),
             None,
         )
 
