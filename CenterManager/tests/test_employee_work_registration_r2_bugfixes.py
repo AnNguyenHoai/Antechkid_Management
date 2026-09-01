@@ -20,7 +20,6 @@ class TestEmployeeWorkRegistrationR2Bugfixes:
             end_time=time(12, 0),
         )
 
-        # Same time range on another day is valid.
         EmployeeWorkRegistrationService._overlap(
             [existing], date(2026, 9, 2), time(9, 0), time(12, 0)
         )
@@ -49,7 +48,7 @@ class TestEmployeeWorkRegistrationR2Bugfixes:
         )
         service = EmployeeWorkRegistrationService(session_factory)
         service._require_permission = MagicMock()
-        service._period = MagicMock(return_value=SimpleNamespace())
+        service._period = MagicMock(return_value=SimpleNamespace(id=9))
         service._get_registration = MagicMock(return_value=registration)
 
         manager = SimpleNamespace(id=99)
