@@ -39,6 +39,7 @@ class TestEmployeeWorkRegistrationR2Bugfixes:
 
     def test_reopen_returns_accepted_registration_to_draft(self):
         session = MagicMock()
+        session.__enter__.return_value = session
         session_factory = MagicMock(return_value=session)
         registration = SimpleNamespace(
             status=EmployeeWorkRegistration.STATUS_ACCEPTED,
