@@ -129,6 +129,11 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             )
 
     def _apply_filter(self, *_):
+        selected_employee_id = None
+        current_row = self.table.currentRow()
+        if 0 <= current_row < len(self._filtered_rows):
+            selected_employee_id = self._filtered_rows[current_row].employee_id
+
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
         self._filtered_rows = (
             list(self._rows) if selected == "ALL"
@@ -162,9 +167,16 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 for column, value in enumerate(values):
                     self.table.setItem(row, column, QTableWidgetItem(value))
                 self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
+                if registration.employee_id == selected_employee_id:
+                    self.table.selectRow(row)
         finally:
             self.table.setUpdatesEnabled(updates_enabled)
             self.table.blockSignals(signals_blocked)
+
+        # Preserve the historical UI behavior of selecting the first visible
+        # registration when a filter is applied without an existing selection.
+        if selected_employee_id is None and self._filtered_rows:
+            self.table.selectRow(0)
 
         self._update_actions()
 
