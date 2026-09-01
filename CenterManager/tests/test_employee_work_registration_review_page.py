@@ -38,6 +38,44 @@ def test_filter_by_status_and_selection(qtbot):
     assert page._selected().status == EmployeeWorkRegistration.STATUS_SUBMITTED
 
 
+def test_filter_rebuild_preserves_selection_when_row_remains(qtbot):
+    employee_service = Mock()
+    registration_service = Mock()
+    registration_service.next_month.return_value = (2026, 10)
+    registration_service.list_all.return_value = [
+        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
+    ]
+
+    page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
+    qtbot.addWidget(page)
+    page.table.selectRow(1)
+
+    page.status_filter.setCurrentText("SUBMITTED")
+
+    assert page.table.rowCount() == 1
+    assert page._selected().employee_id == 2
+
+
+def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
+    employee_service = Mock()
+    registration_service = Mock()
+    registration_service.next_month.return_value = (2026, 10)
+    registration_service.list_all.return_value = [
+        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
+    ]
+
+    page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
+    qtbot.addWidget(page)
+    page.table.selectRow(0)
+
+    page.status_filter.setCurrentText("SUBMITTED")
+
+    assert page.table.rowCount() == 1
+    assert page._selected() is None
+
+
 def test_filter_rebuild_does_not_reenter_action_update(qtbot):
     employee_service = Mock()
     registration_service = Mock()
@@ -56,7 +94,7 @@ def test_filter_rebuild_does_not_reenter_action_update(qtbot):
         qtbot.wait(1)
 
         assert page.table.rowCount() == 1
-        assert page._selected() is None
+        assert page._selected().status == EmployeeWorkRegistration.STATUS_SUBMITTED
         assert update_actions.call_count == 1
 
 
@@ -69,9 +107,10 @@ def test_accept_selected_calls_service_and_refreshes(qtbot):
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
+    page.set_write_enabled(True)
     page.table.selectRow(0)
 
-    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=2):
+    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=16384):
         page.accept_selected()
 
     registration_service.accept.assert_called_once_with(1, 2026, 10)
@@ -86,9 +125,10 @@ def test_reopen_selected_calls_service(qtbot):
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
+    page.set_write_enabled(True)
     page.table.selectRow(0)
 
-    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=2):
+    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=16384):
         page.reopen_selected()
 
     registration_service.reopen.assert_called_once_with(1, 2026, 10)
