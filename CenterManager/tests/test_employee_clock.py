@@ -27,6 +27,9 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
             pass
 
     class FakeRepo:
+        def get_by_user_id(self, user_id):
+            return None
+
         def get_highest_employee_number(self):
             return 0
 
