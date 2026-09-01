@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 from centermanager.database.base import Base
 from centermanager.database.engine import create_engine_for_path
-from centermanager.models import User, Role, Employee, Permission
+from centermanager.models import User, Role, Employee, Permission, EmployeeWorkRegistration
 from centermanager.services.employee_service import EmployeeService
 from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService, EmployeeWorkRegistrationValidationError, EmployeeWorkRegistrationAccessDeniedError
 from centermanager.core.clock import Clock, reset_clock, set_clock
