@@ -8,7 +8,7 @@ from centermanager.core.current_user import CurrentUserContext
 from centermanager.models.audit_log import AuditLog
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService
-from test_employee_work_registration import setup_db
+from .test_employee_work_registration import setup_db
 
 
 @pytest.fixture(autouse=True)
