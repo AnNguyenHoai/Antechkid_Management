@@ -17,6 +17,7 @@ if str(src_path) not in sys.path:
 
 from centermanager.core import paths as paths_module
 from centermanager.core import config as config_module
+from centermanager.core import clock as clock_module
 from centermanager.core.paths import get_paths
 
 # Lưu đường dẫn runtime thật để kiểm tra bảo vệ
@@ -25,16 +26,19 @@ REAL_RUNTIME_PATH = get_paths().runtime_root
 
 @pytest.fixture
 def clean_paths():
-    """Reset path and config state."""
+    """Reset path, config, and clock state."""
     old_paths = paths_module._paths
     old_config = config_module._config
+    old_clock = clock_module._fixed_clock
     paths_module._paths = None
     config_module._config = None
+    clock_module.reset_clock()
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     yield
     paths_module._paths = old_paths
     config_module._config = old_config
+    clock_module._fixed_clock = old_clock
 
 
 @pytest.fixture

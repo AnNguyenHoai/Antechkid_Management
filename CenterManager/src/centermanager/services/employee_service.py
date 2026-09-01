@@ -15,6 +15,7 @@ from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.role_repository import RoleRepository
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.core.current_user import get_current_user
+from centermanager.core.clock import get_clock
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ class EmployeeService:
                 department=self._text(department),
                 position=self._text(position),
                 employment_status=status,
-                hire_date=hire_date or date.today(),
+                hire_date=hire_date or get_clock().today(),
                 user_id=user_id,
             )
             repo.add(e)
@@ -294,7 +295,7 @@ class EmployeeService:
                 department=self._text(department),
                 position=self._text(position),
                 employment_status=status,
-                hire_date=hire_date or date.today(),
+                hire_date=hire_date or get_clock().today(),
                 user_id=user.id,
             )
             repo.add(employee)
@@ -313,7 +314,8 @@ class EmployeeService:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             if employee.user_id is not None and employee.user_id != user_id:
                 raise EmployeeValidationError("Employee is already linked to an account.")
-            if repo.get_by_user_id(user_id) and repo.get_by_user_id(user_id).id != employee_id:
+            existing = repo.get_by_user_id(user_id)
+            if existing and existing.id != employee_id:
                 raise EmployeeValidationError("User is already linked to another employee.")
             if UserRepository(s).get_by_id_with_role(user_id) is None:
                 raise EmployeeValidationError("User account does not exist.")
