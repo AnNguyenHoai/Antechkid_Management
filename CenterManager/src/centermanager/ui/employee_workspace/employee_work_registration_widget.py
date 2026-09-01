@@ -31,7 +31,7 @@ from centermanager.models.employee_work_registration import EmployeeWorkRegistra
 class WorkRegistrationDialog(QDialog):
     """Create or edit one availability block."""
 
-    def __init__(self, parent=None, entry=None, default_date=None):
+    def __init__(self, parent=None, entry=None, default_date=None, min_date=None, max_date=None):
         super().__init__(parent)
         self.setWindowTitle("Register Availability" if entry is None else "Edit Availability")
         self.setMinimumWidth(430)
@@ -42,6 +42,10 @@ class WorkRegistrationDialog(QDialog):
         self.day.setDisplayFormat("dd/MM/yyyy")
         d = default_date or date.today()
         self.day.setDate(QDate(d.year, d.month, d.day))
+        if min_date:
+            self.day.setMinimumDate(QDate(min_date.year, min_date.month, min_date.day))
+        if max_date:
+            self.day.setMaximumDate(QDate(max_date.year, max_date.month, max_date.day))
 
         self.start = QTimeEdit()
         self.start.setDisplayFormat("HH:mm")
@@ -53,6 +57,7 @@ class WorkRegistrationDialog(QDialog):
         self.typ = QComboBox()
         self.typ.addItems(["WORK", "TEACHING", "MEETING", "TRAINING", "ADMIN", "OTHER"])
         self.notes = QLineEdit()
+        self.notes.setMaxLength(500)
         self.notes.setPlaceholderText("Optional note")
 
         for label, widget in (
@@ -64,8 +69,10 @@ class WorkRegistrationDialog(QDialog):
         ):
             form.addRow(label, widget)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._accept_if_valid)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
@@ -75,6 +82,12 @@ class WorkRegistrationDialog(QDialog):
             self.end.setTime(QTime(entry.end_time.hour, entry.end_time.minute))
             self.typ.setCurrentText(entry.work_type)
             self.notes.setText(entry.notes or "")
+
+    def _accept_if_valid(self):
+        if self.start.time() >= self.end.time():
+            QMessageBox.warning(self, "Invalid availability", "End time must be after start time.")
+            return
+        self.accept()
 
     def values(self):
         return (
@@ -179,39 +192,40 @@ class EmployeeWorkRegistrationWidget(QWidget):
         self.editable = bool(enabled)
         self._update_actions()
 
+    def _is_draft(self):
+        return self.registration is None or self.registration.status == EmployeeWorkRegistration.STATUS_DRAFT
+
     def _update_actions(self):
-        draft = bool(
-            self.registration
-            and self.registration.status == EmployeeWorkRegistration.STATUS_DRAFT
-        )
+        can_edit = self.editable and self._is_draft()
         has_selection = self.table.currentRow() >= 0
-        can_edit = self.editable and draft
         self.add.setEnabled(can_edit)
         self.edit.setEnabled(can_edit and has_selection)
         self.delete.setEnabled(can_edit and has_selection)
-        self.submit.setEnabled(can_edit and bool(self.registration and self.registration.blocks))
+        self.submit.setEnabled(
+            can_edit and bool(self.registration and self.registration.blocks)
+        )
         self.table.setEnabled(True)
 
     def _set_status_message(self, status):
         if status == EmployeeWorkRegistration.STATUS_DRAFT:
             self.message.setText("Draft: you can add, edit, or remove availability before submitting.")
-            self.message.setStyleSheet("padding:10px;border-radius:6px;")
         elif status == EmployeeWorkRegistration.STATUS_SUBMITTED:
             self.message.setText(
                 "Submitted for manager review. Your availability is read-only until a manager reopens it."
             )
-            self.message.setStyleSheet("padding:10px;border-radius:6px;")
         elif status == EmployeeWorkRegistration.STATUS_ACCEPTED:
             self.message.setText(
                 "Accepted by manager. The registration is locked. Ask the manager to reopen it if you need to correct a mistake."
             )
-            self.message.setStyleSheet("padding:10px;border-radius:6px;")
         else:
             self.message.setText("")
 
     def refresh(self):
         try:
-            year, month, _, _ = self._range()
+            if self.employee is None:
+                raise ValueError("No employee profile is linked to this account.")
+
+            year, month, first_day, last_day = self._range()
             self.month.setText(f"{month:02d}/{year} • Next month")
             self.registration = self.service.list_for_employee(self.employee.id, year, month)
             registration_status = (
@@ -254,7 +268,9 @@ class EmployeeWorkRegistrationWidget(QWidget):
             try:
                 period = self.service.get_period(year, month)
                 deadline = getattr(period, "submission_deadline", None)
-                self.deadline_summary.setText(deadline.strftime("%d/%m/%Y") if deadline else "Not set")
+                self.deadline_summary.setText(
+                    deadline.strftime("%d/%m/%Y") if deadline else "Not set"
+                )
             except Exception:
                 self.deadline_summary.setText("-")
 
@@ -278,10 +294,15 @@ class EmployeeWorkRegistrationWidget(QWidget):
         return next((block for block in self.registration.blocks if block.id == block_id), None)
 
     def _add(self):
-        if not self.editable or not self.registration or self.registration.status != EmployeeWorkRegistration.STATUS_DRAFT:
+        if not self.editable or not self._is_draft():
             return
-        year, month, first_day, _ = self._range()
-        dialog = WorkRegistrationDialog(self, default_date=first_day)
+        year, month, first_day, last_day = self._range()
+        dialog = WorkRegistrationDialog(
+            self,
+            default_date=first_day,
+            min_date=first_day,
+            max_date=last_day,
+        )
         if not dialog.exec():
             return
         try:
@@ -292,9 +313,15 @@ class EmployeeWorkRegistrationWidget(QWidget):
 
     def _edit(self):
         block = self._selected()
-        if block is None:
+        if block is None or not self.editable or not self._is_draft():
             return
-        dialog = WorkRegistrationDialog(self, block)
+        year, month, first_day, last_day = self._range()
+        dialog = WorkRegistrationDialog(
+            self,
+            block,
+            min_date=first_day,
+            max_date=last_day,
+        )
         if not dialog.exec():
             return
         try:
@@ -313,7 +340,7 @@ class EmployeeWorkRegistrationWidget(QWidget):
 
     def _delete(self):
         block = self._selected()
-        if block is None:
+        if block is None or not self.editable or not self._is_draft():
             return
         if QMessageBox.question(
             self,
@@ -329,6 +356,8 @@ class EmployeeWorkRegistrationWidget(QWidget):
 
     def _submit_month(self):
         year, month, _, _ = self._range()
+        if not self.editable or not self._is_draft() or not self.registration:
+            return
         if QMessageBox.question(
             self,
             "Submit availability",
