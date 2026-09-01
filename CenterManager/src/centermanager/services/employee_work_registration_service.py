@@ -1,9 +1,10 @@
 from __future__ import annotations
 import logging
 from calendar import monthrange
-from datetime import date, datetime, time
+from datetime import date, time
 from typing import Optional
 from sqlalchemy import select
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee import Employee
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration, EmployeeWorkRegistrationBlock
@@ -35,7 +36,7 @@ class EmployeeWorkRegistrationService:
             return e
     @staticmethod
     def next_month(today=None):
-        d=today or date.today(); return (d.year+1,1) if d.month==12 else (d.year,d.month+1)
+        d=today or get_clock().today(); return (d.year+1,1) if d.month==12 else (d.year,d.month+1)
     @staticmethod
     def _month_range(y,m):
         try:return date(y,m,1),date(y,m,monthrange(y,m)[1])
@@ -47,7 +48,8 @@ class EmployeeWorkRegistrationService:
     def _open_period(self,s,y,m):
         p=self._period(s,y,m)
         if p.status!=EmployeeWorkRegistrationPeriod.STATUS_OPEN:raise EmployeeWorkRegistrationValidationError(f"Registration period {m:02d}/{y} is closed.")
-        if p.submission_deadline and date.today()>p.submission_deadline:raise EmployeeWorkRegistrationValidationError(f"Registration submission deadline was {p.submission_deadline.strftime('%d/%m/%Y')}.")
+        today=get_clock().today()
+        if p.submission_deadline and today>p.submission_deadline:raise EmployeeWorkRegistrationValidationError(f"Registration submission deadline was {p.submission_deadline.strftime('%d/%m/%Y')}.")
         return p
     def get_period(self,y,m,user=None):
         u=self._user(user)
@@ -109,13 +111,13 @@ class EmployeeWorkRegistrationService:
             self._begin_write(s);p=self._open_period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or not r.blocks:raise EmployeeWorkRegistrationValidationError("Add at least one availability block before submitting.")
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("Registration is not in draft state.")
-            r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.submitted_at=datetime.now();s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.submitted_at=get_clock().now();s.commit();return r
     def accept(self,eid,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
             p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_SUBMITTED:raise EmployeeWorkRegistrationValidationError("Only submitted registrations can be accepted.")
-            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=datetime.now();r.accepted_by_user_id=u.id;s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;s.commit();return r
     def reopen(self,eid,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
@@ -135,4 +137,4 @@ class EmployeeWorkRegistrationService:
             self._begin_write(s);p=self._period(s,y,m);rows=EmployeeWorkRegistrationRepository(s).list_all(p.id)
             if not rows:raise EmployeeWorkRegistrationValidationError("Cannot close a registration month with no employee submissions.")
             if any(r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED for r in rows):raise EmployeeWorkRegistrationValidationError("All employee registrations must be accepted before closing the month.")
-            p.status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED;p.closed_at=datetime.now();p.closed_by_user_id=u.id;s.commit();return len(rows)
+            p.status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED;p.closed_at=get_clock().now();p.closed_by_user_id=u.id;s.commit();return len(rows)
