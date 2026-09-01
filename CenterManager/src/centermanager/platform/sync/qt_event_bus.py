@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, List
+from typing import Any, Callable
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot, QThread
 
 
 class _QtEventBridge(QObject):
@@ -21,22 +21,40 @@ class _QtEventBridge(QObject):
 
 
 class ThreadSafeEventBusProxy:
-    """EventBus-compatible publisher with the real EventBus subscription API.
+    """EventBus-compatible publisher without creating QObjects in worker threads.
 
-    Publishing from worker threads is queued through a Qt bridge. Subscription
-    registration remains delegated to the underlying EventBus so existing code
-    that accesses ``_event_bus.register(...)`` continues to work.
+    The proxy itself can be constructed anywhere. The Qt bridge is created lazily
+    when ``publish()`` is first used on a Qt-aware thread. For the application
+    startup path, ``bind_to_current_thread()`` is called from the GUI thread so
+    all later worker publications are queued back to that thread.
     """
 
     def __init__(self, event_bus: Any) -> None:
         self._event_bus = event_bus
+        self._bridge: _QtEventBridge | None = None
+        self._bound_thread: QThread | None = None
+
+    def bind_to_current_thread(self) -> None:
+        """Create the Qt bridge on the current Qt thread (normally GUI thread)."""
+        current = QThread.currentThread()
+        if self._bridge is not None:
+            return
         self._bridge = _QtEventBridge(self._dispatch)
+        self._bound_thread = current
 
     def _dispatch(self, event: object) -> None:
         self._event_bus.publish(event)
 
     def publish(self, event: object) -> None:
-        self._bridge.event_ready.emit(event)
+        # If a GUI-bound bridge exists, queued delivery is the safe path.
+        if self._bridge is not None:
+            self._bridge.event_ready.emit(event)
+            return
+
+        # No Qt bridge has been bound yet. This must only occur before the
+        # background sync service starts; publish synchronously rather than
+        # creating a QObject from an arbitrary worker thread.
+        self._event_bus.publish(event)
 
     def register(self, event_type: Any, callback: Callable[[Any], None]) -> None:
         self._event_bus.register(event_type, callback)
