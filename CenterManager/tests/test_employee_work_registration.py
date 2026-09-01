@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 from centermanager.database.base import Base
 from centermanager.database.engine import create_engine_for_path
-from centermanager.models import User, Role, Employee, Permission, EmployeeWorkRegistration
+from centermanager.models import User, Role, Employee, Permission
 from centermanager.services.employee_service import EmployeeService
 from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService, EmployeeWorkRegistrationValidationError, EmployeeWorkRegistrationAccessDeniedError
 from centermanager.core.clock import Clock, reset_clock, set_clock
@@ -148,8 +148,7 @@ def test_audit_records_submission_and_period_close(tmp_path):
 
 
 def test_manager_list_all_keeps_employee_relationship_loaded_after_service_session_closes(tmp_path):
-    Session,u,u2,emp,other=setup_db(tmp_path)
-    svc=EmployeeWorkRegistrationService(Session)
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
     with CurrentUserContext(u):
         y,m=svc.next_month()
         svc.create(emp.id,date(y,m,5),time(9),time(12),'WORK')
