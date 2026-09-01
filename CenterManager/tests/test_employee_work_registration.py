@@ -56,15 +56,17 @@ def test_registration_is_own_employee_only(tmp_path):
     with CurrentUserContext(u):
         with pytest.raises(EmployeeWorkRegistrationAccessDeniedError): svc.list_for_employee(other.id,*svc.next_month())
 
+
 def test_employee_can_submit_entire_next_month_registration(tmp_path):
     Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
     with CurrentUserContext(u):
         y,m=svc.next_month()
         svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
         svc.create(emp.id,date(y,m,4),time(13),time(17),'WORK')
-        rows=svc.submit_month(emp.id,y,m)
-        assert len(rows)==2
-        assert {r.status for r in rows}=={'SUBMITTED'}
+        registration=svc.submit_month(emp.id,y,m)
+        assert registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
+        assert len(registration.blocks) == 2
+        assert all(block.registration_id == registration.id for block in registration.blocks)
 
 
 def test_manager_can_view_all_and_close_submitted_registrations(tmp_path):
@@ -79,9 +81,14 @@ def test_manager_can_view_all_and_close_submitted_registrations(tmp_path):
     with CurrentUserContext(manager):
         rows=svc.list_all(y,m)
         assert len(rows)==1 and rows[0].employee_id==emp.id
+        assert rows[0].status == EmployeeWorkRegistration.STATUS_SUBMITTED
+        accepted=svc.accept(emp.id,y,m)
+        assert accepted.status == EmployeeWorkRegistration.STATUS_ACCEPTED
         assert svc.close_month(y,m)==1
+        period=svc.get_period(y,m,manager)
+        assert period.status == 'CLOSED'
         rows=svc.list_all(y,m)
-        assert rows[0].status=='CLOSED'
+        assert rows[0].status == EmployeeWorkRegistration.STATUS_ACCEPTED
 
 
 def test_manager_permission_is_required_even_for_manager_role(tmp_path):
@@ -102,6 +109,9 @@ def test_close_month_requires_no_draft_blocks_and_closes_period(tmp_path):
         with pytest.raises(EmployeeWorkRegistrationValidationError): svc.close_month(y,m)
     with CurrentUserContext(u): svc.submit_month(emp.id,y,m)
     with CurrentUserContext(manager):
+        with pytest.raises(EmployeeWorkRegistrationValidationError): svc.close_month(y,m)
+        accepted=svc.accept(emp.id,y,m)
+        assert accepted.status == EmployeeWorkRegistration.STATUS_ACCEPTED
         assert svc.close_month(y,m)==1
         period=svc.get_period(y,m,manager)
         assert period.status == 'CLOSED'
@@ -113,7 +123,9 @@ def test_closed_period_blocks_new_registration(tmp_path):
     with CurrentUserContext(u): svc.create(emp.id,date(y,m,3),time(9),time(12),'WORK')
     with Session() as s: manager=s.query(User).filter_by(username='manager').one()
     with CurrentUserContext(u): svc.submit_month(emp.id,y,m)
-    with CurrentUserContext(manager): svc.close_month(y,m)
+    with CurrentUserContext(manager):
+        svc.accept(emp.id,y,m)
+        svc.close_month(y,m)
     with CurrentUserContext(u):
         with pytest.raises(EmployeeWorkRegistrationValidationError): svc.create(emp.id,date(y,m,4),time(13),time(17),'WORK')
 
@@ -125,7 +137,9 @@ def test_audit_records_submission_and_period_close(tmp_path):
         svc.create(emp.id,date(y,m,5),time(9),time(12),'WORK')
         svc.submit_month(emp.id,y,m)
     with Session() as s: manager=s.query(User).filter_by(username='manager').one()
-    with CurrentUserContext(manager): svc.close_month(y,m)
+    with CurrentUserContext(manager):
+        svc.accept(emp.id,y,m)
+        svc.close_month(y,m)
     with Session() as s:
         actions=[row.action for row in s.query(__import__('centermanager.models.audit_log',fromlist=['AuditLog']).AuditLog).all()]
     assert 'WORK_REGISTRATION_CREATED' in actions
