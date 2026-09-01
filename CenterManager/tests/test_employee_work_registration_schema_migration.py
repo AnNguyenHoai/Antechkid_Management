@@ -39,7 +39,10 @@ def _build_pre_013_schema(connection):
         metadata,
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("employee_id", sa.Integer(), nullable=False),
-        sa.Column("period_id", sa.Integer(), nullable=False),
+        # The pre-1e10a013 schema is intentionally modeled as nullable here so
+        # the migration can inspect and reject legacy invalid rows before it
+        # rebuilds the canonical table with a NOT NULL period_id.
+        sa.Column("period_id", sa.Integer(), nullable=True),
         sa.Column("work_date", sa.Date(), nullable=False),
         sa.Column("start_time", sa.Time(), nullable=False),
         sa.Column("end_time", sa.Time(), nullable=False),
@@ -155,9 +158,7 @@ def test_reconcile_removes_legacy_columns_and_preserves_aggregate_and_blocks():
         }
         assert "ix_employee_work_registrations_period_id" in indexes
         assert "ix_employee_work_registration_status" in indexes
-        assert indexes[
-            "uq_employee_work_registration_employee_period"
-        ]["unique"] is True
+        assert bool(indexes["uq_employee_work_registration_employee_period"]["unique"])
 
 
 def test_reconcile_refuses_null_period_id_before_schema_change():
