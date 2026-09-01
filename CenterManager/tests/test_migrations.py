@@ -50,7 +50,7 @@ def test_migration_upgrade(test_db_path):
 
 def test_employee_timestamp_defaults_and_persistence_after_migration(test_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect
     from sqlalchemy.orm import sessionmaker
     from centermanager.database.engine import create_engine_for_path
     from centermanager.models.employee import Employee
@@ -104,27 +104,21 @@ def test_existing_employee_database_upgrades_timestamp_defaults(test_db_path):
         assert columns[column_name]["default"] is not None
         assert "CURRENT_TIMESTAMP" in str(columns[column_name]["default"]).upper()
 
+
 def test_migration_downgrade(test_db_path):
-    """Migration downgrade to base removes domain tables, including Employee."""
+    """The canonical monthly registration schema explicitly does not support downgrade."""
     migration_files = _get_migration_files()
     if not migration_files:
         pytest.fail("No migration files found.")
 
-    from sqlalchemy import inspect
-    from centermanager.database.engine import create_engine_for_path
     from alembic import command
 
     alembic_cfg = _upgrade_to_head(test_db_path)
-    command.downgrade(alembic_cfg, "base")
-
-    engine = create_engine_for_path(test_db_path)
-    inspector = inspect(engine)
-    domain_tables = {
-        "students", "parents", "enrollments", "assessments",
-        "timeline_events", "student_products", "progress", "attachments",
-        "employees", "employee_documents",
-    }
-    assert not domain_tables.intersection(set(inspector.get_table_names()))
+    with pytest.raises(
+        RuntimeError,
+        match="Downgrade from the canonical monthly registration schema is not supported",
+    ):
+        command.downgrade(alembic_cfg, "base")
 
 
 def test_employee_access_permissions_exist_after_migration(test_db_path):
