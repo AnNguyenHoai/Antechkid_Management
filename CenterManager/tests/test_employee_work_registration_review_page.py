@@ -38,12 +38,34 @@ def test_filter_by_status_and_selection(qtbot):
     assert page._selected().status == EmployeeWorkRegistration.STATUS_SUBMITTED
 
 
+def test_filter_rebuild_does_not_reenter_action_update(qtbot):
+    employee_service = Mock()
+    registration_service = Mock()
+    registration_service.next_month.return_value = (2026, 10)
+    registration_service.list_all.return_value = [
+        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
+    ]
+
+    page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
+    qtbot.addWidget(page)
+
+    with patch.object(page, "_update_actions", wraps=page._update_actions) as update_actions:
+        update_actions.reset_mock()
+        page.status_filter.setCurrentText("SUBMITTED")
+        qtbot.wait(1)
+
+        assert page.table.rowCount() == 1
+        assert page._selected() is None
+        assert update_actions.call_count == 1
+
+
 def test_accept_selected_calls_service_and_refreshes(qtbot):
     employee_service = Mock()
     registration_service = Mock()
     registration_service.next_month.return_value = (2026, 10)
     submitted = _registration(EmployeeWorkRegistration.STATUS_SUBMITTED)
-    registration_service.list_all.side_effect = [[submitted], [ _registration(EmployeeWorkRegistration.STATUS_ACCEPTED) ]]
+    registration_service.list_all.side_effect = [[submitted], [_registration(EmployeeWorkRegistration.STATUS_ACCEPTED)]]
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)

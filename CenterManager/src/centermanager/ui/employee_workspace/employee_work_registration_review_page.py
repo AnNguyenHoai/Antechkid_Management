@@ -134,22 +134,38 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             list(self._rows) if selected == "ALL"
             else [r for r in self._rows if r.status == selected]
         )
-        self.table.setRowCount(0)
-        for registration in self._filtered_rows:
-            values = [
-                registration.employee.full_name or "-",
-                registration.employee.employee_code or "-",
-                str(len(registration.blocks)),
-                f"{self._hours(registration):.2f}",
-                registration.status,
-                registration.submitted_at.strftime("%d/%m/%Y %H:%M") if registration.submitted_at else "-",
-                registration.accepted_at.strftime("%d/%m/%Y %H:%M") if registration.accepted_at else "-",
-            ]
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            for column, value in enumerate(values):
-                self.table.setItem(row, column, QTableWidgetItem(value))
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
+
+        # Rebuilding a QTableWidget emits selection/item signals while its
+        # internal model is being mutated.  In this page those signals feed
+        # _update_actions(), which reads the same model.  Keep the rebuild
+        # atomic from Qt's signal/paint perspective and update actions once at
+        # the end.  This also makes refresh/filter deterministic in tests and
+        # in the live UI.
+        signals_blocked = self.table.blockSignals(True)
+        updates_enabled = self.table.updatesEnabled()
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            for registration in self._filtered_rows:
+                values = [
+                    registration.employee.full_name or "-",
+                    registration.employee.employee_code or "-",
+                    str(len(registration.blocks)),
+                    f"{self._hours(registration):.2f}",
+                    registration.status,
+                    registration.submitted_at.strftime("%d/%m/%Y %H:%M") if registration.submitted_at else "-",
+                    registration.accepted_at.strftime("%d/%m/%Y %H:%M") if registration.accepted_at else "-",
+                ]
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                for column, value in enumerate(values):
+                    self.table.setItem(row, column, QTableWidgetItem(value))
+                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
+        finally:
+            self.table.setUpdatesEnabled(updates_enabled)
+            self.table.blockSignals(signals_blocked)
+
         self._update_actions()
 
     def _selected(self):
