@@ -68,9 +68,10 @@ class EmployeeWorkRegistrationService:
     def _begin_write(s):
         if s.get_bind().dialect.name=="sqlite":s.connection().exec_driver_sql("BEGIN IMMEDIATE")
     @staticmethod
-    def _overlap(blocks,start,end,exclude=None):
+    def _overlap(blocks,work_date,start,end,exclude=None):
         for b in blocks:
             if exclude and b.id==exclude:continue
+            if b.work_date != work_date:continue
             if start<b.end_time and b.start_time<end:raise EmployeeWorkRegistrationValidationError("Registration overlaps an existing registration.")
     def _get_registration(self,s,eid,pid,create=False):
         r=EmployeeWorkRegistrationRepository(s).get_by_employee_period(eid,pid)
@@ -81,7 +82,7 @@ class EmployeeWorkRegistrationService:
         with self._sf() as s:
             self._begin_write(s);p=self._open_period(s,work_date.year,work_date.month);r=self._get_registration(s,eid,p.id,True)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("This registration month has already been submitted and cannot be changed.")
-            self._overlap(r.blocks,start_time,end_time);r.blocks.append(EmployeeWorkRegistrationBlock(work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),notes=notes or None));s.commit();s.refresh(r);return r
+            self._overlap(r.blocks,work_date,start_time,end_time);r.blocks.append(EmployeeWorkRegistrationBlock(work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),notes=notes or None));s.commit();s.refresh(r);return r
     def update(self,bid,*,work_date,start_time,end_time,work_type,notes=None,user=None):
         u=self._user(user)
         with self._sf() as s:
@@ -89,7 +90,7 @@ class EmployeeWorkRegistrationService:
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);self._validate(work_date,start_time,end_time,work_type)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            self._open_period(s,work_date.year,work_date.month);self._overlap(r.blocks,start_time,end_time,b.id);b.work_date,b.start_time,b.end_time,b.work_type,b.notes=work_date,start_time,end_time,work_type.strip(),notes or None;s.commit();return r
+            self._open_period(s,work_date.year,work_date.month);self._overlap(r.blocks,work_date,start_time,end_time,b.id);b.work_date,b.start_time,b.end_time,b.work_type,b.notes=work_date,start_time,end_time,work_type.strip(),notes or None;s.commit();return r
     def delete(self,bid,user=None):
         u=self._user(user)
         with self._sf() as s:
@@ -120,7 +121,7 @@ class EmployeeWorkRegistrationService:
         with self._sf() as s:
             p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED:raise EmployeeWorkRegistrationValidationError("Only accepted registrations can be reopened.")
-            r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.accepted_at=None;r.accepted_by_user_id=None;s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;s.commit();return r
     def set_submission_deadline(self,y,m,deadline:Optional[date],user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);start,end=self._month_range(y,m)
         if deadline is not None and not(start<=deadline<=end):raise EmployeeWorkRegistrationValidationError("Submission deadline must be inside the registration month.")
