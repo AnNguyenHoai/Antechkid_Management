@@ -131,14 +131,15 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def _apply_filter(self, *_):
         selected_employee_id = None
         current_row = self.table.currentRow()
-        if 0 <= current_row < len(self._filtered_rows):
-            selected_employee_id = self._filtered_rows[current_row].employee_id
+        if 0 <= current_row < self.table.rowCount():
+            selected_employee_id = self.table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
 
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
-        self._filtered_rows = (
+        filtered_rows = (
             list(self._rows) if selected == "ALL"
             else [r for r in self._rows if r.status == selected]
         )
+        self._filtered_rows = filtered_rows
 
         # Rebuilding a QTableWidget emits selection/item signals while its
         # internal model is being mutated.  In this page those signals feed
@@ -152,6 +153,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         try:
             self.table.clearContents()
             self.table.setRowCount(0)
+            restored = False
             for registration in self._filtered_rows:
                 values = [
                     registration.employee.full_name or "-",
@@ -169,20 +171,25 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
                 if registration.employee_id == selected_employee_id:
                     self.table.selectRow(row)
+                    restored = True
+
+            if not restored and self._filtered_rows and selected_employee_id is None:
+                self.table.selectRow(0)
         finally:
             self.table.setUpdatesEnabled(updates_enabled)
             self.table.blockSignals(signals_blocked)
-
-        # Preserve the historical UI behavior of selecting the first visible
-        # registration when a filter is applied without an existing selection.
-        if selected_employee_id is None and self._filtered_rows:
-            self.table.selectRow(0)
 
         self._update_actions()
 
     def _selected(self):
         row = self.table.currentRow()
-        return self._filtered_rows[row] if 0 <= row < len(self._filtered_rows) else None
+        if not 0 <= row < self.table.rowCount():
+            return None
+        employee_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        return next(
+            (registration for registration in self._filtered_rows if registration.employee_id == employee_id),
+            None,
+        )
 
     def _update_actions(self):
         registration = self._selected()
