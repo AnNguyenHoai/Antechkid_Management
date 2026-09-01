@@ -77,6 +77,9 @@ class EmployeeService:
         user = self._require_user(user)
         if self.can_view_all(user) or user.has_permission("employee.view.self"):
             return True
+        # Employee self-service is an identity capability. If an authenticated
+        # account is already linked to an Employee, do not make access depend on
+        # a stale/missing role seed in an older runtime database.
         with self._session_factory() as session:
             return EmployeeRepository(session).get_by_user_id(user.id) is not None
 
@@ -93,7 +96,12 @@ class EmployeeService:
         return user
 
     def get_current_employee(self, user: Optional[User] = None) -> Employee:
-        """Resolve the employee identity from the authenticated account."""
+        """Resolve the employee identity from the authenticated account.
+
+        Legacy accounts created before the Account → Employee contract are repaired
+        lazily on first access. New accounts are provisioned atomically by User
+        management and never need this fallback.
+        """
         user = self._require_user(user)
         with self._session_factory() as session:
             employee = EmployeeRepository(session).get_by_user_id(user.id)
@@ -147,7 +155,11 @@ class EmployeeService:
             )
 
     def get_or_create_employee_for_user(self, user: Optional[User] = None) -> Employee:
-        """Resolve the authenticated employee, repairing a legacy account when safe."""
+        """Resolve the authenticated employee, repairing a legacy account when safe.
+
+        New accounts are provisioned atomically by PermissionService. This method only
+        creates a profile for legacy accounts that pre-date that contract.
+        """
         user = self._require_user(user)
         with self._session_factory() as session:
             repo = EmployeeRepository(session)
@@ -346,6 +358,9 @@ class EmployeeService:
                 if not actor.has_permission("employee.update") and not self._is_manager_or_admin(actor):
                     raise EmployeeAccessDeniedError("Permission 'employee.update' is required.")
             else:
+                # Viewing one's own profile is the minimum self-service capability;
+                # update.self may be explicitly granted, but view.self remains a safe
+                # compatibility fallback for existing roles.
                 if not (
                     actor.has_permission("employee.update.self")
                     or actor.has_permission("employee.view.self")
