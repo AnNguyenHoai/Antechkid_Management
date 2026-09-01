@@ -3,7 +3,6 @@
 
 import logging
 import ntpath
-import os
 import posixpath
 import re
 from typing import Any
@@ -17,14 +16,12 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 def _normalize_local_path(value: str) -> str:
     """Return one platform-independent canonical form for a local Git path."""
     value = unquote((value or "").strip()).replace("\\", "/")
-    # file:///C:/repo arrives as /C:/repo; Windows drive paths arrive as C:/repo.
     if re.match(r"^/[A-Za-z]:/", value):
         value = value[1:]
 
     if re.match(r"^[A-Za-z]:/", value):
         value = ntpath.normpath(value).replace("\\", "/")
     elif value.startswith("//"):
-        # UNC path: keep the UNC namespace, but normalize separators/components.
         value = ntpath.normpath(value).replace("\\", "/")
     else:
         value = posixpath.normpath(value)
@@ -43,8 +40,8 @@ def _normalize_remote_url(url: str) -> str:
     if not value:
         return ""
 
-    # A Windows drive path must be detected before urlsplit(), because
-    # urlsplit("C:/repo") interprets "c" as a URL scheme.
+    # Detect Windows drive paths before urlsplit(): urlsplit("C:/repo") treats
+    # ``c`` as a URL scheme rather than as a filesystem drive.
     if _WINDOWS_DRIVE_RE.match(value):
         return _normalize_local_path(value)
 
@@ -56,8 +53,8 @@ def _normalize_remote_url(url: str) -> str:
             path = f"//{parsed.netloc}{path}"
         return _normalize_local_path(path)
 
-    # SCP-style SSH: user@host:path. Do not treat the colon after a drive
-    # letter as an SSH separator.
+    # SCP-style SSH remote: git@host:path. A Windows drive path has already
+    # been handled above, so the colon here is unambiguously the SCP separator.
     if not parsed.scheme and ":" in value:
         head, tail = value.split(":", 1)
         if not re.match(r"^[A-Za-z]$", head):
@@ -70,7 +67,7 @@ def _normalize_remote_url(url: str) -> str:
         scheme = parsed.scheme.lower()
         netloc = parsed.netloc
 
-        # Lowercase the host while preserving optional credentials and port.
+        # Canonicalize the hostname while preserving credentials and port.
         if parsed.hostname:
             host = parsed.hostname.lower()
             if ":" in host and not host.startswith("["):
@@ -105,6 +102,7 @@ def _normalize_remote_url(url: str) -> str:
 
 
 def _get_origin_url(provider: Any) -> str:
+    """Return the runtime repository's origin URL, or an empty string."""
     repo = getattr(provider, "_repo", None)
     if repo is None:
         return ""
@@ -171,9 +169,25 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
         result = original_connect(self)
         if not result:
             return False
+
+        # ``connect()`` historically only opened an existing local clone. For
+        # an unmaterialized repository, a configured origin is enough to
+        # establish the provider by cloning it. This keeps connect() useful to
+        # callers while still applying the same origin reconciliation path.
+        if getattr(self, "_repo", None) is None and getattr(self, "_repository_url", ""):
+            try:
+                if not self.clone():
+                    self._offline = True
+                    return False
+            except Exception:
+                logger.exception("Failed to materialize configured repository during connect")
+                self._offline = True
+                return False
+
         if not _reconcile_origin(self):
             self._offline = True
             return False
+
         return True
 
     provider_cls.connect = connect_with_reconciled_origin
