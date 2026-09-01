@@ -164,6 +164,32 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
         return
 
     original_connect = provider_cls.connect
+    original_clone = provider_cls.clone
+
+    def clone_idempotent(self, progress_callback=None):
+        # EIT-ORIGIN-02 makes connect() materialize a missing repository.
+        # Keep the public clone() operation idempotent when the destination is
+        # already a valid Git repository, while still rejecting arbitrary
+        # non-Git directories.
+        repo_path = getattr(self, "_repo_path", None)
+        # connect() has already opened/materialized this repository. A second
+        # clone() call must not invoke ``git clone`` into the same destination.
+        if (
+            getattr(self, "_repo", None) is not None
+            and repo_path is not None
+            and (repo_path / ".git").exists()
+        ):
+            if not _reconcile_origin(self):
+                logger.error("Existing repository origin could not be reconciled")
+                return False
+            logger.info("Repository already exists at %s; clone is idempotent", repo_path)
+            if progress_callback:
+                progress_callback("clone", "Repository already exists", 100)
+            return True
+
+        return original_clone(self, progress_callback=progress_callback)
+
+    provider_cls.clone = clone_idempotent
 
     def connect_with_reconciled_origin(self):
         result = original_connect(self)

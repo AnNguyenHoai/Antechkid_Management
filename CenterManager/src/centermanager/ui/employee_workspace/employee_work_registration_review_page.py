@@ -32,8 +32,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._selected_employee_id = None
         self._selection_is_explicit = False
         self._selection_syncing = False
+        self._allow_implicit_selection = False
         self._setup()
         self.refresh()
+        self._allow_implicit_selection = True
 
     def _setup(self):
         root = QVBoxLayout(self)
@@ -161,7 +163,12 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
             # An explicit user selection that is filtered out is cleared.
             # Only an implicit selection (or no selection) gets the first row.
-            if target_row is None and not preserve_selection and self._filtered_rows:
+            if (
+                target_row is None
+                and not preserve_selection
+                and self._allow_implicit_selection
+                and self._filtered_rows
+            ):
                 target_row = 0
 
             for registration in self._filtered_rows:
