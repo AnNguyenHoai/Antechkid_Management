@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -17,7 +18,7 @@ from centermanager.models.employee_work_registration import EmployeeWorkRegistra
 
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
-    """Manager overview: one row per employee/month; review happens in detail."""
+    """Manager overview: filter and process monthly employee registrations."""
 
     detail_requested = Signal(object)
 
@@ -26,6 +27,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._es = employee_service
         self._rs = registration_service
         self._rows = []
+        self._filtered_rows = []
         self._write_enabled = False
         self._setup()
         self.refresh()
@@ -40,8 +42,8 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         root.addWidget(title)
 
         hint = QLabel(
-            "Each employee has one monthly registration containing all availability blocks. "
-            "Select an employee to review the complete registration."
+            "Review employee availability registrations for the next month. "
+            "Filter by status, process submissions, or open the full detail."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#68737d;")
@@ -52,12 +54,23 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.month.setStyleSheet("font-size:15px;font-weight:600;")
         bar.addWidget(self.month)
         bar.addStretch()
+        bar.addWidget(QLabel("Status:"))
+        self.status_filter = QComboBox()
+        self.status_filter.addItems(["ALL", "DRAFT", "SUBMITTED", "ACCEPTED"])
+        self.status_filter.currentTextChanged.connect(self._apply_filter)
+        bar.addWidget(self.status_filter)
+        self.accept_btn = QPushButton("Accept")
+        self.reopen_btn = QPushButton("Reopen")
         self.detail_btn = QPushButton("Open Detail")
         self.close_btn = QPushButton("Close Registration Month")
         self.refresh_btn = QPushButton("Refresh")
-        for button in (self.detail_btn, self.close_btn, self.refresh_btn):
+        for button in (self.accept_btn, self.reopen_btn, self.detail_btn, self.close_btn, self.refresh_btn):
             bar.addWidget(button)
         root.addLayout(bar)
+
+        self.counters = QLabel("Total: 0 • Draft: 0 • Submitted: 0 • Accepted: 0")
+        self.counters.setStyleSheet("font-weight:600;")
+        root.addWidget(self.counters)
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
@@ -74,6 +87,8 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         root.addWidget(self.table, 1)
 
         self.detail_btn.clicked.connect(self.open_detail)
+        self.accept_btn.clicked.connect(self.accept_selected)
+        self.reopen_btn.clicked.connect(self.reopen_selected)
         self.refresh_btn.clicked.connect(self.refresh)
         self.close_btn.clicked.connect(self.close_month)
         self.table.itemSelectionChanged.connect(self._update_actions)
@@ -87,55 +102,108 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def _period(self):
         return self._rs.next_month()
 
+    @staticmethod
+    def _hours(registration):
+        return sum(
+            ((block.end_time.hour * 60 + block.end_time.minute)
+             - (block.start_time.hour * 60 + block.start_time.minute))
+            for block in registration.blocks
+        ) / 60
+
     def refresh(self):
         try:
             year, month = self._period()
             self.month.setText(f"Planning input: {month:02d}/{year} • Next month")
             self._rows = self._rs.list_all(year, month)
-            self.table.setRowCount(0)
+            counts = {"DRAFT": 0, "SUBMITTED": 0, "ACCEPTED": 0}
             for registration in self._rows:
-                hours = sum(
-                    (block.end_time.hour * 60 + block.end_time.minute)
-                    - (block.start_time.hour * 60 + block.start_time.minute)
-                    for block in registration.blocks
-                ) / 60
-                values = [
-                    registration.employee.full_name or "-",
-                    registration.employee.employee_code or "-",
-                    str(len(registration.blocks)),
-                    f"{hours:.2f}",
-                    registration.status,
-                    registration.submitted_at.strftime("%d/%m/%Y %H:%M")
-                    if registration.submitted_at
-                    else "-",
-                    registration.accepted_at.strftime("%d/%m/%Y %H:%M")
-                    if registration.accepted_at
-                    else "-",
-                ]
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                for column, value in enumerate(values):
-                    self.table.setItem(row, column, QTableWidgetItem(value))
-                self.table.item(row, 0).setData(
-                    Qt.ItemDataRole.UserRole, registration.employee_id
-                )
-            self._update_actions()
+                counts[registration.status] = counts.get(registration.status, 0) + 1
+            self.counters.setText(
+                f"Total: {len(self._rows)} • Draft: {counts['DRAFT']} • "
+                f"Submitted: {counts['SUBMITTED']} • Accepted: {counts['ACCEPTED']}"
+            )
+            self._apply_filter()
         except Exception as exc:
             QMessageBox.warning(
                 self, "Work Registrations", f"Could not load registrations.\n\n{exc}"
             )
 
+    def _apply_filter(self, *_):
+        selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
+        self._filtered_rows = (
+            list(self._rows) if selected == "ALL"
+            else [r for r in self._rows if r.status == selected]
+        )
+        self.table.setRowCount(0)
+        for registration in self._filtered_rows:
+            values = [
+                registration.employee.full_name or "-",
+                registration.employee.employee_code or "-",
+                str(len(registration.blocks)),
+                f"{self._hours(registration):.2f}",
+                registration.status,
+                registration.submitted_at.strftime("%d/%m/%Y %H:%M") if registration.submitted_at else "-",
+                registration.accepted_at.strftime("%d/%m/%Y %H:%M") if registration.accepted_at else "-",
+            ]
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            for column, value in enumerate(values):
+                self.table.setItem(row, column, QTableWidgetItem(value))
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.employee_id)
+        self._update_actions()
+
     def _selected(self):
         row = self.table.currentRow()
-        return self._rows[row] if 0 <= row < len(self._rows) else None
+        return self._filtered_rows[row] if 0 <= row < len(self._filtered_rows) else None
 
     def _update_actions(self):
         registration = self._selected()
         self.detail_btn.setEnabled(registration is not None)
+        self.accept_btn.setEnabled(
+            self._write_enabled
+            and registration is not None
+            and registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
+        )
+        self.reopen_btn.setEnabled(
+            self._write_enabled
+            and registration is not None
+            and registration.status == EmployeeWorkRegistration.STATUS_ACCEPTED
+        )
         all_accepted = bool(self._rows) and all(
             item.status == EmployeeWorkRegistration.STATUS_ACCEPTED for item in self._rows
         )
         self.close_btn.setEnabled(self._write_enabled and all_accepted)
+
+    def _confirm(self, title, text):
+        return QMessageBox.question(
+            self, title, text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes
+
+    def accept_selected(self):
+        registration = self._selected()
+        if not self._write_enabled or not registration or registration.status != EmployeeWorkRegistration.STATUS_SUBMITTED:
+            return
+        if not self._confirm("Accept Registration", "Accept this employee's monthly work registration?"):
+            return
+        try:
+            year, month = self._period()
+            self._rs.accept(registration.employee_id, year, month)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Accept Registration", str(exc))
+
+    def reopen_selected(self):
+        registration = self._selected()
+        if not self._write_enabled or not registration or registration.status != EmployeeWorkRegistration.STATUS_ACCEPTED:
+            return
+        if not self._confirm("Reopen Registration", "Reopen this registration so the employee can correct it?"):
+            return
+        try:
+            year, month = self._period()
+            self._rs.reopen(registration.employee_id, year, month)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Reopen Registration", str(exc))
 
     def open_detail(self):
         registration = self._selected()
@@ -144,11 +212,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def close_month(self):
         year, month = self._period()
-        if QMessageBox.question(
-            self,
+        if not self._confirm(
             "Close registration month",
             f"Close the {month:02d}/{year} registration period after all registrations are accepted?",
-        ) != QMessageBox.StandardButton.Yes:
+        ):
             return
         try:
             self._rs.close_month(year, month)
