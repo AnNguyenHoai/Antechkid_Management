@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """Pytest fixtures for CenterManager tests."""
 
-pytest_plugins = ("pytestqt.plugin",)
-
 import pytest
 import subprocess
 import json
