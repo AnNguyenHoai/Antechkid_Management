@@ -16,5 +16,9 @@ class AuditLog(Base):
     target_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     target_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     target_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Canonical entity identity used by the audit schema. Keep target_* for
+    # backwards-compatible consumers while mirroring the same identity here.
+    entity_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    entity_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     result: Mapped[str] = mapped_column(String(20), default='success', nullable=False, index=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
