@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
@@ -33,6 +34,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._selection_is_explicit = False
         self._selection_syncing = False
         self._allow_implicit_selection = False
+        self._period_status = EmployeeWorkRegistrationPeriod.STATUS_OPEN
         self._setup()
         self.refresh()
         self._allow_implicit_selection = True
@@ -115,10 +117,17 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             for block in registration.blocks
         ) / 60
 
+    def _load_period_status(self, year, month):
+        """Return the lifecycle state of the registration period."""
+        period = self._rs.get_period(year, month)
+        return getattr(period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN)
+
     def refresh(self):
         try:
             year, month = self._period()
-            self.month.setText(f"Planning input: {month:02d}/{year} • Next month")
+            self._period_status = self._load_period_status(year, month)
+            period_label = "Closed" if self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED else "Open"
+            self.month.setText(f"Planning input: {month:02d}/{year} • Next month • Period: {period_label}")
             self._rows = self._rs.list_all(year, month)
             counts = {"DRAFT": 0, "SUBMITTED": 0, "ACCEPTED": 0}
             for registration in self._rows:
@@ -161,8 +170,6 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                         target_row = index
                         break
 
-            # An explicit user selection that is filtered out is cleared.
-            # Only an implicit selection (or no selection) gets the first row.
             if (
                 target_row is None
                 and not preserve_selection
@@ -192,7 +199,6 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             if target_row is not None:
                 self.table.selectRow(target_row)
                 self._selected_employee_id = self._filtered_rows[target_row].employee_id
-                # A filter-created fallback selection is not a user selection.
                 self._selection_is_explicit = preserve_selection and (
                     self._filtered_rows[target_row].employee_id == selected_employee_id
                 )
@@ -236,21 +242,24 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def _update_actions(self):
         registration = self._selected()
+        period_closed = self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
         self.detail_btn.setEnabled(registration is not None)
         self.accept_btn.setEnabled(
             self._write_enabled
+            and not period_closed
             and registration is not None
             and registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
         )
         self.reopen_btn.setEnabled(
             self._write_enabled
+            and not period_closed
             and registration is not None
             and registration.status == EmployeeWorkRegistration.STATUS_ACCEPTED
         )
         all_accepted = bool(self._rows) and all(
             item.status == EmployeeWorkRegistration.STATUS_ACCEPTED for item in self._rows
         )
-        self.close_btn.setEnabled(self._write_enabled and all_accepted)
+        self.close_btn.setEnabled(self._write_enabled and not period_closed and all_accepted)
 
     def _confirm(self, title, text):
         return QMessageBox.question(
@@ -259,7 +268,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def accept_selected(self):
         registration = self._selected()
-        if not self._write_enabled or not registration or registration.status != EmployeeWorkRegistration.STATUS_SUBMITTED:
+        if not self._write_enabled or self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED or not registration or registration.status != EmployeeWorkRegistration.STATUS_SUBMITTED:
             return
         if not self._confirm("Accept Registration", "Accept this employee's monthly work registration?"):
             return
@@ -272,7 +281,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def reopen_selected(self):
         registration = self._selected()
-        if not self._write_enabled or not registration or registration.status != EmployeeWorkRegistration.STATUS_ACCEPTED:
+        if not self._write_enabled or self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED or not registration or registration.status != EmployeeWorkRegistration.STATUS_ACCEPTED:
             return
         if not self._confirm("Reopen Registration", "Reopen this registration so the employee can correct it?"):
             return
@@ -290,6 +299,8 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def close_month(self):
         year, month = self._period()
+        if self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED:
+            return
         if not self._confirm(
             "Close registration month",
             f"Close the {month:02d}/{year} registration period after all registrations are accepted?",
