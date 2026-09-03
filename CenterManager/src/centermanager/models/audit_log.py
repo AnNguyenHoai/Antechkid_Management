@@ -20,5 +20,6 @@ class AuditLog(Base):
     # backwards-compatible consumers while mirroring the same identity here.
     entity_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     entity_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False)
     result: Mapped[str] = mapped_column(String(20), default='success', nullable=False, index=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
