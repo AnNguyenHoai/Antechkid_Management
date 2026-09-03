@@ -7,9 +7,10 @@ from centermanager.ui.employee_workspace.employee_work_registration_review_page 
 )
 
 
-def _registration(status, employee_id=1):
+def _registration(status, employee_id=1, registration_id=None):
     employee = SimpleNamespace(full_name="Employee", employee_code="E001")
     return SimpleNamespace(
+        id=registration_id if registration_id is not None else employee_id + 100,
         employee_id=employee_id,
         employee=employee,
         blocks=[],
@@ -43,8 +44,8 @@ def test_filter_rebuild_preserves_selection_when_row_remains(qtbot):
     registration_service = Mock()
     registration_service.next_month.return_value = (2026, 10)
     registration_service.list_all.return_value = [
-        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
-        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
+        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1, registration_id=101),
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2, registration_id=202),
     ]
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
@@ -55,6 +56,7 @@ def test_filter_rebuild_preserves_selection_when_row_remains(qtbot):
 
     assert page.table.rowCount() == 1
     assert page._selected().employee_id == 2
+    assert page._selected().id == 202
 
 
 def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
@@ -62,8 +64,8 @@ def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
     registration_service = Mock()
     registration_service.next_month.return_value = (2026, 10)
     registration_service.list_all.return_value = [
-        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
-        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
+        _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1, registration_id=101),
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2, registration_id=202),
     ]
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
@@ -74,6 +76,7 @@ def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
 
     assert page.table.rowCount() == 1
     assert page._selected() is None
+    assert page._selected_registration_id is None
 
 
 def test_filter_rebuild_does_not_reenter_action_update(qtbot):
