@@ -143,10 +143,16 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             )
 
     def _apply_filter(self, *_):
-        # The page owns logical selection. Qt row/current state is only a
-        # presentation detail and is rebuilt during filtering.
+        # The page owns logical selection. Before rebuilding the table, take a
+        # last snapshot from Qt so a programmatic/test selection that has not
+        # emitted itemSelectionChanged yet is not lost.
         selected_employee_id = self._selected_employee_id
         preserve_selection = self._selection_is_explicit
+        if not preserve_selection and hasattr(self, "table"):
+            selected_rows = self.table.selectionModel().selectedRows(0)
+            if selected_rows:
+                selected_employee_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
+                preserve_selection = selected_employee_id is not None
 
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
         filtered_rows = (
