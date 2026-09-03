@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from centermanager.database.base import Base
 from centermanager.database.engine import create_engine_for_path
 from centermanager.models import User, Role, Employee, Permission, EmployeeWorkRegistration
+from centermanager.models.audit_log import AuditLog
 from centermanager.services.employee_service import EmployeeService
 from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService, EmployeeWorkRegistrationValidationError, EmployeeWorkRegistrationAccessDeniedError
 from centermanager.core.clock import Clock, reset_clock, set_clock
@@ -141,10 +142,29 @@ def test_audit_records_submission_and_period_close(tmp_path):
         svc.accept(emp.id,y,m)
         svc.close_month(y,m)
     with Session() as s:
-        actions=[row.action for row in s.query(__import__('centermanager.models.audit_log',fromlist=['AuditLog']).AuditLog).all()]
+        actions=[row.action for row in s.query(AuditLog).all()]
     assert 'WORK_REGISTRATION_CREATED' in actions
     assert 'WORK_REGISTRATION_SUBMITTED' in actions
     assert 'WORK_REGISTRATION_PERIOD_CLOSED' in actions
+
+
+def test_close_month_audit_records_canonical_entity_metadata(tmp_path):
+    Session,u,u2,emp,other=setup_db(tmp_path); svc=EmployeeWorkRegistrationService(Session)
+    y,m=svc.next_month()
+    with CurrentUserContext(u):
+        svc.create(emp.id,date(y,m,5),time(9),time(12),'WORK')
+        svc.submit_month(emp.id,y,m)
+    with Session() as s: manager=s.query(User).filter_by(username='manager').one()
+    with CurrentUserContext(manager):
+        svc.accept(emp.id,y,m)
+        svc.close_month(y,m)
+    with Session() as s:
+        close_log=s.query(AuditLog).filter_by(action='WORK_REGISTRATION_PERIOD_CLOSED').one()
+        period=s.query(__import__('centermanager.models.employee_work_registration_period',fromlist=['EmployeeWorkRegistrationPeriod']).EmployeeWorkRegistrationPeriod).filter_by(year=y,month=m).one()
+        assert close_log.entity_type == 'EmployeeWorkRegistrationPeriod'
+        assert close_log.entity_id == str(period.id)
+        assert close_log.target_type == close_log.entity_type
+        assert close_log.target_id == close_log.entity_id
 
 
 def test_manager_list_all_keeps_employee_relationship_loaded_after_service_session_closes(tmp_path):
