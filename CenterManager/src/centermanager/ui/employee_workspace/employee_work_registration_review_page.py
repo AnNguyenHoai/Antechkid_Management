@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -30,7 +30,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._rows = []
         self._filtered_rows = []
         self._write_enabled = False
-        self._selected_employee_id = None
+        self._selected_registration_id = None
         self._selection_is_explicit = False
         self._selection_syncing = False
         self._allow_implicit_selection = False
@@ -117,6 +117,19 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             for block in registration.blocks
         ) / 60
 
+    @staticmethod
+    def _registration_identity(registration):
+        """Return a stable identity for a registration across table rebuilds.
+
+        Production ORM registrations always have a database ``id``.  The
+        employee-id fallback keeps lightweight test doubles and legacy callers
+        usable while the UI transitions to registration identity.
+        """
+        registration_id = getattr(registration, "id", None)
+        if registration_id is not None:
+            return ("registration", registration_id)
+        return ("employee", getattr(registration, "employee_id", None))
+
     def _load_period_status(self, year, month):
         """Return the lifecycle state of the registration period."""
         period = self._rs.get_period(year, month)
@@ -143,16 +156,15 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             )
 
     def _apply_filter(self, *_):
-        # The page owns logical selection. Before rebuilding the table, take a
-        # last snapshot from Qt so a programmatic/test selection that has not
-        # emitted itemSelectionChanged yet is not lost.
-        selected_employee_id = self._selected_employee_id
+        # Logical selection is keyed by registration identity, not by the
+        # transient Qt current row or by a stale registration object.
+        selected_registration_id = self._selected_registration_id
         preserve_selection = self._selection_is_explicit
         if not preserve_selection and hasattr(self, "table"):
             selected_rows = self.table.selectionModel().selectedRows(0)
             if selected_rows:
-                selected_employee_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
-                preserve_selection = selected_employee_id is not None
+                selected_registration_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
+                preserve_selection = selected_registration_id is not None
 
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
         filtered_rows = (
@@ -162,6 +174,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._filtered_rows = filtered_rows
 
         signals_blocked = self.table.blockSignals(True)
+        selection_model_blocker = QSignalBlocker(self.table.selectionModel())
         updates_enabled = self.table.updatesEnabled()
         self.table.setUpdatesEnabled(False)
         self._selection_syncing = True
@@ -170,9 +183,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self.table.setRowCount(0)
 
             target_row = None
-            if preserve_selection and selected_employee_id is not None:
+            if preserve_selection and selected_registration_id is not None:
                 for index, registration in enumerate(self._filtered_rows):
-                    if registration.employee_id == selected_employee_id:
+                    if self._registration_identity(registration) == selected_registration_id:
                         target_row = index
                         break
 
@@ -199,22 +212,24 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 for column, value in enumerate(values):
                     self.table.setItem(row, column, QTableWidgetItem(value))
                 self.table.item(row, 0).setData(
-                    Qt.ItemDataRole.UserRole, registration.employee_id
+                    Qt.ItemDataRole.UserRole, self._registration_identity(registration)
                 )
 
             if target_row is not None:
                 self.table.selectRow(target_row)
-                self._selected_employee_id = self._filtered_rows[target_row].employee_id
+                self._selected_registration_id = self._registration_identity(self._filtered_rows[target_row])
                 self._selection_is_explicit = preserve_selection and (
-                    self._filtered_rows[target_row].employee_id == selected_employee_id
+                    self._registration_identity(self._filtered_rows[target_row]) == selected_registration_id
                 )
             else:
-                self._selected_employee_id = None
+                self.table.clearSelection()
+                self._selected_registration_id = None
                 self._selection_is_explicit = False
         finally:
             self._selection_syncing = False
             self.table.setUpdatesEnabled(updates_enabled)
             self.table.blockSignals(signals_blocked)
+            del selection_model_blocker
 
         self._update_actions()
 
@@ -224,24 +239,24 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
         selected_rows = self.table.selectionModel().selectedRows(0)
         if not selected_rows:
-            self._selected_employee_id = None
+            self._selected_registration_id = None
             self._selection_is_explicit = False
         else:
-            employee_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
-            self._selected_employee_id = employee_id
-            self._selection_is_explicit = employee_id is not None
+            registration_id = selected_rows[0].data(Qt.ItemDataRole.UserRole)
+            self._selected_registration_id = registration_id
+            self._selection_is_explicit = registration_id is not None
         self._update_actions()
 
     def _selected(self):
-        employee_id = self._selected_employee_id
-        if employee_id is None:
+        registration_id = self._selected_registration_id
+        if registration_id is None:
             return None
 
         return next(
             (
                 registration
                 for registration in self._filtered_rows
-                if registration.employee_id == employee_id
+                if self._registration_identity(registration) == registration_id
             ),
             None,
         )
