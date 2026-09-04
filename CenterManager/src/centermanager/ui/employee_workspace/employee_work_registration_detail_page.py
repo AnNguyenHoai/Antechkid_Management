@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from calendar import monthrange
+from datetime import date
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QInputDialog,
     QHeaderView,
     QLabel,
     QMessageBox,
@@ -14,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 
 
 class EmployeeWorkRegistrationDetailPage(QWidget):
@@ -24,6 +29,7 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self._rs = registration_service
         self.registration = registration
         self._write_enabled = False
+        self._period_status = EmployeeWorkRegistrationPeriod.STATUS_OPEN
         self._setup()
         self.refresh()
 
@@ -61,15 +67,22 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self.back_btn = QPushButton("Back")
         self.accept_btn = QPushButton("Accept")
         self.reopen_btn = QPushButton("Reopen")
+        self.edit_btn = QPushButton("Edit Selected")
+        self.delete_btn = QPushButton("Delete Selected")
         actions.addWidget(self.back_btn)
         actions.addStretch()
         actions.addWidget(self.accept_btn)
         actions.addWidget(self.reopen_btn)
+        actions.addWidget(self.edit_btn)
+        actions.addWidget(self.delete_btn)
         root.addLayout(actions)
 
         self.back_btn.clicked.connect(self._back)
         self.accept_btn.clicked.connect(self._accept)
         self.reopen_btn.clicked.connect(self._reopen)
+        self.edit_btn.clicked.connect(self._edit_selected)
+        self.delete_btn.clicked.connect(self._delete_selected)
+        self.table.itemSelectionChanged.connect(self._update_actions)
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
@@ -83,6 +96,7 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         period = getattr(r, "period", None)
         if period:
             period_text = f"{period.month:02d}/{period.year}"
+            self._period_status = getattr(period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN)
         else:
             period_text = "-"
 
@@ -92,7 +106,7 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
             f"Registration month: {period_text}\n"
             f"Availability blocks: {len(r.blocks)}"
         )
-        self.status.setText(f"Status: {r.status}")
+        self.status.setText(f"Status: {r.status} • Period: {self._period_status}")
 
         self.table.setRowCount(0)
         total_minutes = 0
@@ -124,12 +138,24 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         r = self.registration
         self.accept_btn.setEnabled(
             self._write_enabled
+            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
             and r.status == EmployeeWorkRegistration.STATUS_SUBMITTED
         )
         self.reopen_btn.setEnabled(
             self._write_enabled
+            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
             and r.status == EmployeeWorkRegistration.STATUS_ACCEPTED
         )
+        blocks = sorted(r.blocks, key=lambda b: (b.work_date, b.start_time))
+        has_selection = 0 <= self.table.currentRow() < len(blocks)
+        can_edit = (
+            self._write_enabled
+            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
+            and r.status == EmployeeWorkRegistration.STATUS_DRAFT
+            and has_selection
+        )
+        self.edit_btn.setEnabled(can_edit)
+        self.delete_btn.setEnabled(can_edit)
 
     def _period_values(self):
         period = getattr(self.registration, "period", None)
@@ -162,6 +188,71 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
             self.refresh()
         except Exception as exc:
             QMessageBox.warning(self, "Reopen Registration", str(exc))
+
+    def _selected_block(self):
+        row = self.table.currentRow()
+        blocks = sorted(self.registration.blocks, key=lambda b: (b.work_date, b.start_time))
+        if row < 0 or row >= len(blocks):
+            return None
+        return blocks[row]
+
+    @staticmethod
+    def _ask_reason(parent, title, prompt):
+        reason, accepted = QInputDialog.getText(parent, title, prompt)
+        value = reason.strip() if accepted else ""
+        return value if accepted and value else None
+
+    def _edit_selected(self):
+        block = self._selected_block()
+        if block is None or not self.edit_btn.isEnabled():
+            return
+        from centermanager.ui.employee_workspace.employee_work_registration_widget import WorkRegistrationDialog
+        period = self.registration.period
+        dialog = WorkRegistrationDialog(
+            self, block,
+            min_date=date(period.year, period.month, 1),
+            max_date=date(period.year, period.month, monthrange(period.year, period.month)[1]),
+        )
+        if not dialog.exec():
+            return
+        work_date, start_time, end_time, work_type, notes = dialog.values()
+        try:
+            self._rs.update(
+                block.id, work_date=work_date, start_time=start_time,
+                end_time=end_time, work_type=work_type, notes=notes
+            )
+            self.registration = self._rs.list_for_employee(
+                self.registration.employee_id, period.year, period.month
+            )
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Edit Registration", str(exc))
+
+    def _delete_selected(self):
+        block = self._selected_block()
+        if block is None or not self.delete_btn.isEnabled():
+            return
+        reason = self._ask_reason(
+            self, "Delete Availability",
+            "Reason for deleting this availability block:",
+        )
+        if not reason:
+            return
+        if QMessageBox.question(
+            self, "Confirm Availability Deletion",
+            "Delete the selected availability block?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._rs.delete(block.id)
+            period = self.registration.period
+            self.registration = self._rs.list_for_employee(
+                self.registration.employee_id, period.year, period.month
+            )
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self, "Delete Availability", str(exc))
 
     def _back(self):
         parent = self.parent()
