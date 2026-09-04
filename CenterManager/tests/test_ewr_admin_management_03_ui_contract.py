@@ -53,12 +53,13 @@ def test_teacher_role_receives_own_work_registration_permission():
 
 
 def test_existing_databases_receive_teacher_work_registration_permission():
+    """The canonical runtime repair migration grants teachers the self permission."""
     migration = (
         ROOT.parent.parent.parent.parent
-        / "migrations" / "versions" / "1e10a006_work_registration_self_permission.py"
+        / "migrations" / "versions" / "1e10a016_runtime_employee_registration_repairs.py"
     ).read_text(encoding="utf-8")
-    assert 'revision = "1e10a006"' in migration
-    assert 'down_revision = "1e10a005"' in migration
+    assert 'revision = "1e10a016"' in migration
+    assert 'down_revision = "1e10a015"' in migration
     assert 'SELF_PERMISSION = "work_registration.self"' in migration
     assert 'INSERT OR IGNORE INTO role_permissions' in migration
-    assert '"name": "teacher"' in migration
+    assert 'TEACHER_ROLE = "teacher"' in migration
