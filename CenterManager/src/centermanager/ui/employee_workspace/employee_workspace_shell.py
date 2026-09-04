@@ -6,7 +6,7 @@ import logging
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel,
-    QTabWidget, QPushButton, QFormLayout, QMessageBox
+    QFormLayout, QMessageBox
 )
 from centermanager.core.current_user import get_current_user
 from centermanager.services.employee_service import EmployeeServiceError, EmployeeAccessDeniedError
@@ -54,7 +54,10 @@ class MyEmployeeProfilePage(QWidget):
         root.addLayout(form)
         self.cv_label = QLabel("CV: -")
         root.addWidget(self.cv_label)
-        self.edit_btn = QPushButton("Edit My Profile")
+        self.edit_btn = QPushButton("Edit My Profile") if False else None
+        if self.edit_btn is None:
+            from PySide6.QtWidgets import QPushButton
+            self.edit_btn = QPushButton("Edit My Profile")
         self.edit_btn.clicked.connect(self.edit_profile)
         root.addWidget(self.edit_btn)
         root.addStretch()
@@ -135,12 +138,26 @@ class EmployeeWorkspaceShell(QWidget):
         self.registration_detail_page = None
         self._setup()
 
+    def _can_view_all_registrations(self, user):
+        """The review UI is only valid when the registration service's all-scope capability is present."""
+        return bool(user and self._ps.has_permission("work_registration.view.all", user))
+
+    def _can_view_self_registration(self, user):
+        """Return whether the account is explicitly allowed to use self registration."""
+        if not user:
+            return False
+        return bool(
+            self._ps.has_permission("work_registration.self", user)
+            or self._ps.has_permission("working_time.registration.self", user)
+        )
+
     def _setup(self):
         root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
         self.header = WorkspaceHeader("Employee Workspace", "My Profile")
         self.header.back_home_clicked.connect(self.go_home.emit); root.addWidget(self.header)
         body = QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
-        user = get_current_user(); self.management_mode = self._es.can_view_all(user)
+        user = get_current_user()
+        self.management_mode = self._es.can_view_all(user) and self._can_view_all_registrations(user)
 
         if self.management_mode:
             try:
@@ -155,7 +172,7 @@ class EmployeeWorkspaceShell(QWidget):
                 {"id": "employees", "icon": "👥", "label": "Employees"},
                 {"id": "registrations", "icon": "📝", "label": "Work Registrations"},
             ]
-            if management_employee is not None:
+            if management_employee is not None and self._can_view_self_registration(user):
                 nav_items.append({"id": "my_registration", "icon": "👤", "label": "My Work Registration"})
 
             self.nav = WorkspaceNavigation("Employee Workspace", nav_items)
@@ -167,26 +184,32 @@ class EmployeeWorkspaceShell(QWidget):
             self.registration_review_page = EmployeeWorkRegistrationReviewPage(self._es, self._work_registration_service, parent=self)
             self.registration_review_page.detail_requested.connect(self.open_registration_detail)
             self.stack.addWidget(self.registration_review_page)
-            if management_employee:
+            if management_employee and self._can_view_self_registration(user):
                 from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
                 self.management_self_registration = EmployeeWorkRegistrationWidget(self._work_registration_service, management_employee, editable=self._write_enabled, parent=self); self.stack.addWidget(self.management_self_registration)
             else:
-                self.management_self_registration = QLabel("No employee profile is linked to this account."); self.management_self_registration.setAlignment(Qt.AlignmentFlag.AlignCenter); self.stack.addWidget(self.management_self_registration)
+                self.management_self_registration = QLabel("My work registration is not available for this account."); self.management_self_registration.setAlignment(Qt.AlignmentFlag.AlignCenter); self.stack.addWidget(self.management_self_registration)
             body.addWidget(self.stack, 1)
         else:
+            can_self_registration = self._can_view_self_registration(user)
             self.nav = WorkspaceNavigation(
                 "Employee Workspace",
                 [{"id": "profile", "icon": "👤", "label": "My Profile"}, {"id": "attendance", "icon": "🕒", "label": "Attendance"},
-                 {"id": "registration", "icon": "📝", "label": "Work Registration"}, {"id": "schedule", "icon": "📅", "label": "Schedule"}],
+                 *([{ "id": "registration", "icon": "📝", "label": "Work Registration"}] if can_self_registration else []),
+                 {"id": "schedule", "icon": "📅", "label": "Schedule"}],
             )
             self.nav.page_selected.connect(self.navigate_to); body.addWidget(self.nav); self.stack = QStackedWidget()
-            self.self_page = MyEmployeeProfilePage(self._es, self._ds, self._schedule_service, self); self.self_page.set_write_enabled(self._write_enabled); self.stack.addWidget(self.self_page)
+            self.self_page = MyEmployeeProfilePage(self._es, self._ds, self._schedule_service, self._working_time_service, self); self.self_page.set_write_enabled(self._write_enabled); self.stack.addWidget(self.self_page)
             attendance = QLabel("Select Attendance to load your working time."); attendance.setAlignment(Qt.AlignmentFlag.AlignCenter); self.attendance_page = attendance; self._attendance_widget = None; self.stack.addWidget(attendance)
-            from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
-            employee = None
-            try: employee = self._es.get_current_employee()
-            except Exception: pass
-            self.registration_page = EmployeeWorkRegistrationWidget(self._work_registration_service, employee, editable=self._write_enabled, parent=self) if employee else QLabel("No employee profile is linked to this account.")
+            if can_self_registration:
+                from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
+                employee = None
+                try: employee = self._es.get_current_employee()
+                except Exception: pass
+                self.registration_page = EmployeeWorkRegistrationWidget(self._work_registration_service, employee, editable=self._write_enabled, parent=self) if employee else QLabel("No employee profile is linked to this account.")
+            else:
+                self.registration_page = QLabel("You do not have permission to use Work Registration.")
+                self.registration_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stack.addWidget(self.registration_page); self.schedule_page = MyEmployeeSchedulePage(self._es, self._schedule_service, self); self.stack.addWidget(self.schedule_page); body.addWidget(self.stack, 1)
         root.addLayout(body)
         if not self.management_mode: self.self_page.refresh()
@@ -238,6 +261,11 @@ class EmployeeWorkspaceShell(QWidget):
             if page_id == "attendance":
                 self._ensure_attendance_page(); self.stack.setCurrentIndex(1); self.header.set_context("Employee Workspace", "Attendance"); self.nav.set_active_page("attendance")
             elif page_id == "registration":
+                if not self._can_view_self_registration(get_current_user()):
+                    self.status_message = "Permission denied for Work Registration"
+                    self.header.set_context("Employee Workspace", "My Profile")
+                    self.nav.set_active_page("profile")
+                    return
                 self.stack.setCurrentWidget(self.registration_page); self.header.set_context("Employee Workspace", "Work Registration"); self.nav.set_active_page("registration")
                 if hasattr(self.registration_page, "refresh"): self.registration_page.refresh()
             elif page_id == "schedule":
