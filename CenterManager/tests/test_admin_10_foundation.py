@@ -26,7 +26,7 @@ def test_admin_shell_uses_one_notification_service():
 
 def test_admin_shell_has_page_permission_boundaries():
     source = read("ui/admin_workspace/admin_workspace_shell.py")
-    assert '"users": PermissionDefinitions.USER_MANAGE' in source
+    assert '"users": PermissionDefinitions.USER_VIEW' in source
     assert '"settings": PermissionDefinitions.SETTING_UPDATE' in source
     assert '"git": PermissionDefinitions.SETTING_UPDATE' in source
     assert "def _has_page_permission" in source
