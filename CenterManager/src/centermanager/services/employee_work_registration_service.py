@@ -27,7 +27,20 @@ class EmployeeWorkRegistrationService:
         if u is None: raise EmployeeWorkRegistrationAccessDeniedError("Authentication is required.")
         return u
     def _require_permission(self,p,u):
-        if not self._permission_service.has_permission(p,u): raise EmployeeWorkRegistrationAccessDeniedError(f"Permission '{p}' is required.")
+        allowed = self._permission_service.has_permission(p,u)
+        if not allowed:
+            logger.error(
+                "[WORK_REGISTRATION_PERMISSION_DENIED] permission=%s user_id=%s username=%s role=%s "
+                "employee_id=%s user_object=%s",
+                p,
+                getattr(u, "id", None),
+                getattr(u, "username", None),
+                getattr(getattr(u, "role", None), "name", None),
+                getattr(getattr(u, "employee", None), "id", None),
+                type(u).__name__,
+                stack_info=True,
+            )
+            raise EmployeeWorkRegistrationAccessDeniedError(f"Permission '{p}' is required.")
     def can_admin_override(self,user=None):
         """Return whether the actor can override registration lifecycle guards."""
         u=self._user(user)
@@ -38,7 +51,22 @@ class EmployeeWorkRegistrationService:
             e=EmployeeRepository(s).get_by_id(employee_id)
             if not e: raise EmployeeWorkRegistrationValidationError("Employee not found.")
             if e.user_id==u.id:
-                if not(self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)): raise EmployeeWorkRegistrationAccessDeniedError(f"Permission '{self.SELF_PERMISSION}' is required.")
+                allowed_self = self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)
+                if not allowed_self:
+                    logger.error(
+                        "[WORK_REGISTRATION_PERMISSION_DENIED] permission=%s user_id=%s username=%s role=%s employee_id=%s "
+                        "scope=self requested_employee_id=%s self_permission=%s legacy_permission=%s",
+                        self.SELF_PERMISSION,
+                        getattr(u, "id", None),
+                        getattr(u, "username", None),
+                        getattr(getattr(u, "role", None), "name", None),
+                        getattr(e, "id", None),
+                        employee_id,
+                        self._permission_service.has_permission(self.SELF_PERMISSION, u),
+                        self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION, u),
+                        stack_info=True,
+                    )
+                    raise EmployeeWorkRegistrationAccessDeniedError(f"Permission '{self.SELF_PERMISSION}' is required.")
             else:self._require_permission(self.ALL_PERMISSION,u)
             return e
     @staticmethod
@@ -62,11 +90,6 @@ class EmployeeWorkRegistrationService:
         u=self._user(user)
         with self._sf() as s:
             employee = s.scalar(select(Employee).where(Employee.user_id == u.id))
-        # All-scope reviewers/managers must be able to read the period even when
-        # their account is also linked to an Employee identity. The old ordering
-        # selected self permission solely from the existence of that link, which
-        # made the review page fail with a self/view permission error for valid
-        # all-scope accounts.
         if self._permission_service.has_permission(self.ALL_PERMISSION, u):
             return self._period_readonly(y, m)
         if employee is not None and (
@@ -114,17 +137,14 @@ class EmployeeWorkRegistrationService:
             else:self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"add_block","work_date":work_date.isoformat()},actor=u)
             s.commit();s.refresh(r);return r
     def update(self,bid,*,work_date,start_time,end_time,work_type,notes=None,user=None):
-        u=self._user(user)
-        admin_override=self.can_admin_override(u)
+        u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
             self._begin_write(s);b=EmployeeWorkRegistrationRepository(s).get_block(bid)
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);self._validate(work_date,start_time,end_time,work_type)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            if admin_override:
-                p=self._period(s,work_date.year,work_date.month)
-            else:
-                p=self._open_period(s,work_date.year,work_date.month)
+            if admin_override:p=self._period(s,work_date.year,work_date.month)
+            else:p=self._open_period(s,work_date.year,work_date.month)
             self._overlap(r.blocks,work_date,start_time,end_time,b.id);b.work_date,b.start_time,b.end_time,b.work_type,b.notes=work_date,start_time,end_time,work_type.strip(),notes or None
             self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);s.commit();return r
     def delete(self,bid,user=None):

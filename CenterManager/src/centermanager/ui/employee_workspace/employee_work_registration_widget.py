@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from calendar import monthrange
 from datetime import date
 
@@ -26,6 +27,8 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+
+logger = logging.getLogger(__name__)
 
 
 class WorkRegistrationDialog(QDialog):
@@ -218,12 +221,27 @@ class EmployeeWorkRegistrationWidget(QWidget):
         else:
             self.message.setText("")
 
-    def _set_error(self, exc):
+    def _set_error(self, exc, operation="refresh"):
         self._last_error = str(exc)
+        logger.exception(
+            "[WORK_REGISTRATION_ERROR] operation=%s employee_id=%s employee_code=%s "
+            "exception_type=%s exception=%s",
+            operation,
+            getattr(self.employee, "id", None),
+            getattr(self.employee, "employee_code", None),
+            type(exc).__name__,
+            exc,
+        )
         self.message.setText(f"Could not load your work registration. {exc}")
 
     def refresh(self):
         try:
+            logger.info(
+                "[WORK_REGISTRATION] refresh start employee_id=%s employee_code=%s editable=%s",
+                getattr(self.employee, "id", None),
+                getattr(self.employee, "employee_code", None),
+                self.editable,
+            )
             if self.employee is None:
                 raise ValueError("No employee profile is linked to this account.")
             year, month, _, _ = self._range()
@@ -255,14 +273,23 @@ class EmployeeWorkRegistrationWidget(QWidget):
                 period = self.service.get_period(year, month)
                 deadline = getattr(period, "submission_deadline", None)
                 self.deadline_summary.setText(deadline.strftime("%d/%m/%Y") if deadline else "Not set")
-            except Exception:
+            except Exception as exc:
+                logger.exception(
+                    "[WORK_REGISTRATION_ERROR] operation=load_period_deadline employee_id=%s "
+                    "year=%s month=%s exception_type=%s exception=%s",
+                    getattr(self.employee, "id", None), year, month, type(exc).__name__, exc,
+                )
                 self.deadline_summary.setText("-")
             self._set_status_message(registration_status)
             self._last_error = None
             self._update_actions()
+            logger.info(
+                "[WORK_REGISTRATION] refresh success employee_id=%s year=%s month=%s status=%s blocks=%s",
+                getattr(self.employee, "id", None), year, month, registration_status, block_count,
+            )
         except Exception as exc:
             self.registration = None
-            self._set_error(exc)
+            self._set_error(exc, operation="refresh")
             self._update_actions()
 
     def _selected(self):
@@ -279,10 +306,13 @@ class EmployeeWorkRegistrationWidget(QWidget):
         try:
             operation()
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=mutation title=%s employee_id=%s "
+                "exception_type=%s exception=%s",
+                title, getattr(self.employee, "id", None), type(exc).__name__, exc,
+            )
             QMessageBox.warning(self, title, str(exc))
         finally:
-            # Always discard stale ORM/UI state after a mutation attempt.
-            # The next refresh is the authoritative snapshot from the service.
             self.refresh()
 
     def _add(self):
