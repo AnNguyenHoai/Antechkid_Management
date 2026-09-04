@@ -55,11 +55,14 @@ def test_open_period_keeps_close_action_available_when_all_accepted(qtbot):
 
 def test_close_refreshes_period_status(qtbot):
     page, registration_service = _page(qtbot, EmployeeWorkRegistrationPeriod.STATUS_OPEN)
-    registration_service.close_month.return_value = 1
-    registration_service.get_period.side_effect = [
-        SimpleNamespace(status=EmployeeWorkRegistrationPeriod.STATUS_OPEN),
-        SimpleNamespace(status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED),
-    ]
+
+    period_state = {"status": EmployeeWorkRegistrationPeriod.STATUS_OPEN}
+    registration_service.get_period.side_effect = lambda *args, **kwargs: SimpleNamespace(
+        status=period_state["status"]
+    )
+    registration_service.close_month.side_effect = lambda year, month: period_state.update(
+        status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED
+    )
 
     with patch(
         "centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question",
@@ -68,6 +71,7 @@ def test_close_refreshes_period_status(qtbot):
         page.close_month()
 
     registration_service.close_month.assert_called_once_with(2026, 10)
+    registration_service.get_period.assert_called()
     assert page._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
     assert "Period: Closed" in page.month.text()
     assert not page.close_btn.isEnabled()
