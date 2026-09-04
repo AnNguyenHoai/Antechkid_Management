@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -24,6 +26,8 @@ from centermanager.services.employee_admin_management_service import (
     EmployeeAdminManagementService,
     EmployeeAdminManagementValidationError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
@@ -153,6 +157,12 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
 
     def refresh(self):
         try:
+            user = get_current_user()
+            logger.info(
+                "[WORK_REGISTRATION_REVIEW] refresh start user_id=%s role=%s",
+                getattr(user, "id", None),
+                getattr(getattr(user, "role", None), "name", None),
+            )
             year, month = self._period()
             self._period_status = self._load_period_status(year, month)
             period_label = "Closed" if self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED else "Open"
@@ -166,14 +176,23 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 f"Submitted: {counts['SUBMITTED']} • Accepted: {counts['ACCEPTED']}"
             )
             self._apply_filter()
+            logger.info(
+                "[WORK_REGISTRATION_REVIEW] refresh success user_id=%s year=%s month=%s rows=%s period_status=%s",
+                getattr(user, "id", None), year, month, len(self._rows), self._period_status,
+            )
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] review_refresh user_id=%s role=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None),
+                getattr(getattr(get_current_user(), "role", None), "name", None),
+                type(exc).__name__,
+                exc,
+            )
             QMessageBox.warning(
                 self, "Work Registrations", f"Could not load registrations.\n\n{exc}"
             )
 
     def _apply_filter(self, *_):
-        # Logical selection is keyed by registration identity, not by the
-        # transient Qt current row or by a stale registration object.
         selected_registration_id = self._selected_registration_id
         preserve_selection = self._selection_is_explicit
         if not preserve_selection and hasattr(self, "table"):
@@ -315,6 +334,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self._rs.accept(registration.employee_id, year, month)
             self.refresh()
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=accept_selected user_id=%s employee_id=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None), getattr(registration, "employee_id", None), type(exc).__name__, exc,
+            )
             QMessageBox.warning(self, "Accept Registration", str(exc))
 
     def reopen_selected(self):
@@ -328,6 +351,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self._rs.reopen(registration.employee_id, year, month)
             self.refresh()
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=reopen_selected user_id=%s employee_id=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None), getattr(registration, "employee_id", None), type(exc).__name__, exc,
+            )
             QMessageBox.warning(self, "Reopen Registration", str(exc))
 
     def open_detail(self):
@@ -364,8 +391,16 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self._admin_service.reopen_period(year, month, reason=reason)
             self.refresh()
         except (EmployeeAdminManagementAccessDeniedError, EmployeeAdminManagementValidationError) as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=reopen_period user_id=%s year=%s month=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None), year, month, type(exc).__name__, exc,
+            )
             QMessageBox.warning(self, "Re-open Registration Month", str(exc))
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=reopen_period user_id=%s year=%s month=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None), year, month, type(exc).__name__, exc,
+            )
             QMessageBox.critical(self, "Re-open Registration Month", f"Could not reopen the period.\n\n{exc}")
 
     def close_month(self):
@@ -381,4 +416,8 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self._rs.close_month(year, month)
             self.refresh()
         except Exception as exc:
+            logger.exception(
+                "[WORK_REGISTRATION_ERROR] operation=close_month user_id=%s year=%s month=%s exception_type=%s exception=%s",
+                getattr(get_current_user(), "id", None), year, month, type(exc).__name__, exc,
+            )
             QMessageBox.warning(self, "Close Registration", str(exc))
