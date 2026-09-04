@@ -2,6 +2,7 @@
 """Regression test for EmployeeService planning-date determinism."""
 
 from datetime import date
+from types import SimpleNamespace
 
 from centermanager.core.clock import Clock, reset_clock, set_clock
 from centermanager.models.role import RoleDefinitions
@@ -38,13 +39,12 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
 
     class FakeUserRepo:
         def get_by_id_with_role(self, user_id):
-            # create_employee() links an existing employee-bearing account.
-            # Keep this fixture faithful to the account/Employee identity boundary.
-            return type(
-                "User",
-                (),
-                {"role": type("Role", (), {"name": RoleDefinitions.TEACHER})()},
-            )()
+            # create_employee() accepts a linked employee-bearing account. Keep
+            # this fixture explicit so it does not rely on an untyped object.
+            return SimpleNamespace(
+                id=user_id,
+                role=SimpleNamespace(name=RoleDefinitions.TEACHER),
+            )
 
     actor = type(
         "Actor",
