@@ -143,12 +143,22 @@ class EmployeeWorkspaceShell(QWidget):
         user = get_current_user(); self.management_mode = self._es.can_view_all(user)
 
         if self.management_mode:
-            self.nav = WorkspaceNavigation(
-                "Employee Workspace",
-                [{"id": "employees", "icon": "👥", "label": "Employees"},
-                 {"id": "registrations", "icon": "📝", "label": "Work Registrations"},
-                 {"id": "my_registration", "icon": "👤", "label": "My Work Registration"}],
-            )
+            try:
+                management_employee = self._es.get_current_employee(user)
+            except EmployeeServiceError:
+                management_employee = None
+            except Exception:
+                logger.exception("Failed to resolve management user's employee identity")
+                management_employee = None
+
+            nav_items = [
+                {"id": "employees", "icon": "👥", "label": "Employees"},
+                {"id": "registrations", "icon": "📝", "label": "Work Registrations"},
+            ]
+            if management_employee is not None:
+                nav_items.append({"id": "my_registration", "icon": "👤", "label": "My Work Registration"})
+
+            self.nav = WorkspaceNavigation("Employee Workspace", nav_items)
             self.nav.page_selected.connect(self.navigate_to); body.addWidget(self.nav)
             self.stack = QStackedWidget()
             self.list_page = EmployeeListPage(self._es, self._ds, self._schedule_service, self._working_time_service, self._ps, parent=self)
@@ -157,9 +167,6 @@ class EmployeeWorkspaceShell(QWidget):
             self.registration_review_page = EmployeeWorkRegistrationReviewPage(self._es, self._work_registration_service, parent=self)
             self.registration_review_page.detail_requested.connect(self.open_registration_detail)
             self.stack.addWidget(self.registration_review_page)
-            self.management_self_registration = None
-            try: management_employee = self._es.get_current_employee(user)
-            except Exception: management_employee = None
             if management_employee:
                 from centermanager.ui.employee_workspace.employee_work_registration_widget import EmployeeWorkRegistrationWidget
                 self.management_self_registration = EmployeeWorkRegistrationWidget(self._work_registration_service, management_employee, editable=self._write_enabled, parent=self); self.stack.addWidget(self.management_self_registration)
@@ -222,7 +229,7 @@ class EmployeeWorkspaceShell(QWidget):
         if self.management_mode:
             if page_id == "registrations":
                 self.stack.setCurrentWidget(self.registration_review_page); self.nav.set_active_page("registrations"); self.header.set_context("Employee Workspace", "Work Registrations"); self.registration_review_page.refresh()
-            elif page_id == "my_registration":
+            elif page_id == "my_registration" and self.management_self_registration is not None:
                 self.stack.setCurrentWidget(self.management_self_registration); self.nav.set_active_page("my_registration"); self.header.set_context("Employee Workspace", "My Work Registration")
                 if hasattr(self.management_self_registration, "refresh"): self.management_self_registration.refresh()
             else:
