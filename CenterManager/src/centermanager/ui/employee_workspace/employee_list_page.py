@@ -5,13 +5,20 @@ from pathlib import Path
 
 from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
+    QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QInputDialog,
     QFormLayout, QGroupBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QTabWidget,
     QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from centermanager.models.employee import Employee
 from centermanager.services.employee_service import EmployeeAccessDeniedError, EmployeeServiceError
+from centermanager.services.employee_admin_management_service import (
+    EmployeeAdminManagementAccessDeniedError,
+    EmployeeAdminManagementService,
+    EmployeeAdminManagementValidationError,
+)
+from centermanager.models.role import RoleDefinitions
+from centermanager.core.current_user import get_current_user
 from centermanager.ui.shared import DataTable
 
 logger = logging.getLogger(__name__)
@@ -405,6 +412,8 @@ class EmployeeListPage(QWidget):
         self.ss = schedule_service
         self.wts = working_time_service
         self.ps = permission_service
+        self._admin_service = EmployeeAdminManagementService(getattr(permission_service, "_session_factory"))
+        self._selected_employee_id = None
         # Global WRITE mode is OFF until MainWindow grants it.
         self.write_enabled = False
         self._profile_opener = None
@@ -440,7 +449,10 @@ class EmployeeListPage(QWidget):
             self.filter.addItem(status.replace("_", " ").title(), status)
         self.filter.currentIndexChanged.connect(self.apply)
         self.refresh_btn = QPushButton("Refresh"); self.refresh_btn.clicked.connect(self.refresh)
-        for w in (self.search, self.filter, self.refresh_btn): bar.addWidget(w)
+        self.delete_btn = QPushButton("Delete Employee")
+        self.delete_btn.setToolTip("Delete an employee only when no operational history exists.")
+        self.delete_btn.clicked.connect(self.delete_selected)
+        for w in (self.search, self.filter, self.refresh_btn, self.delete_btn): bar.addWidget(w)
         layout.addLayout(bar)
 
         self.table = DataTable([
@@ -454,13 +466,65 @@ class EmployeeListPage(QWidget):
             {"key":"account","label":"Account","sortable":True},
         ], page_size=20)
         self.table.row_double_clicked.connect(self.edit_selected)
+        self.table.selection_changed.connect(self._on_selection_changed)
         layout.addWidget(self.table)
+
+    @staticmethod
+    def _is_admin():
+        user = get_current_user()
+        return bool(user and getattr(getattr(user, "role", None), "name", None) == RoleDefinitions.ADMIN)
 
     def set_profile_opener(self, callback):
         self._profile_opener = callback
 
     def set_write_enabled(self, enabled):
         self.write_enabled = bool(enabled)
+        self._update_actions()
+
+    def _on_selection_changed(self, rows):
+        self._selected_employee_id = None
+        for row in rows:
+            if 0 <= row < len(self.filtered):
+                self._selected_employee_id = self.filtered[row].get("_id")
+                break
+        self._update_actions()
+
+    def _update_actions(self):
+        self.delete_btn.setEnabled(
+            self.write_enabled and self._is_admin() and self._selected_employee_id is not None
+        )
+
+    def delete_selected(self):
+        if not self.write_enabled or not self._is_admin():
+            return
+        employee_id = self._selected_employee_id
+        if employee_id is None:
+            return
+        employee = next((e for e in self.rows if e.id == employee_id), None)
+        if employee is None:
+            return
+        reason, accepted = QInputDialog.getText(
+            self, "Delete Employee", "Reason for deleting this employee:"
+        )
+        if not accepted or not reason.strip():
+            return
+        if QMessageBox.question(
+            self,
+            "Confirm Employee Deletion",
+            f"Delete employee {employee.employee_code} — {employee.full_name}?\n\n"
+            "Employees with operational history cannot be hard-deleted and will be rejected.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._admin_service.delete_employee(employee_id, reason=reason.strip())
+            self.refresh()
+            QMessageBox.information(self, "Employee", "Employee deleted successfully.")
+        except (EmployeeAdminManagementAccessDeniedError, EmployeeAdminManagementValidationError) as exc:
+            QMessageBox.warning(self, "Delete Employee", str(exc))
+        except Exception as exc:
+            logger.exception("Failed to delete employee: employee_id=%s", employee_id)
+            QMessageBox.critical(self, "Delete Employee", f"Could not delete employee.\n\nReason: {exc}")
 
     def refresh(self):
         try:
@@ -482,7 +546,8 @@ class EmployeeListPage(QWidget):
                          "department":e.department or "-","phone":e.phone or "-","status":e.employment_status,
                          "hire_date":str(e.hire_date or ""), "account":e.user.username if e.user else "NOT LINKED",
                          "_id":e.id})
-        self.filtered=data; self.table.set_data(data,len(data)); self.count_label.setText("{} employee{}".format(len(data), "s" if len(data) != 1 else ""))
+        self._selected_employee_id = None
+        self.filtered=data; self.table.set_data(data,len(data)); self.count_label.setText("{} employee{}".format(len(data), "s" if len(data) != 1 else "")); self._update_actions()
 
     def edit_selected(self, index):
         if index >= len(self.filtered): return
@@ -502,3 +567,4 @@ class EmployeeListPage(QWidget):
 
     def set_write_enabled(self, enabled):
         self.write_enabled = bool(enabled)
+        self._update_actions()
