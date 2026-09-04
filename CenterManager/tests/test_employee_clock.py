@@ -38,7 +38,13 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
 
     class FakeUserRepo:
         def get_by_id_with_role(self, user_id):
-            return object()
+            # create_employee() links an existing employee-bearing account.
+            # Keep this fixture faithful to the account/Employee identity boundary.
+            return type(
+                "User",
+                (),
+                {"role": type("Role", (), {"name": RoleDefinitions.TEACHER})()},
+            )()
 
     actor = type(
         "Actor",
