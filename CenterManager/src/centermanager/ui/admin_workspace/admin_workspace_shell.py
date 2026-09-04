@@ -19,6 +19,7 @@ from centermanager.services.audit_service import AuditService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
 from centermanager.models.permission import PermissionDefinitions
+from centermanager.core.current_user import get_current_user
 from centermanager.services.system_operations_service import SystemOperationsService
 from centermanager.ui.admin_workspace.system_operations_page import SystemOperationsPage
 from centermanager.ui.admin_workspace.backup_recovery_page import BackupRecoveryPage
@@ -152,6 +153,11 @@ class AdminWorkspaceShell(QWidget):
         return
 
     def _has_page_permission(self, page_id: str) -> bool:
+        # Admin Workspace is an administrative boundary. A generic permission
+        # must not allow a non-admin account to open administrative pages.
+        user = get_current_user()
+        if user is None or not user.is_admin:
+            return False
         permission = self._page_permissions.get(page_id)
         if permission is None:
             return True
