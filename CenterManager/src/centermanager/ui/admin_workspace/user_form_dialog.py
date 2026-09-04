@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QHBoxLayout, QMessageBox, QLabel, QWidget
 )
 
+from centermanager.models.role import RoleDefinitions
 from centermanager.services.permission_service import PermissionService
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class UserFormDialog(QDialog):
         self._user_id = user_id
         self._is_edit = user_id is not None
 
-        self.setWindowTitle("Edit User" if self._is_edit else "Create Employee Account")
+        self.setWindowTitle("Edit User" if self._is_edit else "Create User Account")
         self.setMinimumWidth(400)
         self.setModal(True)
 
@@ -85,7 +86,10 @@ class UserFormDialog(QDialog):
             self.temp_password_edit.setVisible(False)
         else:
             form.addRow("Temporary Password", self.temp_password_edit)
-            info = QLabel("Creating this account automatically creates the employee profile.")
+            info = QLabel(
+                "Employee profiles are created automatically for employee accounts. "
+                "Administrator accounts are system-only and do not receive an employee profile."
+            )
             info.setWordWrap(True)
             form.addRow("", info)
 
@@ -163,16 +167,31 @@ class UserFormDialog(QDialog):
                     temp_password=temp_password,
                 )
                 if temp_password is None:
-                    # Auto-generated password, show it
+                    if role_name == RoleDefinitions.ADMIN:
+                        message = (
+                            f"Account {username} created as an Administrator.\n\n"
+                            f"Temporary password: {getattr(user, '_temporary_password', '')}\n"
+                            "No employee profile was created."
+                        )
+                    else:
+                        message = (
+                            f"Account {username} created with an employee profile.\n\n"
+                            f"Temporary password: {getattr(user, '_temporary_password', '')}\n"
+                            "Please provide this to the employee."
+                        )
+                    QMessageBox.information(self, "User Created", message)
+                elif role_name == RoleDefinitions.ADMIN:
                     QMessageBox.information(
                         self,
-                        "User Created",
-                        f"Account {username} created. Employee profile was created automatically.\n\n"
-                        f"Temporary password: {getattr(user, "_temporary_password", "")}\n"
-                        "Please provide this to the employee."
+                        "Administrator Account Created",
+                        f"Account {username} was created successfully. No employee profile was created."
                     )
                 else:
-                    QMessageBox.information(self, "Employee Account Created", f"Account {username} and its employee profile were created successfully.")
+                    QMessageBox.information(
+                        self,
+                        "Employee Account Created",
+                        f"Account {username} and its employee profile were created successfully."
+                    )
             self.accept()
         except ValueError as e:
             QMessageBox.warning(self, "Validation", str(e))

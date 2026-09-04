@@ -49,18 +49,21 @@ class EmployeeService:
         v = v.strip()
         return v or None
 
-    def _validate_status(self, status):
-        status = (self._text(status) or Employee.STATUS_ACTIVE).upper()
-        if status not in Employee.VALID_STATUSES:
-            raise EmployeeValidationError(f"Invalid employment status: {status}")
-        return status
-
     @staticmethod
     def _is_manager_or_admin(user: Optional[User]) -> bool:
         return bool(user and user.role and user.role.name in {
             RoleDefinitions.ADMIN,
             RoleDefinitions.MANAGER,
         })
+
+    @staticmethod
+    def _is_employee_account(user: Optional[User]) -> bool:
+        """Return whether the account may own an Employee identity."""
+        return bool(
+            user
+            and user.role
+            and user.role.name != RoleDefinitions.ADMIN
+        )
 
     @staticmethod
     def _require_user(user: Optional[User]) -> User:
@@ -77,9 +80,6 @@ class EmployeeService:
         user = self._require_user(user)
         if self.can_view_all(user) or user.has_permission("employee.view.self"):
             return True
-        # Employee self-service is an identity capability. If an authenticated
-        # account is already linked to an Employee, do not make access depend on
-        # a stale/missing role seed in an older runtime database.
         with self._session_factory() as session:
             return EmployeeRepository(session).get_by_user_id(user.id) is not None
 
@@ -96,13 +96,17 @@ class EmployeeService:
         return user
 
     def get_current_employee(self, user: Optional[User] = None) -> Employee:
-        """Resolve the employee identity from the authenticated account.
+        """Resolve the employee identity from an authenticated employee account.
 
-        Legacy accounts created before the Account → Employee contract are repaired
-        lazily on first access. New accounts are provisioned atomically by User
-        management and never need this fallback.
+        Administrator accounts are system identities and never acquire an Employee
+        identity through this self-service resolver. Legacy non-admin accounts may
+        still be repaired lazily when their Employee link is missing.
         """
         user = self._require_user(user)
+        if not self._is_employee_account(user):
+            raise EmployeeAccessDeniedError(
+                "Administrator accounts do not have an employee identity."
+            )
         with self._session_factory() as session:
             employee = EmployeeRepository(session).get_by_user_id(user.id)
             if employee:
@@ -155,12 +159,12 @@ class EmployeeService:
             )
 
     def get_or_create_employee_for_user(self, user: Optional[User] = None) -> Employee:
-        """Resolve the authenticated employee, repairing a legacy account when safe.
-
-        New accounts are provisioned atomically by PermissionService. This method only
-        creates a profile for legacy accounts that pre-date that contract.
-        """
+        """Resolve the authenticated employee, repairing a legacy account when safe."""
         user = self._require_user(user)
+        if not self._is_employee_account(user):
+            raise EmployeeAccessDeniedError(
+                "Administrator accounts do not have an employee identity."
+            )
         with self._session_factory() as session:
             repo = EmployeeRepository(session)
             employee = repo.get_by_user_id(user.id)
@@ -202,8 +206,13 @@ class EmployeeService:
         with self._session_factory() as s:
             repo = EmployeeRepository(s)
             user_repo = UserRepository(s)
-            if user_repo.get_by_id_with_role(user_id) is None:
+            user = user_repo.get_by_id_with_role(user_id)
+            if user is None:
                 raise EmployeeValidationError("Selected user account does not exist.")
+            if not self._is_employee_account(user):
+                raise EmployeeValidationError(
+                    "Administrator accounts cannot be linked to an employee profile."
+                )
             if repo.get_by_user_id(user_id):
                 raise EmployeeValidationError("User is already linked to an employee.")
             n = (repo.get_highest_employee_number() or 0) + 1
@@ -243,6 +252,10 @@ class EmployeeService:
             raise EmployeeValidationError("Username is required.")
         if role_name not in RoleDefinitions.all_roles():
             raise EmployeeValidationError(f"Invalid account role: {role_name}")
+        if role_name == RoleDefinitions.ADMIN:
+            raise EmployeeValidationError(
+                "Administrator accounts are system identities and cannot be employees."
+            )
         if actor.role and actor.role.name == RoleDefinitions.MANAGER and role_name in {
             RoleDefinitions.ADMIN, RoleDefinitions.MANAGER
         }:
@@ -317,8 +330,13 @@ class EmployeeService:
             existing = repo.get_by_user_id(user_id)
             if existing and existing.id != employee_id:
                 raise EmployeeValidationError("User is already linked to another employee.")
-            if UserRepository(s).get_by_id_with_role(user_id) is None:
+            user = UserRepository(s).get_by_id_with_role(user_id)
+            if user is None:
                 raise EmployeeValidationError("User account does not exist.")
+            if not self._is_employee_account(user):
+                raise EmployeeValidationError(
+                    "Administrator accounts cannot be linked to an employee profile."
+                )
             employee.user_id = user_id
             s.commit()
             s.refresh(employee)
@@ -358,9 +376,6 @@ class EmployeeService:
                 if not actor.has_permission("employee.update") and not self._is_manager_or_admin(actor):
                     raise EmployeeAccessDeniedError("Permission 'employee.update' is required.")
             else:
-                # Viewing one's own profile is the minimum self-service capability;
-                # update.self may be explicitly granted, but view.self remains a safe
-                # compatibility fallback for existing roles.
                 if not (
                     actor.has_permission("employee.update.self")
                     or actor.has_permission("employee.view.self")

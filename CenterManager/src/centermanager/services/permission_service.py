@@ -347,6 +347,11 @@ class PermissionService:
             self._audit("USER_ACTIVATED" if active else "USER_DEACTIVATED", user)
             return user
 
+    @staticmethod
+    def _should_provision_employee(role_name: str) -> bool:
+        """Only employee roles receive an Employee identity; admin is account-only."""
+        return role_name != RoleDefinitions.ADMIN
+
     def create_user_with_temp_password(
         self, username: str, full_name: str, role_name: str,
         email: Optional[str] = None, phone: Optional[str] = None,
@@ -378,33 +383,36 @@ class PermissionService:
             user_repo.add(user)
             session.flush()
 
-            # Every newly-created system account owns exactly one Employee profile.
-            # The profile is created automatically; Employee Workspace never creates
-            # standalone employees.
-            from centermanager.models.employee import Employee
-            employee_repo = EmployeeRepository(session)
-            next_number = (employee_repo.get_highest_employee_number() or 0) + 1
-            employee = Employee(
-                employee_code=f"EMP-{next_number:05d}",
-                full_name=full_name,
-                phone=phone,
-                email=email,
-                employment_status=Employee.STATUS_ACTIVE,
-                hire_date=None,
-                user_id=user.id,
-            )
-            employee_repo.add(employee)
+            employee = None
+            if self._should_provision_employee(role_name):
+                from centermanager.models.employee import Employee
+                employee_repo = EmployeeRepository(session)
+                next_number = (employee_repo.get_highest_employee_number() or 0) + 1
+                employee = Employee(
+                    employee_code=f"EMP-{next_number:05d}",
+                    full_name=full_name,
+                    phone=phone,
+                    email=email,
+                    employment_status=Employee.STATUS_ACTIVE,
+                    hire_date=None,
+                    user_id=user.id,
+                )
+                employee_repo.add(employee)
 
             session.commit()
             session.refresh(user)
-            session.refresh(employee)
-            logger.info(
-                "User created with employee profile: username=%s role=%s employee_id=%s",
-                username, role_name, employee.id,
-            )
-            self._audit("USER_CREATED", user, {"role": role_name, "employee_id": employee.id})
+            if employee is not None:
+                session.refresh(employee)
+                logger.info(
+                    "User created with employee profile: username=%s role=%s employee_id=%s",
+                    username, role_name, employee.id,
+                )
+                self._audit("USER_CREATED", user, {"role": role_name, "employee_id": employee.id})
+                user._employee_id = employee.id
+            else:
+                logger.info("User created without employee profile: username=%s role=%s", username, role_name)
+                self._audit("USER_CREATED", user, {"role": role_name})
             user._temporary_password = temp_password
-            user._employee_id = employee.id
             return user
 
     def reset_user_password(self, user_id: int, temp_password: Optional[str] = None) -> str:
