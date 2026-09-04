@@ -18,7 +18,7 @@ class EmployeeWorkRegistrationError(Exception): pass
 class EmployeeWorkRegistrationAccessDeniedError(EmployeeWorkRegistrationError): pass
 class EmployeeWorkRegistrationValidationError(EmployeeWorkRegistrationError): pass
 class EmployeeWorkRegistrationService:
-    SELF_PERMISSION="work_registration.self"; LEGACY_SELF_PERMISSION="working_time.registration.self"; ALL_PERMISSION="work_registration.view.all"; MANAGE_PERMISSION="work_registration.manage"
+    SELF_PERMISSION="work_registration.self"; LEGACY_SELF_PERMISSION="working_time.registration.self"; ALL_PERMISSION="work_registration.view.all"; MANAGE_PERMISSION="work_registration.manage"; ADMIN_OVERRIDE_PERMISSION="work_registration.period.admin_override"
     AUDIT_MODULE="employee_work_registration"
     AUDIT_CREATED="WORK_REGISTRATION_CREATED"; AUDIT_UPDATED="WORK_REGISTRATION_UPDATED"; AUDIT_DELETED="WORK_REGISTRATION_DELETED"; AUDIT_SUBMITTED="WORK_REGISTRATION_SUBMITTED"; AUDIT_ACCEPTED="WORK_REGISTRATION_ACCEPTED"; AUDIT_REOPENED="WORK_REGISTRATION_REOPENED"; AUDIT_DEADLINE="WORK_REGISTRATION_DEADLINE_UPDATED"; AUDIT_CLOSED="WORK_REGISTRATION_PERIOD_CLOSED"
     def __init__(self,session_factory): self._sf=session_factory; self._permission_service=PermissionService(session_factory); self._audit_service=AuditService(session_factory)
@@ -28,6 +28,10 @@ class EmployeeWorkRegistrationService:
         return u
     def _require_permission(self,p,u):
         if not self._permission_service.has_permission(p,u): raise EmployeeWorkRegistrationAccessDeniedError(f"Permission '{p}' is required.")
+    def can_admin_override(self,user=None):
+        """Return whether the actor can override registration lifecycle guards."""
+        u=self._user(user)
+        return self._permission_service.has_permission(self.ADMIN_OVERRIDE_PERMISSION,u)
     def _scope(self,employee_id,user=None):
         u=self._user(user)
         with self._sf() as s:
@@ -56,7 +60,10 @@ class EmployeeWorkRegistrationService:
         return p
     def get_period(self,y,m,user=None):
         u=self._user(user)
-        if (y,m)!=self.next_month():self._require_permission(self.ALL_PERMISSION,u)
+        with self._sf() as s:
+            employee = s.scalar(select(Employee).where(Employee.user_id == u.id))
+        if employee is not None:self._require_permission(self.SELF_PERMISSION,u)
+        else:self._require_permission(self.ALL_PERMISSION,u)
         with self._sf() as s:p=self._period(s,y,m);s.expunge(p);return p
     def list_for_employee(self,eid,y,m,user=None):
         self._scope(eid,user)
@@ -95,22 +102,27 @@ class EmployeeWorkRegistrationService:
             s.commit();s.refresh(r);return r
     def update(self,bid,*,work_date,start_time,end_time,work_type,notes=None,user=None):
         u=self._user(user)
+        admin_override=self.can_admin_override(u)
         with self._sf() as s:
             self._begin_write(s);b=EmployeeWorkRegistrationRepository(s).get_block(bid)
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);self._validate(work_date,start_time,end_time,work_type)
-            if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            self._open_period(s,work_date.year,work_date.month);self._overlap(r.blocks,work_date,start_time,end_time,b.id);b.work_date,b.start_time,b.end_time,b.work_type,b.notes=work_date,start_time,end_time,work_type.strip(),notes or None
-            self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid},actor=u);s.commit();return r
+            if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
+            if admin_override:
+                p=self._period(s,work_date.year,work_date.month)
+            else:
+                p=self._open_period(s,work_date.year,work_date.month)
+            self._overlap(r.blocks,work_date,start_time,end_time,b.id);b.work_date,b.start_time,b.end_time,b.work_type,b.notes=work_date,start_time,end_time,work_type.strip(),notes or None
+            self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);s.commit();return r
     def delete(self,bid,user=None):
-        u=self._user(user)
+        u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
             self._begin_write(s);b=EmployeeWorkRegistrationRepository(s).get_block(bid)
             if not b:return
             r=b.registration;self._scope(r.employee_id,u)
-            if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be deleted.")
+            if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be deleted.")
             registration_id=r.id;s.delete(b);s.flush()
-            self._audit(s,self.AUDIT_DELETED,r,details={"block_id":bid,"registration_deleted":not bool(r.blocks)},actor=u)
+            self._audit(s,self.AUDIT_DELETED,r,details={"block_id":bid,"registration_deleted":not bool(r.blocks),"admin_override":admin_override},actor=u)
             if not r.blocks:s.delete(r)
             s.commit()
     def submit(self,bid,user=None):raise EmployeeWorkRegistrationValidationError("Block-level submission is no longer supported. Submit the whole registration month.")

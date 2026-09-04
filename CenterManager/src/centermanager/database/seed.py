@@ -56,6 +56,7 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.ATTENDANCE_UPDATE,
             PermissionDefinitions.EMPLOYEE_VIEW_SELF,
             PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
+            PermissionDefinitions.WORK_REGISTRATION_SELF,
         ]
     )
 

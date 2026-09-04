@@ -33,4 +33,9 @@ class Employee(Base, TimestampMixin):
     schedule_exceptions = relationship("EmployeeScheduleException", back_populates="employee", cascade="all, delete-orphan")
     working_time_entries = relationship("EmployeeWorkingTimeEntry", back_populates="employee", cascade="all, delete-orphan")
     work_registrations = relationship("EmployeeWorkRegistration", back_populates="employee", cascade="all, delete-orphan")
+    # Employee documents are dependent records. Keep their rows in the same
+    # aggregate lifecycle so a legitimate hard-delete cannot violate the FK
+    # constraint; historical operational records remain protected by the admin
+    # service before a delete is attempted.
+    documents = relationship("EmployeeDocument", cascade="all, delete-orphan")
     __table_args__=(UniqueConstraint("employee_code", name="uq_employee_code"), UniqueConstraint("user_id", name="uq_employee_user"))

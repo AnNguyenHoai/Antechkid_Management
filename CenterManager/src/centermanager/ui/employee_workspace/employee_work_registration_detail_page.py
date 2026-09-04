@@ -30,6 +30,7 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self.registration = registration
         self._write_enabled = False
         self._period_status = EmployeeWorkRegistrationPeriod.STATUS_OPEN
+        self._admin_override = False
         self._setup()
         self.refresh()
 
@@ -89,6 +90,8 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self._update_actions()
 
     def refresh(self) -> None:
+        can_override = getattr(self._rs, "can_admin_override", None)
+        self._admin_override = bool(can_override()) if can_override is not None else False
         r = self.registration
         employee = getattr(r, "employee", None)
         name = getattr(employee, "full_name", None) or "-"
@@ -106,7 +109,8 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
             f"Registration month: {period_text}\n"
             f"Availability blocks: {len(r.blocks)}"
         )
-        self.status.setText(f"Status: {r.status} • Period: {self._period_status}")
+        effective = "ADMIN OVERRIDE" if self._admin_override and self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED else self._period_status
+        self.status.setText(f"Status: {r.status} • Period: {self._period_status} • Access: {effective}")
 
         self.table.setRowCount(0)
         total_minutes = 0
@@ -136,23 +140,25 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
 
     def _update_actions(self) -> None:
         r = self.registration
+        period_open = self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
+        can_override = self._admin_override
         self.accept_btn.setEnabled(
             self._write_enabled
-            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
+            and period_open
             and r.status == EmployeeWorkRegistration.STATUS_SUBMITTED
         )
         self.reopen_btn.setEnabled(
             self._write_enabled
-            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
             and r.status == EmployeeWorkRegistration.STATUS_ACCEPTED
+            and (period_open or can_override)
         )
         blocks = sorted(r.blocks, key=lambda b: (b.work_date, b.start_time))
         has_selection = 0 <= self.table.currentRow() < len(blocks)
         can_edit = (
             self._write_enabled
-            and self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
-            and r.status == EmployeeWorkRegistration.STATUS_DRAFT
             and has_selection
+            and (period_open or can_override)
+            and (r.status == EmployeeWorkRegistration.STATUS_DRAFT or can_override)
         )
         self.edit_btn.setEnabled(can_edit)
         self.delete_btn.setEnabled(can_edit)
