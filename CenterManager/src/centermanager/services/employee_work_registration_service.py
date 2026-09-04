@@ -62,8 +62,21 @@ class EmployeeWorkRegistrationService:
         u=self._user(user)
         with self._sf() as s:
             employee = s.scalar(select(Employee).where(Employee.user_id == u.id))
-        if employee is not None:self._require_permission(self.SELF_PERMISSION,u)
-        else:self._require_permission(self.ALL_PERMISSION,u)
+        # All-scope reviewers/managers must be able to read the period even when
+        # their account is also linked to an Employee identity. The old ordering
+        # selected self permission solely from the existence of that link, which
+        # made the review page fail with a self/view permission error for valid
+        # all-scope accounts.
+        if self._permission_service.has_permission(self.ALL_PERMISSION, u):
+            return self._period_readonly(y, m)
+        if employee is not None and (
+            self._permission_service.has_permission(self.SELF_PERMISSION, u)
+            or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION, u)
+        ):
+            return self._period_readonly(y, m)
+        self._require_permission(self.ALL_PERMISSION, u)
+        return self._period_readonly(y, m)
+    def _period_readonly(self,y,m):
         with self._sf() as s:p=self._period(s,y,m);s.expunge(p);return p
     def list_for_employee(self,eid,y,m,user=None):
         self._scope(eid,user)
@@ -139,7 +152,7 @@ class EmployeeWorkRegistrationService:
         with self._sf() as s:
             p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_SUBMITTED:raise EmployeeWorkRegistrationValidationError("Only submitted registrations can be accepted.")
-            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"period_id":p.id},actor=u);s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"period_id":p.id},actor=u);s.commit();s.refresh(r);return r
     def reopen(self,eid,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
