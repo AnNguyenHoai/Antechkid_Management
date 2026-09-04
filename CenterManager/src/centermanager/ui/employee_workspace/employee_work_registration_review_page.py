@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QInputDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -16,6 +17,13 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
+from centermanager.models.role import RoleDefinitions
+from centermanager.core.current_user import get_current_user
+from centermanager.services.employee_admin_management_service import (
+    EmployeeAdminManagementAccessDeniedError,
+    EmployeeAdminManagementService,
+    EmployeeAdminManagementValidationError,
+)
 
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
@@ -34,6 +42,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._selection_is_explicit = False
         self._selection_syncing = False
         self._allow_implicit_selection = False
+        self._admin_service = EmployeeAdminManagementService(getattr(registration_service, "_sf"))
         self._period_status = EmployeeWorkRegistrationPeriod.STATUS_OPEN
         self._setup()
         self.refresh()
@@ -70,8 +79,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.reopen_btn = QPushButton("Reopen")
         self.detail_btn = QPushButton("Open Detail")
         self.close_btn = QPushButton("Close Registration Month")
+        self.reopen_period_btn = QPushButton("Re-open Closed Month")
         self.refresh_btn = QPushButton("Refresh")
-        for button in (self.accept_btn, self.reopen_btn, self.detail_btn, self.close_btn, self.refresh_btn):
+        for button in (self.accept_btn, self.reopen_btn, self.detail_btn, self.close_btn, self.reopen_period_btn, self.refresh_btn):
             bar.addWidget(button)
         root.addLayout(bar)
 
@@ -98,6 +108,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.reopen_btn.clicked.connect(self.reopen_selected)
         self.refresh_btn.clicked.connect(self.refresh)
         self.close_btn.clicked.connect(self.close_month)
+        self.reopen_period_btn.clicked.connect(self.reopen_period)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
         self._update_actions()
@@ -105,6 +116,11 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
         self._update_actions()
+
+    @staticmethod
+    def _is_admin():
+        user = get_current_user()
+        return bool(user and getattr(getattr(user, "role", None), "name", None) == RoleDefinitions.ADMIN)
 
     def _period(self):
         return self._rs.next_month()
@@ -156,8 +172,6 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             )
 
     def _apply_filter(self, *_):
-        # Logical selection is keyed by registration identity, not by the
-        # transient Qt current row or by a stale registration object.
         selected_registration_id = self._selected_registration_id
         preserve_selection = self._selection_is_explicit
         if not preserve_selection and hasattr(self, "table"):
@@ -167,10 +181,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 preserve_selection = selected_registration_id is not None
 
         selected = self.status_filter.currentText() if hasattr(self, "status_filter") else "ALL"
-        filtered_rows = (
-            list(self._rows) if selected == "ALL"
-            else [r for r in self._rows if r.status == selected]
-        )
+        filtered_rows = list(self._rows) if selected == "ALL" else [r for r in self._rows if r.status == selected]
         self._filtered_rows = filtered_rows
 
         signals_blocked = self.table.blockSignals(True)
@@ -181,22 +192,14 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         try:
             self.table.clearContents()
             self.table.setRowCount(0)
-
             target_row = None
             if preserve_selection and selected_registration_id is not None:
                 for index, registration in enumerate(self._filtered_rows):
                     if self._registration_identity(registration) == selected_registration_id:
                         target_row = index
                         break
-
-            if (
-                target_row is None
-                and not preserve_selection
-                and self._allow_implicit_selection
-                and self._filtered_rows
-            ):
+            if target_row is None and not preserve_selection and self._allow_implicit_selection and self._filtered_rows:
                 target_row = 0
-
             for registration in self._filtered_rows:
                 values = [
                     registration.employee.full_name or "-",
@@ -211,16 +214,11 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 self.table.insertRow(row)
                 for column, value in enumerate(values):
                     self.table.setItem(row, column, QTableWidgetItem(value))
-                self.table.item(row, 0).setData(
-                    Qt.ItemDataRole.UserRole, self._registration_identity(registration)
-                )
-
+                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, self._registration_identity(registration))
             if target_row is not None:
                 self.table.selectRow(target_row)
                 self._selected_registration_id = self._registration_identity(self._filtered_rows[target_row])
-                self._selection_is_explicit = preserve_selection and (
-                    self._registration_identity(self._filtered_rows[target_row]) == selected_registration_id
-                )
+                self._selection_is_explicit = preserve_selection and self._registration_identity(self._filtered_rows[target_row]) == selected_registration_id
             else:
                 self.table.clearSelection()
                 self._selected_registration_id = None
@@ -230,13 +228,11 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self.table.setUpdatesEnabled(updates_enabled)
             self.table.blockSignals(signals_blocked)
             del selection_model_blocker
-
         self._update_actions()
 
     def _on_selection_changed(self):
         if self._selection_syncing:
             return
-
         selected_rows = self.table.selectionModel().selectedRows(0)
         if not selected_rows:
             self._selected_registration_id = None
@@ -251,36 +247,21 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         registration_id = self._selected_registration_id
         if registration_id is None:
             return None
-
-        return next(
-            (
-                registration
-                for registration in self._filtered_rows
-                if self._registration_identity(registration) == registration_id
-            ),
-            None,
-        )
+        return next((registration for registration in self._filtered_rows if self._registration_identity(registration) == registration_id), None)
 
     def _update_actions(self):
         registration = self._selected()
         period_closed = self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
         self.detail_btn.setEnabled(registration is not None)
         self.accept_btn.setEnabled(
-            self._write_enabled
-            and not period_closed
-            and registration is not None
-            and registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
+            self._write_enabled and not period_closed and registration is not None and registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
         )
         self.reopen_btn.setEnabled(
-            self._write_enabled
-            and not period_closed
-            and registration is not None
-            and registration.status == EmployeeWorkRegistration.STATUS_ACCEPTED
+            self._write_enabled and not period_closed and registration is not None and registration.status == EmployeeWorkRegistration.STATUS_ACCEPTED
         )
-        all_accepted = bool(self._rows) and all(
-            item.status == EmployeeWorkRegistration.STATUS_ACCEPTED for item in self._rows
-        )
+        all_accepted = bool(self._rows) and all(item.status == EmployeeWorkRegistration.STATUS_ACCEPTED for item in self._rows)
         self.close_btn.setEnabled(self._write_enabled and not period_closed and all_accepted)
+        self.reopen_period_btn.setEnabled(self._write_enabled and self._is_admin() and period_closed)
 
     def _confirm(self, title, text):
         return QMessageBox.question(
@@ -317,6 +298,36 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         registration = self._selected()
         if registration is not None:
             self.detail_requested.emit(registration)
+
+    @staticmethod
+    def _ask_reason(parent, title, prompt):
+        reason, accepted = QInputDialog.getText(parent, title, prompt)
+        value = reason.strip() if accepted else ""
+        return value if accepted and value else None
+
+    def reopen_period(self):
+        if not self._write_enabled or not self._is_admin():
+            return
+        year, month = self._period()
+        if self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED:
+            return
+        reason = self._ask_reason(
+            self, "Re-open Registration Month", "Reason for reopening this closed registration month:"
+        )
+        if not reason:
+            return
+        if not self._confirm(
+            "Confirm Period Re-open",
+            f"Re-open the {month:02d}/{year} registration period?\n\nRegistration workflow states will not be changed.",
+        ):
+            return
+        try:
+            self._admin_service.reopen_period(year, month, reason=reason)
+            self.refresh()
+        except (EmployeeAdminManagementAccessDeniedError, EmployeeAdminManagementValidationError) as exc:
+            QMessageBox.warning(self, "Re-open Registration Month", str(exc))
+        except Exception as exc:
+            QMessageBox.critical(self, "Re-open Registration Month", f"Could not reopen the period.\n\n{exc}")
 
     def close_month(self):
         year, month = self._period()
