@@ -6,10 +6,10 @@ import logging
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel,
-    QFormLayout, QMessageBox
+    QFormLayout, QMessageBox, QPushButton
 )
 from centermanager.core.current_user import get_current_user
-from centermanager.services.employee_service import EmployeeServiceError, EmployeeAccessDeniedError
+from centermanager.services.employee_service import EmployeeServiceError
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from .employee_list_page import EmployeeListPage, EmployeeProfileDialog
@@ -54,10 +54,7 @@ class MyEmployeeProfilePage(QWidget):
         root.addLayout(form)
         self.cv_label = QLabel("CV: -")
         root.addWidget(self.cv_label)
-        self.edit_btn = QPushButton("Edit My Profile") if False else None
-        if self.edit_btn is None:
-            from PySide6.QtWidgets import QPushButton
-            self.edit_btn = QPushButton("Edit My Profile")
+        self.edit_btn = QPushButton("Edit My Profile")
         self.edit_btn.clicked.connect(self.edit_profile)
         root.addWidget(self.edit_btn)
         root.addStretch()
@@ -262,14 +259,13 @@ class EmployeeWorkspaceShell(QWidget):
                 self._ensure_attendance_page(); self.stack.setCurrentIndex(1); self.header.set_context("Employee Workspace", "Attendance"); self.nav.set_active_page("attendance")
             elif page_id == "registration":
                 if not self._can_view_self_registration(get_current_user()):
-                    self.status_message = "Permission denied for Work Registration"
                     self.header.set_context("Employee Workspace", "My Profile")
                     self.nav.set_active_page("profile")
                     return
                 self.stack.setCurrentWidget(self.registration_page); self.header.set_context("Employee Workspace", "Work Registration"); self.nav.set_active_page("registration")
                 if hasattr(self.registration_page, "refresh"): self.registration_page.refresh()
             elif page_id == "schedule":
-                self.stack.setCurrentIndex(3); self.header.set_context("Employee Workspace", "Schedule"); self.nav.set_active_page("schedule"); self.schedule_page.refresh()
+                self.stack.setCurrentWidget(self.schedule_page); self.header.set_context("Employee Workspace", "Schedule"); self.nav.set_active_page("schedule"); self.schedule_page.refresh()
             else:
                 self.stack.setCurrentIndex(0); self.header.set_context("Employee Workspace", "My Profile"); self.nav.set_active_page("profile"); self.self_page.refresh()
 
