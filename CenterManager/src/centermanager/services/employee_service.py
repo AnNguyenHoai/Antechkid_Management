@@ -50,6 +50,19 @@ class EmployeeService:
         return v or None
 
     @staticmethod
+    def _validate_status(status: str) -> str:
+        """Validate and normalize an Employee employment status."""
+        if status is None:
+            raise EmployeeValidationError("Employment status is required.")
+        normalized = str(status).strip().upper()
+        if normalized not in Employee.VALID_STATUSES:
+            raise EmployeeValidationError(
+                f"Invalid employment status: {status}. "
+                f"Expected one of: {', '.join(sorted(Employee.VALID_STATUSES))}."
+            )
+        return normalized
+
+    @staticmethod
     def _is_manager_or_admin(user: Optional[User]) -> bool:
         return bool(user and user.role and user.role.name in {
             RoleDefinitions.ADMIN,
