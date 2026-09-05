@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QInputDialog, QMessageBox, QPushButton,
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -30,9 +30,8 @@ class AdminEmployeeWorkDataPage(QWidget):
         self._write_enabled = True
         self._employees = []
         self._registrations = []
+        self._period_initialized = False
         self._setup()
-        self._set_default_period()
-        self.refresh()
 
     def _setup(self):
         root = QVBoxLayout(self)
@@ -135,7 +134,10 @@ class AdminEmployeeWorkDataPage(QWidget):
         self.registration_delete_btn.setEnabled(self._write_enabled and self._is_admin() and self._selected_registration() is not None)
 
     def refresh(self):
-        self.refresh_employees(); self.refresh_period()
+        if not self._period_initialized:
+            self._set_default_period()
+        self.refresh_employees()
+        self.refresh_period()
 
     def refresh_employees(self):
         try:
@@ -152,7 +154,10 @@ class AdminEmployeeWorkDataPage(QWidget):
 
     def _set_default_period(self):
         year, month = self._registration_service.next_month()
-        self.year.setValue(year); self.month.setCurrentIndex(month - 1)
+        with QSignalBlocker(self.year), QSignalBlocker(self.month):
+            self.year.setValue(year)
+            self.month.setCurrentIndex(month - 1)
+        self._period_initialized = True
 
     def refresh_period(self):
         year, month = self.year.value(), self.month.currentData()
