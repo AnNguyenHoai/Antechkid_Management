@@ -34,7 +34,7 @@ def test_view_self_never_grants_update_self():
     caps = EmployeeWorkspaceCapabilities.resolve(
         FakePermissionService({PermissionDefinitions.EMPLOYEE_VIEW_SELF}), user()
     )
-    assert caps.can_view_self
+    assert caps.employee_profile_self
     assert not caps.employee_update_self
     assert not caps.can_edit_profile(True)
 
