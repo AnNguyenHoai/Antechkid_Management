@@ -21,7 +21,10 @@ def _session(path):
     with Session() as s:
         all_perm = Permission(name="employee.view.all", description="all", category="employee")
         self_perm = Permission(name="employee.view.self", description="self", category="employee")
-        s.add_all([all_perm, self_perm])
+        update_self_perm = Permission(
+            name="employee.update.self", description="update self", category="employee"
+        )
+        s.add_all([all_perm, self_perm, update_self_perm])
         s.flush()
         manager_role = Role(
             name=RoleDefinitions.MANAGER, display_name="Manager",
@@ -29,7 +32,7 @@ def _session(path):
         )
         teacher_role = Role(
             name=RoleDefinitions.TEACHER, display_name="Teacher",
-            description="test role", is_system=True, permissions=[self_perm]
+            description="test role", is_system=True, permissions=[self_perm, update_self_perm]
         )
         s.add_all([manager_role, teacher_role])
         s.commit()
