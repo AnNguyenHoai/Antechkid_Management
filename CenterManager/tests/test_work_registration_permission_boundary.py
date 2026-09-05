@@ -1,30 +1,74 @@
 from pathlib import Path
+from types import SimpleNamespace
+
+from centermanager.models.permission import PermissionDefinitions
+from centermanager.models.role import RoleDefinitions
+from centermanager.ui.employee_workspace.employee_workspace_capabilities import (
+    EmployeeWorkspaceCapabilities,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SHELL = ROOT / "src" / "centermanager" / "ui" / "employee_workspace" / "employee_workspace_shell.py"
+CAPABILITIES = ROOT / "src" / "centermanager" / "ui" / "employee_workspace" / "employee_workspace_capabilities.py"
 SERVICE = ROOT / "src" / "centermanager" / "services" / "employee_work_registration_service.py"
 
 
-def test_employee_workspace_checks_registration_all_capability_before_management_review_ui():
-    source = SHELL.read_text(encoding="utf-8")
-    assert 'def _can_view_all_registrations(self, user):' in source
-    assert '"work_registration.view.all"' in source
-    assert 'self.management_mode = self._es.can_view_all(user) and self._can_view_all_registrations(user)' in source
+class FakePermissionService:
+    def __init__(self, permissions=()):
+        self.permissions = set(permissions)
+
+    def has_permission(self, permission_name, user=None):
+        return permission_name in self.permissions
+
+    def has_any_permission(self, permission_names, user=None):
+        return bool(self.permissions.intersection(permission_names))
+
+    def is_admin(self, user=None):
+        return bool(user and user.role and user.role.name == RoleDefinitions.ADMIN)
 
 
-def test_employee_workspace_does_not_construct_self_registration_without_self_capability():
-    source = SHELL.read_text(encoding="utf-8")
-    assert 'def _can_view_self_registration(self, user):' in source
-    assert '"work_registration.self"' in source
-    assert 'if management_employee and self._can_view_self_registration(user):' in source
-    assert 'if can_self_registration:' in source
+def user(role=RoleDefinitions.TEACHER):
+    return SimpleNamespace(role=SimpleNamespace(name=role))
 
 
-def test_employee_workspace_rechecks_self_registration_capability_on_navigation():
-    source = SHELL.read_text(encoding="utf-8")
-    assert 'if not self._can_view_self_registration(get_current_user()):' in source
-    assert 'self.header.set_context("Employee Workspace", "My Profile")' in source
+def test_employee_workspace_management_is_independent_from_registration_review_capability():
+    permissions = FakePermissionService({PermissionDefinitions.EMPLOYEE_VIEW_ALL})
+    caps = EmployeeWorkspaceCapabilities.resolve(permissions, user())
+
+    assert caps.management is True
+    assert caps.registration_all is False
+    assert [item["id"] for item in caps.management_nav_items()] == ["employees"]
+
+
+def test_employee_workspace_management_exposes_all_scope_registration_without_self_duplicate():
+    permissions = FakePermissionService({
+        PermissionDefinitions.EMPLOYEE_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_SELF,
+    })
+    caps = EmployeeWorkspaceCapabilities.resolve(permissions, user())
+
+    assert caps.registration_all is True
+    assert caps.registration_self is True
+    assert [item["id"] for item in caps.management_nav_items()] == [
+        "employees", "registrations"
+    ]
+    assert "my_registration" not in [item["id"] for item in caps.management_nav_items()]
+
+
+def test_employee_workspace_self_registration_remains_independent_when_all_scope_is_absent():
+    permissions = FakePermissionService({
+        PermissionDefinitions.EMPLOYEE_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_SELF,
+    })
+    caps = EmployeeWorkspaceCapabilities.resolve(permissions, user())
+
+    assert caps.registration_all is False
+    assert caps.registration_self is True
+    assert [item["id"] for item in caps.management_nav_items()] == [
+        "employees", "my_registration"
+    ]
 
 
 def test_work_registration_service_uses_canonical_self_and_all_permissions():
@@ -42,3 +86,22 @@ def test_get_period_checks_all_scope_before_employee_self_scope():
     assert self_check in source
     assert source.index(all_check) < source.index(self_check)
     assert 'return self._period_readonly(y, m)' in source
+
+
+def test_shell_uses_capability_policy_for_registration_navigation():
+    source = SHELL.read_text(encoding="utf-8")
+
+    assert "EmployeeWorkspaceCapabilities.resolve" in source
+    assert "self.capabilities.management_nav_items()" in source
+    assert "self.capabilities.self_nav_items()" in source
+    assert "self.capabilities.registration_all" in source
+    assert "self.capabilities.registration_self" in source
+
+
+def test_capability_policy_is_the_canonical_registration_navigation_boundary():
+    source = CAPABILITIES.read_text(encoding="utf-8")
+
+    assert "registration_self" in source
+    assert "registration_all" in source
+    assert "if self.registration_all:" in source
+    assert "elif self.registration_self:" in source
