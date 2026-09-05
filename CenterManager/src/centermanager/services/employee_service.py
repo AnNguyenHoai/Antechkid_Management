@@ -389,10 +389,7 @@ class EmployeeService:
                 if not actor.has_permission("employee.update") and not self._is_manager_or_admin(actor):
                     raise EmployeeAccessDeniedError("Permission 'employee.update' is required.")
             else:
-                if not (
-                    actor.has_permission("employee.update.self")
-                    or actor.has_permission("employee.view.self")
-                ):
+                if not actor.has_permission("employee.update.self"):
                     raise EmployeeAccessDeniedError("Permission 'employee.update.self' is required.")
                 forbidden = set(data) - {"full_name", "phone", "email", "address", "date_of_birth", "gender"}
                 if forbidden:

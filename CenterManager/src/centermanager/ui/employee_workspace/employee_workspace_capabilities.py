@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Capability policy for Employee Workspace navigation.
+"""Capability policy for Employee Workspace navigation and actions.
 
-The workspace uses capabilities for navigation visibility. Domain services remain
-responsible for enforcing the same permissions at the data boundary.
+Navigation visibility is derived from explicit capabilities. Read capabilities
+never imply write capabilities. Domain services remain responsible for enforcing
+these permissions at the data boundary.
 """
 from __future__ import annotations
 
@@ -22,18 +23,28 @@ class EmployeeWorkspaceCapabilities:
     management: bool
     employee_view_all: bool
     employee_profile_self: bool
+    employee_update_self: bool
+    employee_update_all: bool
+    employee_create: bool
+    employee_archive: bool
     attendance_self: bool
     attendance_all: bool
+    attendance_create_self: bool
+    attendance_manage: bool
     schedule_self: bool
     schedule_all: bool
+    schedule_manage: bool
     registration_self: bool
     registration_all: bool
+    registration_manage: bool
 
     @classmethod
-    def resolve(cls, permission_service: PermissionService, user: Optional[User]) -> "EmployeeWorkspaceCapabilities":
+    def resolve(
+        cls, permission_service: PermissionService, user: Optional[User]
+    ) -> "EmployeeWorkspaceCapabilities":
         """Resolve capabilities without loading employee operational data."""
         if user is None:
-            return cls(False, False, False, False, False, False, False, False, False)
+            return cls(*(False for _ in range(17)))
 
         employee_view_all = permission_service.has_permission(
             PermissionDefinitions.EMPLOYEE_VIEW_ALL, user
@@ -46,21 +57,40 @@ class EmployeeWorkspaceCapabilities:
         return cls(
             management=management,
             employee_view_all=employee_view_all,
-            # Profile is the baseline self-service destination. The service
-            # still enforces the actual employee identity/data boundary.
             employee_profile_self=True,
+            employee_update_self=permission_service.has_permission(
+                PermissionDefinitions.EMPLOYEE_UPDATE_SELF, user
+            ),
+            employee_update_all=permission_service.has_permission(
+                PermissionDefinitions.EMPLOYEE_UPDATE, user
+            ),
+            employee_create=permission_service.has_permission(
+                PermissionDefinitions.EMPLOYEE_CREATE, user
+            ),
+            employee_archive=permission_service.has_permission(
+                PermissionDefinitions.EMPLOYEE_ARCHIVE, user
+            ),
             attendance_self=permission_service.has_permission(
                 PermissionDefinitions.WORKING_TIME_VIEW_SELF, user
             ),
             attendance_all=permission_service.has_permission(
                 PermissionDefinitions.WORKING_TIME_VIEW_ALL, user
-            ) or manager_or_admin,
+            ),
+            attendance_create_self=permission_service.has_permission(
+                PermissionDefinitions.WORKING_TIME_CREATE_SELF, user
+            ),
+            attendance_manage=permission_service.has_permission(
+                PermissionDefinitions.WORKING_TIME_MANAGE, user
+            ),
             schedule_self=permission_service.has_permission(
                 PermissionDefinitions.SCHEDULE_VIEW_SELF, user
             ),
             schedule_all=permission_service.has_permission(
                 PermissionDefinitions.SCHEDULE_VIEW_ALL, user
-            ) or manager_or_admin,
+            ),
+            schedule_manage=permission_service.has_permission(
+                PermissionDefinitions.SCHEDULE_MANAGE, user
+            ),
             registration_self=permission_service.has_any_permission(
                 [
                     PermissionDefinitions.WORK_REGISTRATION_SELF,
@@ -70,6 +100,9 @@ class EmployeeWorkspaceCapabilities:
             ),
             registration_all=permission_service.has_permission(
                 PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL, user
+            ),
+            registration_manage=permission_service.has_permission(
+                PermissionDefinitions.WORK_REGISTRATION_MANAGE, user
             ),
         )
 
@@ -92,8 +125,18 @@ class EmployeeWorkspaceCapabilities:
         if self.registration_all:
             items.append({"id": "registrations", "icon": "📝", "label": "Work Registrations"})
         elif self.registration_self:
-            # A management account without all-scope review access may still
-            # need its own registration, but an account with all-scope access
-            # already has the broader Work Registrations destination.
             items.append({"id": "my_registration", "icon": "👤", "label": "My Work Registration"})
         return items
+
+    def can_edit_profile(self, is_self: bool) -> bool:
+        """Return whether the profile editor may enable its write controls."""
+        return self.employee_update_self if is_self else self.employee_update_all
+
+    def can_edit_schedule(self) -> bool:
+        return self.schedule_manage
+
+    def can_edit_working_time(self, is_self: bool) -> bool:
+        return self.attendance_create_self if is_self else self.attendance_manage
+
+    def can_manage_registration(self) -> bool:
+        return self.registration_manage
