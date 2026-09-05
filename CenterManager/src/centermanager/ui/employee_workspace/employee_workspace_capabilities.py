@@ -85,12 +85,15 @@ class EmployeeWorkspaceCapabilities:
         return items
 
     def management_nav_items(self) -> list[dict]:
-        """Return management destinations independently of registration review access."""
+        """Return management destinations without duplicate self/all registration entries."""
         items = []
         if self.management:
             items.append({"id": "employees", "icon": "👥", "label": "Employees"})
         if self.registration_all:
             items.append({"id": "registrations", "icon": "📝", "label": "Work Registrations"})
-        if self.registration_self:
+        elif self.registration_self:
+            # A management account without all-scope review access may still
+            # need its own registration, but an account with all-scope access
+            # already has the broader Work Registrations destination.
             items.append({"id": "my_registration", "icon": "👤", "label": "My Work Registration"})
         return items
