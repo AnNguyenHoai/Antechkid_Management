@@ -1,1 +1,4 @@
 from .employee_workspace_shell import EmployeeWorkspaceShell
+from .employee_profile_compat import apply_compatibility_fix
+
+apply_compatibility_fix()
