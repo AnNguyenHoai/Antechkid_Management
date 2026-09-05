@@ -13,6 +13,10 @@ SHELL = (
     ROOT / "src" / "centermanager" / "ui" / "employee_workspace"
     / "employee_workspace_shell.py"
 )
+CAPABILITIES = (
+    ROOT / "src" / "centermanager" / "ui" / "employee_workspace"
+    / "employee_workspace_capabilities.py"
+)
 
 
 class FakePermissionService:
@@ -40,6 +44,31 @@ def test_management_mode_does_not_depend_on_registration_review_permission():
     assert caps.management is True
     assert caps.registration_all is False
     assert [item["id"] for item in caps.management_nav_items()] == ["employees"]
+
+
+def test_management_navigation_does_not_duplicate_work_registration_for_all_scope():
+    permissions = FakePermissionService({
+        PermissionDefinitions.EMPLOYEE_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_SELF,
+    })
+    caps = EmployeeWorkspaceCapabilities.resolve(permissions, user())
+
+    assert [item["id"] for item in caps.management_nav_items()] == [
+        "employees", "registrations"
+    ]
+
+
+def test_management_navigation_keeps_self_registration_when_all_scope_is_absent():
+    permissions = FakePermissionService({
+        PermissionDefinitions.EMPLOYEE_VIEW_ALL,
+        PermissionDefinitions.WORK_REGISTRATION_SELF,
+    })
+    caps = EmployeeWorkspaceCapabilities.resolve(permissions, user())
+
+    assert [item["id"] for item in caps.management_nav_items()] == [
+        "employees", "my_registration"
+    ]
 
 
 def test_self_navigation_only_exposes_granted_operational_capabilities():
@@ -91,6 +120,15 @@ def test_shell_lazy_loads_each_operational_page_on_navigation():
     assert 'if page_id == "schedule":' in source
 
 
+def test_profile_shell_resolves_qdate_for_missing_birth_and_hire_dates():
+    source = SHELL.read_text(encoding="utf-8")
+
+    assert "from PySide6.QtCore import QDate, Signal, Qt" in source
+    assert "from PySide6.QtCore import QDate\n" not in source
+    assert "self.dob.setDate(QDate(2000, 1, 1))" in source
+    assert "self.hire.setDate(QDate.currentDate())" in source
+
+
 def test_shell_uses_capability_policy_for_navigation():
     source = SHELL.read_text(encoding="utf-8")
 
@@ -100,3 +138,10 @@ def test_shell_uses_capability_policy_for_navigation():
     assert "self.capabilities.registration_all" in source
     assert "self.capabilities.attendance_self" in source
     assert "self.capabilities.schedule_self" in source
+
+
+def test_management_navigation_policy_is_exclusive_for_registration_destinations():
+    source = CAPABILITIES.read_text(encoding="utf-8")
+
+    assert 'if self.registration_all:' in source
+    assert 'elif self.registration_self:' in source
