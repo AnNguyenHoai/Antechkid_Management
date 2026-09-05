@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QDate, Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel,
     QFormLayout, QMessageBox, QPushButton
@@ -74,7 +74,6 @@ class LazyEmployeeProfileDialog(EmployeeProfileDialog):
         self.code.setText(e.employee_code or "-")
         self.name.setText(e.full_name or "")
         if e.date_of_birth:
-            from PySide6.QtCore import QDate
             self.dob.setDate(QDate(e.date_of_birth.year, e.date_of_birth.month, e.date_of_birth.day))
         else:
             self.dob.setDate(QDate(2000, 1, 1))
