@@ -4,7 +4,6 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.database.base import Base
 from centermanager.database.engine import create_engine_for_path
-from centermanager.database.seed import seed_roles_and_permissions
 from centermanager.models import Employee, User, Role, Permission
 from centermanager.models.role import RoleDefinitions
 from centermanager.repositories.role_repository import RoleRepository
@@ -21,20 +20,28 @@ def _session(path):
     with Session() as s:
         all_perm = Permission(name="employee.view.all", description="all", category="employee")
         self_perm = Permission(name="employee.view.self", description="self", category="employee")
-        update_self_perm = Permission(
-            name="employee.update.self", description="update self", category="employee"
-        )
-        s.add_all([all_perm, self_perm, update_self_perm])
+        update_self_perm = Permission(name="employee.update.self", description="update self", category="employee")
+        create_perm = Permission(name="employee.create", description="create", category="employee")
+        update_perm = Permission(name="employee.update", description="update all", category="employee")
+        s.add_all([all_perm, self_perm, update_self_perm, create_perm, update_perm])
         s.flush()
         manager_role = Role(
-            name=RoleDefinitions.MANAGER, display_name="Manager",
-            description="test role", is_system=True, permissions=[all_perm, self_perm]
+            name=RoleDefinitions.MANAGER, display_name="Manager", description="test role", is_system=True,
+            permissions=[all_perm, self_perm, create_perm, update_perm]
         )
         teacher_role = Role(
-            name=RoleDefinitions.TEACHER, display_name="Teacher",
-            description="test role", is_system=True, permissions=[self_perm, update_self_perm]
+            name=RoleDefinitions.TEACHER, display_name="Teacher", description="test role", is_system=True,
+            permissions=[self_perm, update_self_perm]
         )
-        s.add_all([manager_role, teacher_role])
+        limited_role = Role(
+            name="limited_manager", display_name="Limited Manager", description="test role", is_system=False,
+            permissions=[all_perm, self_perm]
+        )
+        update_only_role = Role(
+            name="update_only", display_name="Update Only", description="test role", is_system=False,
+            permissions=[update_perm]
+        )
+        s.add_all([manager_role, teacher_role, limited_role, update_only_role])
         s.commit()
     return Session
 
@@ -42,13 +49,9 @@ def _session(path):
 def _user(Session, role_name, username):
     with Session() as s:
         role = RoleRepository(s).get_by_name(role_name)
-        user = User(
-            username=username, password_hash="test", full_name=username,
-            role_id=role.id, is_active=True, force_password_change=False,
-        )
-        s.add(user)
-        s.commit()
-        s.refresh(user)
+        user = User(username=username, password_hash="test", full_name=username,
+                    role_id=role.id, is_active=True, force_password_change=False)
+        s.add(user); s.commit(); s.refresh(user)
         return user
 
 
@@ -62,14 +65,11 @@ def test_manager_sees_all_and_employee_sees_only_self(tmp_path):
     manager = _user(Session, RoleDefinitions.MANAGER, "manager")
     teacher = _user(Session, RoleDefinitions.TEACHER, "teacher")
     teacher2 = _user(Session, RoleDefinitions.TEACHER, "teacher2")
-
-    # Management creates linked employee records.
     with CurrentUserContext(manager):
         first = _employee(Session, teacher.id, "Teacher One")
         second = _employee(Session, teacher2.id, "Teacher Two")
         service = EmployeeService(Session)
         assert {e.id for e in service.list_visible_employees()} == {first.id, second.id}
-
     with CurrentUserContext(teacher):
         service = EmployeeService(Session)
         visible = service.list_visible_employees()
@@ -122,3 +122,48 @@ def test_linked_employee_can_access_self_service_without_stale_role_permission(t
         service = EmployeeService(Session)
         assert service.can_access_workspace(teacher)
         assert service.get_current_employee(teacher).id == employee.id
+
+
+def test_manager_without_update_capability_cannot_update_employee(tmp_path):
+    Session = _session(tmp_path / "capability-boundary.db")
+    manager = _user(Session, RoleDefinitions.MANAGER, "manager")
+    limited = _user(Session, "limited_manager", "limited")
+    teacher = _user(Session, RoleDefinitions.TEACHER, "teacher")
+    with CurrentUserContext(manager):
+        employee = _employee(Session, teacher.id, "Teacher")
+    with CurrentUserContext(limited):
+        try:
+            EmployeeService(Session).update_employee(employee.id, position="Manager")
+        except EmployeeAccessDeniedError as exc:
+            assert "update" in str(exc).lower()
+        else:
+            raise AssertionError("View-all without employee.update must not grant update access")
+
+
+def test_manager_without_create_capability_cannot_create_employee(tmp_path):
+    Session = _session(tmp_path / "create-boundary.db")
+    limited = _user(Session, "limited_manager", "limited")
+    teacher = _user(Session, RoleDefinitions.TEACHER, "teacher")
+    with CurrentUserContext(limited):
+        try:
+            EmployeeService(Session).create_employee("Teacher", user_id=teacher.id)
+        except EmployeeAccessDeniedError as exc:
+            assert "employee.create" in str(exc)
+        else:
+            raise AssertionError("View-all without employee.create must not grant create access")
+
+
+def test_update_capability_without_view_all_cannot_update_another_employee(tmp_path):
+    Session = _session(tmp_path / "update-scope.db")
+    manager = _user(Session, RoleDefinitions.MANAGER, "manager")
+    update_only = _user(Session, "update_only", "update-only")
+    teacher = _user(Session, RoleDefinitions.TEACHER, "teacher")
+    with CurrentUserContext(manager):
+        employee = _employee(Session, teacher.id, "Teacher")
+    with CurrentUserContext(update_only):
+        try:
+            EmployeeService(Session).update_employee(employee.id, position="Manager")
+        except EmployeeAccessDeniedError:
+            pass
+        else:
+            raise AssertionError("employee.update without employee.view.all must not cross employee scope")

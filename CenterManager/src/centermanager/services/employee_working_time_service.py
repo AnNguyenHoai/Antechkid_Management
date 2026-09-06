@@ -3,9 +3,9 @@ from datetime import date, datetime, time, timedelta
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee import Employee
 from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
-from centermanager.models.role import RoleDefinitions
 from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
 
 class EmployeeWorkingTimeError(Exception): pass
@@ -14,7 +14,13 @@ class EmployeeWorkingTimeValidationError(EmployeeWorkingTimeError): pass
 
 
 class EmployeeWorkingTimeService:
-    """Actual working-time boundary. Employees book their own time; Admin/Manager manage all."""
+    """Actual working-time boundary using explicit operation capabilities."""
+    VIEW_SELF = "working_time.view.self"
+    VIEW_ALL = "working_time.view.all"
+    CREATE_SELF = "working_time.create.self"
+    MANAGE = "working_time.manage"
+    LOCK = "working_time.lock"
+
     def __init__(self, session_factory, schedule_service=None):
         self._sf = session_factory
         self._schedule = schedule_service
@@ -26,26 +32,34 @@ class EmployeeWorkingTimeService:
         return u
 
     @staticmethod
-    def _management(user):
-        return bool(user.role and user.role.name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER})
+    def _has(user, capability):
+        return EmployeeCapabilityPolicy.has(user, capability)
+
+    def can_view_all(self, user=None):
+        u=self._user(user); return self._has(u,self.VIEW_ALL)
+
+    def can_view_self(self, user=None):
+        u=self._user(user); return self._has(u,self.VIEW_SELF) or self.can_view_all(u)
 
     def _scope(self, employee_id, user=None, write=False):
         u=self._user(user)
         with self._sf() as s:
             e=EmployeeRepository(s).get_by_id(employee_id)
             if not e: raise EmployeeWorkingTimeValidationError(f"Employee {employee_id} not found.")
-            if self._management(u): return e
-            if e.user_id != u.id: raise EmployeeWorkingTimeAccessDeniedError("You can only access your own working time.")
-            if not u.has_permission("working_time.view.self") and not write:
-                raise EmployeeWorkingTimeAccessDeniedError("Permission 'working_time.view.self' is required.")
-            if write and not u.has_permission("working_time.create.self"):
-                raise EmployeeWorkingTimeAccessDeniedError("Permission 'working_time.create.self' is required.")
-            return e
-
-    def can_view_all(self, user=None):
-        u=self._user(user); return self._management(u) or u.has_permission("working_time.view.all")
-    def can_view_self(self, user=None):
-        u=self._user(user); return self.can_view_all(u) or u.has_permission("working_time.view.self")
+            is_self = e.user_id == u.id
+            if write:
+                if self._has(u,self.MANAGE):
+                    return e
+                if is_self and self._has(u,self.CREATE_SELF):
+                    return e
+                raise EmployeeWorkingTimeAccessDeniedError(
+                    f"Permission '{self.CREATE_SELF if is_self else self.MANAGE}' is required."
+                )
+            if self._has(u,self.VIEW_ALL):
+                return e
+            if is_self and self._has(u,self.VIEW_SELF):
+                return e
+            raise EmployeeWorkingTimeAccessDeniedError("You can only access your own working time.")
 
     @staticmethod
     def _validate_times(start_time, end_time):
@@ -60,11 +74,7 @@ class EmployeeWorkingTimeService:
 
     def _assert_write_scope(self, employee_id, user=None):
         u = self._user(user)
-        e = self._scope(employee_id, u, write=True)
-        if self._management(u):
-            if not u.has_permission("working_time.manage"):
-                raise EmployeeWorkingTimeAccessDeniedError("Permission 'working_time.manage' is required.")
-        return e
+        return self._scope(employee_id, u, write=True)
 
     def _assert_no_overlap(self, repo, employee_id, work_date, start, end, exclude_id=None):
         if end is None: return
@@ -129,7 +139,7 @@ class EmployeeWorkingTimeService:
 
     def approve(self, entry_id, user=None):
         u=self._user(user)
-        if not self._management(u) and not u.has_permission("working_time.manage"): raise EmployeeWorkingTimeAccessDeniedError("Permission 'working_time.manage' is required.")
+        if not self._has(u,self.MANAGE): raise EmployeeWorkingTimeAccessDeniedError(f"Permission '{self.MANAGE}' is required.")
         with self._sf() as s:
             e=EmployeeWorkingTimeRepository(s).get(entry_id)
             if not e: raise EmployeeWorkingTimeValidationError("Working-time entry not found.")
@@ -138,7 +148,7 @@ class EmployeeWorkingTimeService:
 
     def lock_month(self, employee_id, year, month, user=None):
         u=self._user(user)
-        if not self._management(u) and not u.has_permission("working_time.lock"): raise EmployeeWorkingTimeAccessDeniedError("Permission 'working_time.lock' is required.")
+        if not self._has(u,self.LOCK): raise EmployeeWorkingTimeAccessDeniedError(f"Permission '{self.LOCK}' is required.")
         start=date(year,month,1); end=date(year+1,1,1)-timedelta(days=1) if month==12 else date(year,month+1,1)-timedelta(days=1)
         with self._sf() as s:
             self._scope(employee_id,u)
