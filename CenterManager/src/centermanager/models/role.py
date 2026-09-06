@@ -32,7 +32,7 @@ class Role(Base, TimestampMixin):
         "Permission",
         secondary="role_permissions",
         back_populates="roles",
-        lazy="selectin"  # lazy loading thay vì joinedload mặc định
+        lazy="joined"
     )
 
     __table_args__ = (
