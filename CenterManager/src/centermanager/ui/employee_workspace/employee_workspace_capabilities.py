@@ -107,22 +107,24 @@ class EmployeeWorkspaceCapabilities:
             ),
         )
 
-    # Public capability-oriented aliases retained for callers/tests while the
-    # existing field names remain stable for the current workspace UI.
     @property
     def can_view_self(self) -> bool:
+        """Canonical self-scope profile visibility."""
         return self.employee_profile_self
 
     @property
     def can_view_all(self) -> bool:
+        """Canonical all-scope employee visibility."""
         return self.employee_view_all
 
     @property
     def can_update_self(self) -> bool:
+        """Canonical self-update capability; never implied by self-view."""
         return self.employee_update_self
 
     @property
     def can_update_all(self) -> bool:
+        """Canonical all-scope employee update capability."""
         return self.employee_update_all
 
     def self_nav_items(self) -> list[dict]:
