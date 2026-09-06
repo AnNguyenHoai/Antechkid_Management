@@ -1,7 +1,7 @@
 """Canonical capability checks for Employee Workspace services.
 
 The Employee Workspace uses operation-level capabilities as the authorization
-contract.  Roles are only a source of granted capabilities; they must not be
+contract. Roles are only a source of granted capabilities; they must not be
 used as implicit write permission inside individual employee services.
 
 Administrator is the single system-level exception: PermissionService defines
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from centermanager.models.permission import PermissionDefinitions
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
 
@@ -25,6 +26,17 @@ class EmployeeCapabilityPolicy:
             return False
         if user.role and user.role.name == RoleDefinitions.ADMIN:
             return True
+
+        # ``employee.update`` is the broader employee-management write
+        # capability and therefore remains a valid superset for self-profile
+        # updates. The reverse relationship is intentionally not allowed:
+        # viewing a profile must never grant a write capability.
+        if (
+            capability == PermissionDefinitions.EMPLOYEE_UPDATE_SELF
+            and user.has_permission(PermissionDefinitions.EMPLOYEE_UPDATE)
+        ):
+            return True
+
         return user.has_permission(capability)
 
     @classmethod
