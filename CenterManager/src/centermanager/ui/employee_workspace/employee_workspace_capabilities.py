@@ -60,7 +60,9 @@ class EmployeeWorkspaceCapabilities:
             employee_view_all=employee_view_all,
             employee_profile_self=True,
             employee_update_self=EmployeeCapabilityPolicy.has(
-                user, PermissionDefinitions.EMPLOYEE_UPDATE_SELF
+                user,
+                PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
+                permission_service=permission_service,
             ),
             employee_update_all=permission_service.has_permission(
                 PermissionDefinitions.EMPLOYEE_UPDATE, user

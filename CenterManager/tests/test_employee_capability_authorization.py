@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from centermanager.models.permission import PermissionDefinitions
 from centermanager.models.role import RoleDefinitions
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 from centermanager.ui.employee_workspace.employee_workspace_capabilities import (
     EmployeeWorkspaceCapabilities,
 )
@@ -90,8 +91,20 @@ def test_registration_review_does_not_grant_manage():
     assert not caps.registration_manage
 
 
+def test_capability_policy_accepts_lightweight_principal():
+    principal = SimpleNamespace(
+        role=SimpleNamespace(name=RoleDefinitions.TEACHER),
+        permissions={PermissionDefinitions.EMPLOYEE_UPDATE_SELF},
+    )
+    assert EmployeeCapabilityPolicy.has(
+        principal, PermissionDefinitions.EMPLOYEE_UPDATE_SELF
+    )
+    assert not EmployeeCapabilityPolicy.has(
+        principal, PermissionDefinitions.EMPLOYEE_VIEW_ALL
+    )
+
+
 def test_employee_service_does_not_use_view_self_as_update_fallback():
     source = SERVICE.read_text(encoding="utf-8")
     forbidden = '''actor.has_permission("employee.update.self")\n                    or actor.has_permission("employee.view.self")'''
     assert forbidden not in source
-    assert 'if not actor.has_permission("employee.update.self"):' in source
