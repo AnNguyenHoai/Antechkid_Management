@@ -8,11 +8,9 @@ Administrator is the single system-level exception: PermissionService defines
 admin as having every permission, and this small policy mirrors that contract
 without making each domain service reimplement role checks.
 
-Manager compatibility is intentionally narrow. Existing employee and schedule
-services historically treated the system Manager role as an operational
-management identity. Those legacy grants are centralized here so callers do not
-reimplement role checks themselves. Work Registration and Working Time remain
-capability-driven and are not included in this compatibility set.
+Manager compatibility is intentionally narrow. Existing employee services may
+still rely on the Manager role for legacy employee-management operations, but
+schedule mutation and all operational capabilities are explicit.
 """
 from __future__ import annotations
 
@@ -32,12 +30,10 @@ class EmployeeCapabilityPolicy:
         PermissionDefinitions.EMPLOYEE_CREATE,
         PermissionDefinitions.EMPLOYEE_UPDATE,
         PermissionDefinitions.EMPLOYEE_ARCHIVE,
-        PermissionDefinitions.SCHEDULE_MANAGE,
     })
 
     @staticmethod
     def _role_name(user: object) -> Optional[str]:
-        """Read a lightweight principal's role without assuming ORM methods."""
         try:
             role = getattr(user, "role", None)
             return getattr(role, "name", None)
@@ -53,29 +49,21 @@ class EmployeeCapabilityPolicy:
 
     @staticmethod
     def _direct_permission(user: object, capability: str) -> bool:
-        """Evaluate a principal without requiring the SQLAlchemy User API.
-
-        Production User instances expose ``has_permission``. Tests and other
-        lightweight principals may expose a ``permissions`` set/list instead.
-        """
         checker = getattr(user, "has_permission", None)
         if callable(checker):
             try:
                 return bool(checker(capability))
             except DetachedInstanceError:
                 return False
-
         try:
             permissions = getattr(user, "permissions", None)
         except DetachedInstanceError:
             return False
-
         if permissions is not None:
             try:
                 return capability in permissions
             except TypeError:
                 pass
-
         try:
             role = getattr(user, "role", None)
             permission_names = getattr(role, "permission_names", None)
@@ -83,7 +71,6 @@ class EmployeeCapabilityPolicy:
                 return capability in permission_names
         except DetachedInstanceError:
             return False
-
         return False
 
     @classmethod
@@ -93,34 +80,19 @@ class EmployeeCapabilityPolicy:
         capability: str,
         permission_service=None,
     ) -> bool:
-        """Return whether ``user`` has ``capability`` without ORM coupling.
-
-        ``permission_service`` is preferred when supplied because it is the
-        canonical permission abstraction and supports lightweight principals.
-        Direct User evaluation remains available for domain services that do not
-        own a PermissionService dependency.
-        """
         if user is None:
             return False
-
         role_name = cls._role_name(user)
         if role_name == RoleDefinitions.ADMIN:
             return True
-
         if cls._manager_compatibility_grant(user, capability):
             return True
-
         if permission_service is not None:
             try:
                 if permission_service.has_permission(capability, user):
                     return True
             except (AttributeError, DetachedInstanceError):
                 pass
-
-            # ``employee.update`` is the broader employee-management write
-            # capability and therefore remains a valid superset for self-profile
-            # updates. The reverse relationship is intentionally not allowed:
-            # viewing a profile must never grant a write capability.
             if capability == PermissionDefinitions.EMPLOYEE_UPDATE_SELF:
                 try:
                     return bool(
@@ -131,16 +103,10 @@ class EmployeeCapabilityPolicy:
                 except (AttributeError, DetachedInstanceError):
                     return False
             return False
-
-        # ``employee.update`` is the broader employee-management write
-        # capability and therefore remains a valid superset for self-profile
-        # updates. The reverse relationship is intentionally not allowed:
-        # viewing a profile must never grant a write capability.
         if capability == PermissionDefinitions.EMPLOYEE_UPDATE_SELF:
             return cls._direct_permission(
                 user, PermissionDefinitions.EMPLOYEE_UPDATE
             ) or cls._direct_permission(user, capability)
-
         return cls._direct_permission(user, capability)
 
     @classmethod

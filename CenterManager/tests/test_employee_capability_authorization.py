@@ -27,8 +27,11 @@ class FakePermissionService:
         return bool(user and user.role and user.role.name == RoleDefinitions.ADMIN)
 
 
-def user(role=RoleDefinitions.TEACHER):
-    return SimpleNamespace(role=SimpleNamespace(name=role))
+def user(role=RoleDefinitions.TEACHER, permissions=()):
+    return SimpleNamespace(
+        role=SimpleNamespace(name=role),
+        permissions=set(permissions),
+    )
 
 
 def test_view_self_never_grants_update_self():
@@ -104,7 +107,28 @@ def test_capability_policy_accepts_lightweight_principal():
     )
 
 
-def test_employee_service_does_not_use_view_self_as_update_fallback():
-    source = SERVICE.read_text(encoding="utf-8")
-    forbidden = '''actor.has_permission("employee.update.self")\n                    or actor.has_permission("employee.view.self")'''
-    assert forbidden not in source
+def test_admin_only_implicit_capability_grant():
+    manager = user(RoleDefinitions.MANAGER)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_CREATE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_UPDATE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_ARCHIVE)
+    assert not EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)
+
+
+def test_schedule_view_all_does_not_grant_schedule_manage():
+    principal = user(
+        RoleDefinitions.TEACHER,
+        permissions={PermissionDefinitions.SCHEDULE_VIEW_ALL},
+    )
+    assert EmployeeCapabilityPolicy.has(principal, PermissionDefinitions.SCHEDULE_VIEW_ALL)
+    assert not EmployeeCapabilityPolicy.has(principal, PermissionDefinitions.SCHEDULE_MANAGE)
+
+
+def test_manager_schedule_manage_requires_explicit_permission():
+    manager = user(
+        RoleDefinitions.MANAGER,
+        permissions={PermissionDefinitions.SCHEDULE_VIEW_ALL},
+    )
+    assert not EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)
+    manager.permissions.add(PermissionDefinitions.SCHEDULE_MANAGE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)

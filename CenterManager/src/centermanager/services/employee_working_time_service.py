@@ -158,13 +158,14 @@ class EmployeeWorkingTimeService:
             s.commit(); return len(rows)
 
     def monthly_summary(self, employee_id, year, month, user=None):
-        rows=self.list_entries(employee_id,date(year,month,1),date(year+1,1,1)-timedelta(days=1) if month==12 else date(year,month+1,1)-timedelta(days=1),user)
+        u=self._user(user)
+        rows=self.list_entries(employee_id,date(year,month,1),date(year+1,1,1)-timedelta(days=1) if month==12 else date(year,month+1,1)-timedelta(days=1),u)
         actual=sum(self._minutes(r.start_time,r.end_time) for r in rows)
         expected=0
         if self._schedule:
             d=date(year,month,1)
             end=date(year+1,1,1) if month==12 else date(year,month+1,1)
             while d<end:
-                expected += sum(self._minutes(a,b) for a,b in self._schedule.expected_for_date(employee_id,d,user))
+                expected += sum(self._minutes(a,b) for a,b in self._schedule.expected_for_date(employee_id,d,u))
                 d += timedelta(days=1)
         return {"year":year,"month":month,"entries":len(rows),"actual_minutes":actual,"expected_minutes":expected,"overtime_minutes":max(0,actual-expected),"shortfall_minutes":max(0,expected-actual)}
