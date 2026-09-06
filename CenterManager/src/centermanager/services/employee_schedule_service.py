@@ -5,40 +5,47 @@ from centermanager.models.employee import Employee
 from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException, VALID_EXCEPTION_TYPES
 from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
-from centermanager.models.role import RoleDefinitions
 from centermanager.core.current_user import get_current_user
+from centermanager.models.role import RoleDefinitions
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
 class EmployeeScheduleError(Exception): pass
 class EmployeeScheduleAccessDeniedError(EmployeeScheduleError): pass
 class EmployeeScheduleValidationError(EmployeeScheduleError): pass
 
 class EmployeeScheduleService:
-    """Schedule business boundary. Management edits; employees read their own schedule."""
+    """Schedule business boundary using explicit operation capabilities."""
+    VIEW_SELF = "schedule.view.self"
+    VIEW_ALL = "schedule.view.all"
+    MANAGE = "schedule.manage"
+
     def __init__(self, session_factory): self._sf = session_factory
     @staticmethod
     def _user(user=None):
         user = user or get_current_user()
         if user is None: raise EmployeeScheduleAccessDeniedError("Authentication is required.")
         return user
-    @staticmethod
-    def _management(user):
-        return bool(user.role and user.role.name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER})
+    def _has(self, user, capability):
+        return EmployeeCapabilityPolicy.has(user, capability)
     def can_view_all(self, user=None):
-        u=self._user(user); return self._management(u) or u.has_permission("schedule.view.all")
+        u=self._user(user); return self._has(u,self.VIEW_ALL)
     def can_view_self(self, user=None):
-        u=self._user(user); return self.can_view_all(u) or u.has_permission("schedule.view.self")
+        u=self._user(user); return self._has(u,self.VIEW_SELF) or self.can_view_all(u)
     def _assert_scope(self, employee_id, user=None, write=False):
         u=self._user(user)
         with self._sf() as s:
             e=EmployeeRepository(s).get_by_id(employee_id)
             if not e: raise EmployeeScheduleValidationError(f"Employee {employee_id} not found.")
-            if self._management(u):
-                return e
-            if e.user_id != u.id:
-                raise EmployeeScheduleAccessDeniedError("You can only access your own schedule.")
+            is_self = e.user_id == u.id
             if write:
-                raise EmployeeScheduleAccessDeniedError("Only administrators and managers can manage employee schedules.")
-            if not self.can_view_self(u): raise EmployeeScheduleAccessDeniedError("Permission 'schedule.view.self' is required.")
+                if not self._has(u,self.MANAGE):
+                    raise EmployeeScheduleAccessDeniedError(f"Permission '{self.MANAGE}' is required.")
+            elif self._has(u,self.VIEW_ALL):
+                return e
+            elif is_self and self._has(u,self.VIEW_SELF):
+                return e
+            else:
+                raise EmployeeScheduleAccessDeniedError("You can only access your own schedule.")
             return e
     @staticmethod
     def _validate_rule(day_of_week, start_time, end_time, effective_from, effective_to):

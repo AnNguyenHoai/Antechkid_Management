@@ -16,6 +16,7 @@ from centermanager.repositories.role_repository import RoleRepository
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.core.current_user import get_current_user
 from centermanager.core.clock import get_clock
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,13 @@ class EmployeeAccessDeniedError(EmployeeServiceError):
 
 class EmployeeService:
     """Employee business service with self/all data-level authorization."""
+
+    VIEW_SELF = "employee.view.self"
+    VIEW_ALL = "employee.view.all"
+    UPDATE_SELF = "employee.update.self"
+    CREATE = "employee.create"
+    UPDATE = "employee.update"
+    ARCHIVE = "employee.archive"
 
     def __init__(self, session_factory: sessionmaker):
         self._session_factory = session_factory
@@ -64,6 +72,7 @@ class EmployeeService:
 
     @staticmethod
     def _is_manager_or_admin(user: Optional[User]) -> bool:
+        """Legacy role helper retained only for compatibility with callers/tests."""
         return bool(user and user.role and user.role.name in {
             RoleDefinitions.ADMIN,
             RoleDefinitions.MANAGER,
@@ -85,28 +94,30 @@ class EmployeeService:
             raise EmployeeAccessDeniedError("Authentication is required.")
         return user
 
+    @staticmethod
+    def _has(user: User, capability: str) -> bool:
+        return EmployeeCapabilityPolicy.has(user, capability)
+
     def can_view_all(self, user: Optional[User] = None) -> bool:
         user = self._require_user(user)
-        return self._is_manager_or_admin(user) or user.has_permission("employee.view.all")
+        return self._has(user, self.VIEW_ALL)
 
     def can_view_self(self, user: Optional[User] = None) -> bool:
         user = self._require_user(user)
-        if self.can_view_all(user) or user.has_permission("employee.view.self"):
-            return True
-        with self._session_factory() as session:
-            return EmployeeRepository(session).get_by_user_id(user.id) is not None
+        return self._has(user, self.VIEW_SELF) or self.can_view_all(user)
 
     def can_access_workspace(self, user: Optional[User] = None) -> bool:
         user = self._require_user(user)
         return self.can_view_all(user) or self.can_view_self(user)
 
     def _require_management(self, user: Optional[User] = None) -> User:
+        """Require the canonical capability for employee management writes."""
         user = self._require_user(user)
-        if not self._is_manager_or_admin(user):
-            raise EmployeeAccessDeniedError(
-                "Only administrators and managers can perform employee management actions."
-            )
+        self._require_capability(user, self.UPDATE)
         return user
+
+    def _require_capability(self, user: User, capability: str) -> None:
+        EmployeeCapabilityPolicy.require(user, capability, EmployeeAccessDeniedError)
 
     def get_current_employee(self, user: Optional[User] = None) -> Employee:
         """Resolve the employee identity from an authenticated employee account.
@@ -124,19 +135,14 @@ class EmployeeService:
             employee = EmployeeRepository(session).get_by_user_id(user.id)
             if employee:
                 return employee
-            repo = EmployeeRepository(session)
-            number = (repo.get_highest_employee_number() or 0) + 1
+            number = (EmployeeRepository(session).get_highest_employee_number() or 0) + 1
             employee = Employee(
-                employee_code=f"EMP-{number:05d}",
-                full_name=user.full_name,
-                phone=user.phone,
-                email=user.email,
-                employment_status=Employee.STATUS_ACTIVE,
-                user_id=user.id,
+                employee_code=f"EMP-{number:05d}", full_name=user.full_name,
+                phone=user.phone, email=user.email,
+                employment_status=Employee.STATUS_ACTIVE, user_id=user.id,
             )
-            repo.add(employee)
-            session.commit()
-            session.refresh(employee)
+            EmployeeRepository(session).add(employee)
+            session.commit(); session.refresh(employee)
             logger.info(
                 "Repaired legacy user-to-employee link: user_id=%s employee_id=%s",
                 user.id, employee.id,
@@ -165,37 +171,13 @@ class EmployeeService:
             employee = repo.get_by_id(employee_id)
             if employee is None:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
-            if self.can_view_all(user) or employee.user_id == user.id:
+            if self.can_view_all(user) or (employee.user_id == user.id and self.can_view_self(user)):
                 return employee
-            raise EmployeeAccessDeniedError(
-                "You can only access your own employee profile."
-            )
+            raise EmployeeAccessDeniedError("You can only access your own employee profile.")
 
     def get_or_create_employee_for_user(self, user: Optional[User] = None) -> Employee:
         """Resolve the authenticated employee, repairing a legacy account when safe."""
-        user = self._require_user(user)
-        if not self._is_employee_account(user):
-            raise EmployeeAccessDeniedError(
-                "Administrator accounts do not have an employee identity."
-            )
-        with self._session_factory() as session:
-            repo = EmployeeRepository(session)
-            employee = repo.get_by_user_id(user.id)
-            if employee:
-                return employee
-            number = (repo.get_highest_employee_number() or 0) + 1
-            employee = Employee(
-                employee_code=f"EMP-{number:05d}",
-                full_name=user.full_name,
-                phone=user.phone,
-                email=user.email,
-                employment_status=Employee.STATUS_ACTIVE,
-                user_id=user.id,
-            )
-            repo.add(employee)
-            session.commit()
-            session.refresh(employee)
-            return employee
+        return self.get_current_employee(user)
 
     def create_employee(
         self, full_name: str, *, date_of_birth: Optional[date] = None,
@@ -203,8 +185,9 @@ class EmployeeService:
         position=None, employment_status=Employee.STATUS_ACTIVE,
         hire_date: Optional[date] = None, user_id: Optional[int] = None,
     ) -> Employee:
-        """Create a linked employee. New employees must have an account."""
-        self._require_management()
+        """Create a linked employee; requires the explicit employee.create capability."""
+        actor = self._require_user(None)
+        self._require_capability(actor, self.CREATE)
         if user_id is None:
             raise EmployeeValidationError(
                 "An employee account is required. Create or select a user account first."
@@ -217,36 +200,24 @@ class EmployeeService:
                 raise EmployeeValidationError("Invalid email format.")
         status = self._validate_status(employment_status)
         with self._session_factory() as s:
-            repo = EmployeeRepository(s)
-            user_repo = UserRepository(s)
+            repo = EmployeeRepository(s); user_repo = UserRepository(s)
             user = user_repo.get_by_id_with_role(user_id)
             if user is None:
                 raise EmployeeValidationError("Selected user account does not exist.")
             if not self._is_employee_account(user):
-                raise EmployeeValidationError(
-                    "Administrator accounts cannot be linked to an employee profile."
-                )
+                raise EmployeeValidationError("Administrator accounts cannot be linked to an employee profile.")
             if repo.get_by_user_id(user_id):
                 raise EmployeeValidationError("User is already linked to an employee.")
             n = (repo.get_highest_employee_number() or 0) + 1
             e = Employee(
-                employee_code=f"EMP-{n:05d}",
-                full_name=full_name,
-                date_of_birth=date_of_birth,
-                gender=self._text(gender),
-                phone=self._text(phone),
-                email=email,
-                address=self._text(address),
-                department=self._text(department),
-                position=self._text(position),
-                employment_status=status,
-                hire_date=hire_date or get_clock().today(),
+                employee_code=f"EMP-{n:05d}", full_name=full_name,
+                date_of_birth=date_of_birth, gender=self._text(gender),
+                phone=self._text(phone), email=email, address=self._text(address),
+                department=self._text(department), position=self._text(position),
+                employment_status=status, hire_date=hire_date or get_clock().today(),
                 user_id=user_id,
             )
-            repo.add(e)
-            s.commit()
-            s.refresh(e)
-            return e
+            repo.add(e); s.commit(); s.refresh(e); return e
 
     def create_employee_with_account(
         self, full_name: str, username: str, role_name: str, *,
@@ -256,24 +227,19 @@ class EmployeeService:
         hire_date: Optional[date] = None,
     ):
         """Atomically create an employee and its mandatory login account."""
-        actor = self._require_management()
+        actor = self._require_user(None)
+        self._require_capability(actor, self.CREATE)
         from centermanager.security.password import hash_password
         import secrets, string
-
         username = self._text(username)
         if not username:
             raise EmployeeValidationError("Username is required.")
         if role_name not in RoleDefinitions.all_roles():
             raise EmployeeValidationError(f"Invalid account role: {role_name}")
         if role_name == RoleDefinitions.ADMIN:
-            raise EmployeeValidationError(
-                "Administrator accounts are system identities and cannot be employees."
-            )
-        if actor.role and actor.role.name == RoleDefinitions.MANAGER and role_name in {
-            RoleDefinitions.ADMIN, RoleDefinitions.MANAGER
-        }:
+            raise EmployeeValidationError("Administrator accounts are system identities and cannot be employees.")
+        if actor.role and actor.role.name == RoleDefinitions.MANAGER and role_name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER}:
             raise EmployeeAccessDeniedError("Managers cannot create administrator or manager accounts.")
-
         full_name = self._text(full_name)
         if not full_name:
             raise EmployeeValidationError("Full name is required.")
@@ -281,7 +247,6 @@ class EmployeeService:
             if "@" not in email:
                 raise EmployeeValidationError("Invalid email format.")
         status = self._validate_status(employment_status)
-
         with self._session_factory() as s:
             user_repo = UserRepository(s)
             if user_repo.get_by_username(username):
@@ -289,50 +254,31 @@ class EmployeeService:
             role = RoleRepository(s).get_by_name(role_name)
             if role is None:
                 raise EmployeeValidationError(f"Role '{role_name}' not found.")
-
             if temp_password is None:
                 alphabet = string.ascii_letters + string.digits
                 temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
-
             user = User(
-                username=username,
-                password_hash=hash_password(temp_password),
-                full_name=full_name,
-                email=email,
-                phone=self._text(phone),
-                role_id=role.id,
-                is_active=True,
-                force_password_change=True,
-                login_attempts=0,
+                username=username, password_hash=hash_password(temp_password),
+                full_name=full_name, email=email, phone=self._text(phone),
+                role_id=role.id, is_active=True, force_password_change=True, login_attempts=0,
             )
-            user_repo.add(user)
-            s.flush()
-
-            repo = EmployeeRepository(s)
-            n = (repo.get_highest_employee_number() or 0) + 1
+            user_repo.add(user); s.flush()
+            repo = EmployeeRepository(s); n = (repo.get_highest_employee_number() or 0) + 1
             employee = Employee(
-                employee_code=f"EMP-{n:05d}",
-                full_name=full_name,
-                date_of_birth=date_of_birth,
-                gender=self._text(gender),
-                phone=self._text(phone),
-                email=email,
-                address=self._text(address),
-                department=self._text(department),
-                position=self._text(position),
-                employment_status=status,
-                hire_date=hire_date or get_clock().today(),
-                user_id=user.id,
+                employee_code=f"EMP-{n:05d}", full_name=full_name,
+                date_of_birth=date_of_birth, gender=self._text(gender), phone=self._text(phone),
+                email=email, address=self._text(address), department=self._text(department),
+                position=self._text(position), employment_status=status,
+                hire_date=hire_date or get_clock().today(), user_id=user.id,
             )
-            repo.add(employee)
-            s.commit()
-            s.refresh(employee)
+            repo.add(employee); s.commit(); s.refresh(employee)
             employee._temporary_password = temp_password
             employee._account_username = username
             return employee
 
     def link_existing_user(self, employee_id: int, user_id: int) -> Employee:
-        self._require_management()
+        actor = self._require_user(None)
+        self._require_capability(actor, self.UPDATE)
         with self._session_factory() as s:
             repo = EmployeeRepository(s)
             employee = repo.get_by_id(employee_id)
@@ -347,16 +293,11 @@ class EmployeeService:
             if user is None:
                 raise EmployeeValidationError("User account does not exist.")
             if not self._is_employee_account(user):
-                raise EmployeeValidationError(
-                    "Administrator accounts cannot be linked to an employee profile."
-                )
+                raise EmployeeValidationError("Administrator accounts cannot be linked to an employee profile.")
             employee.user_id = user_id
-            s.commit()
-            s.refresh(employee)
-            return employee
+            s.commit(); s.refresh(employee); return employee
 
     def get_employee(self, employee_id: int, user: Optional[User] = None) -> Employee:
-        """Authorized employee lookup. Never exposes an arbitrary employee to self-service users."""
         return self.get_employee_for_user(employee_id, user)
 
     def list_employees(self) -> List[Employee]:
@@ -364,16 +305,15 @@ class EmployeeService:
         return self.list_visible_employees()
 
     def update_status(self, employee_id: int, status: str, termination_date: Optional[date] = None) -> Employee:
-        self._require_management()
+        actor = self._require_user(None)
+        self._require_capability(actor, self.UPDATE)
         with self._session_factory() as s:
             e = EmployeeRepository(s).get_by_id(employee_id)
             if not e:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             e.employment_status = self._validate_status(status)
             e.termination_date = termination_date
-            s.commit()
-            s.refresh(e)
-            return e
+            s.commit(); s.refresh(e); return e
 
     def update_employee(self, employee_id: int, **data) -> Employee:
         actor = self._require_user(None)
@@ -382,20 +322,17 @@ class EmployeeService:
             if not e:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             is_self = e.user_id == actor.id
-            is_management = self.can_view_all(actor)
-            if not is_management and not is_self:
-                raise EmployeeAccessDeniedError("You can only update your own employee profile.")
-            if is_management:
-                if not actor.has_permission("employee.update") and not self._is_manager_or_admin(actor):
-                    raise EmployeeAccessDeniedError("Permission 'employee.update' is required.")
-            else:
-                if not actor.has_permission("employee.update.self"):
-                    raise EmployeeAccessDeniedError("Permission 'employee.update.self' is required.")
+            has_update_all = self._has(actor, self.UPDATE)
+            has_update_self = self._has(actor, self.UPDATE_SELF)
+            has_view_all = self._has(actor, self.VIEW_ALL)
+            if has_update_all and (is_self or has_view_all):
+                pass
+            elif is_self and has_update_self:
                 forbidden = set(data) - {"full_name", "phone", "email", "address", "date_of_birth", "gender"}
                 if forbidden:
-                    raise EmployeeAccessDeniedError(
-                        "Employees may only update personal profile information."
-                    )
+                    raise EmployeeAccessDeniedError("Employees may only update personal profile information.")
+            else:
+                raise EmployeeAccessDeniedError("You do not have permission to update this employee profile.")
             for key in ("full_name", "phone", "email", "address", "department", "position", "gender"):
                 if key in data:
                     setattr(e, key, self._text(data[key]))
@@ -404,9 +341,9 @@ class EmployeeService:
             if e.email and "@" not in e.email:
                 raise EmployeeValidationError("Invalid email format.")
             if "employment_status" in data:
+                self._require_capability(actor, self.UPDATE)
                 e.employment_status = self._validate_status(data["employment_status"])
             if "hire_date" in data:
+                self._require_capability(actor, self.UPDATE)
                 e.hire_date = data["hire_date"]
-            s.commit()
-            s.refresh(e)
-            return e
+            s.commit(); s.refresh(e); return e
