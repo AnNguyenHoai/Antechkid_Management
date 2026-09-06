@@ -14,6 +14,7 @@ from centermanager.models.permission import PermissionDefinitions
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
 from centermanager.services.permission_service import PermissionService
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
 
 @dataclass(frozen=True)
@@ -58,8 +59,8 @@ class EmployeeWorkspaceCapabilities:
             management=management,
             employee_view_all=employee_view_all,
             employee_profile_self=True,
-            employee_update_self=permission_service.has_permission(
-                PermissionDefinitions.EMPLOYEE_UPDATE_SELF, user
+            employee_update_self=EmployeeCapabilityPolicy.has(
+                user, PermissionDefinitions.EMPLOYEE_UPDATE_SELF
             ),
             employee_update_all=permission_service.has_permission(
                 PermissionDefinitions.EMPLOYEE_UPDATE, user
