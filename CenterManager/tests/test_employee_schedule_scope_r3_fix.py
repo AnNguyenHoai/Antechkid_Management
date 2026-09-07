@@ -24,14 +24,18 @@ def _db(tmp_path):
             name: Permission(name=name, description=name, category="employee")
             for name in ("schedule.view.all", "schedule.view.self", "schedule.manage")
         }
-        manager_role = Role(name="manager", display_name="Manager", is_system=True,
-                            permissions=[perms["schedule.view.all"]])
+        manager_role = Role(
+            name="manager", display_name="Manager", is_system=True,
+            permissions=[perms["schedule.view.all"]],
+        )
         schedule_manager_role = Role(
             name="schedule_manager", display_name="Schedule Manager", is_system=False,
             permissions=[perms["schedule.view.all"], perms["schedule.manage"]],
         )
-        teacher_role = Role(name="teacher", display_name="Teacher", is_system=True,
-                            permissions=[perms["schedule.view.self"]])
+        teacher_role = Role(
+            name="teacher", display_name="Teacher", is_system=True,
+            permissions=[perms["schedule.view.self"]],
+        )
         s.add_all([*perms.values(), manager_role, schedule_manager_role, teacher_role])
         s.commit()
     return Session
@@ -40,8 +44,10 @@ def _db(tmp_path):
 def _user(Session, role, username):
     with Session() as s:
         role_obj = RoleRepository(s).get_by_name(role)
-        user = User(username=username, password_hash="test", full_name=username,
-                    role_id=role_obj.id, is_active=True, force_password_change=False)
+        user = User(
+            username=username, password_hash="test", full_name=username,
+            role_id=role_obj.id, is_active=True, force_password_change=False,
+        )
         s.add(user)
         s.commit()
         s.refresh(user)
@@ -51,10 +57,8 @@ def _user(Session, role, username):
 def _employee(Session, user_id):
     with Session() as s:
         employee = Employee(
-            employee_code=f"EMP-{user_id:05d}",
-            full_name="Teacher",
-            employment_status=Employee.STATUS_ACTIVE,
-            user_id=user_id,
+            employee_code=f"EMP-{user_id:05d}", full_name="Teacher",
+            employment_status=Employee.STATUS_ACTIVE, user_id=user_id,
         )
         s.add(employee)
         s.commit()
