@@ -52,7 +52,7 @@ def test_schedule_service_rejects_overlap_and_self_write(tmp_path):
         assert ss.list_rules(employee.id)
         with pytest.raises(EmployeeScheduleAccessDeniedError): ss.add_rule(employee.id,1,time(9),time(10),date(2026,9,1))
 
-def test_schedule_manage_allows_read_without_granting_manage_from_view_all():
+def test_schedule_manage_allows_read_without_granting_manage_from_view_all(tmp_path):
     engine=create_engine_for_path(tmp_path/'schedule-read.db'); Base.metadata.create_all(engine); Session=sessionmaker(bind=engine,expire_on_commit=False)
     with Session() as s:
         manager_role=Role(name='manager',display_name='Manager',is_system=True)
