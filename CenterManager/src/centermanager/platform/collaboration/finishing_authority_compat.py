@@ -30,27 +30,55 @@ def install_finishing_authority_compat(collaboration_manager_cls: type) -> None:
     def validate_write_authority(self, session) -> Dict[str, Any]:
         result = original_validate(self, session)
 
-        # The persisted local lock is the source of truth for finishing
-        # metadata.  Keep remote validation behavior unchanged; the remote
-        # provider already returns its authoritative lease state.
-        if getattr(self, "_sync_provider", None) is not None:
-            return result
-
         lock = getattr(self, "_lock", None)
         if lock is None:
             return result
+
+        # Remote mode has two independent clocks:
+        #   * lease_expires_at fences ownership of the remote lock;
+        #   * finishing_deadline fences the FINISHING transaction.
+        # The base validator checks the lease, but its generic local-stale
+        # compatibility path cannot see the remote FINISHING deadline because
+        # the remote branch returns before the local lock-stale evaluation.
+        # Read the remote authority directly so an expired FINISHING deadline
+        # cannot be reported as a valid write authority while the lease itself
+        # is still alive.
+        if getattr(self, "_sync_provider", None) is not None:
+            if not result.get("valid", False):
+                # Preserve stronger failures from the authoritative remote
+                # validator (owner mismatch, expired lease, unavailable sync).
+                return result
+            try:
+                remote_status = self._sync_provider.remote_lock_status()
+                deadline = _parse_datetime(remote_status.get("finishing_deadline"))
+                if deadline is None:
+                    return result
+
+                result["finishing_deadline"] = deadline
+                if datetime.now() >= deadline:
+                    result["valid"] = False
+                    result["reason"] = "Deadline expired"
+                    return result
+
+                # FINISHING's absolute deadline is authoritative while active;
+                # a stale heartbeat must not invalidate the transaction before
+                # that deadline. The remote lease was already validated by the
+                # base validator above.
+                result["valid"] = True
+                if not result.get("reason") or result.get("reason") == "Local lock stale":
+                    result["reason"] = "OK"
+                return result
+            except Exception:
+                # Do not weaken the base validator when remote metadata cannot
+                # be inspected. Its result remains authoritative.
+                return result
 
         try:
             lock_info = lock.get_lock_info()
         except Exception:
             return result
 
-        deadline_value = lock_info.get("finishing_deadline")
-        started_value = lock_info.get("finishing_started_at")
-
-        deadline = _parse_datetime(deadline_value)
-        started_at = _parse_datetime(started_value)
-
+        deadline = _parse_datetime(lock_info.get("finishing_deadline"))
         if deadline is not None:
             # Preserve the public authority contract: callers must be able to
             # observe the active absolute FINISHING deadline.
@@ -70,8 +98,8 @@ def install_finishing_authority_compat(collaboration_manager_cls: type) -> None:
             return result
 
         # No finishing deadline means the transaction is in normal EDITING
-        # semantics.  If the base validator reports a stale local lock,
-        # surface the actual authority failure that caused it.
+        # semantics. If the base validator reports a stale local lock, surface
+        # the actual authority failure that caused it.
         if not result.get("valid") and result.get("reason") == "Local lock stale":
             last_heartbeat = _parse_datetime(lock_info.get("last_heartbeat"))
             if last_heartbeat is not None:
@@ -80,9 +108,6 @@ def install_finishing_authority_compat(collaboration_manager_cls: type) -> None:
                 if age > timeout:
                     result["reason"] = "Heartbeat timeout"
 
-        # started_at is useful to diagnostics but is intentionally not added
-        # to the existing result shape unless a finishing deadline exists.
-        _ = started_at
         return result
 
     collaboration_manager_cls.validate_write_authority = validate_write_authority
