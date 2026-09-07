@@ -3,12 +3,18 @@
 
 from .collaboration_manager import CollaborationManager, WriteRequestResult, WriteRequestInfo
 from .false_waiting_guard import install_false_waiting_guard
+from .finishing_authority_compat import install_finishing_authority_compat
 
 # Keep the restored CollaborationManager implementation intact and install the
 # narrow false-WAITING protection at the package boundary. This avoids changing
 # queue/arbitration APIs while ensuring a free/stale remote lock cannot be shown
 # as WAITING to the user.
 install_false_waiting_guard(CollaborationManager)
+
+# Normalize the legacy authority response at the same package boundary.  The
+# transaction/lock implementation remains the source of truth for finishing
+# state; this only makes the public validation result consistent with it.
+install_finishing_authority_compat(CollaborationManager)
 
 from .runtime_session import RuntimeSession
 from .runtime_lock import RuntimeLock
