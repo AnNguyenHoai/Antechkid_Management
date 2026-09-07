@@ -17,8 +17,10 @@ def setup_db(tmp_path):
     with Session() as s:
         mr=Role(name='manager',display_name='Manager',is_system=True)
         tr=Role(name='teacher',display_name='Teacher',is_system=True)
+        schedule_manage=Permission(name='schedule.manage',description='schedule.manage',category='employee')
         ps=[Permission(name=n,description=n,category='employee') for n in ('working_time.view.self','working_time.view.all','working_time.create.self','working_time.manage','working_time.lock')]
-        s.add_all([mr,tr,*ps]); s.flush()
+        s.add_all([mr,tr,schedule_manage,*ps]); s.flush()
+        mr.permissions.append(schedule_manage)
         for p in ps: mr.permissions.append(p)
         for p in ps:
             if p.name in ('working_time.view.self','working_time.create.self'): tr.permissions.append(p)
