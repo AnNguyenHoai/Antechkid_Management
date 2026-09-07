@@ -36,7 +36,10 @@ from centermanager.core.current_user import CurrentUserContext
 def test_schedule_service_rejects_overlap_and_self_write(tmp_path):
     engine=create_engine_for_path(tmp_path/'schedule.db'); Base.metadata.create_all(engine); Session=sessionmaker(bind=engine,expire_on_commit=False)
     with Session() as s:
-        mr=Role(name='manager',display_name='Manager',is_system=True); tr=Role(name='teacher',display_name='Teacher',is_system=True); perm=Permission(name='schedule.view.self',description='self',category='employee'); s.add(perm); s.flush(); tr.permissions.append(perm); s.add_all([mr,tr]);s.flush()
+        mr=Role(name='manager',display_name='Manager',is_system=True); tr=Role(name='teacher',display_name='Teacher',is_system=True)
+        schedule_manage=Permission(name='schedule.manage',description='manage',category='employee')
+        schedule_view_self=Permission(name='schedule.view.self',description='self',category='employee')
+        s.add_all([mr,tr,schedule_manage,schedule_view_self]); s.flush(); tr.permissions.append(schedule_view_self); mr.permissions.append(schedule_manage); s.add_all([mr,tr]); s.flush()
         manager=User(username='manager',password_hash='x',full_name='Manager',role_id=mr.id,is_active=True,force_password_change=False)
         teacher=User(username='teacher',password_hash='x',full_name='Teacher',role_id=tr.id,is_active=True,force_password_change=False);s.add_all([manager,teacher]);s.commit();s.refresh(manager);s.refresh(teacher)
     es=EmployeeService(Session)
