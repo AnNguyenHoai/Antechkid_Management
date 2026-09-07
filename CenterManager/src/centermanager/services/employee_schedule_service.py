@@ -45,7 +45,7 @@ class EmployeeScheduleService:
 
     def can_view_all(self, user=None):
         u = self._user(user)
-        return self._has(u, self.VIEW_ALL)
+        return self._has(u, self.VIEW_ALL) or self._has(u, self.MANAGE)
 
     def can_view_self(self, user=None):
         u = self._user(user)
@@ -61,7 +61,10 @@ class EmployeeScheduleService:
     def _assert_read_scope(self, employee_id, user=None):
         u = self._user(user)
         e = self._employee(employee_id)
-        if self._has(u, self.VIEW_ALL):
+        # Managing a schedule necessarily permits reading the schedule being
+        # managed. The reverse relationship is intentionally not granted:
+        # schedule.view.all must never imply schedule.manage.
+        if self._has(u, self.MANAGE) or self._has(u, self.VIEW_ALL):
             return e
         if e.user_id == u.id and self._has(u, self.VIEW_SELF):
             return e
