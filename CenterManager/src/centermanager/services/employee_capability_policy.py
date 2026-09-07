@@ -8,9 +8,9 @@ Administrator is the single system-level exception: PermissionService defines
 admin as having every permission, and this small policy mirrors that contract
 without making each domain service reimplement role checks.
 
-Manager compatibility is intentionally narrow. Existing employee services may
-still rely on the Manager role for legacy employee-management operations, but
-schedule mutation and all operational capabilities are explicit.
+Manager compatibility is intentionally narrow and limited to legacy employee
+management operations. Schedule mutation and all operational capabilities are
+explicit permissions.
 """
 from __future__ import annotations
 
