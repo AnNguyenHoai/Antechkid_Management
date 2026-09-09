@@ -148,11 +148,16 @@ ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.EMPLOYEE_DELETE.value,
 })
 
-# Compatibility policy retained from the pre-normalization Employee Workspace:
-# MANAGER owns employee record management, but does not implicitly gain
-# schedule/working-time management.
+# Employee Workspace management is an explicit domain boundary. Manager and
+# admin roles may enter the all-employee management surface, but this does not
+# grant unrelated employee capabilities and does not create a generic admin
+# bypass in AuthorizationService.
 IMPLICIT_ROLE_CAPABILITIES = {
+    "admin": frozenset({
+        Capability.EMPLOYEE_VIEW_ALL.value,
+    }),
     "manager": frozenset({
+        Capability.EMPLOYEE_VIEW_ALL.value,
         Capability.EMPLOYEE_CREATE.value,
         Capability.EMPLOYEE_UPDATE.value,
         Capability.EMPLOYEE_ARCHIVE.value,
