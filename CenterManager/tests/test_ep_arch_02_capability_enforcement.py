@@ -8,15 +8,17 @@ from centermanager.services.authorization_service import (
     AuthorizationDecision,
     AuthorizationService,
 )
+from centermanager.services.permission_service import PermissionDeniedError
 
 
 def make_user(*permissions, role_name="employee", active=True):
+    granted = set(permissions)
     role = SimpleNamespace(name=role_name)
     return SimpleNamespace(
         id=1,
         is_active=active,
         role=role,
-        has_permission=lambda name: name in set(permissions),
+        has_permission=lambda name: name in granted,
     )
 
 
@@ -68,5 +70,5 @@ def test_any_and_all_use_capability_decisions():
 
 def test_require_denies_without_mutating_actor():
     user = make_user(role_name="manager")
-    with pytest.raises(Exception, match="Capability 'employee.delete' is required"):
+    with pytest.raises(PermissionDeniedError, match="Capability 'employee.delete' is required"):
         AuthorizationService.require(user, Capability.EMPLOYEE_DELETE)
