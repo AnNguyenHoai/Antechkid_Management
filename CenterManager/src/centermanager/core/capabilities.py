@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Canonical application authorization capabilities.
 
-This module is the single vocabulary for capability identifiers.  Persistence
+This module is the single vocabulary for capability identifiers. Persistence
 models and legacy permission APIs may reference these values, but must not
 create a second authorization vocabulary.
 """
@@ -30,6 +30,7 @@ class Capability(str, Enum):
     CLASS_CREATE = "class.create"
     CLASS_UPDATE = "class.update"
     CLASS_DELETE = "class.delete"
+    CLASS_TEACHER_ASSIGNMENT_MANAGE = "class.teacher_assignment.manage"
 
     # Finance / reports / settings
     FINANCE_VIEW = "finance.view"
@@ -73,6 +74,7 @@ class Capability(str, Enum):
     EMPLOYEE_UPDATE_SELF = "employee.update.self"
     EMPLOYEE_CREATE = "employee.create"
     EMPLOYEE_UPDATE = "employee.update"
+    EMPLOYEE_DELETE = "employee.delete"
     EMPLOYEE_ARCHIVE = "employee.archive"
 
     # Employee schedule / working time
@@ -89,6 +91,8 @@ class Capability(str, Enum):
     WORK_REGISTRATION_SELF = "work_registration.self"
     WORK_REGISTRATION_VIEW_ALL = "work_registration.view.all"
     WORK_REGISTRATION_MANAGE = "work_registration.manage"
+    WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE = "work_registration.period.admin_override"
+    WORK_REGISTRATION_DELETE = "work_registration.delete"
 
     @classmethod
     def values(cls) -> tuple[str, ...]:
