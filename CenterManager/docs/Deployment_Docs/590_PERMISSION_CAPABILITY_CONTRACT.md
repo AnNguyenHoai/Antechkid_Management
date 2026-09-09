@@ -1,7 +1,7 @@
 # 590_PERMISSION_CAPABILITY_CONTRACT.md
 
-Version: 1.0
-Status: DRAFT
+Version: 1.1
+Status: ACTIVE
 Document Type: Platform Security Contract
 Owner: OpenAI & AnTechKids
 
@@ -45,6 +45,8 @@ Canonical roles:
 - `MANAGER`
 - `EMPLOYEE`
 
+The runtime currently persists the employee actor class using the operational roles `teacher`, `reception`, and `finance`; these remain distinct role identifiers because they have different permission profiles. They are employee-scoped roles under the `EMPLOYEE` actor class and must not be silently renamed as part of capability normalization.
+
 Role values are identifiers, not UI labels. Presentation layers may localize labels without changing the identifiers.
 
 ### Capability
@@ -57,6 +59,14 @@ Capability identifiers use lowercase dot-separated namespaces:
 <domain>.<resource>.<operation>
 ```
 
+The canonical runtime registry is:
+
+```text
+CenterManager/src/centermanager/core/capabilities.py
+```
+
+`Capability` is the source of truth for capability identifiers. The database `Permission` model stores these identifiers for role assignments; compatibility APIs such as `PermissionDefinitions` must alias the canonical values rather than define independent names.
+
 Canonical capabilities currently established by the platform:
 
 | Capability | Meaning | Default role policy |
@@ -68,7 +78,7 @@ Canonical capabilities currently established by the platform:
 | `employee.delete` | Hard-delete an employee with no operational history | `ADMIN` |
 | `class.teacher_assignment.manage` | Assign/unassign a teacher for a class | `ADMIN`, `MANAGER` |
 
-The list above is the platform's canonical name registry. New capabilities must be added here before implementation code introduces a new identifier.
+The list above is the platform's canonical name registry. New capabilities must be added to the runtime registry before implementation code introduces a new identifier.
 
 ## 3. Authorization Decision
 
@@ -267,6 +277,8 @@ Do not create parallel permission registries in individual modules or workspaces
 
 During migration, legacy checks must not silently diverge from the canonical capability registry.
 
+The runtime migration is implemented through `AuthorizationService` and the compatibility `PermissionService` facade. `PermissionService` must delegate authorization decisions to `AuthorizationService`; it must not add a role-name bypass.
+
 ## 13. Contract Invariants
 
 The following are mandatory:
@@ -281,6 +293,8 @@ The following are mandatory:
 8. Administrative overrides use explicit administrative capabilities.
 9. Capability semantics are independent of deployment technology.
 10. New capability identifiers are registered in one canonical contract.
+11. The runtime registry and persistence permission names must not diverge.
+12. Authorization decisions fail closed for inactive or role-less actors.
 
 ## 14. Reference Decision Flow
 
