@@ -8,6 +8,7 @@ from centermanager.core.capabilities import (
     ADMIN_ONLY_CAPABILITIES,
     IMPLICIT_ROLE_CAPABILITIES,
     IMPLIED_CAPABILITIES,
+    LEGACY_CAPABILITY_ALIASES,
 )
 from centermanager.models.role import RoleDefinitions
 
@@ -52,33 +53,35 @@ class AuthorizationService:
         return bool(getattr(user, "is_active", True))
 
     @staticmethod
-    def _direct_permission_names(user: Any) -> set[str]:
+    def _canonical_permission_name(value: str) -> str:
+        return LEGACY_CAPABILITY_ALIASES.get(value, value)
+
+    @classmethod
+    def _direct_permission_names(cls, user: Any) -> set[str]:
         permissions = getattr(user, "permissions", None)
-        if permissions is not None and not callable(permissions):
-            try:
-                return {str(value) for value in permissions}
-            except TypeError:
-                return set()
-        return set()
+        if permissions is None or callable(permissions):
+            return set()
+        try:
+            return {
+                cls._canonical_permission_name(str(value))
+                for value in permissions
+            }
+        except TypeError:
+            return set()
 
     @classmethod
     def _has_direct_permission(cls, user: Any, capability: str) -> bool:
         checker = getattr(user, "has_permission", None)
-        if callable(checker):
-            return bool(checker(capability))
+        if callable(checker) and checker(capability):
+            return True
         return capability in cls._direct_permission_names(user)
 
     @classmethod
     def _grants(cls, user: Any, capability: Capability) -> bool:
         role_name = cls._role_name(user)
 
-        # ADMIN is the sole privileged system role. This preserves the
-        # established admin-superuser behavior while keeping the rule in one
-        # authorization boundary rather than scattering role checks.
-        if role_name == RoleDefinitions.ADMIN:
-            return True
-
         # MANAGER retains the established employee-record management scope.
+        # No other role receives an implicit capability grant.
         if capability.value in IMPLICIT_ROLE_CAPABILITIES.get(role_name, frozenset()):
             return True
 
@@ -105,8 +108,9 @@ class AuthorizationService:
 
         canonical = capability if isinstance(capability, Capability) else Capability.from_value(capability)
 
-        # Admin-only operations remain explicit policy boundaries. They are
-        # never granted by Manager compatibility rules or by write mode.
+        # Admin-only operations are explicit policy boundaries. They are the
+        # only capabilities whose grant is role-derived. Generic capabilities
+        # require an explicit persisted grant (or the narrow Manager policy).
         if canonical.value in ADMIN_ONLY_CAPABILITIES:
             return (
                 AuthorizationDecision.ALLOW

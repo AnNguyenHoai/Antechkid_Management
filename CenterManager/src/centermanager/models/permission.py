@@ -53,6 +53,7 @@ class PermissionDefinitions:
     BACKUP_VIEW = "backup.view"
     BACKUP_CREATE = "backup.create"
     BACKUP_RESTORE = "backup.restore"
+    EMPLOYEE_UPDATE_SELF = "employee.update.self"
 
     # Every remaining definition is generated from the single canonical enum.
     for _capability in Capability:
