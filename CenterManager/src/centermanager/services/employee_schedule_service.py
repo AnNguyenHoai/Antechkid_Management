@@ -1,11 +1,9 @@
 from __future__ import annotations
 from datetime import date, time
-from typing import Optional
 
 from centermanager.models.employee import Employee
 from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException, VALID_EXCEPTION_TYPES
-from centermanager.repositories.employee_repository import EmployeeRepository
-from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.core.current_user import get_current_user
 from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
@@ -29,8 +27,9 @@ class EmployeeScheduleService:
     VIEW_ALL = "schedule.view.all"
     MANAGE = "schedule.manage"
 
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     @staticmethod
     def _user(user=None):
@@ -53,7 +52,7 @@ class EmployeeScheduleService:
 
     def _employee(self, employee_id):
         with self._sf() as s:
-            e = EmployeeRepository(s).get_by_id(employee_id)
+            e = self._repository_provider.employees(s).get_by_id(employee_id)
             if not e:
                 raise EmployeeScheduleValidationError(f"Employee {employee_id} not found.")
             return e
@@ -97,18 +96,18 @@ class EmployeeScheduleService:
     def list_rules(self, employee_id, user=None):
         self._assert_read_scope(employee_id, user)
         with self._sf() as s:
-            return EmployeeScheduleRepository(s).list_rules(employee_id)
+            return self._repository_provider.employee_schedules(s).list_rules(employee_id)
 
     def list_exceptions(self, employee_id, user=None):
         self._assert_read_scope(employee_id, user)
         with self._sf() as s:
-            return EmployeeScheduleRepository(s).list_exceptions(employee_id)
+            return self._repository_provider.employee_schedules(s).list_exceptions(employee_id)
 
     def add_rule(self, employee_id, day_of_week, start_time, end_time, effective_from, effective_to=None, notes=None, user=None):
         self._assert_manage_scope(employee_id, user)
         self._validate_rule(day_of_week, start_time, end_time, effective_from, effective_to)
         with self._sf() as s:
-            repo = EmployeeScheduleRepository(s)
+            repo = self._repository_provider.employee_schedules(s)
             for r in repo.list_rules(employee_id):
                 if (
                     r.day_of_week == day_of_week
@@ -133,7 +132,7 @@ class EmployeeScheduleService:
     def update_rule(self, rule_id, *, day_of_week, start_time, end_time, effective_from, effective_to=None, notes=None, user=None):
         u = self._user(user)
         with self._sf() as s:
-            repo = EmployeeScheduleRepository(s)
+            repo = self._repository_provider.employee_schedules(s)
             r = repo.get_rule(rule_id)
             if not r:
                 raise EmployeeScheduleValidationError(f"Schedule rule {rule_id} not found.")
@@ -160,7 +159,7 @@ class EmployeeScheduleService:
     def delete_rule(self, rule_id, user=None):
         u = self._user(user)
         with self._sf() as s:
-            r = EmployeeScheduleRepository(s).get_rule(rule_id)
+            r = self._repository_provider.employee_schedules(s).get_rule(rule_id)
             if not r:
                 return
             self._assert_manage_scope(r.employee_id, u)
@@ -177,7 +176,7 @@ class EmployeeScheduleService:
         if typ != "MODIFIED":
             start_time = end_time = None
         with self._sf() as s:
-            repo = EmployeeScheduleRepository(s)
+            repo = self._repository_provider.employee_schedules(s)
             if any(x.schedule_date == schedule_date for x in repo.list_exceptions(employee_id)):
                 raise EmployeeScheduleValidationError("An exception already exists for this date.")
             x = EmployeeScheduleException(
@@ -196,7 +195,7 @@ class EmployeeScheduleService:
     def delete_exception(self, exception_id, user=None):
         u = self._user(user)
         with self._sf() as s:
-            x = EmployeeScheduleRepository(s).get_exception(exception_id)
+            x = self._repository_provider.employee_schedules(s).get_exception(exception_id)
             if not x:
                 return
             self._assert_manage_scope(x.employee_id, u)
@@ -207,7 +206,7 @@ class EmployeeScheduleService:
         """Return the effective schedule blocks for a date, applying date exceptions."""
         self._assert_read_scope(employee_id, user)
         with self._sf() as s:
-            repo = EmployeeScheduleRepository(s)
+            repo = self._repository_provider.employee_schedules(s)
             exceptions = [x for x in repo.list_exceptions(employee_id) if x.schedule_date == work_date]
             if exceptions:
                 x = exceptions[0]
