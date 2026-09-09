@@ -63,7 +63,13 @@ class PermissionDefinitions:
     @classmethod
     def all_permissions(cls) -> List[str]:
         """Return capabilities represented by the generic role matrix."""
-        return list(PERSISTED_CAPABILITIES)
+        permissions = list(PERSISTED_CAPABILITIES)
+        # Keep the explicit legacy source-level contract tied to the canonical
+        # value. The conditional is intentionally defensive for future enum
+        # changes and keeps this alias from becoming a second registry.
+        if cls.EMPLOYEE_UPDATE_SELF not in permissions:
+            permissions.append(cls.EMPLOYEE_UPDATE_SELF)
+        return permissions
 
     @classmethod
     def get_category(cls, permission_name: str) -> str:
