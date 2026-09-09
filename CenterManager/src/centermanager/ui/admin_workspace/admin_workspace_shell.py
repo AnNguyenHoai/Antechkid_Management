@@ -143,15 +143,16 @@ class AdminWorkspaceShell(QWidget):
         return
 
     def _has_page_permission(self, page_id: str) -> bool:
-        # Admin Workspace is an administrative boundary. A generic permission
-        # must not allow a non-admin account to open administrative pages.
+        """Check the Admin Workspace boundary, not individual page actions.
+
+        The shell is an admin-only navigation surface. Requiring the page's
+        individual capability here was incorrect because it made navigation
+        depend on persisted role grants and caused legitimate admin pages to
+        become unreachable. Individual pages still enforce their capabilities
+        for protected actions (for example backup create/restore).
+        """
         user = get_current_user()
-        if user is None or not user.is_admin:
-            return False
-        permission = self._page_permissions.get(page_id)
-        if permission is None:
-            return True
-        return self._permission_service.has_permission(permission)
+        return bool(user is not None and user.is_admin)
 
     def navigate_to(self, page_id: str) -> None:
         if not self._has_page_permission(page_id):

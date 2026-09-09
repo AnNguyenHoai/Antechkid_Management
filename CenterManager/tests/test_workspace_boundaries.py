@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from pathlib import Path
 
 from centermanager.core.capabilities import Capability
 from centermanager.services.employee_service import EmployeeService
@@ -40,11 +41,21 @@ def test_regular_employee_requires_employee_self_view_capability():
 
 
 def test_admin_workspace_source_has_no_employee_work_registration_page():
-    from pathlib import Path
-
     source = Path(__file__).parents[1] / "src" / "centermanager" / "ui" / "admin_workspace" / "admin_workspace_shell.py"
     text = source.read_text(encoding="utf-8")
 
     assert "AdminEmployeeWorkDataPage" not in text
     assert '"employee_work_data"' not in text
     assert "Employees & Work" not in text
+
+
+def test_admin_workspace_page_navigation_is_role_bounded_not_page_permission_bounded():
+    source = Path(__file__).parents[1] / "src" / "centermanager" / "ui" / "admin_workspace" / "admin_workspace_shell.py"
+    text = source.read_text(encoding="utf-8")
+
+    assert '"roles": PermissionDefinitions.ROLE_MANAGE' in text
+    assert '"audit": PermissionDefinitions.AUDIT_VIEW' in text
+    assert '"operations": PermissionDefinitions.SYSTEM_DIAGNOSTICS_VIEW' in text
+    assert '"backup": PermissionDefinitions.BACKUP_VIEW' in text
+    assert "return bool(user is not None and user.is_admin)" in text
+    assert "self._permission_service.has_permission(permission)" not in text
