@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Backward-compatible permission API backed by the canonical capability registry."""
-from typing import Optional
 
 from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import get_current_user
@@ -10,7 +9,11 @@ from centermanager.core.current_user import get_current_user
 Permission = Capability
 
 
-def has_permission(permission: Capability, user=None) -> bool:
+def _canonical(permission: Capability | str) -> Capability:
+    return permission if isinstance(permission, Capability) else Capability.from_value(permission)
+
+
+def has_permission(permission: Capability | str, user=None) -> bool:
     """Check a canonical capability for a user."""
     from centermanager.services.permission_service import PermissionService
     from centermanager.database.engine import create_production_engine
@@ -21,19 +24,21 @@ def has_permission(permission: Capability, user=None) -> bool:
     if user is None:
         return False
 
+    capability = _canonical(permission)
     engine = create_production_engine()
     session_factory = sessionmaker(bind=engine)
     service = PermissionService(session_factory)
-    return service.has_permission(permission.value, user)
+    return service.has_permission(capability.value, user)
 
 
-def require_permission(permission: Capability, user=None) -> None:
+def require_permission(permission: Capability | str, user=None) -> None:
     """Require a canonical capability or raise ``PermissionDeniedError``."""
-    if not has_permission(permission, user):
+    capability = _canonical(permission)
+    if not has_permission(capability, user):
         from centermanager.services.permission_service import PermissionDeniedError
-        raise PermissionDeniedError(f"Capability '{permission.value}' is required.")
+        raise PermissionDeniedError(f"Capability '{capability.value}' is required.")
 
 
 # Legacy alias kept for compatibility with older callers.
-def has_permission_legacy(permission: Capability, user=None) -> bool:
+def has_permission_legacy(permission: Capability | str, user=None) -> bool:
     return has_permission(permission, user)
