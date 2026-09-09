@@ -120,186 +120,309 @@ class TestLockIsolation:
         )
         self.provider.connect()
         yield
+        # Cleanup: delete lock branch if left behind
         if remote_lock_exists(self.remote_path):
             subprocess.run(
                 ["git", "push", str(self.remote_path), "--delete", "lock-main", "--force"],
                 capture_output=True
             )
 
+    # ---- Test A: MAIN HEAD Preservation ----
     def test_acquire_keeps_main_head_unchanged(self):
         before_head = get_main_head(self.repo_path)
+
         lock_data = {
-            "locked": True, "session_id": "sess_123", "owner": "test_user",
-            "username": "test_user", "user_id": "test_user",
-            "acquired_at": datetime.now().isoformat(), "last_heartbeat": datetime.now().isoformat(),
+            "locked": True,
+            "session_id": "sess_123",
+            "owner": "test_user",
+            "username": "test_user",
+            "user_id": "test_user",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
             "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data) is True
-        assert get_main_head(self.repo_path) == before_head
+        success = self.provider.acquire_lock(lock_data)
+        assert success is True
+
+        after_head = get_main_head(self.repo_path)
+        assert after_head == before_head, "MAIN HEAD changed after acquire"
+
         self.provider.release_lock("test_user")
 
+    # ---- Test B: Working Tree Preservation ----
     def test_acquire_keeps_main_working_tree_clean(self):
         before_status = get_main_status(self.repo_path)
-        assert before_status == ""
+        # Ensure it's clean (untracked files from test fixture might be ignored)
+        # We explicitly ignore the .git directory and any pre-existing untracked files.
+        # In a fresh clone, it should be clean.
+        assert before_status == "", "Initial working tree should be clean"
+
         lock_data = {
-            "locked": True, "session_id": "sess_123", "owner": "test_user",
-            "username": "test_user", "user_id": "test_user",
-            "acquired_at": datetime.now().isoformat(), "last_heartbeat": datetime.now().isoformat(),
+            "locked": True,
+            "session_id": "sess_123",
+            "owner": "test_user",
+            "username": "test_user",
+            "user_id": "test_user",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
             "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data) is True
-        assert get_main_status(self.repo_path) == before_status
+        success = self.provider.acquire_lock(lock_data)
+        assert success is True
+
+        after_status = get_main_status(self.repo_path)
+        assert after_status == before_status, "MAIN working tree became dirty after acquire"
+
         self.provider.release_lock("test_user")
 
+    # ---- Test C: Branch Preservation ----
     def test_acquire_keeps_main_branch_unchanged(self):
         before_branch = get_main_branch(self.repo_path)
         assert before_branch == "main", "Initial branch should be main"
+
         lock_data = {
-            "locked": True, "session_id": "sess_123", "owner": "test_user",
-            "username": "test_user", "user_id": "test_user",
-            "acquired_at": datetime.now().isoformat(), "last_heartbeat": datetime.now().isoformat(),
+            "locked": True,
+            "session_id": "sess_123",
+            "owner": "test_user",
+            "username": "test_user",
+            "user_id": "test_user",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
             "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data) is True
-        assert get_main_branch(self.repo_path) == before_branch
+        success = self.provider.acquire_lock(lock_data)
+        assert success is True
+
+        after_branch = get_main_branch(self.repo_path)
+        assert after_branch == before_branch, "MAIN branch changed after acquire"
+
         self.provider.release_lock("test_user")
 
+    # ---- Test D: Remote Lock Creation ----
     def test_remote_lock_created_and_verified(self):
         assert remote_lock_exists(self.remote_path) is False, "lock-main should not exist initially"
+
         session_id = "sess_456"
         lock_data = {
-            "locked": True, "session_id": session_id, "owner": "test_user",
-            "username": "test_user", "user_id": "test_user",
-            "acquired_at": datetime.now().isoformat(), "last_heartbeat": datetime.now().isoformat(),
+            "locked": True,
+            "session_id": session_id,
+            "owner": "test_user",
+            "username": "test_user",
+            "user_id": "test_user",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
             "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data) is True
+        success = self.provider.acquire_lock(lock_data)
+        assert success is True
+
         assert remote_lock_exists(self.remote_path) is True, "lock-main should exist after acquire"
+
+        # Verify ownership
         status = self.provider.remote_lock_status()
         assert status["locked"] is True
         assert status["session_id"] == session_id
         assert status["owner"] == "test_user"
+
         self.provider.release_lock("test_user")
 
+    # ---- Test E: Ownership Verification ----
     def test_acquisition_fails_if_lock_held_by_other(self):
+        # First acquire by user A
         lock_data_a = {
-            "locked": True, "session_id": "sess_A", "owner": "user_a", "username": "user_a",
-            "user_id": "user_a", "acquired_at": datetime.now().isoformat(),
-            "last_heartbeat": datetime.now().isoformat(), "machine": "test_machine",
+            "locked": True,
+            "session_id": "sess_A",
+            "owner": "user_a",
+            "username": "user_a",
+            "user_id": "user_a",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
+            "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data_a) is True
+        success_a = self.provider.acquire_lock(lock_data_a)
+        assert success_a is True
+
+        # Second acquire by user B should fail
         lock_data_b = {
-            "locked": True, "session_id": "sess_B", "owner": "user_b", "username": "user_b",
-            "user_id": "user_b", "acquired_at": datetime.now().isoformat(),
-            "last_heartbeat": datetime.now().isoformat(), "machine": "test_machine",
+            "locked": True,
+            "session_id": "sess_B",
+            "owner": "user_b",
+            "username": "user_b",
+            "user_id": "user_b",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
+            "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data_b) is False
-        assert self.provider.remote_lock_status()["session_id"] == "sess_A"
+        success_b = self.provider.acquire_lock(lock_data_b)
+        assert success_b is False
+
+        # Verify remote lock still owned by A
+        status = self.provider.remote_lock_status()
+        assert status["session_id"] == "sess_A"
+
         self.provider.release_lock("user_a")
 
+    # ---- Test F: Release ----
     def test_release_keeps_main_unchanged_and_removes_lock(self):
         lock_data = {
-            "locked": True, "session_id": "sess_789", "owner": "test_user",
-            "username": "test_user", "user_id": "test_user",
-            "acquired_at": datetime.now().isoformat(), "last_heartbeat": datetime.now().isoformat(),
+            "locked": True,
+            "session_id": "sess_789",
+            "owner": "test_user",
+            "username": "test_user",
+            "user_id": "test_user",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
             "machine": "test_machine",
         }
         before_head = get_main_head(self.repo_path)
         before_status = get_main_status(self.repo_path)
         before_branch = get_main_branch(self.repo_path)
-        assert self.provider.acquire_lock(lock_data) is True
+
+        success = self.provider.acquire_lock(lock_data)
+        assert success is True
         assert remote_lock_exists(self.remote_path) is True
-        assert self.provider.release_lock("test_user") is True
-        assert get_main_head(self.repo_path) == before_head
-        assert get_main_status(self.repo_path) == before_status
-        assert get_main_branch(self.repo_path) == before_branch
+
+        release_success = self.provider.release_lock("test_user")
+        assert release_success is True
+
+        after_head = get_main_head(self.repo_path)
+        after_status = get_main_status(self.repo_path)
+        after_branch = get_main_branch(self.repo_path)
+
+        assert after_head == before_head
+        assert after_status == before_status
+        assert after_branch == before_branch
         assert remote_lock_exists(self.remote_path) is False, "lock-main should be deleted"
 
     # ---- Test G: Atomic Race ----
     def test_atomic_race_two_contenders(self):
-        """Two threads attempt to acquire simultaneously. Exactly one wins per round."""
+        """Two threads attempt to acquire simultaneously. Exactly one wins."""
+        results = []
+        lock = threading.Lock()
+
+        def acquire_worker(worker_id: str):
+            provider = None
+            success = False
+            try:
+                lock_data = {
+                    "locked": True,
+                    "session_id": f"sess_{worker_id}",
+                    "owner": f"user_{worker_id}",
+                    "username": f"user_{worker_id}",
+                    "user_id": f"user_{worker_id}",
+                    "acquired_at": datetime.now().isoformat(),
+                    "last_heartbeat": datetime.now().isoformat(),
+                    "machine": "test_machine",
+                }
+                # Each worker creates its own provider instance to simulate separate machines
+                provider = GitSynchronizationProvider(
+                    repo_path=self.repo_path,
+                    repository_url=str(self.remote_path),
+                    token="",
+                    branch="main"
+                )
+                provider.connect()
+                start_barrier.wait(timeout=10)
+                success = provider.acquire_lock(lock_data)
+                with lock:
+                    results.append((worker_id, success))
+            except Exception as e:
+                with lock:
+                    results.append((worker_id, f"ERROR: {e}"))
+            finally:
+                try:
+                    # Both contenders must complete their acquisition attempt before
+                    # the winner releases the lock. This prevents a slow Git operation
+                    # from turning one atomic race into two sequential acquisitions.
+                    attempt_complete_barrier.wait(timeout=10)
+                except threading.BrokenBarrierError:
+                    pass
+                if success and provider is not None:
+                    provider.release_lock(f"user_{worker_id}")
+
+        # Run multiple rounds for reliability
         rounds = 10
         for round_num in range(rounds):
-            results = []
-            result_lock = threading.Lock()
+            results.clear()
+            # Both contenders start acquisition together. The second barrier keeps
+            # the winner alive until the losing acquisition attempt has completed.
             start_barrier = threading.Barrier(2)
             attempt_complete_barrier = threading.Barrier(2)
+            threads = []
+            for i in range(2):
+                t = threading.Thread(target=acquire_worker, args=(str(i),))
+                threads.append(t)
+                t.start()
 
-            def acquire_worker(worker_id: str):
-                provider = None
-                success = False
-                try:
-                    lock_data = {
-                        "locked": True,
-                        "session_id": f"sess_{worker_id}",
-                        "owner": f"user_{worker_id}",
-                        "username": f"user_{worker_id}",
-                        "user_id": f"user_{worker_id}",
-                        "acquired_at": datetime.now().isoformat(),
-                        "last_heartbeat": datetime.now().isoformat(),
-                        "machine": "test_machine",
-                    }
-                    provider = GitSynchronizationProvider(
-                        repo_path=self.repo_path,
-                        repository_url=str(self.remote_path),
-                        token="",
-                        branch="main"
-                    )
-                    provider.connect()
-                    start_barrier.wait(timeout=10)
-                    success = provider.acquire_lock(lock_data)
-                    with result_lock:
-                        results.append((worker_id, success))
-                except Exception as e:
-                    with result_lock:
-                        results.append((worker_id, f"ERROR: {e}"))
-                finally:
-                    try:
-                        attempt_complete_barrier.wait(timeout=10)
-                    except threading.BrokenBarrierError:
-                        pass
-                    if success and provider is not None:
-                        provider.release_lock(f"user_{worker_id}")
+            for t in threads:
+                t.join(timeout=20)
 
-            threads = [threading.Thread(target=acquire_worker, args=(str(i),)) for i in range(2)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(timeout=20)
+            assert all(not t.is_alive() for t in threads), f"Contender thread leaked in round {round_num}"
 
-            assert all(not thread.is_alive() for thread in threads), f"Contender thread leaked in round {round_num}"
             successes = [r for r in results if r[1] is True]
             failures = [r for r in results if r[1] is False]
             assert len(successes) == 1, f"Expected 1 winner, got {len(successes)} in round {round_num}"
             assert len(failures) == 1, f"Expected 1 loser, got {len(failures)} in round {round_num}"
 
+            # Verify final remote state has exactly one owner
             status = self.provider.remote_lock_status()
             if status["locked"]:
+                # If someone is still holding the lock, release it (should be the winner's session)
                 winner_id = successes[0][0]
                 self.provider.release_lock(f"user_{winner_id}")
+            # Ensure lock is gone for next round
             time.sleep(0.2)
 
+    # ---- Test H: Failed Acquisition Does Not Touch MAIN ----
     def test_failed_acquisition_does_not_touch_main(self):
+        # First acquire by user A
         lock_data_a = {
-            "locked": True, "session_id": "sess_A", "owner": "user_a", "username": "user_a",
-            "user_id": "user_a", "acquired_at": datetime.now().isoformat(),
-            "last_heartbeat": datetime.now().isoformat(), "machine": "test_machine",
+            "locked": True,
+            "session_id": "sess_A",
+            "owner": "user_a",
+            "username": "user_a",
+            "user_id": "user_a",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
+            "machine": "test_machine",
         }
-        assert self.provider.acquire_lock(lock_data_a) is True
+        success_a = self.provider.acquire_lock(lock_data_a)
+        assert success_a is True
+
+        # Record MAIN state for user B (loser)
         before_head_b = get_main_head(self.repo_path)
         before_status_b = get_main_status(self.repo_path)
         before_branch_b = get_main_branch(self.repo_path)
+
+        # Attempt acquire by user B (should fail)
         lock_data_b = {
-            "locked": True, "session_id": "sess_B", "owner": "user_b", "username": "user_b",
-            "user_id": "user_b", "acquired_at": datetime.now().isoformat(),
-            "last_heartbeat": datetime.now().isoformat(), "machine": "test_machine",
+            "locked": True,
+            "session_id": "sess_B",
+            "owner": "user_b",
+            "username": "user_b",
+            "user_id": "user_b",
+            "acquired_at": datetime.now().isoformat(),
+            "last_heartbeat": datetime.now().isoformat(),
+            "machine": "test_machine",
         }
+        # Create a separate provider for B
         provider_b = GitSynchronizationProvider(
-            repo_path=self.repo_path, repository_url=str(self.remote_path), token="", branch="main"
+            repo_path=self.repo_path,
+            repository_url=str(self.remote_path),
+            token="",
+            branch="main"
         )
         provider_b.connect()
-        assert provider_b.acquire_lock(lock_data_b) is False
-        assert get_main_head(self.repo_path) == before_head_b, "Loser's MAIN HEAD changed"
-        assert get_main_status(self.repo_path) == before_status_b, "Loser's MAIN working tree changed"
-        assert get_main_branch(self.repo_path) == before_branch_b, "Loser's MAIN branch changed"
+        success_b = provider_b.acquire_lock(lock_data_b)
+        assert success_b is False
+
+        after_head_b = get_main_head(self.repo_path)
+        after_status_b = get_main_status(self.repo_path)
+        after_branch_b = get_main_branch(self.repo_path)
+
+        assert after_head_b == before_head_b, "Loser's MAIN HEAD changed"
+        assert after_status_b == before_status_b, "Loser's MAIN working tree changed"
+        assert after_branch_b == before_branch_b, "Loser's MAIN branch changed"
+
+        # Cleanup
         self.provider.release_lock("user_a")
