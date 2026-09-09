@@ -12,6 +12,7 @@ from centermanager.services.authorization_service import (
     AuthorizationDecision,
     AuthorizationService,
 )
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 from centermanager.services.permission_service import PermissionDeniedError
 
 
@@ -44,8 +45,8 @@ def test_legacy_permission_definitions_are_aliases_of_canonical_registry():
 
 
 def test_admin_has_no_generic_capability_bypass():
-    admin_without_delete = make_user(role_name="admin")
-    assert AuthorizationService.decide(admin_without_delete, Capability.EMPLOYEE_UPDATE) is AuthorizationDecision.DENY
+    admin_without_update = make_user(role_name="admin")
+    assert AuthorizationService.decide(admin_without_update, Capability.EMPLOYEE_UPDATE) is AuthorizationDecision.DENY
 
 
 def test_admin_only_capability_is_explicitly_policy_controlled():
@@ -62,6 +63,12 @@ def test_admin_only_capability_is_explicitly_policy_controlled():
 def test_explicit_capability_grant_allows_operation():
     manager = make_user(Capability.CLASS_TEACHER_ASSIGNMENT_MANAGE.value, role_name="manager")
     assert AuthorizationService.allows(manager, Capability.CLASS_TEACHER_ASSIGNMENT_MANAGE)
+
+
+def test_employee_policy_is_a_thin_authorization_facade():
+    manager = make_user(Capability.EMPLOYEE_UPDATE.value, role_name="manager")
+    assert EmployeeCapabilityPolicy.has(manager, Capability.EMPLOYEE_UPDATE.value)
+    assert not EmployeeCapabilityPolicy.has(manager, Capability.EMPLOYEE_DELETE.value)
 
 
 def test_inactive_actor_is_denied_even_with_capability():
