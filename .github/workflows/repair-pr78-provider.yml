@@ -1,15 +1,17 @@
 name: Repair PR78 provider file
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize]
     branches:
-      - fix/collaboration-poller-git-concurrency
+      - main_repos
 
 permissions:
   contents: write
 
 jobs:
   repair:
+    if: github.event.pull_request.head.ref == 'fix/collaboration-poller-git-concurrency' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,11 +19,11 @@ jobs:
           fetch-depth: 0
           ref: fix/collaboration-poller-git-concurrency
 
-      - name: Restore provider and apply concurrency patch
+      - name: Restore provider from main and apply concurrency patch
         shell: bash
         run: |
           set -euo pipefail
-          git checkout HEAD~2 -- CenterManager/src/centermanager/platform/synchronization/git_synchronization_provider.py
+          git checkout origin/main_repos -- CenterManager/src/centermanager/platform/synchronization/git_synchronization_provider.py
           python - <<'PY'
           from pathlib import Path
           p = Path("CenterManager/src/centermanager/platform/synchronization/git_synchronization_provider.py")
