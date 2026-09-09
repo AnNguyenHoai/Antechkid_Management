@@ -30,7 +30,7 @@ class Permission(Base, TimestampMixin):
     roles: Mapped[List[Role]] = relationship(
         "Role",
         secondary="role_permissions",
-        back_populates="roles"
+        back_populates="permissions"
     )
 
     __table_args__ = (
