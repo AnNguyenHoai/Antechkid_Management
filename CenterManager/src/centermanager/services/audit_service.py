@@ -1,13 +1,27 @@
 import json
 from typing import Optional, Any, Dict, List
 from sqlalchemy.orm import sessionmaker, Session
-from centermanager.repositories.audit_log_repository import AuditLogRepository
 from centermanager.models.audit_log import AuditLog
 from centermanager.core.current_user import get_current_user
 from centermanager.core.clock import get_clock
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+
 
 class AuditService:
-    def __init__(self, session_factory: sessionmaker): self._session_factory=session_factory
+    """Application service for audit records.
+
+    The service owns the application/transaction flow while repository
+    construction is delegated to ``RepositoryProvider``. This prevents the
+    service layer from depending on a concrete persistence implementation.
+    """
+
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ):
+        self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     @staticmethod
     def _build_summary(action: str, target_type: Optional[str], target_id: Optional[Any], target_name: Optional[str]) -> str:
@@ -64,7 +78,8 @@ class AuditService:
             session.commit(); session.refresh(log); return log
 
     def list_logs(self, **filters) -> List[AuditLog]:
-        with self._session_factory() as session: return AuditLogRepository(session).search(**filters)
+        with self._session_factory() as session:
+            return self._repository_provider.audit_logs(session).search(**filters)
 
     def log_user_action(self, action, user, details=None, **kwargs): return self.record(action, 'admin', 'user', getattr(user,'id',None), getattr(user,'username',None), details=details, **kwargs)
     def log_role_action(self, action, role, details=None, **kwargs): return self.record(action, 'admin', 'role', getattr(role,'id',None), getattr(role,'name',None), details=details, **kwargs)
