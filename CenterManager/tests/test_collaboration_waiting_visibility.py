@@ -36,21 +36,18 @@ from centermanager.platform.synchronization import GitSynchronizationProvider
 # ---------------------------------------------------------------------
 
 def wait_for_signal(spy, timeout_ms=5000):
-    """Wait using a local Qt event loop so cross-thread signals are dispatched."""
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
-
-    def on_signal(*_args):
-        loop.quit()
-
-    spy.connect(on_signal) if hasattr(spy, "connect") else None
+    """Wait for a cross-thread Qt signal while running an explicit event loop."""
     if spy.count() > 0:
         return True
-    timer.start(timeout_ms)
+
+    loop = QEventLoop()
+    check_timer = QTimer()
+    check_timer.setInterval(20)
+    check_timer.timeout.connect(lambda: loop.quit() if spy.count() > 0 else None)
+    check_timer.start()
+    QTimer.singleShot(timeout_ms, loop.quit)
     loop.exec()
-    timer.stop()
+    check_timer.stop()
     return spy.count() > 0
 
 
@@ -179,7 +176,7 @@ def create_client(tmp_path, remote_path, name, lease_duration_seconds=None):
 
 
 def start_client(client):
-    """Start poller with no automatic cycle, then trigger one explicit initial poll."""
+    """Start poller without an automatic cycle, then trigger one explicit initial poll."""
     poller = client["poller"]
     poller.start(initial_poll=False)
     assert wait_for_timer(poller, timeout_ms=2000), f"{client['name']} timer not created"
