@@ -100,6 +100,10 @@ class Capability(str, Enum):
 
     @classmethod
     def from_value(cls, value: str) -> "Capability":
+        # Persisted/test fixtures from before EP-ARCH-02 may still contain this
+        # identifier. Accept it only as an input alias; the canonical value is
+        # always returned and no legacy value is added to the registry.
+        value = LEGACY_CAPABILITY_ALIASES.get(value, value)
         try:
             return cls(value)
         except ValueError as exc:
@@ -130,6 +134,13 @@ class Capability(str, Enum):
         return "other"
 
 
+# Legacy persisted identifier -> canonical capability identifier. This is an
+# input-compatibility boundary, not a second capability vocabulary.
+LEGACY_CAPABILITY_ALIASES = {
+    "working_time.registration.self": Capability.WORK_REGISTRATION_SELF.value,
+}
+
+
 # Explicit policy-only capabilities are not seeded into generic role matrices.
 ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
@@ -138,10 +149,9 @@ ADMIN_ONLY_CAPABILITIES = frozenset({
 })
 
 # Compatibility policy retained from the pre-normalization Employee Workspace:
-# ADMIN is the privileged system role; MANAGER owns employee record management,
-# but does not implicitly gain schedule/working-time management.
+# MANAGER owns employee record management, but does not implicitly gain
+# schedule/working-time management.
 IMPLICIT_ROLE_CAPABILITIES = {
-    "admin": frozenset(Capability.values()),
     "manager": frozenset({
         Capability.EMPLOYEE_CREATE.value,
         Capability.EMPLOYEE_UPDATE.value,
