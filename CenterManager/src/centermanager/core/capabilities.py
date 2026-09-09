@@ -130,14 +130,30 @@ class Capability(str, Enum):
         return "other"
 
 
-# These capabilities are intentionally policy-only: they are protected by an
-# explicit centralized role policy and are not included in the generic role
-# permission seeding set, preventing Manager from inheriting ADMIN-only power.
+# Explicit policy-only capabilities are not seeded into generic role matrices.
 ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
     Capability.WORK_REGISTRATION_DELETE.value,
     Capability.EMPLOYEE_DELETE.value,
 })
+
+# Compatibility policy retained from the pre-normalization Employee Workspace:
+# ADMIN is the privileged system role; MANAGER owns employee record management,
+# but does not implicitly gain schedule/working-time management.
+IMPLICIT_ROLE_CAPABILITIES = {
+    "admin": frozenset(Capability.values()),
+    "manager": frozenset({
+        Capability.EMPLOYEE_CREATE.value,
+        Capability.EMPLOYEE_UPDATE.value,
+        Capability.EMPLOYEE_ARCHIVE.value,
+    }),
+}
+
+# Broad employee update also authorizes the narrower self-profile update scope.
+# No read capability implies a write capability.
+IMPLIED_CAPABILITIES = {
+    Capability.EMPLOYEE_UPDATE.value: frozenset({Capability.EMPLOYEE_UPDATE_SELF.value}),
+}
 
 PERSISTED_CAPABILITIES = tuple(
     capability.value
