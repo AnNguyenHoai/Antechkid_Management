@@ -96,12 +96,10 @@ class Capability(str, Enum):
 
     @classmethod
     def values(cls) -> tuple[str, ...]:
-        """Return the canonical capability identifiers."""
         return tuple(capability.value for capability in cls)
 
     @classmethod
     def from_value(cls, value: str) -> "Capability":
-        """Resolve a persisted capability identifier or fail explicitly."""
         try:
             return cls(value)
         except ValueError as exc:
@@ -109,7 +107,6 @@ class Capability(str, Enum):
 
     @classmethod
     def category(cls, value: str) -> str:
-        """Return the stable permission category used by the persistence UI."""
         if value.startswith("student."):
             return "student"
         if value.startswith("teacher."):
@@ -133,10 +130,17 @@ class Capability(str, Enum):
         return "other"
 
 
-# Explicit policy exceptions. New capabilities are not automatically granted
-# to Manager merely because they were added to the canonical registry.
+# These capabilities are intentionally policy-only: they are protected by an
+# explicit centralized role policy and are not included in the generic role
+# permission seeding set, preventing Manager from inheriting ADMIN-only power.
 ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
     Capability.WORK_REGISTRATION_DELETE.value,
     Capability.EMPLOYEE_DELETE.value,
 })
+
+PERSISTED_CAPABILITIES = tuple(
+    capability.value
+    for capability in Capability
+    if capability.value not in ADMIN_ONLY_CAPABILITIES
+)
