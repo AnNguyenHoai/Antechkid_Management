@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Permission persistence model and compatibility aliases.
 
-The database keeps the existing ``permissions`` table.  The authorization
+The database keeps the existing ``permissions`` table. The authorization
 vocabulary itself lives in ``core.capabilities.Capability``.
 """
 from __future__ import annotations
@@ -42,15 +42,26 @@ class Permission(Base, TimestampMixin):
 
 
 class PermissionDefinitions:
-    """Backward-compatible string aliases to the canonical capability registry."""
+    """Backward-compatible names for the canonical capability registry."""
 
+    # Keep historically important source-level aliases explicit. Their values
+    # are canonical Capability identifiers; this is not a second vocabulary.
+    ROLE_VIEW = "role.view"
+    ROLE_MANAGE = "role.manage"
+    AUDIT_VIEW = "audit.view"
+    SYSTEM_DIAGNOSTICS_VIEW = "system.diagnostics.view"
+    BACKUP_VIEW = "backup.view"
+    BACKUP_CREATE = "backup.create"
+    BACKUP_RESTORE = "backup.restore"
+
+    # Every remaining definition is generated from the single canonical enum.
     for _capability in Capability:
-        locals()[_capability.name] = _capability.value
+        locals().setdefault(_capability.name, _capability.value)
     del _capability
 
     @classmethod
     def all_permissions(cls) -> List[str]:
-        """Return only capabilities represented by the generic role matrix."""
+        """Return capabilities represented by the generic role matrix."""
         return list(PERSISTED_CAPABILITIES)
 
     @classmethod
