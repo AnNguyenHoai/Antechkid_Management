@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 PermissionService - business logic for permission checking and management.
+
+Authorization checks are delegated to the canonical capability service.
+The service remains as a compatibility facade for existing callers.
 """
 import logging
 from typing import Optional, List, Set
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.capabilities import Capability
 from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
@@ -54,40 +58,40 @@ class PermissionService:
     # ===== Permission Checking =====
 
     def has_permission(self, permission_name: str, user: Optional[User] = None) -> bool:
+        """Check a persisted permission through the canonical capability contract."""
         if user is None:
             user = get_current_user()
         if user is None:
             return False
-        # Admin luôn có mọi quyền (bỏ qua kiểm tra chi tiết)
-        if user.role and user.role.name == RoleDefinitions.ADMIN:
-            return True
-        return user.has_permission(permission_name)
+        capability = Capability.from_value(permission_name)
+        from centermanager.services.authorization_service import AuthorizationService
+        return AuthorizationService.allows(user, capability)
 
     def has_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> bool:
         if user is None:
             user = get_current_user()
         if user is None:
             return False
-        if user.role and user.role.name == RoleDefinitions.ADMIN:
-            return True
-        return user.has_any_permission(permission_names)
+        capabilities = [Capability.from_value(name) for name in permission_names]
+        from centermanager.services.authorization_service import AuthorizationService
+        return AuthorizationService.allows_any(user, capabilities)
 
     def has_all_permissions(self, permission_names: List[str], user: Optional[User] = None) -> bool:
         if user is None:
             user = get_current_user()
         if user is None:
             return False
-        if user.role and user.role.name == RoleDefinitions.ADMIN:
-            return True
-        return user.has_all_permissions(permission_names)
+        capabilities = [Capability.from_value(name) for name in permission_names]
+        from centermanager.services.authorization_service import AuthorizationService
+        return AuthorizationService.allows_all(user, capabilities)
 
     def require_permission(self, permission_name: str, user: Optional[User] = None) -> None:
         if not self.has_permission(permission_name, user):
-            raise PermissionDeniedError(f"Permission '{permission_name}' is required.")
+            raise PermissionDeniedError(f"Capability '{permission_name}' is required.")
 
     def require_any_permission(self, permission_names: List[str], user: Optional[User] = None) -> None:
         if not self.has_any_permission(permission_names, user):
-            raise PermissionDeniedError(f"Any of these permissions is required: {', '.join(permission_names)}")
+            raise PermissionDeniedError(f"Any of these capabilities is required: {', '.join(permission_names)}")
 
     def get_user_permissions(self, user: Optional[User] = None) -> Set[str]:
         if user is None:
@@ -152,10 +156,11 @@ class PermissionService:
 
     def _resolve_permissions(self, session, permission_names: Set[str]) -> List[Permission]:
         known = {p.name: p for p in PermissionRepository(session).list_all()}
-        unknown = sorted(set(permission_names) - set(known))
+        canonical_names = {Capability.from_value(name).value for name in permission_names}
+        unknown = sorted(canonical_names - set(known))
         if unknown:
-            raise ValueError(f"Unknown permissions: {', '.join(unknown)}")
-        return [known[name] for name in sorted(permission_names)]
+            raise ValueError(f"Unknown capabilities: {', '.join(unknown)}")
+        return [known[name] for name in sorted(canonical_names)]
 
     def create_role(self, name: str, display_name: str, description: Optional[str], permission_names: Set[str]) -> Role:
         name = name.strip(); display_name = display_name.strip()
@@ -318,9 +323,6 @@ class PermissionService:
                 raise UserNotFoundError(f"User {user_id} not found.")
             self._ensure_not_current_user(user_id, "delete")
             self._ensure_not_last_admin(session, user, "delete")
-            # An account is now the identity anchor for an Employee. Deleting it
-            # would create an employee without an account, so lifecycle must use
-            # deactivate/archive instead.
             from centermanager.models.employee import Employee
             linked_employee = session.query(Employee).filter(Employee.user_id == user_id).first()
             if linked_employee is not None:
