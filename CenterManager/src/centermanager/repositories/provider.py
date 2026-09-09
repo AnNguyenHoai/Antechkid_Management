@@ -12,19 +12,18 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 from centermanager.repositories.audit_log_repository import AuditLogRepository
+from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 
 
 class RepositoryProvider(Protocol):
-    """Application-facing factory for persistence adapters.
-
-    A provider receives the already-owned transaction/session and returns the
-    repository needed by the service. This keeps repository implementation
-    selection out of application services while preserving the current
-    transaction boundary.
-    """
+    """Application-facing factory for persistence adapters."""
 
     def audit_logs(self, session: Session) -> AuditLogRepository:
         """Return the audit-log repository for ``session``."""
+        ...
+
+    def class_timeline(self, session: Session) -> ClassTimelineRepository:
+        """Return the class-timeline repository for ``session``."""
         ...
 
 
@@ -33,3 +32,6 @@ class SqlAlchemyRepositoryProvider:
 
     def audit_logs(self, session: Session) -> AuditLogRepository:
         return AuditLogRepository(session)
+
+    def class_timeline(self, session: Session) -> ClassTimelineRepository:
+        return ClassTimelineRepository(session)
