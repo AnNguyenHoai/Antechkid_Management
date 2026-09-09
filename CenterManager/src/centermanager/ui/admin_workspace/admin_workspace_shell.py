@@ -24,7 +24,6 @@ from centermanager.services.system_operations_service import SystemOperationsSer
 from centermanager.ui.admin_workspace.system_operations_page import SystemOperationsPage
 from centermanager.ui.admin_workspace.backup_recovery_page import BackupRecoveryPage
 from centermanager.services.backup_operations_service import BackupOperationsService
-from centermanager.ui.admin_workspace.admin_employee_work_data_page import AdminEmployeeWorkDataPage
 
 
 class AdminWorkspaceShell(QWidget):
@@ -54,7 +53,6 @@ class AdminWorkspaceShell(QWidget):
             "diagnostics": PermissionDefinitions.SETTING_UPDATE,
             "audit": PermissionDefinitions.AUDIT_VIEW,
             "backup": PermissionDefinitions.BACKUP_VIEW,
-            "employee_work_data": PermissionDefinitions.USER_VIEW,
         }
 
         self._setup_ui()
@@ -76,7 +74,6 @@ class AdminWorkspaceShell(QWidget):
 
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"},
-            {"id": "employee_work_data", "icon": "🧑‍💼", "label": "Employees & Work"},
             {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
             {"id": "audit", "icon": "📋", "label": "Audit Log"},
             {"id": "settings", "icon": "⚙️", "label": "Settings"},
@@ -98,13 +95,6 @@ class AdminWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.users_page)
-
-        self.admin_employee_work_data_page = AdminEmployeeWorkDataPage(
-            getattr(self._permission_service, "_session_factory"),
-            self._notification_service,
-            parent=self,
-        )
-        self.content_stack.addWidget(self.admin_employee_work_data_page)
 
         self.roles_page = RoleListPage(
             self._permission_service,
@@ -169,8 +159,6 @@ class AdminWorkspaceShell(QWidget):
             return
         if page_id == "users":
             self.content_stack.setCurrentWidget(self.users_page); self.nav.set_active_page("users"); self.header.set_context("Admin Workspace", "Users"); self.users_page.refresh()
-        elif page_id == "employee_work_data":
-            self.content_stack.setCurrentWidget(self.admin_employee_work_data_page); self.nav.set_active_page("employee_work_data"); self.header.set_context("Admin Workspace", "Employees & Work"); self.admin_employee_work_data_page.refresh()
         elif page_id == "roles":
             self.content_stack.setCurrentWidget(self.roles_page); self.nav.set_active_page("roles"); self.header.set_context("Admin Workspace", "Roles & Permissions"); self.roles_page.refresh()
         elif page_id == "audit":
@@ -190,7 +178,6 @@ class AdminWorkspaceShell(QWidget):
         self.set_write_enabled(self._current_write_enabled())
         current = self.content_stack.currentWidget()
         if current is self.users_page: self.users_page.refresh()
-        elif current is self.admin_employee_work_data_page: self.admin_employee_work_data_page.refresh()
         elif current is self.roles_page: self.roles_page.refresh()
         elif current is self.audit_page: self.audit_page.refresh()
         elif current is self.system_operations_page: self.system_operations_page.refresh()
@@ -204,7 +191,6 @@ class AdminWorkspaceShell(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         if hasattr(self.users_page, 'set_write_enabled'): self.users_page.set_write_enabled(enabled)
-        if hasattr(self.admin_employee_work_data_page, 'set_write_enabled'): self.admin_employee_work_data_page.set_write_enabled(enabled)
         if hasattr(self.roles_page, 'set_write_enabled'): self.roles_page.set_write_enabled(enabled)
         if hasattr(self.settings_page, 'set_write_enabled'): self.settings_page.set_write_enabled(enabled)
         if hasattr(self.backup_page, 'set_write_enabled'): self.backup_page.set_write_enabled(enabled)
