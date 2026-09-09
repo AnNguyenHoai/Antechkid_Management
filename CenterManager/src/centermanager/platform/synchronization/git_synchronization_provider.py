@@ -7,6 +7,7 @@ import shutil
 import json
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
@@ -66,6 +67,12 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._askpass_env: dict = {}
         self._lease_duration_seconds = 60
 
+        # Serialize Git subprocesses for this provider. The CollaborationPoller
+        # runs in a QThread while the application thread may access the same
+        # repository through CollaborationManager. Git operations on one local
+        # repository must not overlap. RLock permits nested provider calls.
+        self._git_command_lock = threading.RLock()
+
         if self._token and self._username:
             self._credential_helper = GitCredentialHelper(self._username, self._token)
             self._askpass_env = self._credential_helper.setup_environment()
@@ -94,14 +101,15 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
         logger.debug(f"Running git: {' '.join(args)}")
 
-        result = subprocess.run(
-            ["git"] + args,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
+        with self._git_command_lock:
+            result = subprocess.run(
+                ["git"] + args,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
 
         if result.returncode != 0:
             stderr = result.stderr
