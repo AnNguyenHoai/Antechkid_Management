@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
 from centermanager.models.mixins import TimestampMixin
-from centermanager.core.capabilities import Capability
+from centermanager.core.capabilities import Capability, PERSISTED_CAPABILITIES
 
 if TYPE_CHECKING:
     from centermanager.models.role import Role
@@ -30,7 +30,7 @@ class Permission(Base, TimestampMixin):
     roles: Mapped[List[Role]] = relationship(
         "Role",
         secondary="role_permissions",
-        back_populates="permissions"
+        back_populates="roles"
     )
 
     __table_args__ = (
@@ -44,14 +44,14 @@ class Permission(Base, TimestampMixin):
 class PermissionDefinitions:
     """Backward-compatible string aliases to the canonical capability registry."""
 
-    # Keep the public legacy names stable while making Capability the source.
     for _capability in Capability:
         locals()[_capability.name] = _capability.value
     del _capability
 
     @classmethod
     def all_permissions(cls) -> List[str]:
-        return list(Capability.values())
+        """Return only capabilities represented by the generic role matrix."""
+        return list(PERSISTED_CAPABILITIES)
 
     @classmethod
     def get_category(cls, permission_name: str) -> str:
