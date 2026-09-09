@@ -45,7 +45,6 @@ def wait_for_signal(spy, timeout_ms=5000):
     return spy.count() > 0
 
 
-
 def stop_poller_for_git_mutation(poller):
     """Prevent concurrent Git operations on the same local repository."""
     poller.stop()
@@ -60,6 +59,7 @@ def wait_for_poll(poller, timeout_ms=5000):
     spy = QSignalSpy(poller.poll_completed)
     poller.request_refresh("test")
     return wait_for_signal(spy, timeout_ms)
+
 
 def safe_stop_poller(poller, timeout_ms=5000):
     """Safely stop poller and wait for thread to finish."""
@@ -170,9 +170,14 @@ def create_client(tmp_path, remote_path, name, lease_duration_seconds=None):
 
 
 def start_client(client):
-    """Start poller and wait for timer."""
-    client["poller"].start()
-    assert wait_for_timer(client["poller"], timeout_ms=2000), f"{client['name']} timer not created"
+    """Start poller and establish its initial polling cycle before mutations."""
+    poller = client["poller"]
+    initial_spy = QSignalSpy(poller.poll_completed)
+    poller.start()
+    assert wait_for_timer(poller, timeout_ms=2000), f"{client['name']} timer not created"
+    assert wait_for_signal(initial_spy, timeout_ms=5000), (
+        f"{client['name']} initial poll did not complete"
+    )
 
 
 def stop_client(client):
@@ -398,6 +403,7 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
             pass
         stop_client(client_a)
 
+
 def test_main_isolation_cross_machine(qapp, remote_path, tmp_path):
     """Cross-machine collaboration operations never modify MAIN."""
     client_a = create_client(tmp_path, remote_path, "A")
@@ -427,4 +433,3 @@ def test_main_isolation_cross_machine(qapp, remote_path, tmp_path):
     assert get_main_status(client_a["repo_path"]) == status_a_before
     assert get_main_head(client_b["repo_path"]) == head_b_before
     assert get_main_status(client_b["repo_path"]) == status_b_before
-
