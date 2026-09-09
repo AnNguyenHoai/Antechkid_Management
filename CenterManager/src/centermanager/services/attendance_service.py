@@ -9,12 +9,11 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.attendance import Attendance, AttendanceStatus
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.attendance_repository import AttendanceRepository
-from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.permission_guard import require_permission
 from centermanager.events.student_events import StudentUpdated
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,7 @@ class AttendanceService:
         report_policy: Optional[Any] = None,    # ReportPolicy instance, can be None
         report_service: Optional[Any] = None,   # ReportService instance, can be None
         event_bus: Optional[Any] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
@@ -35,6 +35,7 @@ class AttendanceService:
         self._report_policy = report_policy
         self._report_service = report_service
         self._event_bus = event_bus
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _validate_status(self, status: str) -> str:
         valid = [e.value for e in AttendanceStatus]
@@ -45,14 +46,12 @@ class AttendanceService:
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
         """Check if student is enrolled in the class of the session."""
         with self._session_factory() as session:
-            # Lấy class_id từ session
-            from centermanager.repositories.session_repository import SessionRepository
-            session_repo = SessionRepository(session)
+            session_repo = self._repository_provider.sessions(session)
             session_obj = session_repo.get_by_id(session_id)
             if not session_obj:
                 return False
             class_id = session_obj.class_id
-            enroll_repo = EnrollmentRepository(session)
+            enroll_repo = self._repository_provider.enrollments(session)
             return enroll_repo.exists(student_id, class_id)
 
     @require_permission("attendance.create")
@@ -71,7 +70,7 @@ class AttendanceService:
         status = self._validate_status(status)
 
         with self._session_factory() as session:
-            repo = AttendanceRepository(session)
+            repo = self._repository_provider.attendance(session)
             existing = repo.get_by_session_and_student(session_id, student_id)
 
             if existing:
@@ -125,6 +124,7 @@ class AttendanceService:
                     )
 
                 return attendance
+
     def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
         """Deprecated compatibility hook; generation is deferred to publish lifecycle."""
         return None
@@ -149,26 +149,26 @@ class AttendanceService:
     @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
         with self._session_factory() as session:
-            repo = AttendanceRepository(session)
+            repo = self._repository_provider.attendance(session)
             return repo.get_by_session(session_id)
 
     @require_permission("attendance.view")
     def get_attendance_for_student(self, student_id: int) -> List[Attendance]:
         with self._session_factory() as session:
-            repo = AttendanceRepository(session)
+            repo = self._repository_provider.attendance(session)
             return repo.get_by_student(student_id)
 
     @require_permission("attendance.view")
     def get_summary_for_session(self, session_id: int) -> Dict[str, int]:
         with self._session_factory() as session:
-            repo = AttendanceRepository(session)
+            repo = self._repository_provider.attendance(session)
             return repo.get_summary_by_session(session_id)
 
     @require_permission("attendance.view")
     def get_attendance_rate_for_student(self, student_id: int) -> float:
         """Return attendance rate as percentage (0-100)."""
         with self._session_factory() as session:
-            repo = AttendanceRepository(session)
+            repo = self._repository_provider.attendance(session)
             attendances = repo.get_by_student(student_id)
             if not attendances:
                 return 0.0
