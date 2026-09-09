@@ -131,3 +131,12 @@ class Capability(str, Enum):
         if value.startswith(("employee.", "schedule.", "working_time.", "work_registration.")):
             return "employee"
         return "other"
+
+
+# Explicit policy exceptions. New capabilities are not automatically granted
+# to Manager merely because they were added to the canonical registry.
+ADMIN_ONLY_CAPABILITIES = frozenset({
+    Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
+    Capability.WORK_REGISTRATION_DELETE.value,
+    Capability.EMPLOYEE_DELETE.value,
+})
