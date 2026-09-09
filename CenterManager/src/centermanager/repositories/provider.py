@@ -16,6 +16,8 @@ from centermanager.repositories.attendance_repository import AttendanceRepositor
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.repositories.session_repository import SessionRepository
+from centermanager.repositories.employee_repository import EmployeeRepository
+from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
 
 
 class RepositoryProvider(Protocol):
@@ -41,6 +43,14 @@ class RepositoryProvider(Protocol):
         """Return the session repository for ``session``."""
         ...
 
+    def employees(self, session: Session) -> EmployeeRepository:
+        """Return the employee repository for ``session``."""
+        ...
+
+    def employee_schedules(self, session: Session) -> EmployeeScheduleRepository:
+        """Return the employee-schedule repository for ``session``."""
+        ...
+
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -59,3 +69,9 @@ class SqlAlchemyRepositoryProvider:
 
     def sessions(self, session: Session) -> SessionRepository:
         return SessionRepository(session)
+
+    def employees(self, session: Session) -> EmployeeRepository:
+        return EmployeeRepository(session)
+
+    def employee_schedules(self, session: Session) -> EmployeeScheduleRepository:
+        return EmployeeScheduleRepository(session)
