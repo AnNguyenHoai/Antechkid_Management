@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from centermanager.core.capabilities import Capability
+from centermanager.core.capabilities import (
+    ADMIN_ONLY_CAPABILITIES,
+    Capability,
+    PERSISTED_CAPABILITIES,
+)
 from centermanager.models.permission import PermissionDefinitions
 from centermanager.services.authorization_service import (
     AuthorizationDecision,
@@ -35,17 +39,29 @@ def test_legacy_permission_definitions_are_aliases_of_canonical_registry():
     assert PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL == Capability.WORK_REGISTRATION_VIEW_ALL.value
     assert PermissionDefinitions.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE == Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value
     assert PermissionDefinitions.EMPLOYEE_DELETE == Capability.EMPLOYEE_DELETE.value
-    assert set(PermissionDefinitions.all_permissions()) == set(Capability.values())
+    assert set(PermissionDefinitions.all_permissions()) == set(PERSISTED_CAPABILITIES)
+    assert ADMIN_ONLY_CAPABILITIES.isdisjoint(PERSISTED_CAPABILITIES)
 
 
-def test_admin_has_no_implicit_capability_bypass():
+def test_admin_has_no_generic_capability_bypass():
     admin_without_delete = make_user(role_name="admin")
-    assert AuthorizationService.decide(admin_without_delete, Capability.EMPLOYEE_DELETE) is AuthorizationDecision.DENY
+    assert AuthorizationService.decide(admin_without_delete, Capability.EMPLOYEE_UPDATE) is AuthorizationDecision.DENY
+
+
+def test_admin_only_capability_is_explicitly_policy_controlled():
+    admin = make_user(role_name="admin")
+    manager = make_user(role_name="manager")
+    employee = make_user(role_name="employee")
+
+    for capability in ADMIN_ONLY_CAPABILITIES:
+        assert AuthorizationService.allows(admin, capability)
+        assert not AuthorizationService.allows(manager, capability)
+        assert not AuthorizationService.allows(employee, capability)
 
 
 def test_explicit_capability_grant_allows_operation():
-    admin = make_user(Capability.EMPLOYEE_DELETE.value, role_name="admin")
-    assert AuthorizationService.allows(admin, Capability.EMPLOYEE_DELETE)
+    manager = make_user(Capability.CLASS_TEACHER_ASSIGNMENT_MANAGE.value, role_name="manager")
+    assert AuthorizationService.allows(manager, Capability.CLASS_TEACHER_ASSIGNMENT_MANAGE)
 
 
 def test_inactive_actor_is_denied_even_with_capability():
