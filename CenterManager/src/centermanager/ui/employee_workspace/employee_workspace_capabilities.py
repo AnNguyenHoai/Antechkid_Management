@@ -5,7 +5,7 @@ Navigation visibility is derived from explicit capabilities. Read capabilities
 never imply write capabilities. Domain services remain responsible for enforcing
 these permissions at the data boundary.
 """
-from __future__ import annotations__
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
