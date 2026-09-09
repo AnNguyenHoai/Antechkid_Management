@@ -36,12 +36,18 @@ from centermanager.platform.synchronization import GitSynchronizationProvider
 # ---------------------------------------------------------------------
 
 def wait_for_signal(spy, timeout_ms=5000):
-    """Wait using the Qt event loop; compatible with PySide6 QSignalSpy."""
-    deadline = time.time() + timeout_ms / 1000.0
-    while time.time() < deadline:
-        if spy.count() > 0:
-            return True
-        QTest.qWait(20)
+    """Wait for a cross-thread Qt signal while running an explicit event loop."""
+    if spy.count() > 0:
+        return True
+
+    loop = QEventLoop()
+    check_timer = QTimer()
+    check_timer.setInterval(20)
+    check_timer.timeout.connect(lambda: loop.quit() if spy.count() > 0 else None)
+    check_timer.start()
+    QTimer.singleShot(timeout_ms, loop.quit)
+    loop.exec()
+    check_timer.stop()
     return spy.count() > 0
 
 
@@ -170,12 +176,11 @@ def create_client(tmp_path, remote_path, name, lease_duration_seconds=None):
 
 
 def start_client(client):
-    """Start poller and establish its initial polling cycle before mutations."""
+    """Start poller without an automatic cycle, then trigger one explicit initial poll."""
     poller = client["poller"]
-    initial_spy = QSignalSpy(poller.poll_completed)
-    poller.start()
+    poller.start(initial_poll=False)
     assert wait_for_timer(poller, timeout_ms=2000), f"{client['name']} timer not created"
-    assert wait_for_signal(initial_spy, timeout_ms=5000), (
+    assert wait_for_poll(poller, timeout_ms=5000), (
         f"{client['name']} initial poll did not complete"
     )
 
@@ -370,7 +375,7 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
         ), "Failed to publish expired lock"
 
         # Only B polls after the remote mutation.
-        assert wait_for_poll(client_b["poller"], 5000),             "B did not complete expired-lease poll"
+        assert wait_for_poll(client_b["poller"], 5000), "B did not complete expired-lease poll"
 
         snapshot_b = client_b["poller"].get_last_snapshot()
         assert snapshot_b is not None
@@ -388,8 +393,8 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
         # snapshot. The visibility contract is that B observes the same
         # expired lease timestamp from the remote state.
         snapshot_lease = snapshot_b.remote_lock.get("lease_expires_at")
-        assert snapshot_lease is not None,             "B snapshot did not expose lease_expires_at"
-        assert datetime.fromisoformat(snapshot_lease) <= datetime.now(),             "B snapshot did not observe the expired lease"
+        assert snapshot_lease is not None, "B snapshot did not expose lease_expires_at"
+        assert datetime.fromisoformat(snapshot_lease) <= datetime.now(), "B snapshot did not observe the expired lease"
 
         assert snapshot_b.poll_status == "success"
         assert snapshot_b.is_stale is False
