@@ -17,10 +17,8 @@ def test_runtime_teacher_registration_repair_is_latest_single_step():
 def test_admin_workspace_is_reserved_for_admin_accounts():
     source = (ROOT / "src" / "centermanager" / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    # The workspace registry no longer uses the old source-level sentinel
-    # ("admin": None). The current contract is permission-based routing:
-    # Admin Workspace requires user.manage, while the actual admin shell also
-    # enforces the is_admin boundary.
+    # Admin Workspace requires user.manage at the top-level workspace router,
+    # while the Admin shell enforces the concrete admin-role boundary.
     assert '"admin": "user.manage"' in source
     assert '"admin": None' not in source
     assert 'if required_perm:' in source
@@ -28,12 +26,13 @@ def test_admin_workspace_is_reserved_for_admin_accounts():
     assert 'if workspace_id == "admin":' in source
 
 
-def test_admin_workspace_pages_have_admin_role_boundary():
+def test_admin_workspace_has_admin_role_boundary_without_employee_work_page():
     source = (
         ROOT / "src" / "centermanager" / "ui" / "admin_workspace"
         / "admin_workspace_shell.py"
     ).read_text(encoding="utf-8")
     assert "user = get_current_user()" in source
-    assert "if user is None or not user.is_admin:" in source
+    assert "user.is_admin" in source
     assert "Permission denied for" in source
-    assert '"employee_work_data": PermissionDefinitions.USER_VIEW' in source
+    assert "AdminEmployeeWorkDataPage" not in source
+    assert '"employee_work_data"' not in source
