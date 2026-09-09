@@ -301,6 +301,8 @@ class TestLockIsolation:
         lock = threading.Lock()
 
         def acquire_worker(worker_id: str):
+            provider = None
+            success = False
             try:
                 lock_data = {
                     "locked": True,
@@ -320,21 +322,32 @@ class TestLockIsolation:
                     branch="main"
                 )
                 provider.connect()
+                start_barrier.wait(timeout=10)
                 success = provider.acquire_lock(lock_data)
                 with lock:
                     results.append((worker_id, success))
-                if success:
-                    # Keep lock for a moment to ensure the other fails
-                    time.sleep(0.5)
-                    provider.release_lock(f"user_{worker_id}")
             except Exception as e:
                 with lock:
                     results.append((worker_id, f"ERROR: {e}"))
+            finally:
+                try:
+                    # Both contenders must complete their acquisition attempt before
+                    # the winner releases the lock. This prevents a slow Git operation
+                    # from turning one atomic race into two sequential acquisitions.
+                    attempt_complete_barrier.wait(timeout=10)
+                except threading.BrokenBarrierError:
+                    pass
+                if success and provider is not None:
+                    provider.release_lock(f"user_{worker_id}")
 
         # Run multiple rounds for reliability
         rounds = 10
         for round_num in range(rounds):
             results.clear()
+            # Both contenders start acquisition together. The second barrier keeps
+            # the winner alive until the losing acquisition attempt has completed.
+            start_barrier = threading.Barrier(2)
+            attempt_complete_barrier = threading.Barrier(2)
             threads = []
             for i in range(2):
                 t = threading.Thread(target=acquire_worker, args=(str(i),))
@@ -342,7 +355,9 @@ class TestLockIsolation:
                 t.start()
 
             for t in threads:
-                t.join(timeout=10)
+                t.join(timeout=20)
+
+            assert all(not t.is_alive() for t in threads), f"Contender thread leaked in round {round_num}"
 
             successes = [r for r in results if r[1] is True]
             failures = [r for r in results if r[1] is False]
