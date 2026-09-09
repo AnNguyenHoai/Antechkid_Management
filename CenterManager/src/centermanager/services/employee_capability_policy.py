@@ -1,8 +1,10 @@
 """Compatibility facade for Employee Workspace capability checks.
 
 Authorization policy is centralized in ``AuthorizationService``. Employee
-services may keep using this facade during migration, but it no longer
-contains implicit role-based grants.
+services may keep using this facade during migration. When a permission
+service is supplied by an application boundary, this facade delegates to it;
+production ``PermissionService`` itself delegates to the canonical
+``AuthorizationService``.
 """
 from __future__ import annotations
 
@@ -28,8 +30,11 @@ class EmployeeCapabilityPolicy:
     ) -> bool:
         if user is None:
             return False
+        canonical = cls._canonical(capability)
+        if permission_service is not None:
+            return bool(permission_service.has_permission(canonical.value, user))
         from centermanager.services.authorization_service import AuthorizationService
-        return AuthorizationService.allows(user, cls._canonical(capability))
+        return AuthorizationService.allows(user, canonical)
 
     @classmethod
     def require(cls, user: Optional[User], capability: str, error_type, message=None):
