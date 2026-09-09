@@ -9,11 +9,24 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 
 class ClassTimelineService:
-    def __init__(self, session_factory: sessionmaker) -> None:
+    """Application service for class timeline events.
+
+    Repository construction is delegated to the repository provider. The
+    service continues to own the session/transaction lifecycle for backward
+    compatibility with existing callers.
+    """
+
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def log_event(
         self,
@@ -40,7 +53,7 @@ class ClassTimelineService:
                 metadata_json=metadata_json,
                 created_by=created_by or "system",
             )
-            repo = ClassTimelineRepository(session)
+            repo = self._repository_provider.class_timeline(session)
             repo.add(event)
             session.commit()
             session.refresh(event)
@@ -48,5 +61,5 @@ class ClassTimelineService:
 
     def get_class_timeline(self, class_id: int, limit: Optional[int] = None) -> List[ClassTimelineEvent]:
         with self._session_factory() as session:
-            repo = ClassTimelineRepository(session)
+            repo = self._repository_provider.class_timeline(session)
             return repo.get_by_class(class_id, limit)
