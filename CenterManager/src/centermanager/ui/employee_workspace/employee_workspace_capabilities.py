@@ -94,12 +94,8 @@ class EmployeeWorkspaceCapabilities:
             schedule_manage=permission_service.has_permission(
                 PermissionDefinitions.SCHEDULE_MANAGE, user
             ),
-            registration_self=permission_service.has_any_permission(
-                [
-                    PermissionDefinitions.WORK_REGISTRATION_SELF,
-                    "working_time.registration.self",
-                ],
-                user,
+            registration_self=permission_service.has_permission(
+                PermissionDefinitions.WORK_REGISTRATION_SELF, user
             ),
             registration_all=permission_service.has_permission(
                 PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL, user
