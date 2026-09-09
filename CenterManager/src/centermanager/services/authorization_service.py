@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Iterable
 
-from centermanager.core.capabilities import Capability
+from centermanager.core.capabilities import Capability, ADMIN_ONLY_CAPABILITIES
+from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
 
 
@@ -15,11 +16,10 @@ class AuthorizationDecision(str, Enum):
 
 @dataclass(frozen=True)
 class AuthorizationContext:
-    """Optional context carried with a capability decision.
+    """Optional request context for a capability decision.
 
-    Resource and edit-session checks remain separate domain/application
-    invariants. This object only describes the authorization request and does
-    not grant permissions by itself.
+    Resource and edit-session checks remain separate application/domain
+    invariants. Context never grants a capability by itself.
     """
 
     actor_id: Optional[int] = None
@@ -42,8 +42,17 @@ class AuthorizationService:
             return AuthorizationDecision.DENY
 
         canonical = capability if isinstance(capability, Capability) else Capability.from_value(capability)
-        # Deliberately no role-name bypass: even ADMIN is authorized through
-        # the explicit capability grants assigned to that role.
+
+        # Administrative operations have an explicit, centralized policy.
+        # They are not generic "admin gets everything" access and are never
+        # inferred from WRITE mode or a UI state.
+        if canonical.value in ADMIN_ONLY_CAPABILITIES:
+            return (
+                AuthorizationDecision.ALLOW
+                if user.role.name == RoleDefinitions.ADMIN
+                else AuthorizationDecision.DENY
+            )
+
         return (
             AuthorizationDecision.ALLOW
             if user.has_permission(canonical.value)
