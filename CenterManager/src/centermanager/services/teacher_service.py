@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
-from centermanager.repositories.teacher_repository import TeacherRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.teacher_events import TeacherCreated, TeacherUpdated, TeacherArchived, TeacherRestored
@@ -44,11 +44,13 @@ class TeacherService:
         self,
         session_factory: sessionmaker,
         timeline_service: Optional[TeacherTimelineService] = None,
-        event_bus: Optional[EventBus] = None
+        event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._event_bus = event_bus
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -81,7 +83,7 @@ class TeacherService:
         return normalized
 
     def _generate_teacher_code(self, session: Session) -> str:
-        repo = TeacherRepository(session)
+        repo = self._repository_provider.teachers(session)
         highest = repo.get_highest_teacher_number()
         next_num = (highest or 0) + 1
         return f"TCH{next_num:03d}"
@@ -119,7 +121,7 @@ class TeacherService:
                 join_date=join_date or date.today(),
                 status=norm_status,
             )
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             repo.add(teacher)
             session.commit()
             session.refresh(teacher)
@@ -142,7 +144,7 @@ class TeacherService:
 
     def get_teacher(self, teacher_id: int) -> Teacher:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_id(teacher_id)
             if teacher is None or teacher.deleted_at is not None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found or deleted.")
@@ -150,7 +152,7 @@ class TeacherService:
 
     def get_teacher_by_code(self, teacher_code: str) -> Teacher:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_code(teacher_code)
             if teacher is None:
                 raise TeacherNotFoundError(f"Teacher code {teacher_code} not found.")
@@ -158,21 +160,23 @@ class TeacherService:
 
     def list_teachers(self) -> List[Teacher]:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             return repo.list_active()
 
     def search_teachers(self, query: str) -> List[Teacher]:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             return repo.search_teachers(query)
 
     def list_archived_teachers(self) -> List[Teacher]:
         with self._session_factory() as session:
-            return TeacherRepository(session).list_archived()
+            repo = self._repository_provider.teachers(session)
+            return repo.list_archived()
 
     def get_archived_teacher(self, teacher_id: int) -> Teacher:
         with self._session_factory() as session:
-            teacher = TeacherRepository(session).get_by_id(teacher_id)
+            repo = self._repository_provider.teachers(session)
+            teacher = repo.get_by_id(teacher_id)
             if teacher is None or teacher.deleted_at is None:
                 raise TeacherNotFoundError(f"Archived teacher {teacher_id} not found.")
             return teacher
@@ -190,7 +194,7 @@ class TeacherService:
         status: Any = UNSET,
     ) -> Teacher:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_id(teacher_id)
             if teacher is None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
@@ -282,7 +286,7 @@ class TeacherService:
 
     def delete_teacher(self, teacher_id: int) -> None:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_id(teacher_id)
             if teacher is None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
@@ -307,7 +311,7 @@ class TeacherService:
 
     def restore_teacher(self, teacher_id: int) -> None:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_id(teacher_id)
             if teacher is None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
@@ -332,7 +336,7 @@ class TeacherService:
 
     def get_teacher_with_details(self, teacher_id: int) -> Teacher:
         with self._session_factory() as session:
-            repo = TeacherRepository(session)
+            repo = self._repository_provider.teachers(session)
             teacher = repo.get_by_id_with_relations(teacher_id)
             if teacher is None or teacher.deleted_at is not None:
                 raise TeacherNotFoundError(f"Teacher {teacher_id} not found.")
