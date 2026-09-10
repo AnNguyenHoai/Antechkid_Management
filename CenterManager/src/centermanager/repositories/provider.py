@@ -23,57 +23,49 @@ from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.report_repository import ReportRepository
 from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
+from centermanager.repositories.income_repository import IncomeRepository
 
 
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
 
     def audit_logs(self, session: Session) -> AuditLogRepository:
-        """Return the audit-log repository for ``session``."""
         ...
 
     def class_timeline(self, session: Session) -> ClassTimelineRepository:
-        """Return the class-timeline repository for ``session``."""
         ...
 
     def attendance(self, session: Session) -> AttendanceRepository:
-        """Return the attendance repository for ``session``."""
         ...
 
     def enrollments(self, session: Session) -> EnrollmentRepository:
-        """Return the enrollment repository for ``session``."""
         ...
 
     def sessions(self, session: Session) -> SessionRepository:
-        """Return the session repository for ``session``."""
         ...
 
     def employees(self, session: Session) -> EmployeeRepository:
-        """Return the employee repository for ``session``."""
         ...
 
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository:
-        """Return the employee-schedule repository for ``session``."""
         ...
 
     def classes(self, session: Session) -> ClassRepository:
-        """Return the class repository for ``session``."""
         ...
 
     def students(self, session: Session) -> StudentRepository:
-        """Return the student repository for ``session``."""
         ...
 
     def assessments(self, session: Session) -> AssessmentRepository:
-        """Return the assessment repository for ``session``."""
         ...
 
     def reports(self, session: Session) -> ReportRepository:
-        """Return the report repository for ``session``."""
         ...
 
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository:
-        """Return the expense-timeline repository for ``session``."""
+        ...
+
+    def incomes(self, session: Session) -> IncomeRepository:
         ...
 
 
@@ -115,3 +107,6 @@ class SqlAlchemyRepositoryProvider:
 
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository:
         return ExpenseTimelineRepository(session)
+
+    def incomes(self, session: Session) -> IncomeRepository:
+        return IncomeRepository(session)
