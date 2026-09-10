@@ -21,6 +21,7 @@ from centermanager.repositories.employee_schedule_repository import EmployeeSche
 from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
+from centermanager.repositories.report_repository import ReportRepository
 
 
 class RepositoryProvider(Protocol):
@@ -66,6 +67,10 @@ class RepositoryProvider(Protocol):
         """Return the assessment repository for ``session``."""
         ...
 
+    def reports(self, session: Session) -> ReportRepository:
+        """Return the report repository for ``session``."""
+        ...
+
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -99,3 +104,6 @@ class SqlAlchemyRepositoryProvider:
 
     def assessments(self, session: Session) -> AssessmentRepository:
         return AssessmentRepository(session)
+
+    def reports(self, session: Session) -> ReportRepository:
+        return ReportRepository(session)
