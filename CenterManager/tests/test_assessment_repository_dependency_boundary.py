@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
@@ -62,7 +60,7 @@ def test_assessment_service_uses_injected_repository_provider():
     result = service.create_assessment(
         student_id=7,
         assessment_date=__import__("datetime").date(2026, 9, 10),
-        assessment_type="MONTHLY",
+        assessment_type="Monthly",
         strengths="Good",
         improvements="Practice",
         next_goal="Next",
