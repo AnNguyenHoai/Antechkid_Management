@@ -10,10 +10,10 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.assessment import Assessment, AssessmentType
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.services.timeline_service import TimelineService
 from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentAssessmentChanged
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 if TYPE_CHECKING:
     from centermanager.services.report_policy import ReportPolicy
@@ -40,12 +40,14 @@ class AssessmentService:
         report_policy: Optional["ReportPolicy"] = None,
         report_service: Optional["ReportService"] = None,
         event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._report_policy = report_policy
         self._report_service = report_service
         self._event_bus = event_bus
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -130,7 +132,7 @@ class AssessmentService:
                 next_goal=norm_next_goal,
                 teacher_comment=norm_comment,
             )
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             repo.add(assessment)
             session.commit()
             session.refresh(assessment)
@@ -154,7 +156,7 @@ class AssessmentService:
 
     def get_assessment(self, assessment_id: int) -> Assessment:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             assessment = repo.get_by_id(assessment_id)
             if assessment is None:
                 raise AssessmentNotFoundError(f"Assessment id {assessment_id} not found.")
@@ -162,12 +164,12 @@ class AssessmentService:
 
     def get_assessments_for_student(self, student_id: int) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             return repo.get_by_student(student_id)
 
     def get_latest_assessment(self, student_id: int) -> Optional[Assessment]:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             return repo.get_latest(student_id)
 
     def update_assessment(
@@ -182,7 +184,7 @@ class AssessmentService:
         teacher_comment: Optional[str] = None,
     ) -> Assessment:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             assessment = repo.get_by_id(assessment_id)
             if assessment is None:
                 raise AssessmentNotFoundError(f"Assessment id {assessment_id} not found.")
@@ -270,7 +272,7 @@ class AssessmentService:
 
     def delete_assessment(self, assessment_id: int) -> None:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             assessment = repo.get_by_id(assessment_id)
             if assessment is None:
                 raise AssessmentNotFoundError(f"Assessment id {assessment_id} not found.")
@@ -294,10 +296,10 @@ class AssessmentService:
 
     def get_all_assessments_with_student(self) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             return repo.get_all_with_student()
 
     def get_assessments_for_student_with_student(self, student_id: int) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = AssessmentRepository(session)
+            repo = self._repository_provider.assessments(session)
             return repo.get_by_student_with_student(student_id)
