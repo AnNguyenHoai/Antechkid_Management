@@ -7,9 +7,7 @@ from enum import StrEnum
 from typing import Callable, List, Optional
 
 from centermanager.models.enrollment import Enrollment
-from centermanager.repositories.enrollment_repository import EnrollmentRepository
-from centermanager.repositories.class_repository import ClassRepository
-from centermanager.repositories.student_repository import StudentRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentEnrollmentChanged
 
@@ -29,11 +27,23 @@ class EnrollmentValidationError(EnrollmentError): pass
 
 
 class EnrollmentService:
-    """Owns Enrollment lifecycle while preserving historical rows."""
+    """Owns Enrollment lifecycle while preserving historical rows.
 
-    def __init__(self, session_factory: Callable, event_bus: Optional[EventBus] = None):
+    Repository construction is delegated to ``RepositoryProvider``. The
+    service continues to own the session/transaction lifecycle so the
+    migration changes dependency selection without changing business
+    transaction semantics.
+    """
+
+    def __init__(
+        self,
+        session_factory: Callable,
+        event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ):
         self._session_factory = session_factory
         self._event_bus = event_bus
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _publish_change(
         self, enrollment: Enrollment, action: str, previous_status: Optional[str]
@@ -51,14 +61,14 @@ class EnrollmentService:
 
     def enroll(self, student_id: int, class_id: int, start_date: Optional[date] = None) -> Enrollment:
         with self._session_factory() as session:
-            class_obj = ClassRepository(session).get_by_id(class_id)
+            class_obj = self._repository_provider.classes(session).get_by_id(class_id)
             if class_obj is None or class_obj.deleted_at is not None:
                 raise EnrollmentError("Class not found or archived.")
-            student = StudentRepository(session).get_by_id(student_id)
+            student = self._repository_provider.students(session).get_by_id(student_id)
             if student is None or student.deleted_at is not None:
                 raise EnrollmentError("Student not found or inactive.")
 
-            repo = EnrollmentRepository(session)
+            repo = self._repository_provider.enrollments(session)
             if repo.exists(student_id, class_id, active_only=True):
                 raise EnrollmentAlreadyActiveError("Student already has an active enrollment in this class.")
             if class_obj.capacity is not None and len(repo.get_active_by_class(class_id)) >= class_obj.capacity:
@@ -83,10 +93,10 @@ class EnrollmentService:
 
     def _transition(self, enrollment_id: int, target: EnrollmentStatus, end_date: Optional[date]) -> Enrollment:
         with self._session_factory() as session:
-            enrollment = EnrollmentRepository(session).get_by_id(enrollment_id)
+            enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
             if enrollment is None:
                 raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
-            class_obj = ClassRepository(session).get_by_id(enrollment.class_id)
+            class_obj = self._repository_provider.classes(session).get_by_id(enrollment.class_id)
             if class_obj is None or class_obj.deleted_at is not None:
                 raise EnrollmentValidationError(
                     f"Archived class {enrollment.class_id} cannot change enrollments until restored."
@@ -108,9 +118,9 @@ class EnrollmentService:
 
     def get_student_history(self, student_id: int) -> List[Enrollment]:
         with self._session_factory() as session:
-            return EnrollmentRepository(session).get_by_student(student_id)
+            return self._repository_provider.enrollments(session).get_by_student(student_id)
 
     def get_active_students(self, class_id: int):
         with self._session_factory() as session:
-            return [e.student for e in EnrollmentRepository(session).get_by_class_with_student(class_id)
+            return [e.student for e in self._repository_provider.enrollments(session).get_by_class_with_student(class_id)
                     if e.status == EnrollmentStatus.ACTIVE.value and e.student]
