@@ -10,8 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.income import Income
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.income_repository import IncomeRepository
-from centermanager.repositories.enrollment_repository import EnrollmentRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.timeline_service import TimelineService
@@ -40,12 +39,14 @@ class IncomeService:
         class_service: ClassService,
         timeline_service: TimelineService,
         permission_service: PermissionService,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._student_service = student_service
         self._class_service = class_service
         self._timeline_service = timeline_service
         self._permission_service = permission_service
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -82,7 +83,7 @@ class IncomeService:
 
     def _check_student_enrolled(self, student_id: int, class_id: int) -> bool:
         with self._session_factory() as session:
-            repo = EnrollmentRepository(session)
+            repo = self._repository_provider.enrollments(session)
             return repo.exists(student_id, class_id)
 
     @require_permission("finance.income.create")
@@ -101,7 +102,6 @@ class IncomeService:
         """
         Create an income record. If student_id and class_id are None, treat as other income source.
         """
-        # Validate fields
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
         payment_method = self._validate_payment_method(payment_method)
@@ -111,19 +111,17 @@ class IncomeService:
         received_by = self._normalize_text(received_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
 
-        # Validate student/class if provided
         if student_id is not None:
-            self._student_service.get_student(student_id)  # raises if not found
+            self._student_service.get_student(student_id)
         if class_id is not None:
-            self._class_service.get_class(class_id)  # raises if not found
+            self._class_service.get_class(class_id)
 
-        # If both student and class are provided, check enrollment
         if student_id is not None and class_id is not None:
             if not self._check_student_enrolled(student_id, class_id):
                 raise IncomeValidationError("Student is not enrolled in the selected class.")
 
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -139,7 +137,6 @@ class IncomeService:
             session.commit()
             session.refresh(income)
 
-            # Log timeline if student exists
             if student_id is not None:
                 class_name = self._class_service.get_class(class_id).name if class_id else "N/A"
                 self._timeline_service.log_event(
@@ -157,7 +154,6 @@ class IncomeService:
                     }
                 )
             else:
-                # Optionally log to system timeline if you have one
                 pass
 
             return income
@@ -165,7 +161,7 @@ class IncomeService:
     @require_permission("finance.view")
     def get_income(self, income_id: int) -> Income:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id(income_id)
             if income is None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found.")
@@ -187,7 +183,7 @@ class IncomeService:
     ) -> Tuple[List[Income], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             items = repo.list_active(
                 student_id=student_id,
                 class_id=class_id,
@@ -223,7 +219,7 @@ class IncomeService:
         note: Optional[str] = None,
     ) -> Income:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
@@ -264,7 +260,6 @@ class IncomeService:
             session.commit()
             session.refresh(income)
 
-            # Log timeline if student exists
             if income.student_id is not None:
                 self._timeline_service.log_event(
                     student_id=income.student_id,
@@ -278,17 +273,15 @@ class IncomeService:
     @require_permission("finance.income.delete")
     def delete_income(self, income_id: int) -> None:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or already deleted.")
 
             student_id = income.student_id
-            # Soft delete
             income.deleted_at = datetime.now()
             session.commit()
 
-            # Log timeline if student exists
             if student_id is not None:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -297,6 +290,7 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
+
 # update lifecycle: income.received_by = new_received_by
 
 
