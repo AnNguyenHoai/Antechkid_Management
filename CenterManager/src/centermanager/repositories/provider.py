@@ -24,6 +24,8 @@ from centermanager.repositories.assessment_repository import AssessmentRepositor
 from centermanager.repositories.report_repository import ReportRepository
 from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
 from centermanager.repositories.income_repository import IncomeRepository
+from centermanager.repositories.teacher_repository import TeacherRepository
+from centermanager.repositories.teacher_assignment_repository import TeacherAssignmentRepository
 
 
 class RepositoryProvider(Protocol):
@@ -68,6 +70,12 @@ class RepositoryProvider(Protocol):
     def incomes(self, session: Session) -> IncomeRepository:
         ...
 
+    def teachers(self, session: Session) -> TeacherRepository:
+        ...
+
+    def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository:
+        ...
+
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -110,3 +118,9 @@ class SqlAlchemyRepositoryProvider:
 
     def incomes(self, session: Session) -> IncomeRepository:
         return IncomeRepository(session)
+
+    def teachers(self, session: Session) -> TeacherRepository:
+        return TeacherRepository(session)
+
+    def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository:
+        return TeacherAssignmentRepository(session)
