@@ -8,7 +8,6 @@ from typing import Optional, List
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
-from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 
