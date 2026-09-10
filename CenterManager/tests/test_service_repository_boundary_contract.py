@@ -1,10 +1,4 @@
-"""Architecture guard for the EP-ARCH-03 service/repository boundary.
-
-This test intentionally protects only services that have already been migrated
-onto RepositoryProvider. It is a migration guard: adding a new concrete
-repository import or construction to a migrated service must fail the suite.
-The provider itself remains the infrastructure composition point.
-"""
+"""Architecture guard for the EP-ARCH-03 service/repository boundary."""
 from __future__ import annotations
 
 import ast
@@ -12,12 +6,9 @@ from pathlib import Path
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICES_DIR = PROJECT_ROOT / "src" / "centermanager" / "services"
 
-# Services migrated by EP-ARCH-03 so far. Keep this list explicit while the
-# remaining legacy services are migrated in subsequent slices.
 MIGRATED_SERVICES = (
     "audit_service.py",
     "attendance_service.py",
@@ -29,6 +20,7 @@ MIGRATED_SERVICES = (
     "income_service.py",
     "teacher_assignment_service.py",
     "teacher_service.py",
+    "student_note_service.py",
 )
 
 
@@ -76,15 +68,13 @@ def test_migrated_services_depend_on_repository_provider_only(filename: str) -> 
         f"{filename} must depend on RepositoryProvider"
     )
     assert not visitor.concrete_constructors, (
-        f"{filename} constructs concrete repositories directly: "
-        f"{visitor.concrete_constructors}"
+        f"{filename} constructs concrete repositories directly: {visitor.concrete_constructors}"
     )
 
 
 def test_repository_provider_is_the_application_facing_repository_factory() -> None:
     provider_path = PROJECT_ROOT / "src" / "centermanager" / "repositories" / "provider.py"
     tree = ast.parse(provider_path.read_text(encoding="utf-8"), filename=str(provider_path))
-
     classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
     assert "RepositoryProvider" in classes
     assert "SqlAlchemyRepositoryProvider" in classes
