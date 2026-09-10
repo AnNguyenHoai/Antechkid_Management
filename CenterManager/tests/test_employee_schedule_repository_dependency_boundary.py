@@ -56,6 +56,15 @@ class _Provider:
         return _ScheduleRepository()
 
 
+def _self_schedule_user(user_id=7):
+    role = type("Role", (), {"name": "employee"})()
+    return type(
+        "User",
+        (),
+        {"id": user_id, "role": role, "permissions": {"schedule.view.self"}},
+    )()
+
+
 def test_employee_schedule_service_does_not_select_concrete_repository_implementations():
     source = inspect.getsource(EmployeeScheduleService)
 
@@ -88,9 +97,10 @@ def test_schedule_reads_use_the_injected_schedule_repository():
         session_factory=lambda: _SessionContext(session),
         repository_provider=provider,
     )
+    user = _self_schedule_user()
 
-    assert service.list_rules(123, user=type("User", (), {"id": 7})()) == []
-    assert service.list_exceptions(123, user=type("User", (), {"id": 7})()) == []
+    assert service.list_rules(123, user=user) == []
+    assert service.list_exceptions(123, user=user) == []
     assert provider.schedule_sessions == [session, session]
 
 
