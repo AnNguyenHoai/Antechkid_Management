@@ -8,7 +8,9 @@ DETAIL = Path("src/centermanager/ui/class_workspace/class_detail_page.py").read_
 
 
 def test_class_facade_preserves_shared_event_bus_for_enrollment():
-    assert "EnrollmentService(self._session_factory, event_bus=self._event_bus)" in CLASS_SERVICE
+    assert "EnrollmentService(" in CLASS_SERVICE
+    assert "event_bus=self._event_bus" in CLASS_SERVICE
+    assert "repository_provider=self._repository_provider" in CLASS_SERVICE
     assert "StudentEnrollmentChanged" in ENROLLMENT_SERVICE
 
 
