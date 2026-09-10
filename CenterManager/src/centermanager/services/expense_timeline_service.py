@@ -1,15 +1,27 @@
 # -*- coding: utf-8 -*-
 import json
 from typing import Optional
+
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
-from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 
 class ExpenseTimelineService:
-    def __init__(self, session_factory: sessionmaker):
+    """Application service for expense timeline records.
+
+    Repository construction is delegated to ``RepositoryProvider`` while this
+    service retains ownership of the existing session/transaction boundary.
+    """
+
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def log_event(
         self,
@@ -30,7 +42,7 @@ class ExpenseTimelineService:
                 metadata_json=metadata_json,
                 created_by=created_by or "system",
             )
-            repo = ExpenseTimelineRepository(session)
+            repo = self._repository_provider.expense_timeline(session)
             repo.add(event)
             session.commit()
             session.refresh(event)
