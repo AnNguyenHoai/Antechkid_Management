@@ -20,41 +20,50 @@ from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
 from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.student_repository import StudentRepository
-from centermanager.repositories.teacher_timeline_repository import TeacherTimelineRepository
+from centermanager.repositories.assessment_repository import AssessmentRepository
 
 
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
 
     def audit_logs(self, session: Session) -> AuditLogRepository:
+        """Return the audit-log repository for ``session``."""
         ...
 
     def class_timeline(self, session: Session) -> ClassTimelineRepository:
+        """Return the class-timeline repository for ``session``."""
         ...
 
     def attendance(self, session: Session) -> AttendanceRepository:
+        """Return the attendance repository for ``session``."""
         ...
 
     def enrollments(self, session: Session) -> EnrollmentRepository:
+        """Return the enrollment repository for ``session``."""
         ...
 
     def sessions(self, session: Session) -> SessionRepository:
+        """Return the session repository for ``session``."""
         ...
 
     def employees(self, session: Session) -> EmployeeRepository:
+        """Return the employee repository for ``session``."""
         ...
 
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository:
+        """Return the employee-schedule repository for ``session``."""
         ...
 
     def classes(self, session: Session) -> ClassRepository:
+        """Return the class repository for ``session``."""
         ...
 
     def students(self, session: Session) -> StudentRepository:
+        """Return the student repository for ``session``."""
         ...
 
-    def teacher_timeline(self, session: Session) -> TeacherTimelineRepository:
-        """Return the teacher-timeline repository for ``session``."""
+    def assessments(self, session: Session) -> AssessmentRepository:
+        """Return the assessment repository for ``session``."""
         ...
 
 
@@ -88,5 +97,5 @@ class SqlAlchemyRepositoryProvider:
     def students(self, session: Session) -> StudentRepository:
         return StudentRepository(session)
 
-    def teacher_timeline(self, session: Session) -> TeacherTimelineRepository:
-        return TeacherTimelineRepository(session)
+    def assessments(self, session: Session) -> AssessmentRepository:
+        return AssessmentRepository(session)
