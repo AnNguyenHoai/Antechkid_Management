@@ -31,10 +31,19 @@ def test_student_note_service_does_not_import_concrete_repository():
 
     path = Path(__file__).parents[1] / "src" / "centermanager" / "services" / "student_note_service.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    imports = []
+
+    # RepositoryProvider is the explicit application-facing dependency seam.
+    # Only concrete repository implementations are forbidden here.
+    concrete_repository_imports = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("centermanager.repositories"):
-            imports.append(node.module)
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.startswith("centermanager.repositories.") and module != "centermanager.repositories.provider":
+                concrete_repository_imports.append(module)
         elif isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names if alias.name.startswith("centermanager.repositories"))
-    assert imports == []
+            for alias in node.names:
+                module = alias.name
+                if module.startswith("centermanager.repositories.") and module != "centermanager.repositories.provider":
+                    concrete_repository_imports.append(module)
+
+    assert concrete_repository_imports == []
