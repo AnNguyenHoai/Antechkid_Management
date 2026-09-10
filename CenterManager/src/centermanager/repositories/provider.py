@@ -22,6 +22,7 @@ from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.report_repository import ReportRepository
+from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
 
 
 class RepositoryProvider(Protocol):
@@ -71,6 +72,10 @@ class RepositoryProvider(Protocol):
         """Return the report repository for ``session``."""
         ...
 
+    def expense_timeline(self, session: Session) -> ExpenseTimelineRepository:
+        """Return the expense-timeline repository for ``session``."""
+        ...
+
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -107,3 +112,6 @@ class SqlAlchemyRepositoryProvider:
 
     def reports(self, session: Session) -> ReportRepository:
         return ReportRepository(session)
+
+    def expense_timeline(self, session: Session) -> ExpenseTimelineRepository:
+        return ExpenseTimelineRepository(session)
