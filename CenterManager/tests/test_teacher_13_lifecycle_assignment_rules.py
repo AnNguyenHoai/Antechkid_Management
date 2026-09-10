@@ -30,4 +30,4 @@ def test_assignment_rules_reject_invalid_teacher_and_class_states():
     assert "Inactive teacher" in source
     assert "Archived class" in source
     assert "Inactive class" in source
-    assert "return ClassRepository(session).list_active()" in source
+    assert "return self._repository_provider.classes(session).list_active()" in source
