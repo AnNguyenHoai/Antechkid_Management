@@ -3,7 +3,6 @@
 LoginDialog - simple login dialog for authentication.
 """
 import logging
-from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -13,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.user import User
-from centermanager.services.permission_service import PermissionService
+from centermanager.services.permission_service import PermissionService, AuthenticationError
 from centermanager.core.current_user import set_current_user
 
 logger = logging.getLogger(__name__)
@@ -117,47 +116,7 @@ class LoginDialog(QDialog):
 
         try:
             logger.info(f"Attempting login for user: {username}")
-
-            user = self._permission_service.get_user_by_username(username)
-            if user is None:
-                self._show_error("Invalid username or password.")
-                return
-
-            if not user.is_active:
-                self._show_error("Account is deactivated.")
-                return
-
-            with self._permission_service._session_factory() as session:
-                user = session.merge(user)
-
-                if user.is_locked:
-                    self._show_error("Account is locked. Please try again later.")
-                    return
-
-                from centermanager.security.password import verify_password, hash_password
-                password_valid, needs_upgrade = verify_password(password, user.password_hash)
-                if not password_valid:
-                    user.increment_login_attempts()
-                    session.commit()
-                    remaining = 5 - user.login_attempts
-                    if remaining > 0:
-                        self._show_error(f"Invalid username or password. {remaining} attempts remaining.")
-                    else:
-                        self._show_error("Account locked due to too many failed attempts.")
-                    return
-
-                if needs_upgrade:
-                    user.password_hash = hash_password(password)
-                    logger.info("Upgraded legacy password hash for user: %s", username)
-                user.reset_login_attempts()
-                user.last_login = datetime.now()
-                session.commit()
-                user_id = user.id
-
-            user = self._permission_service.get_user(user_id)
-            if user is None:
-                self._show_error("User not found after login.")
-                return
+            user = self._permission_service.authenticate_user(username, password)
 
             self.error_label.setVisible(False)
             self._user = user
@@ -167,7 +126,7 @@ class LoginDialog(QDialog):
                 self.hide()
                 change_dialog = ChangePasswordDialog(user, self._permission_service)
                 if change_dialog.exec() == ChangePasswordDialog.DialogCode.Accepted:
-                    user = self._permission_service.get_user_by_username(username)
+                    user = self._permission_service.get_user(user.id)
                     self._user = user
                     set_current_user(user)
                     self.login_successful.emit(user)
@@ -183,6 +142,8 @@ class LoginDialog(QDialog):
                 self.login_successful.emit(user)
                 self.accept()
 
+        except AuthenticationError as e:
+            self._show_error(str(e))
         except Exception as e:
             logger.exception(f"Login error for user {username}: {e}")
             self._show_error(f"Login error: {str(e)}")
