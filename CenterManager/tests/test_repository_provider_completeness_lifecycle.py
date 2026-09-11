@@ -41,8 +41,8 @@ def _public_factory_names(provider_type: type) -> set[str]:
         name
         for name, member in inspect.getmembers(provider_type, predicate=inspect.isfunction)
         if not name.startswith("_")
-        and name not in {"mro"}
-        and len(inspect.signature(member).parameters) == 1
+        and len(inspect.signature(member).parameters) == 2
+        and list(inspect.signature(member).parameters.values())[1].name == "session"
     }
 
 
@@ -75,12 +75,8 @@ def test_repository_provider_factories_are_session_scoped_and_not_cached():
 
 
 def test_repository_provider_factories_have_single_session_parameter():
-    provider_methods = {
-        name: getattr(SqlAlchemyRepositoryProvider, name)
-        for name in EXPECTED_FACTORIES
-    }
-
-    for name, method in provider_methods.items():
+    for name in sorted(EXPECTED_FACTORIES):
+        method = getattr(SqlAlchemyRepositoryProvider, name)
         parameters = list(inspect.signature(method).parameters.values())
         assert len(parameters) == 2, f"{name} must accept self and session"
         assert parameters[1].name == "session"
