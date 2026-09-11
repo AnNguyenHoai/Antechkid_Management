@@ -22,6 +22,18 @@ class _FakeEmployeeRepo:
         return self.employee
 
 
+class _FakeRepositoryProvider:
+    def __init__(self, employee, working_rows):
+        self.employee_repo = _FakeEmployeeRepo(employee)
+        self.working_repo = _FakeWorkingRepo(working_rows)
+
+    def employees(self, session):
+        return self.employee_repo
+
+    def employee_working_times(self, session):
+        return self.working_repo
+
+
 def _user(user_id=10, permissions=(), role=RoleDefinitions.TEACHER):
     return SimpleNamespace(
         id=user_id,
@@ -30,7 +42,7 @@ def _user(user_id=10, permissions=(), role=RoleDefinitions.TEACHER):
     )
 
 
-def test_monthly_summary_uses_schedule_with_same_authorization_context(monkeypatch):
+def test_monthly_summary_uses_schedule_with_same_authorization_context():
     employee = SimpleNamespace(id=20, user_id=99)
     actor = _user(
         permissions={
@@ -42,27 +54,25 @@ def test_monthly_summary_uses_schedule_with_same_authorization_context(monkeypat
     class _Session:
         def __enter__(self):
             return self
+
         def __exit__(self, exc_type, exc, tb):
             return False
-
-    monkeypatch.setattr(
-        "centermanager.services.employee_working_time_service.EmployeeRepository",
-        lambda session: _FakeEmployeeRepo(employee),
-    )
-    monkeypatch.setattr(
-        "centermanager.services.employee_working_time_service.EmployeeWorkingTimeRepository",
-        lambda session: _FakeWorkingRepo([]),
-    )
 
     class _Schedule:
         def __init__(self):
             self.calls = []
+
         def expected_for_date(self, employee_id, work_date, user=None):
             self.calls.append((employee_id, work_date, user))
             return [(time(9, 0), time(17, 0))]
 
     schedule = _Schedule()
-    service = EmployeeWorkingTimeService(lambda: _Session(), schedule_service=schedule)
+    provider = _FakeRepositoryProvider(employee, [])
+    service = EmployeeWorkingTimeService(
+        lambda: _Session(),
+        schedule_service=schedule,
+        repository_provider=provider,
+    )
     result = service.monthly_summary(employee.id, 2026, 1, actor)
 
     assert result["expected_minutes"] == 8 * 60 * 31
