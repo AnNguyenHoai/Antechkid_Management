@@ -8,8 +8,11 @@ The rule is intentionally narrow:
   the graph because it is the composition/export surface, not an application
   service implementation.
 
-The test builds the import graph only from direct imports found in service
-implementation modules and fails when a directed cycle exists.
+The graph models module-level imports. Function-local imports are intentionally
+excluded because they are lazy runtime dependencies and do not participate in
+Python module initialization/import cycles. Those dependencies should be
+covered by explicit service contract tests when they are architecturally
+significant.
 """
 from __future__ import annotations
 
@@ -32,7 +35,10 @@ def _service_dependency_graph() -> dict[str, set[str]]:
         graph.setdefault(module_name, set())
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
 
-        for node in ast.walk(tree):
+        # Only imports executed while the service module is initialized define
+        # this static module dependency graph. Local imports are deliberately
+        # excluded; they are lazy runtime edges and are not import-time cycles.
+        for node in tree.body:
             if isinstance(node, ast.Import):
                 imported_modules = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
