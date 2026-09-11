@@ -17,21 +17,14 @@ The contract is deliberately narrow:
 
 from typing import Optional
 
-from sqlalchemy import select
-
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee import Employee
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
-from centermanager.models.employee_work_registration_period import (
-    EmployeeWorkRegistrationPeriod,
-)
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
-from centermanager.repositories.employee_repository import EmployeeRepository
-from centermanager.repositories.employee_work_registration_repository import (
-    EmployeeWorkRegistrationRepository,
-)
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.audit_service import AuditService
 from centermanager.services.permission_service import PermissionService
 
@@ -57,14 +50,13 @@ class EmployeeAdminManagementService:
     ACTION_REGISTRATION_DELETED = "WORK_REGISTRATION_ADMIN_DELETED"
     ACTION_EMPLOYEE_DELETED = "EMPLOYEE_ADMIN_DELETED"
 
-    # Stable capability names for future role/permission wiring.  The Admin
-    # system role is the only role allowed to exercise these capabilities today.
     CAPABILITY_PERIOD_OVERRIDE = "work_registration.period.admin_override"
     CAPABILITY_REGISTRATION_DELETE = "work_registration.delete"
     CAPABILITY_EMPLOYEE_DELETE = "employee.delete"
 
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, repository_provider: Optional[RepositoryProvider] = None):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
         self._permission_service = PermissionService(session_factory)
         self._audit_service = AuditService(session_factory)
 
@@ -72,9 +64,7 @@ class EmployeeAdminManagementService:
     def _resolve_user(user: Optional[User] = None) -> User:
         actor = user if user is not None else get_current_user()
         if actor is None:
-            raise EmployeeAdminManagementAccessDeniedError(
-                "Authentication is required."
-            )
+            raise EmployeeAdminManagementAccessDeniedError("Authentication is required.")
         return actor
 
     def _require_admin(self, user: Optional[User] = None) -> User:
@@ -110,12 +100,8 @@ class EmployeeAdminManagementService:
             )
 
         with self._session_factory() as session:
-            period = session.scalar(
-                select(EmployeeWorkRegistrationPeriod).where(
-                    EmployeeWorkRegistrationPeriod.year == year,
-                    EmployeeWorkRegistrationPeriod.month == month,
-                )
-            )
+            period_repo = self._repository_provider.employee_work_registration_periods(session)
+            period = period_repo.get_by_year_month(year, month)
             if period is None:
                 raise EmployeeAdminManagementValidationError(
                     f"Registration period {month:02d}/{year} not found."
@@ -165,9 +151,8 @@ class EmployeeAdminManagementService:
             )
 
         with self._session_factory() as session:
-            registration = EmployeeWorkRegistrationRepository(session).get(
-                registration_id
-            )
+            repo = self._repository_provider.employee_work_registrations(session)
+            registration = repo.get(registration_id)
             if registration is None:
                 raise EmployeeAdminManagementValidationError(
                     f"Registration {registration_id} not found."
@@ -204,13 +189,7 @@ class EmployeeAdminManagementService:
         reason: Optional[str] = None,
         user: Optional[User] = None,
     ) -> None:
-        """Hard-delete an employee only when no operational history exists.
-
-        Employees with registrations, schedules, exceptions or working-time
-        entries are retained so historical records cannot be destroyed by an
-        accidental administrative delete.  Such employees should be archived
-        through the existing Employee status lifecycle.
-        """
+        """Hard-delete an employee only when no operational history exists."""
         actor = self._require_admin(user)
         reason = self._reason(reason)
         if not reason:
@@ -219,18 +198,14 @@ class EmployeeAdminManagementService:
             )
 
         with self._session_factory() as session:
-            employee = EmployeeRepository(session).get_by_id(employee_id)
+            repo = self._repository_provider.employees(session)
+            employee = repo.get_by_id(employee_id)
             if employee is None:
                 raise EmployeeAdminManagementValidationError(
                     f"Employee {employee_id} not found."
                 )
 
-            history_counts = {
-                "work_registrations": len(employee.work_registrations),
-                "schedule_rules": len(employee.schedule_rules),
-                "schedule_exceptions": len(employee.schedule_exceptions),
-                "working_time_entries": len(employee.working_time_entries),
-            }
+            history_counts = repo.operational_history_counts(employee_id)
             if any(history_counts.values()):
                 raise EmployeeAdminManagementValidationError(
                     "Employee has operational history and cannot be hard-deleted. "
