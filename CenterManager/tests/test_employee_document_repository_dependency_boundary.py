@@ -25,14 +25,14 @@ def test_employee_document_service_uses_injected_repository_provider_for_reads()
     service, session, provider, repo = _service()
     document = MagicMock()
     repo.get_by_id.return_value = document
-    document.relative_path = "Attachments/Employees/EMP-00001/CV/test.docx"
+    resolved_path = MagicMock()
+    resolved_path.is_file.return_value = True
+    resolved_path.name = "test.docx"
+    service.resolve_document_path = MagicMock(return_value=resolved_path)
 
-    # The file check is intentionally bypassed here; this test verifies only
-    # the persistence dependency seam.
-    service.resolve_document_path = MagicMock(return_value=Path("/tmp/runtime/Attachments/Employees/EMP-00001/CV/test.docx"))
     result = service.openable_path(42)
 
-    assert result.name == "test.docx"
+    assert result is resolved_path
     provider.employee_documents.assert_called_once_with(session)
     repo.get_by_id.assert_called_once_with(42)
 
