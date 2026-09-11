@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Optional, List
-
-from sqlalchemy.orm import sessionmaker
+from typing import Optional, List, Callable, Any
 
 from centermanager.models.employee import Employee
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
-from centermanager.repositories.employee_repository import EmployeeRepository
-from centermanager.repositories.role_repository import RoleRepository
-from centermanager.repositories.user_repository import UserRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.core.current_user import get_current_user
 from centermanager.core.clock import get_clock
 from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
@@ -47,8 +43,9 @@ class EmployeeService:
     UPDATE = "employee.update"
     ARCHIVE = "employee.archive"
 
-    def __init__(self, session_factory: sessionmaker):
+    def __init__(self, session_factory: Callable[[], Any], repository_provider: RepositoryProvider | None = None):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _text(v):
@@ -132,16 +129,17 @@ class EmployeeService:
                 "Administrator accounts do not have an employee identity."
             )
         with self._session_factory() as session:
-            employee = EmployeeRepository(session).get_by_user_id(user.id)
+            employee_repo = self._repository_provider.employees(session)
+            employee = employee_repo.get_by_user_id(user.id)
             if employee:
                 return employee
-            number = (EmployeeRepository(session).get_highest_employee_number() or 0) + 1
+            number = (employee_repo.get_highest_employee_number() or 0) + 1
             employee = Employee(
                 employee_code=f"EMP-{number:05d}", full_name=user.full_name,
                 phone=user.phone, email=user.email,
                 employment_status=Employee.STATUS_ACTIVE, user_id=user.id,
             )
-            EmployeeRepository(session).add(employee)
+            employee_repo.add(employee)
             session.commit(); session.refresh(employee)
             logger.info(
                 "Repaired legacy user-to-employee link: user_id=%s employee_id=%s",
@@ -153,7 +151,7 @@ class EmployeeService:
         """Return only records the authenticated user is authorized to see."""
         user = self._require_user(user)
         with self._session_factory() as session:
-            repo = EmployeeRepository(session)
+            repo = self._repository_provider.employees(session)
             if self.can_view_all(user):
                 return repo.list_all()
             if self.can_view_self(user):
@@ -167,7 +165,7 @@ class EmployeeService:
         """Get one employee while enforcing self/all visibility at service level."""
         user = self._require_user(user)
         with self._session_factory() as session:
-            repo = EmployeeRepository(session)
+            repo = self._repository_provider.employees(session)
             employee = repo.get_by_id(employee_id)
             if employee is None:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
@@ -200,7 +198,8 @@ class EmployeeService:
                 raise EmployeeValidationError("Invalid email format.")
         status = self._validate_status(employment_status)
         with self._session_factory() as s:
-            repo = EmployeeRepository(s); user_repo = UserRepository(s)
+            repo = self._repository_provider.employees(s)
+            user_repo = self._repository_provider.users(s)
             user = user_repo.get_by_id_with_role(user_id)
             if user is None:
                 raise EmployeeValidationError("Selected user account does not exist.")
@@ -248,10 +247,10 @@ class EmployeeService:
                 raise EmployeeValidationError("Invalid email format.")
         status = self._validate_status(employment_status)
         with self._session_factory() as s:
-            user_repo = UserRepository(s)
+            user_repo = self._repository_provider.users(s)
             if user_repo.get_by_username(username):
                 raise EmployeeValidationError(f"Username '{username}' already exists.")
-            role = RoleRepository(s).get_by_name(role_name)
+            role = self._repository_provider.roles(s).get_by_name(role_name)
             if role is None:
                 raise EmployeeValidationError(f"Role '{role_name}' not found.")
             if temp_password is None:
@@ -263,7 +262,7 @@ class EmployeeService:
                 role_id=role.id, is_active=True, force_password_change=True, login_attempts=0,
             )
             user_repo.add(user); s.flush()
-            repo = EmployeeRepository(s); n = (repo.get_highest_employee_number() or 0) + 1
+            repo = self._repository_provider.employees(s); n = (repo.get_highest_employee_number() or 0) + 1
             employee = Employee(
                 employee_code=f"EMP-{n:05d}", full_name=full_name,
                 date_of_birth=date_of_birth, gender=self._text(gender), phone=self._text(phone),
@@ -280,7 +279,7 @@ class EmployeeService:
         actor = self._require_user(None)
         self._require_capability(actor, self.UPDATE)
         with self._session_factory() as s:
-            repo = EmployeeRepository(s)
+            repo = self._repository_provider.employees(s)
             employee = repo.get_by_id(employee_id)
             if not employee:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
@@ -289,7 +288,7 @@ class EmployeeService:
             existing = repo.get_by_user_id(user_id)
             if existing and existing.id != employee_id:
                 raise EmployeeValidationError("User is already linked to another employee.")
-            user = UserRepository(s).get_by_id_with_role(user_id)
+            user = self._repository_provider.users(s).get_by_id_with_role(user_id)
             if user is None:
                 raise EmployeeValidationError("User account does not exist.")
             if not self._is_employee_account(user):
@@ -308,7 +307,7 @@ class EmployeeService:
         actor = self._require_user(None)
         self._require_capability(actor, self.UPDATE)
         with self._session_factory() as s:
-            e = EmployeeRepository(s).get_by_id(employee_id)
+            e = self._repository_provider.employees(s).get_by_id(employee_id)
             if not e:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             e.employment_status = self._validate_status(status)
@@ -318,7 +317,7 @@ class EmployeeService:
     def update_employee(self, employee_id: int, **data) -> Employee:
         actor = self._require_user(None)
         with self._session_factory() as s:
-            e = EmployeeRepository(s).get_by_id(employee_id)
+            e = self._repository_provider.employees(s).get_by_id(employee_id)
             if not e:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             is_self = e.user_id == actor.id
