@@ -25,6 +25,7 @@ from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.report_repository import ReportRepository
+from centermanager.repositories.expense_repository import ExpenseRepository
 from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.repositories.teacher_repository import TeacherRepository
@@ -58,6 +59,7 @@ class RepositoryProvider(Protocol):
     def students(self, session: Session) -> StudentRepository: ...
     def assessments(self, session: Session) -> AssessmentRepository: ...
     def reports(self, session: Session) -> ReportRepository: ...
+    def expenses(self, session: Session) -> ExpenseRepository: ...
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository: ...
     def incomes(self, session: Session) -> IncomeRepository: ...
     def teachers(self, session: Session) -> TeacherRepository: ...
@@ -87,6 +89,7 @@ class SqlAlchemyRepositoryProvider:
     def students(self, session: Session) -> StudentRepository: return StudentRepository(session)
     def assessments(self, session: Session) -> AssessmentRepository: return AssessmentRepository(session)
     def reports(self, session: Session) -> ReportRepository: return ReportRepository(session)
+    def expenses(self, session: Session) -> ExpenseRepository: return ExpenseRepository(session)
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository: return ExpenseTimelineRepository(session)
     def incomes(self, session: Session) -> IncomeRepository: return IncomeRepository(session)
     def teachers(self, session: Session) -> TeacherRepository: return TeacherRepository(session)
@@ -96,9 +99,5 @@ class SqlAlchemyRepositoryProvider:
 
 
 def create_default_repository_provider() -> RepositoryProvider:
-    """Create the production provider for legacy callers during migration.
-
-    The concrete infrastructure type is instantiated here, at the composition
-    boundary, so application services only depend on the provider contract.
-    """
+    """Create the production provider for legacy callers during migration."""
     return SqlAlchemyRepositoryProvider()
