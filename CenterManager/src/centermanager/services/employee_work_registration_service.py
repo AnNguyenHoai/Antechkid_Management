@@ -58,8 +58,10 @@ class EmployeeWorkRegistrationService:
     def get_period(self,y,m,user=None):
         u=self._user(user)
         with self._sf() as s: employee=self._repository_provider.employees(s).get_by_user_id(u.id)
-        if self._permission_service.has_permission(self.ALL_PERMISSION,u): return self._period_readonly(y,m)
-        if employee is not None and (self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)): return self._period_readonly(y,m)
+        if self._permission_service.has_permission(self.ALL_PERMISSION, u):
+            return self._period_readonly(y,m)
+        if employee is not None and (self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)):
+            return self._period_readonly(y,m)
         self._require_permission(self.ALL_PERMISSION,u); return self._period_readonly(y,m)
     def _period_readonly(self,y,m):
         with self._sf() as s:p=self._period(s,y,m);s.expunge(p);return p
@@ -105,7 +107,10 @@ class EmployeeWorkRegistrationService:
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);self._validate(work_date,start_time,end_time,work_type)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            p=self._period(s,work_date.year,work_date.month) if admin_override else self._open_period(s,work_date.year,work_date.month)
+            if admin_override:
+                p=self._period(s,work_date.year,work_date.month)
+            else:
+                p=self._open_period(s,work_date.year,work_date.month)
             self._overlap(r.blocks,work_date,start_time,end_time,b.id);repo.update_block(bid,work_date,start_time,end_time,work_type.strip(),notes or None)
             self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);s.commit();return r
     def delete(self,bid,user=None):
