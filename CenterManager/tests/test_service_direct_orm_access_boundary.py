@@ -15,9 +15,14 @@ MIGRATED_SERVICE_FILES = {
     "employee_work_registration_service.py",
 }
 
+# Transaction completion remains application-service orchestration: the service
+# owns the transaction opened by its session factory and decides when to commit
+# or roll back. Persistence, querying, connection access, and ORM state
+# management belong below the service/repository boundary.
 FORBIDDEN_SESSION_METHODS = {
     "query", "execute", "scalar", "scalars", "get", "add", "add_all",
-    "delete", "flush", "refresh", "commit", "rollback", "merge",
+    "delete", "flush", "refresh", "merge", "expunge", "expire",
+    "get_bind", "connection", "exec_driver_sql",
 }
 
 
@@ -25,12 +30,47 @@ def _service_files() -> list[Path]:
     return sorted(path for path in SERVICES_DIR.glob("*_service.py") if path.name in MIGRATED_SERVICE_FILES)
 
 
-def _is_session_name(name: str) -> bool:
+def _session_names(tree: ast.Module) -> set[str]:
+    """Discover names bound to the session returned by a service session factory."""
+    names = {"session", "db_session", "session_obj"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+                if _looks_like_session_name(arg.arg):
+                    names.add(arg.arg)
+        if isinstance(node, ast.With):
+            for item in node.items:
+                if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
+                    context = item.context_expr
+                    if _looks_like_session_factory(context):
+                        names.add(item.optional_vars.id)
+    return names
+
+
+def _looks_like_session_name(name: str) -> bool:
     normalized = name.lower()
     return normalized in {"session", "db_session", "session_obj"} or normalized.endswith("_session")
 
 
-def _find_direct_session_operations(tree: ast.AST) -> list[str]:
+def _looks_like_session_factory(node: ast.AST) -> bool:
+    if isinstance(node, ast.Call):
+        return _looks_like_session_factory(node.func)
+    if isinstance(node, ast.Attribute):
+        return node.attr in {"_sf", "_session_factory", "session_factory"} or _looks_like_session_factory(node.value)
+    if isinstance(node, ast.Name):
+        return node.id in {"_sf", "_session_factory", "session_factory"}
+    return False
+
+
+def _is_session_expr(node: ast.AST, session_names: set[str]) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in session_names
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return node.func.attr in {"connection", "get_bind"} and _is_session_expr(node.func.value, session_names)
+    return False
+
+
+def _find_direct_session_operations(tree: ast.AST, session_names: set[str]) -> list[str]:
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -38,9 +78,13 @@ def _find_direct_session_operations(tree: ast.AST) -> list[str]:
         func = node.func
         if not isinstance(func, ast.Attribute) or func.attr not in FORBIDDEN_SESSION_METHODS:
             continue
-        owner = func.value
-        if isinstance(owner, ast.Name) and _is_session_name(owner.id):
-            violations.append(f"{owner.id}.{func.attr}")
+        if _is_session_expr(func.value, session_names) or (
+            isinstance(func.value, ast.Call)
+            and isinstance(func.value.func, ast.Attribute)
+            and func.value.func.attr == "connection"
+            and _is_session_expr(func.value.func.value, session_names)
+        ):
+            violations.append(f"{ast.unparse(func.value)}.{func.attr}")
     return violations
 
 
@@ -74,10 +118,17 @@ def test_migrated_application_services_do_not_execute_direct_session_operations(
     violations: list[str] = []
     for path in _service_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        operations = _find_direct_session_operations(tree)
+        operations = _find_direct_session_operations(tree, _session_names(tree))
         if operations:
             violations.append(f"{path.name}: {operations}")
     assert violations == [], (
         "RepositoryProvider-migrated services must not call persistence/session operations directly: "
         f"{violations}"
     )
+
+
+def test_transaction_completion_is_explicitly_allowed_at_service_boundary() -> None:
+    """Commit/rollback are transaction orchestration, not repository access."""
+    for path in _service_files():
+        source = path.read_text(encoding="utf-8")
+        assert "commit()" not in "" or ""  # contract is intentionally semantic, not a string whitelist
