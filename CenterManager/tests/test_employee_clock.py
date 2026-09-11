@@ -39,12 +39,17 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
 
     class FakeUserRepo:
         def get_by_id_with_role(self, user_id):
-            # create_employee() accepts a linked employee-bearing account. Keep
-            # this fixture explicit so it does not rely on an untyped object.
             return SimpleNamespace(
                 id=user_id,
                 role=SimpleNamespace(name=RoleDefinitions.TEACHER),
             )
+
+    class FakeProvider:
+        def employees(self, session):
+            return FakeRepo()
+
+        def users(self, session):
+            return FakeUserRepo()
 
     actor = type(
         "Actor",
@@ -56,21 +61,16 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
     )()
 
     monkeypatch.setattr(
-        "centermanager.services.employee_service.EmployeeRepository",
-        lambda session: FakeRepo(),
-    )
-    monkeypatch.setattr(
-        "centermanager.services.employee_service.UserRepository",
-        lambda session: FakeUserRepo(),
-    )
-    monkeypatch.setattr(
         "centermanager.services.employee_service.get_current_user",
         lambda: actor,
     )
 
-    service = EmployeeService(lambda: FakeSession())
-    employee = service.create_employee("Clock Test", user_id=99)
+    service = EmployeeService(
+        lambda: FakeSession(),
+        repository_provider=FakeProvider(),
+    )
     try:
+        employee = service.create_employee("Clock Test", user_id=99)
         assert employee.hire_date == fixed_today
     finally:
         reset_clock()
