@@ -19,6 +19,17 @@ SQLAlchemy / Database
 
 Application services must not import or construct concrete repositories, and must not bypass the repository boundary with direct persistence/ORM access.
 
+## Audit scope
+
+Scope: `CenterManager/src/centermanager/services/` and the repository-provider boundary used by those services.
+
+The audit distinguishes four cases:
+
+- **COMPLIANT** — service persistence access is mediated by `RepositoryProvider`/repository contracts.
+- **VIOLATION** — service directly imports/constructs a concrete repository or performs persistence/ORM work itself.
+- **INTENTIONAL** — access is explicitly part of an infrastructure/application composition responsibility and is documented as such.
+- **FOLLOW-UP** — a dependency requires source-level review before classification.
+
 ## Current inventory
 
 | Service / area | Boundary status | Evidence / action |
@@ -43,6 +54,48 @@ Application services must not import or construct concrete repositories, and mus
 | `teacher_assignment_service.py` | COMPLIANT | Repository dependencies migrated behind provider. |
 | `teacher_document_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 | `teacher_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
+
+## EP-ARCH-03.24 — Migrated-service persistence closure
+
+### EmployeeWorkRegistrationService
+
+The service continues to own the transaction boundary and atomic audit orchestration, but no longer performs infrastructure-level transaction admission or ORM state operations itself.
+
+```text
+EmployeeWorkRegistrationService
+        |
+        +--> RepositoryProvider.employee_work_registrations(session)
+        |             |
+        |             +--> begin_write()
+        |             +--> flush()
+        |             +--> refresh()
+        |
+        +--> RepositoryProvider.employee_work_registration_periods(session)
+                      |
+                      +--> refresh()
+                      +--> detach()
+```
+
+`Session.commit()` remains service-level transaction coordination. It is deliberately not classified as a repository persistence/query bypass: the service owns the atomic transaction that contains both the business mutation and `AuditService.record_in_session()` audit insert.
+
+### EmployeeScheduleService
+
+Schedule rule/exception creation, update, deletion, flush, and refresh are now delegated to `EmployeeScheduleRepository`. The service performs validation, authorization, overlap checks, and transaction coordination only.
+
+```text
+EmployeeScheduleService
+        |
+        v
+RepositoryProvider.employee_schedules(session)
+        |
+        v
+EmployeeScheduleRepository
+        |
+        v
+SQLAlchemy
+```
+
+The production service also resolves its default provider through `create_default_repository_provider()` rather than constructing the infrastructure provider itself.
 
 ## EP-ARCH-03.26 — PermissionService persistence boundary
 
