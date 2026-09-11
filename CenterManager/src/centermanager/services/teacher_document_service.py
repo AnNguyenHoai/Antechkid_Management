@@ -11,8 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.teacher_document import TeacherDocument
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
-from centermanager.repositories.teacher_document_repository import TeacherDocumentRepository
-from centermanager.repositories.teacher_repository import TeacherRepository
+from centermanager.repositories.provider import RepositoryProvider
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
 from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
@@ -24,11 +23,16 @@ class TeacherDocumentService:
         self,
         session_factory: sessionmaker,
         timeline_service: TeacherTimelineService,
-        event_bus: EventBus | None = None
+        event_bus: EventBus | None = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._event_bus = event_bus
+        self._repository_provider = repository_provider
+        if self._repository_provider is None:
+            from centermanager.repositories.provider import SqlAlchemyRepositoryProvider
+            self._repository_provider = SqlAlchemyRepositoryProvider()
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
@@ -36,10 +40,9 @@ class TeacherDocumentService:
         stripped = text.strip()
         return stripped if stripped else None
 
-
     def get_teacher_code(self, teacher_id: int) -> str:
         with self._session_factory() as session:
-            teacher = TeacherRepository(session).get_by_id(teacher_id)
+            teacher = self._repository_provider.teachers(session).get_by_id(teacher_id)
             if teacher is None or teacher.deleted_at is not None:
                 raise ValueError(f"Teacher {teacher_id} not found.")
             return teacher.teacher_code
@@ -77,7 +80,7 @@ class TeacherDocumentService:
                     document_type=self._normalize_text(document_type),
                     description=self._normalize_text(description),
                 )
-                repo = TeacherDocumentRepository(session)
+                repo = self._repository_provider.teacher_documents(session)
                 repo.add(doc)
                 session.commit()
                 session.refresh(doc)
@@ -109,14 +112,14 @@ class TeacherDocumentService:
 
     def get_documents_for_teacher(self, teacher_id: int) -> List[TeacherDocument]:
         with self._session_factory() as session:
-            repo = TeacherDocumentRepository(session)
+            repo = self._repository_provider.teacher_documents(session)
             return repo.get_by_teacher(teacher_id)
 
     def delete_document(self, document_id: int) -> None:
         # Keep the physical file until the DB delete has committed. If the DB
         # transaction fails, the DB record still points to a valid file.
         with self._session_factory() as session:
-            repo = TeacherDocumentRepository(session)
+            repo = self._repository_provider.teacher_documents(session)
             doc = repo.get_by_id(document_id)
             if doc is None:
                 raise ValueError(f"Document {document_id} not found.")
@@ -153,4 +156,3 @@ class TeacherDocumentService:
             title="Document Deleted",
             description=f"Deleted {file_name}",
         )
-
