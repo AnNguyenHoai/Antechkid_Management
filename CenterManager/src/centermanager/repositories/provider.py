@@ -29,6 +29,7 @@ from centermanager.repositories.expense_timeline_repository import ExpenseTimeli
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.repositories.teacher_repository import TeacherRepository
 from centermanager.repositories.teacher_assignment_repository import TeacherAssignmentRepository
+from centermanager.repositories.teacher_document_repository import TeacherDocumentRepository
 from centermanager.repositories.note_repository import NoteRepository
 
 
@@ -53,6 +54,7 @@ class RepositoryProvider(Protocol):
     def incomes(self, session: Session) -> IncomeRepository: ...
     def teachers(self, session: Session) -> TeacherRepository: ...
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: ...
+    def teacher_documents(self, session: Session) -> TeacherDocumentRepository: ...
     def notes(self, session: Session) -> NoteRepository: ...
 
 
@@ -77,4 +79,5 @@ class SqlAlchemyRepositoryProvider:
     def incomes(self, session: Session) -> IncomeRepository: return IncomeRepository(session)
     def teachers(self, session: Session) -> TeacherRepository: return TeacherRepository(session)
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: return TeacherAssignmentRepository(session)
+    def teacher_documents(self, session: Session) -> TeacherDocumentRepository: return TeacherDocumentRepository(session)
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
