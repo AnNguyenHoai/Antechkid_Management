@@ -31,6 +31,18 @@ class UserRepository(BaseRepository[User]):
         """Get all active users."""
         return self._session.query(User).filter(User.is_active == True).all()
 
+    def count_active_by_role_id(self, role_id: int) -> int:
+        """Count active users assigned to a role."""
+        return self._session.query(User).filter(
+            User.role_id == role_id,
+            User.is_active == True,
+        ).count()
+
+    def get_employee_linked_to_user(self, user_id: int):
+        """Return the employee identity linked to a user, if any."""
+        from centermanager.models.employee import Employee
+        return self._session.query(Employee).filter(Employee.user_id == user_id).first()
+
     def add(self, user: User) -> User:
         self._session.add(user)
         return user
