@@ -27,6 +27,7 @@ MIGRATED_SERVICES = {
     "student_note_service.py",
     "student_service.py",
     "teacher_assignment_service.py",
+    "teacher_document_service.py",
     "teacher_service.py",
 }
 
