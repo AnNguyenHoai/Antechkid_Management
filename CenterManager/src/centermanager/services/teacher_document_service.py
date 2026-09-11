@@ -30,6 +30,11 @@ class TeacherDocumentService:
         self._timeline_service = timeline_service
         self._event_bus = event_bus
         if repository_provider is None:
+            # The application composition root historically constructs the
+            # timeline service before this service. Reuse its already-injected
+            # repository provider rather than constructing infrastructure here.
+            repository_provider = getattr(timeline_service, "_repository_provider", None)
+        if repository_provider is None:
             raise ValueError("repository_provider is required")
         self._repository_provider = repository_provider
 
