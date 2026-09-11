@@ -1,6 +1,7 @@
 from pathlib import Path
 
 SERVICE = Path("src/centermanager/services/student_service.py").read_text(encoding="utf-8")
+REPOSITORY = Path("src/centermanager/repositories/student_repository.py").read_text(encoding="utf-8")
 GENERATOR = Path("src/centermanager/export/pdf/student_report_generator.py").read_text(encoding="utf-8")
 MAIN = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
 
@@ -13,8 +14,8 @@ def test_student_27_update_student_publishes_student_updated_after_commit():
     assert body.index("session.commit()") < body.index("self._event_bus.publish(StudentUpdated(")
 
 def test_student_27_report_query_eager_loads_assessments():
-    start = SERVICE.index("def get_student_with_relations")
-    body = SERVICE[start:]
+    start = REPOSITORY.index("def get_with_relations")
+    body = REPOSITORY[start:]
     assert "selectinload(Student.assessments)" in body
 
 def test_student_27_post_publish_uses_dirty_student_ids():
