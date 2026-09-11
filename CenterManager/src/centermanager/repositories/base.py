@@ -11,7 +11,7 @@ T = TypeVar("T")
 
 class BaseRepository(Generic[T]):
     """
-    Generic base repository with common CRUD operations.
+    Generic base repository with common operations.
 
     Usage:
         class StudentRepository(BaseRepository[Student]):
@@ -35,6 +35,15 @@ class BaseRepository(Generic[T]):
     def list_all(self) -> List[T]:
         """Get all entities."""
         return self._session.query(self._model_class).all()
+
+    def flush(self) -> None:
+        """Flush the caller-owned transaction."""
+        self._session.flush()
+
+    def refresh(self, entity: T) -> T:
+        """Refresh an entity from the caller-owned persistence context."""
+        self._session.refresh(entity)
+        return entity
 
     @property
     def session(self) -> Session:
