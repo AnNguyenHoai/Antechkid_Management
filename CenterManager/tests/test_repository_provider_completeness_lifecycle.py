@@ -19,6 +19,8 @@ EXPECTED_FACTORIES = {
     "enrollments",
     "sessions",
     "employees",
+    "users",
+    "roles",
     "employee_schedules",
     "employee_work_registration_periods",
     "employee_work_registrations",
