@@ -21,6 +21,7 @@ MIGRATED_SERVICES = (
     "teacher_assignment_service.py",
     "teacher_service.py",
     "student_note_service.py",
+    "student_service.py",
 )
 
 
