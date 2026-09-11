@@ -38,8 +38,8 @@ The audit distinguishes four cases:
 | `attendance_service.py` | COMPLIANT | Repository access migrated behind provider. |
 | `class_service.py` | COMPLIANT | Concrete repository dependencies migrated behind provider. |
 | `class_timeline_service.py` | COMPLIANT | Concrete repository dependency migrated behind provider. |
-| `employee_schedule_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `employee_work_registration_service.py` | FOLLOW-UP | Repository dependency is behind provider; final review of transaction/direct-session operations remains. |
+| `employee_schedule_service.py` | COMPLIANT | Repository dependency and mutation persistence migrated behind provider/repository. |
+| `employee_work_registration_service.py` | COMPLIANT | Repository dependency and direct persistence/connection operations migrated below the service boundary. |
 | `employee_admin_management_service.py` | COMPLIANT | Repository dependencies and operational-history lookup migrated behind provider. |
 | `employee_document_service.py` | COMPLIANT | Repository dependency is behind provider; no concrete repository construction remains. |
 | `employee_service.py` | COMPLIANT | Employee, user, and role repository dependencies migrated behind provider. |
@@ -49,27 +49,51 @@ The audit distinguishes four cases:
 | `student_service.py` | COMPLIANT | Student repository and relation-loading persistence access migrated behind provider/repository. |
 | `teacher_assignment_service.py` | COMPLIANT | Repository dependencies migrated behind provider. |
 | `teacher_document_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `teacher_service.py` | COMPLIANT | Teacher repository dependency migrated behind provider. |
+| `teacher_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 
-## EP-ARCH-03.23 — EmployeeService migration
+## EP-ARCH-03.24 — Migrated-service persistence closure
 
-`EmployeeService` is now application-facing through `RepositoryProvider` for all repository dependencies:
+The migrated-service boundary now covers the two remaining persistence concerns identified during source audit:
+
+### EmployeeWorkRegistrationService
+
+The service continues to own the transaction boundary and atomic audit orchestration, but no longer performs infrastructure-level transaction admission or ORM state operations itself.
 
 ```text
-EmployeeService
-      |
-      +--> RepositoryProvider.employees(session)
-      +--> RepositoryProvider.users(session)
-      +--> RepositoryProvider.roles(session)
-                  |
-                  v
-          Concrete repositories
-                  |
-                  v
-             SQLAlchemy
+EmployeeWorkRegistrationService
+        |
+        +--> RepositoryProvider.employee_work_registrations(session)
+        |             |
+        |             +--> begin_write()
+        |             +--> flush()
+        |             +--> refresh()
+        |
+        +--> RepositoryProvider.employee_work_registration_periods(session)
+                      |
+                      +--> refresh()
+                      +--> detach()
 ```
 
-The service continues to own business validation, capability checks, employee identity repair, account/employee orchestration, and transaction coordination. The migration does not change those domain responsibilities.
+`Session.commit()` remains service-level transaction coordination. It is deliberately not classified as a repository persistence/query bypass: the service owns the atomic transaction that contains both the business mutation and `AuditService.record_in_session()` audit insert.
+
+### EmployeeScheduleService
+
+Schedule rule/exception creation, update, deletion, flush, and refresh are now delegated to `EmployeeScheduleRepository`. The service performs validation, authorization, overlap checks, and transaction coordination only.
+
+```text
+EmployeeScheduleService
+        |
+        v
+RepositoryProvider.employee_schedules(session)
+        |
+        v
+EmployeeScheduleRepository
+        |
+        v
+SQLAlchemy
+```
+
+The production service also resolves its default provider through `create_default_repository_provider()` rather than constructing the infrastructure provider itself.
 
 ## Architecture rules
 
@@ -78,20 +102,25 @@ The following patterns are forbidden in migrated application services:
 ```python
 from centermanager.repositories.foo_repository import FooRepository
 FooRepository(session)
-```
-
-and direct persistence operations such as:
-
-```python
 session.query(...)
 session.execute(...)
-session.scalar(...)
 session.get(...)
+session.add(...)
+session.delete(...)
+session.flush(...)
+session.refresh(...)
+session.connection(...)
+session.get_bind(...)
 ```
 
-when they represent repository persistence/query responsibilities.
+The following remains allowed as application transaction orchestration:
 
-The following is allowed:
+```python
+session.commit()
+session.rollback()
+```
+
+The following is the required persistence seam:
 
 ```python
 from centermanager.repositories.provider import RepositoryProvider
@@ -99,11 +128,11 @@ from centermanager.repositories.provider import RepositoryProvider
 repo = self._repository_provider.foo(session)
 ```
 
-The provider is the application-service seam; concrete repository construction belongs below that seam.
+The provider is the application-service seam; concrete repository construction and ORM access belong below that seam.
 
-## Required follow-up audit
+## Remaining work
 
-Before EP-ARCH-03 can be marked complete, the remaining `FOLLOW-UP` areas must be source-audited and either migrated or explicitly documented as intentional infrastructure access. The final architecture gate should scan the complete service tree for concrete repository imports/construction and direct ORM persistence access.
+EP-ARCH-03 is not yet globally closed. The migrated-service set is now hardened, but the remaining legacy services still require source-level classification and migration where they perform direct ORM/persistence work. The next work should be driven by a complete inventory of those remaining services rather than by broad assumptions.
 
 ## Definition of done
 
