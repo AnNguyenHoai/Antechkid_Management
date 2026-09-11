@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.models.user import User
-from centermanager.services.permission_service import PermissionService
+from centermanager.services.permission_service import PermissionService, AuthenticationError
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +93,6 @@ class ChangePasswordDialog(QDialog):
         new_password = self.new_password_edit.text()
         confirm = self.confirm_password_edit.text()
 
-        from centermanager.security.password import verify_password
-
-        password_valid, _ = verify_password(current, self._user.password_hash)
-        if not password_valid:
-            self._show_error("Current password is incorrect.")
-            return
-
         if len(new_password) < 6:
             self._show_error("New password must be at least 6 characters.")
             return
@@ -113,25 +106,19 @@ class ChangePasswordDialog(QDialog):
             return
 
         try:
-            with self._permission_service._session_factory() as session:
-                user = session.merge(self._user)
-                from centermanager.security.password import hash_password
-                new_hash = hash_password(new_password)
-                user.password_hash = new_hash
-                user.force_password_change = False
-                user.login_attempts = 0
-                user.locked_until = None
-                session.commit()
-                user_id = user.id
+            updated_user = self._permission_service.change_password(
+                self._user.id,
+                current,
+                new_password,
+            )
 
-            updated_user = self._permission_service.get_user(user_id)
-            if updated_user is None:
-                raise Exception("User not found after password change.")
-
+            self._user = updated_user
             logger.info(f"Password changed for user {updated_user.username}")
             self.password_changed.emit(updated_user)
             self.accept()
 
+        except AuthenticationError as e:
+            self._show_error(str(e))
         except Exception as e:
             logger.exception("Error changing password")
             QMessageBox.critical(self, "Error", f"Could not change password: {str(e)}")
