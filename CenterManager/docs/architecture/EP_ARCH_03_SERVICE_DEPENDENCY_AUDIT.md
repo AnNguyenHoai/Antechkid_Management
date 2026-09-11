@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This inventory records the dependency-boundary status of application services after the EP-ARCH-03 migrations. The target dependency direction is:
+This inventory records the final application-service persistence boundary after EP-ARCH-03. The target dependency direction is:
 
 ```text
 Application Service
@@ -17,116 +17,55 @@ Concrete Repository
 SQLAlchemy / Database
 ```
 
-Application services must not import or construct concrete repositories, and must not bypass the repository boundary with direct persistence/ORM access.
+Application services must not import or construct concrete repositories, import SQLAlchemy directly, or perform direct session persistence/query/connection operations. Transaction completion remains an application-service responsibility.
 
-## Audit scope
+## EP-ARCH-03.27 — Final service boundary audit
 
-Scope: `CenterManager/src/centermanager/services/` and the repository-provider boundary used by those services.
+The final audit is source-driven rather than allowlist-driven. The regression gate scans every `*_service.py` in `CenterManager/src/centermanager/services/` and checks three independent boundaries:
 
-The audit distinguishes four cases:
+1. **Concrete repository boundary** — no service may import or construct a concrete repository.
+2. **SQLAlchemy boundary** — no service may import `sqlalchemy` directly.
+3. **Session persistence boundary** — no service may call `query`, `execute`, `get`, `add`, `delete`, `flush`, `refresh`, `connection`, `get_bind`, or related persistence/ORM-state operations directly on a service-owned SQLAlchemy session.
 
-- **COMPLIANT** — service persistence access is mediated by `RepositoryProvider`/repository contracts.
-- **VIOLATION** — service directly imports/constructs a concrete repository or performs persistence/ORM work itself.
-- **INTENTIONAL** — access is explicitly part of an infrastructure/application composition responsibility and is documented as such.
-- **FOLLOW-UP** — a dependency requires source-level review before classification.
+`Session.commit()` and `Session.rollback()` are explicitly retained as application transaction orchestration and are not classified as repository bypasses.
+
+The gate dynamically discovers the complete service tree, so adding a new service cannot silently escape the architecture check by forgetting to update a migrated-service allowlist.
 
 ## Current inventory
 
 | Service / area | Boundary status | Evidence / action |
 |---|---|---|
-| `assessment_service.py` | COMPLIANT | Repository access migrated behind provider. |
-| `attendance_service.py` | COMPLIANT | Repository access migrated behind provider. |
-| `class_service.py` | COMPLIANT | Concrete repository dependencies migrated behind provider. |
-| `class_timeline_service.py` | COMPLIANT | Concrete repository dependency migrated behind provider. |
-| `employee_schedule_service.py` | COMPLIANT | Repository dependency and mutation persistence migrated behind provider/repository. |
-| `employee_work_registration_service.py` | COMPLIANT | Repository dependency and direct persistence/connection operations migrated below the service boundary. |
-| `employee_admin_management_service.py` | COMPLIANT | Repository dependencies and operational-history lookup migrated behind provider. |
-| `employee_document_service.py` | COMPLIANT | Repository dependency is behind provider; no concrete repository construction remains. |
-| `employee_service.py` | COMPLIANT | Employee, user, and role repository dependencies migrated behind provider. |
-| `employee_working_time_service.py` | COMPLIANT | Working-time repository and persistence operations migrated behind provider/repository. |
-| `enrollment_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `expense_timeline_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `income_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `permission_service.py` | COMPLIANT | User, role, permission, and employee persistence/query access migrated behind provider. |
-| `report_service.py` | COMPLIANT | Repository access follows the provider boundary. |
-| `student_note_service.py` | COMPLIANT | Concrete repository access migrated behind provider. |
-| `student_service.py` | COMPLIANT | Student repository and relation-loading persistence access migrated behind provider/repository. |
-| `teacher_assignment_service.py` | COMPLIANT | Repository dependencies migrated behind provider. |
-| `teacher_document_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `teacher_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-
-## EP-ARCH-03.24 — Migrated-service persistence closure
-
-### EmployeeWorkRegistrationService
-
-The service continues to own the transaction boundary and atomic audit orchestration, but no longer performs infrastructure-level transaction admission or ORM state operations itself.
-
-```text
-EmployeeWorkRegistrationService
-        |
-        +--> RepositoryProvider.employee_work_registrations(session)
-        |             |
-        |             +--> begin_write()
-        |             +--> flush()
-        |             +--> refresh()
-        |
-        +--> RepositoryProvider.employee_work_registration_periods(session)
-                      |
-                      +--> refresh()
-                      +--> detach()
-```
-
-`Session.commit()` remains service-level transaction coordination. It is deliberately not classified as a repository persistence/query bypass: the service owns the atomic transaction that contains both the business mutation and `AuditService.record_in_session()` audit insert.
-
-### EmployeeScheduleService
-
-Schedule rule/exception creation, update, deletion, flush, and refresh are now delegated to `EmployeeScheduleRepository`. The service performs validation, authorization, overlap checks, and transaction coordination only.
-
-```text
-EmployeeScheduleService
-        |
-        v
-RepositoryProvider.employee_schedules(session)
-        |
-        v
-EmployeeScheduleRepository
-        |
-        v
-SQLAlchemy
-```
-
-The production service also resolves its default provider through `create_default_repository_provider()` rather than constructing the infrastructure provider itself.
-
-## EP-ARCH-03.26 — PermissionService persistence boundary
-
-`PermissionService` is now application-facing through `RepositoryProvider`. It no longer imports or constructs concrete repositories and no longer performs direct SQLAlchemy queries.
-
-```text
-PermissionService
-      |
-      +--> RepositoryProvider.users(session)
-      +--> RepositoryProvider.roles(session)
-      +--> RepositoryProvider.permissions(session)
-      +--> RepositoryProvider.employees(session)
-                  |
-                  v
-          Concrete repositories
-                  |
-                  v
-             SQLAlchemy
-```
-
-The service remains responsible for capability checks, account/role lifecycle validation, password/authentication rules, employee provisioning orchestration, audit orchestration, and transaction completion. Repository methods own ORM query and persistence operations.
-
-`BaseRepository.flush()` and `BaseRepository.refresh()` provide explicit repository-level state-operation seams. `Session.commit()` remains application-service transaction coordination.
+| `assessment_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `attendance_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `class_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `class_timeline_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `employee_schedule_service.py` | COMPLIANT | Repository boundary and persistence operations migrated. |
+| `employee_work_registration_service.py` | COMPLIANT | Repository boundary and direct persistence/connection operations migrated. |
+| `employee_admin_management_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `employee_document_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `employee_service.py` | COMPLIANT | Employee, user, and role access migrated behind provider. |
+| `employee_working_time_service.py` | COMPLIANT | Working-time repository and persistence operations migrated. |
+| `enrollment_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `expense_timeline_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `income_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `permission_service.py` | COMPLIANT | User, role, permission, and employee access migrated behind provider. |
+| `report_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `student_note_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `student_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `teacher_assignment_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `teacher_document_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `teacher_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
 
 ## Architecture rules
 
-The following patterns are forbidden in migrated application services:
+Forbidden in application services:
 
 ```python
 from centermanager.repositories.foo_repository import FooRepository
 FooRepository(session)
+
+from sqlalchemy.orm import Session
+
 session.query(...)
 session.execute(...)
 session.get(...)
@@ -138,14 +77,14 @@ session.connection(...)
 session.get_bind(...)
 ```
 
-The following remains allowed as application transaction orchestration:
+Allowed as transaction orchestration:
 
 ```python
 session.commit()
 session.rollback()
 ```
 
-The following is the required persistence seam:
+Required persistence seam:
 
 ```python
 from centermanager.repositories.provider import RepositoryProvider
@@ -153,17 +92,15 @@ from centermanager.repositories.provider import RepositoryProvider
 repo = self._repository_provider.foo(session)
 ```
 
-The provider is the application-service seam; concrete repository construction and ORM access belong below that seam.
+## Definition of done — EP-ARCH-03.27
 
-## Remaining work
+- [x] Complete `*_service.py` tree is dynamically discovered.
+- [x] Concrete repository imports/construction are globally guarded.
+- [x] Direct SQLAlchemy imports are globally guarded.
+- [x] Direct session persistence/query/connection operations are globally guarded.
+- [x] Transaction completion is explicitly allowed as service orchestration.
+- [x] Inventory is source-driven rather than allowlist-driven.
+- [x] Final service-boundary architecture regression tests added.
+- [x] Architecture inventory updated.
 
-EP-ARCH-03 is not yet globally closed. The migrated-service set is now larger and hardened, but the remaining legacy services still require source-level classification and migration where they perform direct ORM/persistence work. The next work should continue to be driven by source-verified violations rather than by service names.
-
-## Definition of done
-
-- [x] Global inventory document exists.
-- [x] Migrated services are recorded.
-- [x] Boundary rules are explicit.
-- [ ] Every service is source-verified against the rules.
-- [ ] Every remaining direct ORM access is classified.
-- [ ] Final global architecture regression test covers the complete service tree.
+EP-ARCH-03 can now move to transaction-ownership hardening in EP-ARCH-04 after the full suite passes on this baseline.
