@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 from datetime import date, datetime
-from typing import Optional, List, Tuple
-from sqlalchemy.orm import sessionmaker
+from typing import Any, Optional, List, Tuple
 
 from centermanager.models.expense import Expense
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -25,7 +24,7 @@ class ExpenseNotFoundError(Exception):
 class ExpenseService:
     def __init__(
         self,
-        session_factory: sessionmaker,
+        session_factory: Any,
         timeline_service: ExpenseTimelineService,
         permission_service: PermissionService,
         repository_provider: Optional[RepositoryProvider] = None,
