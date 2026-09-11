@@ -81,3 +81,12 @@ class SqlAlchemyRepositoryProvider:
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: return TeacherAssignmentRepository(session)
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: return TeacherDocumentRepository(session)
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
+
+
+def create_default_repository_provider() -> RepositoryProvider:
+    """Create the production provider for legacy callers during migration.
+
+    The concrete infrastructure type is instantiated here, at the composition
+    boundary, so application services only depend on the provider contract.
+    """
+    return SqlAlchemyRepositoryProvider()
