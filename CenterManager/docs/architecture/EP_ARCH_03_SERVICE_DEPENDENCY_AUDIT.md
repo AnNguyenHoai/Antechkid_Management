@@ -39,15 +39,37 @@ The audit distinguishes four cases:
 | `class_service.py` | COMPLIANT | Concrete repository dependencies migrated behind provider. |
 | `class_timeline_service.py` | COMPLIANT | Concrete repository dependency migrated behind provider. |
 | `employee_schedule_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
-| `employee_work_registration_service.py` | FOLLOW-UP | Requires final source-level review of all persistence paths. |
+| `employee_work_registration_service.py` | FOLLOW-UP | Repository dependency is behind provider; final review of transaction/direct-session operations remains. |
 | `employee_admin_management_service.py` | COMPLIANT | Repository dependencies and operational-history lookup migrated behind provider. |
-| `employee_document_service.py` | FOLLOW-UP | Verify whether remaining ORM/session access exists and whether a document repository seam is required. |
+| `employee_document_service.py` | COMPLIANT | Repository dependency is behind provider; no concrete repository construction remains. |
+| `employee_service.py` | COMPLIANT | Employee, user, and role repository dependencies migrated behind provider. |
 | `enrollment_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 | `report_service.py` | COMPLIANT | Repository access follows the provider boundary. |
 | `student_note_service.py` | COMPLIANT | Concrete repository access migrated behind provider. |
 | `student_service.py` | COMPLIANT | Student repository and relation-loading persistence access migrated behind provider/repository. |
 | `teacher_assignment_service.py` | COMPLIANT | Repository dependencies migrated behind provider. |
+| `teacher_document_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 | `teacher_service.py` | COMPLIANT | Teacher repository dependency migrated behind provider. |
+
+## EP-ARCH-03.23 — EmployeeService migration
+
+`EmployeeService` is now application-facing through `RepositoryProvider` for all repository dependencies:
+
+```text
+EmployeeService
+      |
+      +--> RepositoryProvider.employees(session)
+      +--> RepositoryProvider.users(session)
+      +--> RepositoryProvider.roles(session)
+                  |
+                  v
+          Concrete repositories
+                  |
+                  v
+             SQLAlchemy
+```
+
+The service continues to own business validation, capability checks, employee identity repair, account/employee orchestration, and transaction coordination. The migration does not change those domain responsibilities.
 
 ## Architecture rules
 
