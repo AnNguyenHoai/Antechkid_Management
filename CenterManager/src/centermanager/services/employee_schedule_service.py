@@ -3,7 +3,7 @@ from datetime import date, time
 
 from centermanager.models.employee import Employee
 from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException, VALID_EXCEPTION_TYPES
-from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.core.current_user import get_current_user
 from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
@@ -29,7 +29,7 @@ class EmployeeScheduleService:
 
     def __init__(self, session_factory, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
-        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _user(user=None):
@@ -60,9 +60,6 @@ class EmployeeScheduleService:
     def _assert_read_scope(self, employee_id, user=None):
         u = self._user(user)
         e = self._employee(employee_id)
-        # Managing a schedule necessarily permits reading the schedule being
-        # managed. The reverse relationship is intentionally not granted:
-        # schedule.view.all must never imply schedule.manage.
         if self._has(u, self.MANAGE) or self._has(u, self.VIEW_ALL):
             return e
         if e.user_id == u.id and self._has(u, self.VIEW_SELF):
@@ -124,9 +121,8 @@ class EmployeeScheduleService:
                 effective_to=effective_to,
                 notes=notes or None,
             )
-            s.add(r)
+            repo.add_rule(r)
             s.commit()
-            s.refresh(r)
             return r
 
     def update_rule(self, rule_id, *, day_of_week, start_time, end_time, effective_from, effective_to=None, notes=None, user=None):
@@ -146,24 +142,27 @@ class EmployeeScheduleService:
                     and self._times_overlap(start_time, end_time, other.start_time, other.end_time)
                 ):
                     raise EmployeeScheduleValidationError("Schedule overlaps an existing rule for this employee.")
-            r.day_of_week = day_of_week
-            r.start_time = start_time
-            r.end_time = end_time
-            r.effective_from = effective_from
-            r.effective_to = effective_to
-            r.notes = notes or None
+            repo.update_rule(
+                r,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                notes=notes,
+            )
             s.commit()
-            s.refresh(r)
             return r
 
     def delete_rule(self, rule_id, user=None):
         u = self._user(user)
         with self._sf() as s:
-            r = self._repository_provider.employee_schedules(s).get_rule(rule_id)
+            repo = self._repository_provider.employee_schedules(s)
+            r = repo.get_rule(rule_id)
             if not r:
                 return
             self._assert_manage_scope(r.employee_id, u)
-            s.delete(r)
+            repo.delete_rule(r)
             s.commit()
 
     def add_exception(self, employee_id, schedule_date, exception_type, start_time=None, end_time=None, notes=None, user=None):
@@ -187,19 +186,19 @@ class EmployeeScheduleService:
                 end_time=end_time,
                 notes=notes or None,
             )
-            s.add(x)
+            repo.add_exception(x)
             s.commit()
-            s.refresh(x)
             return x
 
     def delete_exception(self, exception_id, user=None):
         u = self._user(user)
         with self._sf() as s:
-            x = self._repository_provider.employee_schedules(s).get_exception(exception_id)
+            repo = self._repository_provider.employee_schedules(s)
+            x = repo.get_exception(exception_id)
             if not x:
                 return
             self._assert_manage_scope(x.employee_id, u)
-            s.delete(x)
+            repo.delete_exception(x)
             s.commit()
 
     def expected_for_date(self, employee_id, work_date: date, user=None):

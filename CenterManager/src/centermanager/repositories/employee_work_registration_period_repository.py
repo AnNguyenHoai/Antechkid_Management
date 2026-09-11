@@ -29,3 +29,9 @@ class EmployeeWorkRegistrationPeriodRepository:
             self._session.add(period)
             self._session.flush()
         return period
+
+    def refresh(self, period: EmployeeWorkRegistrationPeriod) -> None:
+        self._session.refresh(period)
+
+    def detach(self, period: EmployeeWorkRegistrationPeriod) -> None:
+        self._session.expunge(period)
