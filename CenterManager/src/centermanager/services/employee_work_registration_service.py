@@ -66,7 +66,11 @@ class EmployeeWorkRegistrationService:
         if employee is not None and (self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)): return self._period_readonly(y,m)
         self._require_permission(self.ALL_PERMISSION,u); return self._period_readonly(y,m)
     def _period_readonly(self,y,m):
-        with self._sf() as s:p=self._period(s,y,m);s.expunge(p);return p
+        with self._sf() as s:
+            period_repo=self._repository_provider.employee_work_registration_periods(s)
+            p=period_repo.get_or_create(y,m)
+            period_repo.detach(p)
+            return p
     def list_for_employee(self,eid,y,m,user=None):
         self._scope(eid,user)
         with self._sf() as s:p=self._period(s,y,m);return self._repository_provider.employee_work_registrations(s).get_by_employee_period(eid,p.id)
@@ -79,9 +83,6 @@ class EmployeeWorkRegistrationService:
         if not isinstance(start,time) or not isinstance(end,time) or start>=end:raise EmployeeWorkRegistrationValidationError("End time must be after start time.")
         if EmployeeWorkRegistrationService.next_month()!=(d.year,d.month):raise EmployeeWorkRegistrationValidationError("Work registration is only available for next month.")
         if not typ or len(typ.strip())>60:raise EmployeeWorkRegistrationValidationError("Work type is required and must be at most 60 characters.")
-    @staticmethod
-    def _begin_write(s):
-        if s.get_bind().dialect.name=="sqlite":s.connection().exec_driver_sql("BEGIN IMMEDIATE")
     @staticmethod
     def _overlap(blocks,work_date,start,end,exclude=None):
         for b in blocks:
@@ -96,33 +97,31 @@ class EmployeeWorkRegistrationService:
     def create(self,eid,work_date,start_time,end_time,work_type="WORK",notes=None,user=None):
         u=self._user(user);self._scope(eid,u);self._validate(work_date,start_time,end_time,work_type)
         with self._sf() as s:
-            self._begin_write(s);p=self._open_period(s,work_date.year,work_date.month);repo=self._repository_provider.employee_work_registrations(s);r=self._get_registration(s,eid,p.id,True);created=r.id is not None and not bool(r.blocks)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._open_period(s,work_date.year,work_date.month);r=self._get_registration(s,eid,p.id,True);created=r.id is not None and not bool(r.blocks)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("This registration month has already been submitted and cannot be changed.")
             self._overlap(r.blocks,work_date,start_time,end_time);repo.add_block(r.id,work_date,start_time,end_time,work_type.strip(),notes or None)
             if created:self._audit(s,self.AUDIT_CREATED,r,details={"employee_id":eid,"period_id":p.id},actor=u)
             else:self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"add_block","work_date":work_date.isoformat()},actor=u)
-            s.commit();s.refresh(r);return r
+            s.commit();repo.refresh(r);return r
     def update(self,bid,*,work_date,start_time,end_time,work_type,notes=None,user=None):
         u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
-            self._begin_write(s);repo=self._repository_provider.employee_work_registrations(s);b=repo.get_block(bid)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();b=repo.get_block(bid)
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);self._validate(work_date,start_time,end_time,work_type)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            if admin_override:
-                p=self._period(s,work_date.year,work_date.month)
-            else:
-                p=self._open_period(s,work_date.year,work_date.month)
+            if admin_override:p=self._period(s,work_date.year,work_date.month)
+            else:p=self._open_period(s,work_date.year,work_date.month)
             self._overlap(r.blocks,work_date,start_time,end_time,b.id);repo.update_block(bid,work_date,start_time,end_time,work_type.strip(),notes or None)
             self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);s.commit();return r
     def delete(self,bid,user=None):
         u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
-            self._begin_write(s);repo=self._repository_provider.employee_work_registrations(s);b=repo.get_block(bid)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();b=repo.get_block(bid)
             if not b:return
             r=b.registration;self._scope(r.employee_id,u)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be deleted.")
-            registration_id=r.id;repo.delete_block(bid);s.flush();self._audit(s,self.AUDIT_DELETED,r,details={"block_id":bid,"registration_deleted":not bool(r.blocks),"admin_override":admin_override},actor=u)
+            registration_id=r.id;repo.delete_block(bid);repo.flush();self._audit(s,self.AUDIT_DELETED,r,details={"block_id":bid,"registration_deleted":not bool(r.blocks),"admin_override":admin_override},actor=u)
             if not r.blocks:repo.delete(registration_id)
             s.commit()
     def submit(self,bid,user=None):raise EmployeeWorkRegistrationValidationError("Block-level submission is no longer supported. Submit the whole registration month.")
@@ -130,33 +129,33 @@ class EmployeeWorkRegistrationService:
         u=self._user(user);self._scope(eid,u)
         if (y,m)!=self.next_month():raise EmployeeWorkRegistrationValidationError("Only the next month can be submitted.")
         with self._sf() as s:
-            self._begin_write(s);p=self._open_period(s,y,m);r=self._get_registration(s,eid,p.id)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._open_period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or not r.blocks:raise EmployeeWorkRegistrationValidationError("Add at least one availability block before submitting.")
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("Registration is not in draft state.")
             r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.submitted_at=get_clock().now();self._audit(s,self.AUDIT_SUBMITTED,r,details={"employee_id":eid,"period_id":p.id,"block_count":len(r.blocks)},actor=u);s.commit();return r
     def accept(self,eid,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
-            p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_SUBMITTED:raise EmployeeWorkRegistrationValidationError("Only submitted registrations can be accepted.")
-            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"period_id":p.id},actor=u);s.commit();s.refresh(r);return r
+            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"period_id":p.id},actor=u);s.commit();repo.refresh(r);return r
     def reopen(self,eid,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
-            p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,y,m);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED:raise EmployeeWorkRegistrationValidationError("Only accepted registrations can be reopened.")
             r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;self._audit(s,self.AUDIT_REOPENED,r,details={"employee_id":eid,"period_id":p.id},actor=u);s.commit();return r
     def set_submission_deadline(self,y,m,deadline:Optional[date],user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);start,end=self._month_range(y,m)
         if deadline is not None and not(start<=deadline<=end):raise EmployeeWorkRegistrationValidationError("Submission deadline must be inside the registration month.")
         with self._sf() as s:
-            self._begin_write(s);p=self._period(s,y,m)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,y,m)
             if p.status==EmployeeWorkRegistrationPeriod.STATUS_CLOSED:raise EmployeeWorkRegistrationValidationError("Registration period is already closed.")
-            p.submission_deadline=deadline;self._audit(s,self.AUDIT_DEADLINE,p,target_type="EmployeeWorkRegistrationPeriod",details={"year":y,"month":m,"deadline":deadline.isoformat() if deadline else None},actor=u);s.commit();s.refresh(p);return p
+            p.submission_deadline=deadline;self._audit(s,self.AUDIT_DEADLINE,p,target_type="EmployeeWorkRegistrationPeriod",details={"year":y,"month":m,"deadline":deadline.isoformat() if deadline else None},actor=u);s.commit();self._repository_provider.employee_work_registration_periods(s).refresh(p);return p
     def close_month(self,y,m,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u)
         with self._sf() as s:
-            self._begin_write(s);p=self._period(s,y,m);rows=self._repository_provider.employee_work_registrations(s).list_all(p.id)
+            repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,y,m);rows=repo.list_all(p.id)
             if not rows:raise EmployeeWorkRegistrationValidationError("Cannot close a registration month with no employee submissions.")
             if any(r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED for r in rows):raise EmployeeWorkRegistrationValidationError("All employee registrations must be accepted before closing the month.")
             p.status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED;p.closed_at=get_clock().now();p.closed_by_user_id=u.id;self._audit(s,self.AUDIT_CLOSED,p,target_type="EmployeeWorkRegistrationPeriod",details={"year":y,"month":m,"registration_count":len(rows)},actor=u);s.commit();return len(rows)
