@@ -10,6 +10,19 @@ class EmployeeWorkRegistrationRepository:
     def __init__(self, session: Session):
         self._s = session
 
+    def begin_write(self) -> None:
+        """Acquire SQLite's write-intent lock before an EWR mutation."""
+        if self._s.get_bind().dialect.name == "sqlite":
+            self._s.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+    def flush(self) -> None:
+        """Flush pending EWR changes inside the caller-owned transaction."""
+        self._s.flush()
+
+    def refresh(self, entity) -> None:
+        """Refresh an EWR entity from the caller-owned transaction/session."""
+        self._s.refresh(entity)
+
     def get(self, registration_id: int) -> Optional[EmployeeWorkRegistration]:
         return (
             self._s.query(EmployeeWorkRegistration)
