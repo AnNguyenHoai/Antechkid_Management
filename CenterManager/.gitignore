@@ -35,7 +35,13 @@ runtime/Database/*.db-journal
 runtime/Export/
 runtime/Attachment/
 runtime/Backup/
+runtime/cache/
+runtime/temp/
+runtime/reports/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Ignore old heartbeat files (moved out of repository in Task 3.1)
+runtime/repository/collaboration/heartbeat/

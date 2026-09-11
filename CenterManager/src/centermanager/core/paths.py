@@ -1,16 +1,14 @@
-# -*- coding: utf-8 -*-
-"""
-Centralized path resolution for CenterManager.
-"""
+import sys
 from pathlib import Path
-from typing import Optional
-
+from typing import Optional  # <--- THÊM DÒNG NÀY
 
 class Paths:
     def __init__(self) -> None:
-        self._project_root = Path(__file__).resolve().parent.parent.parent.parent
+        if getattr(sys, 'frozen', False):
+            self._project_root = Path(sys.executable).resolve().parent
+        else:
+            self._project_root = Path(__file__).resolve().parent.parent.parent.parent
         self._runtime_root = self._project_root / "runtime"
-
     @property
     def project_root(self) -> Path:
         return self._project_root
@@ -30,6 +28,10 @@ class Paths:
     @property
     def student_profile_dir(self) -> Path:
         return self.export_dir / "StudentProfile"
+
+    @property
+    def session_report_dir(self) -> Path:
+        return self.export_dir / "SessionReports"
 
     @property
     def excel_export_dir(self) -> Path:
@@ -57,19 +59,22 @@ class Paths:
 
     @property
     def reports_dir(self) -> Path:
-        """Thư mục lưu báo cáo (Reports/Student/...)."""
         return self._runtime_root / "Reports"
 
     @property
     def temp_dir(self) -> Path:
-        """Thư mục tạm."""
         return self._runtime_root / "Temp"
+
+    @property
+    def metadata_dir(self) -> Path:
+        return self._runtime_root / "metadata"
 
     def ensure_directories(self) -> None:
         dirs = [
             self.database_dir,
             self.export_dir,
             self.student_profile_dir,
+            self.session_report_dir,
             self.excel_export_dir,
             self.attachment_dir,
             self.config_dir,
@@ -77,6 +82,7 @@ class Paths:
             self.logs_dir,
             self.reports_dir,
             self.temp_dir,
+            self.metadata_dir,
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -129,3 +135,9 @@ def reports_dir() -> Path:
 
 def temp_dir() -> Path:
     return get_paths().temp_dir
+
+def metadata_dir() -> Path:
+    return get_paths().metadata_dir
+
+def session_report_dir() -> Path:
+    return get_paths().session_report_dir

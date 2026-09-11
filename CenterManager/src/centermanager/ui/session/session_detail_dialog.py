@@ -258,6 +258,8 @@ class SessionDetailDialog(QDialog):
             self._highlight_service,
             self._session_id,
             self._student_service,
+            self._class_service,
+            self._session_service,
             parent=self
         )
         self.highlight_widget.highlight_changed.connect(self._on_highlight_changed)

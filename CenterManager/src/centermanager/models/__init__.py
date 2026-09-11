@@ -17,12 +17,19 @@ from centermanager.models.student_highlight import StudentHighlight, HighlightTy
 from centermanager.models.note import Note, NoteType
 from centermanager.models.document import Document
 from centermanager.models.report import Report  # NEW
-
+from centermanager.models.report_cache import ReportCache
 # RBAC Models
 from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.models.role_permission import RolePermission
+from centermanager.models.audit_log import AuditLog
+from centermanager.models.employee import Employee
+from centermanager.models.employee_document import EmployeeDocument
+from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException
+from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
+from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 
 # Teacher
 from centermanager.models.teacher import Teacher
@@ -66,6 +73,14 @@ __all__ = [
     "Permission",
     "PermissionDefinitions",
     "RolePermission",
+    "AuditLog",
+    "Employee",
+    "EmployeeDocument",
+    "EmployeeScheduleRule",
+    "EmployeeScheduleException",
+    "EmployeeWorkingTimeEntry",
+    "EmployeeWorkRegistration",
+    "EmployeeWorkRegistrationPeriod",
     "Teacher",
     "TeacherDocument",
     "TeacherTimelineEvent",
@@ -78,4 +93,5 @@ __all__ = [
     "ExpenseTimelineEvent",
     "Attendance",
     "AttendanceStatus",
+    "ReportCache",
 ]

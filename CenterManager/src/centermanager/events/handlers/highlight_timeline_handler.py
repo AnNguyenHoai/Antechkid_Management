@@ -5,7 +5,7 @@ Timeline handler for StudentHighlight events.
 import logging
 from datetime import datetime
 
-from centermanager.events.event import EventHandler
+from centermanager.events.event import Event, EventHandler
 from centermanager.events.highlight_events import StudentHighlightCreated
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.services.timeline_service import TimelineService

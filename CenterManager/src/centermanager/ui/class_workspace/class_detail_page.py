@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-ClassDetailPage - full class profile with teacher assignment, student enrollment, schedule, timeline.
-Attendance removed - now only in Teaching Workspace.
+ClassDetailPage - full class profile.
+Now with collaboration support.
 """
 import logging
 from typing import Optional, List
@@ -33,6 +33,8 @@ from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnroll
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,9 @@ class ClassDetailPage(QWidget):
         note_service: SessionNoteService,
         highlight_service: StudentHighlightService,
         student_service: StudentService,
-        attendance_service: AttendanceService,   # <-- thêm
+        attendance_service: AttendanceService,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -61,9 +65,12 @@ class ClassDetailPage(QWidget):
         self._note_service = note_service
         self._highlight_service = highlight_service
         self._student_service = student_service
-        self._attendance_service = attendance_service  # lưu để truyền cho schedule widget
+        self._attendance_service = attendance_service
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
+        self._write_enabled = False
 
         self._setup_ui()
         self._show_empty()
@@ -87,12 +94,11 @@ class ClassDetailPage(QWidget):
         top_bar_layout.addStretch()
         main_layout.addWidget(top_bar)
 
-        # No tab widget now - chỉ có Overview
+        # Overview tab (no tabs, just scroll)
         self.overview_tab = self._create_overview_tab()
         main_layout.addWidget(self.overview_tab)
 
     def _create_overview_tab(self) -> QWidget:
-        """Create the Overview tab content."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -176,7 +182,6 @@ class ClassDetailPage(QWidget):
         schedule_layout.setContentsMargins(0, 0, 0, 0)
         schedule_layout.setSpacing(SPACING['xs'])
 
-        # Header with Add button
         schedule_header = QHBoxLayout()
         title_label = QLabel("📅 Weekly Schedule & Assessment")
         title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
@@ -189,14 +194,19 @@ class ClassDetailPage(QWidget):
         schedule_layout.addLayout(schedule_header)
         schedule_layout.addWidget(self._divider())
 
+        # ===== SỬA LỖI TẠI ĐÂY: thêm 2 tham số =====
         self.schedule_widget = ClassScheduleWidget(
             self._session_service,
             self._note_service,
             self._highlight_service,
             self._student_service,
             self._class_service,
-            self._attendance_service,   # <-- truyền attendance_service
+            self._attendance_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
+        # ==========================================
+
         self.schedule_widget.session_updated.connect(self._on_data_changed)
         schedule_layout.addWidget(self.schedule_widget)
         container_layout.addWidget(schedule_section)
@@ -282,6 +292,20 @@ class ClassDetailPage(QWidget):
         events = self._timeline_service.get_class_timeline(class_obj.id)
         self.timeline_widget.set_events(events)
 
+    def _can_manage_teacher_assignments(self) -> bool:
+        from centermanager.core.current_user import get_current_user
+        from centermanager.models.role import RoleDefinitions
+        user = get_current_user()
+        role_name = getattr(getattr(user, "role", None), "name", None) if user else None
+        return role_name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER}
+
+    def _apply_dynamic_write_state(self) -> None:
+        teacher_enabled = self._write_enabled and self._can_manage_teacher_assignments()
+        for button in self.teacher_container.findChildren(QPushButton):
+            button.setEnabled(teacher_enabled)
+        for button in self.student_container.findChildren(QPushButton):
+            button.setEnabled(self._write_enabled)
+
     def _update_teachers(self, teachers: List[Teacher]) -> None:
         self._clear_layout(self.teacher_layout)
 
@@ -290,6 +314,7 @@ class ClassDetailPage(QWidget):
             btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_assign_teacher)
             self.teacher_layout.addWidget(btn)
+            self._apply_dynamic_write_state()
             return
 
         for teacher in teachers:
@@ -310,6 +335,7 @@ class ClassDetailPage(QWidget):
         add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_assign_teacher)
         self.teacher_layout.addWidget(add_btn)
+        self._apply_dynamic_write_state()
 
     def _update_students(self) -> None:
         self._clear_layout(self.student_layout)
@@ -327,6 +353,7 @@ class ClassDetailPage(QWidget):
             btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_enroll_student)
             self.student_layout.addWidget(btn)
+            self._apply_dynamic_write_state()
             return
 
         for student in students:
@@ -347,6 +374,7 @@ class ClassDetailPage(QWidget):
         add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_enroll_student)
         self.student_layout.addWidget(add_btn)
+        self._apply_dynamic_write_state()
 
     def _clear_layout(self, layout) -> None:
         while layout.count():
@@ -357,6 +385,9 @@ class ClassDetailPage(QWidget):
     def _on_edit(self) -> None:
         if self._current_class_id is None:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            return
         dialog = ClassFormDialog(self._class_service, self._current_class_id, parent=self)
         if dialog.exec() == ClassFormDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
@@ -365,17 +396,26 @@ class ClassDetailPage(QWidget):
     def _on_assign_teacher(self) -> None:
         if self._current_class_id is None:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to assign a teacher.", "warning")
+            return
         dialog = ClassAssignmentDialog(
             self._class_service,
             self._current_class_id,
+            self._collaboration_manager,
+            self._notification_service,
             parent=self
         )
+        dialog.assignment_changed.connect(self._on_assignment_changed)
         if dialog.exec() == ClassAssignmentDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
 
     def _on_remove_teacher(self, teacher_id: int) -> None:
         if self._current_class_id is None:
+            return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to remove a teacher.", "warning")
             return
         reply = QMessageBox.question(
             self, "Confirm Remove",
@@ -393,17 +433,26 @@ class ClassDetailPage(QWidget):
     def _on_enroll_student(self) -> None:
         if self._current_class_id is None:
             return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to enroll a student.", "warning")
+            return
         dialog = ClassEnrollmentDialog(
             self._class_service,
             self._current_class_id,
+            self._collaboration_manager,
+            self._notification_service,
             parent=self
         )
+        dialog.enrollment_changed.connect(self._on_enrollment_changed)
         if dialog.exec() == ClassEnrollmentDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
 
     def _on_remove_student(self, student_id: int) -> None:
         if self._current_class_id is None:
+            return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to remove a student.", "warning")
             return
         reply = QMessageBox.question(
             self, "Confirm Remove",
@@ -422,7 +471,9 @@ class ClassDetailPage(QWidget):
         if self._current_class_id is None:
             QMessageBox.warning(self, "Error", "No class selected.")
             return
-        logger.info(f"Opening Add Session dialog for class {self._current_class_id}")
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify("You must be in WRITE mode to add a session.", "warning")
+            return
         try:
             dialog = SessionDialog(
                 self._session_service,
@@ -430,19 +481,33 @@ class ClassDetailPage(QWidget):
                 parent=self
             )
             if dialog.exec() == SessionDialog.DialogCode.Accepted:
-                logger.info("Session added successfully, refreshing schedule.")
                 self.schedule_widget.refresh()
                 if self._current_class_id:
                     events = self._timeline_service.get_class_timeline(self._current_class_id)
                     self.timeline_widget.set_events(events)
                 self.class_updated.emit()
-            else:
-                logger.info("Session dialog cancelled.")
         except Exception as e:
             logger.exception("Error adding session")
             QMessageBox.critical(self, "Error", f"Could not add session: {str(e)}")
+
+    def _on_assignment_changed(self, class_id: int) -> None:
+        if self._current_class_id == class_id:
+            self.load_class(class_id)
+        self.class_updated.emit()
+
+    def _on_enrollment_changed(self, class_id: int) -> None:
+        if self._current_class_id == class_id:
+            self.load_class(class_id)
+        self.class_updated.emit()
 
     def _on_data_changed(self) -> None:
         if self._current_class_id:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self._write_enabled = enabled
+        self.edit_btn.setEnabled(enabled)
+        self.add_session_btn.setEnabled(enabled)
+        self._apply_dynamic_write_state()
+        # We'll handle this by checking write mode in the slots themselves, so no need to disable buttons here.

@@ -232,3 +232,7 @@ class AssessmentSection(QWidget):
             self._load_data()
         else:
             self._show_empty()
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Enable/disable write actions (Add button)."""
+        self.add_btn.setEnabled(enabled)
+        # Các nút Edit/Delete nằm trong dialog, không cần xử lý ở đây.

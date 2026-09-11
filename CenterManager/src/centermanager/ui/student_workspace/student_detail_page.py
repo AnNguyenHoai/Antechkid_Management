@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-StudentDetailPage - displays full student profile with all sections.
-Now includes Reports tab.
+"""StudentDetailPage - displays full student profile with all sections.
+Now with platform integration and write protection.
 """
 import logging
 from typing import Optional
@@ -24,6 +23,7 @@ from centermanager.services.student_note_service import StudentNoteService
 from centermanager.services.student_document_service import StudentDocumentService
 from centermanager.services.income_service import IncomeService
 from centermanager.services.class_service import ClassService
+from centermanager.services.enrollment_service import EnrollmentService
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
@@ -42,13 +42,18 @@ from centermanager.ui.student_workspace.notes_widget import NotesWidget
 from centermanager.ui.student_workspace.documents_widget import DocumentsWidget
 from centermanager.ui.student_workspace.student_financial_widget import StudentFinancialWidget
 from centermanager.ui.student_workspace.student_attendance_widget import StudentAttendanceWidget
-from centermanager.ui.student_workspace.report_list_widget import ReportListWidget  # NEW
+from centermanager.ui.student_workspace.report_list_widget import ReportListWidget
+from centermanager.ui.student_workspace.enrollment_widget import EnrollmentWidget
 from centermanager.ui.design_system import (
     SectionHeader, InfoPanel, PrimaryButton, SecondaryButton,
     DangerButton, Breadcrumb, Avatar
 )
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS
 from centermanager.ui import styles
+
+from centermanager.platform.context import PlatformContext
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.business import WriteGuard
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +77,13 @@ class StudentDetailPage(QWidget):
         document_service: StudentDocumentService,
         income_service: IncomeService,
         class_service: ClassService,
+        enrollment_service: EnrollmentService,
         permission_service: PermissionService,
         outstanding_service: OutstandingService,
         attendance_service: AttendanceService,
         report_service: ReportService,
+        platform_context: PlatformContext,
+        collaboration_manager: CollaborationManager,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -91,13 +99,19 @@ class StudentDetailPage(QWidget):
         self._document_service = document_service
         self._income_service = income_service
         self._class_service = class_service
+        self._enrollment_service = enrollment_service
         self._permission_service = permission_service
         self._outstanding_service = outstanding_service
         self._attendance_service = attendance_service
         self._report_service = report_service
+        self._platform_context = platform_context
+        self._collaboration_manager = collaboration_manager
+        self._write_guard = WriteGuard(collaboration_manager)
 
         self._current_student_id: Optional[int] = None
         self._current_student: Optional[Student] = None
+        self._write_enabled = False
+        self._parent_mutation_buttons = []
 
         self._setup_ui()
         self._show_empty()
@@ -143,6 +157,16 @@ class StudentDetailPage(QWidget):
         self.profile_tab = self._create_profile_tab()
         self.tab_widget.addTab(self.profile_tab, "Profile")
 
+        # Tab 2: Enrollment
+        self.enrollment_widget = EnrollmentWidget(
+            self._enrollment_service,
+            self._class_service,
+            self._collaboration_manager,
+            parent=self,
+        )
+        self.enrollment_widget.enrollment_changed.connect(self._on_data_changed)
+        self.tab_widget.addTab(self.enrollment_widget, "🎓 Enrollment")
+
         # Tab 2: Financial
         self.financial_tab = StudentFinancialWidget(
             self._income_service,
@@ -153,7 +177,17 @@ class StudentDetailPage(QWidget):
             parent=self
         )
         self.financial_tab.open_finance_clicked.connect(self._on_open_finance)
-        self.tab_widget.addTab(self.financial_tab, "💰 Financial")
+        self.financial_tab.financial_updated.connect(self._on_data_changed)
+        # Finance is a protected workspace. Do not expose a tab that will
+        # immediately fail with finance.view for non-finance roles.
+        self._finance_tab_index = self.tab_widget.addTab(self.financial_tab, "💰 Financial")
+        try:
+            can_view_finance = self._permission_service.has_permission("finance.view")
+        except Exception:
+            logger.exception("Failed to evaluate finance tab visibility")
+            can_view_finance = False
+        self.financial_tab.setVisible(bool(can_view_finance))
+        self.tab_widget.setTabVisible(self._finance_tab_index, bool(can_view_finance))
 
         # Tab 3: Attendance
         self.attendance_widget = StudentAttendanceWidget(
@@ -162,8 +196,9 @@ class StudentDetailPage(QWidget):
         )
         self.tab_widget.addTab(self.attendance_widget, "📋 Attendance")
 
-        # Tab 4: Reports (NEW)
+        # Tab 4: Reports
         self.report_list_widget = ReportListWidget(self._report_service, parent=self)
+        self.report_list_widget.report_changed.connect(self._on_data_changed)
         self.tab_widget.addTab(self.report_list_widget, "📄 Báo cáo")
 
         main_layout.addWidget(self.tab_widget)
@@ -183,6 +218,7 @@ class StudentDetailPage(QWidget):
 
         # Quick Actions
         self.quick_actions = QuickActionsWidget()
+        self.quick_actions.upload_photo_clicked.connect(self._on_upload_photo)
         container_layout.addWidget(self.quick_actions)
 
         # Profile
@@ -241,6 +277,7 @@ class StudentDetailPage(QWidget):
             on_add_note=self._on_add_note,
             on_upload_doc=self._on_upload_doc,
             on_export_pdf=self._export_pdf,
+            on_upload_photo=self._on_upload_photo,
         )
 
         return tab
@@ -265,10 +302,18 @@ class StudentDetailPage(QWidget):
         return section
 
     def _show_empty(self) -> None:
+        self._current_student_id = None
+        self._current_student = None
         self.tab_widget.setVisible(False)
 
     def _show_detail(self) -> None:
         self.tab_widget.setVisible(True)
+
+    def refresh_current_student(self) -> None:
+        """Refresh every detail surface from the authoritative student id."""
+        if self._current_student_id is None:
+            return
+        self.load_student(self._current_student_id)
 
     def load_student(self, student_id: int) -> None:
         try:
@@ -285,10 +330,12 @@ class StudentDetailPage(QWidget):
         self._current_student_id = student.id
         self._current_student = student
         self._populate_profile(student)
+        self.enrollment_widget.set_student(student.id)
         self._populate_financial(student.id)
         self._populate_attendance(student.id)
-        self.report_list_widget.set_student(student.id)  # NEW
+        self.report_list_widget.set_student(student.id)
         self._show_detail()
+        self.set_write_enabled(self._write_enabled)
 
     def _populate_profile(self, student: Student) -> None:
         # Profile
@@ -316,7 +363,7 @@ class StudentDetailPage(QWidget):
         self.notes_widget.set_student(student.id)
 
         # Documents
-        self.documents_widget.set_student(student.id)
+        self.documents_widget.set_student(student.id, student.student_code)
 
     def _populate_financial(self, student_id: int) -> None:
         self.financial_tab.set_student(student_id)
@@ -326,6 +373,7 @@ class StudentDetailPage(QWidget):
 
     def _load_parents(self, student_id: int) -> None:
         self._clear_parents()
+        self._parent_mutation_buttons = []
         try:
             parents = self._parent_service.get_parents_for_student(student_id)
         except Exception as e:
@@ -352,6 +400,8 @@ class StudentDetailPage(QWidget):
             add_btn.setFixedWidth(120)
             add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
+            add_btn.setEnabled(self._write_enabled)
+            self._parent_mutation_buttons.append(add_btn)
             empty_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self.parents_layout.addWidget(empty_widget)
         else:
@@ -359,20 +409,30 @@ class StudentDetailPage(QWidget):
                 card = ParentCard(parent)
                 card.edit_clicked.connect(self._on_edit_parent)
                 card.delete_clicked.connect(self._on_delete_parent)
+                if hasattr(card, "set_write_enabled"):
+                    card.set_write_enabled(self._write_enabled)
                 self.parents_layout.addWidget(card)
             add_btn = QPushButton("+ Add Parent")
             add_btn.setFixedWidth(120)
             add_btn.setStyleSheet(styles.BUTTON_PRIMARY)
             add_btn.clicked.connect(self._on_add_parent)
+            add_btn.setEnabled(self._write_enabled)
+            self._parent_mutation_buttons.append(add_btn)
             self.parents_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
     def _clear_parents(self) -> None:
+        self._parent_mutation_buttons = []
         while self.parents_layout.count():
             item = self.parents_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
     def _on_add_parent(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_widget=self)
@@ -380,6 +440,11 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_edit_parent(self, parent_id: int) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         dialog = ParentDialog(self._parent_service, self._current_student_id, parent_id=parent_id, parent_widget=self)
@@ -387,7 +452,11 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_delete_parent(self, parent_id: int) -> None:
-        from PySide6.QtWidgets import QMessageBox
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         reply = QMessageBox.question(self, "Confirm Delete", "Delete this parent?", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
@@ -397,6 +466,11 @@ class StudentDetailPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def _on_add_assessment(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         from centermanager.ui.assessment.assessment_dialog import AssessmentDialog
@@ -405,35 +479,67 @@ class StudentDetailPage(QWidget):
             self._on_data_changed()
 
     def _on_add_note(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         self.notes_widget._on_add()
 
     def _on_upload_doc(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         self.documents_widget._on_upload()
 
     def _on_edit_clicked(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
         if self._current_student_id is None:
             return
         dialog = StudentFormDialog(self._student_service, student_id=self._current_student_id, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self._on_data_changed()
 
+    def _on_upload_photo(self) -> None:
+        try:
+            self._write_guard.require_write()
+        except Exception as e:
+            QMessageBox.warning(self, "Permission Denied", str(e))
+            return
+        if self._current_student_id is None:
+            return
+        from centermanager.ui.student_workspace.profile_image_dialog import ProfileImageDialog
+        student = self._student_service.get_student(self._current_student_id)
+        dialog = ProfileImageDialog(
+            self._student_service,
+            self._current_student_id,
+            student.profile_image_path,
+            parent=self
+        )
+        if dialog.exec() == ProfileImageDialog.DialogCode.Accepted:
+            self._on_data_changed()
+
     def _on_data_changed(self) -> None:
         if self._current_student_id is not None:
             try:
-                student = self._student_service.get_student(self._current_student_id)
-                self._populate_profile(student)
-                self._populate_financial(self._current_student_id)
-                self._populate_attendance(self._current_student_id)
-                self.report_list_widget.set_student(self._current_student_id)  # NEW
-            except Exception as e:
-                logger.exception("Error refreshing student data")
+                self.refresh_current_student()
+            except Exception:
+                logger.exception("Error refreshing student detail")
             self.student_updated.emit()
 
     def _export_pdf(self) -> None:
+        # Report export is a read-only artifact operation. It must not require
+        # write ownership because it does not mutate the Student aggregate.
         if self._current_student_id is None:
             QMessageBox.warning(self, "Lỗi", "Chưa chọn học sinh.")
             return
@@ -448,9 +554,7 @@ class StudentDetailPage(QWidget):
                 "Xuất thành công",
                 f"Báo cáo đã được lưu tại:\n{output_path}"
             )
-            # Refresh report list
             self.report_list_widget.set_student(self._current_student_id)
-            # Open folder
             import os
             import sys
             if sys.platform == 'win32':
@@ -466,4 +570,33 @@ class StudentDetailPage(QWidget):
             QMessageBox.critical(self, "Lỗi xuất", f"Không thể tạo báo cáo PDF: {str(e)}")
 
     def _on_open_finance(self) -> None:
+        try:
+            if not self._permission_service.has_permission("finance.view"):
+                logger.warning("Finance navigation denied for current user")
+                QMessageBox.information(
+                    self,
+                    "Finance Workspace",
+                    "You do not have permission to open the Finance Workspace.",
+                )
+                return
+        except Exception:
+            logger.exception("Failed to validate finance navigation permission")
+            return
         self.go_to_finance.emit()
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Propagate write mode to all child mutation surfaces."""
+        self._write_enabled = enabled
+        for widget in (
+            self.quick_actions,
+            self.enrollment_widget,
+            self.assessment_section,
+            self.notes_widget,
+            self.documents_widget,
+            self.attendance_widget,
+            self.report_list_widget,
+        ):
+            if hasattr(widget, "set_write_enabled"):
+                widget.set_write_enabled(enabled)
+        for button in self._parent_mutation_buttons:
+            button.setEnabled(enabled)

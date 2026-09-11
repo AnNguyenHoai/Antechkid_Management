@@ -17,7 +17,6 @@ class WorkspaceHeader(QWidget):
     """Header displaying workspace name, current page, and actions."""
 
     back_home_clicked = Signal()
-    change_password_clicked = Signal()  # Thêm signal mới
 
     def __init__(
         self,
@@ -67,24 +66,7 @@ class WorkspaceHeader(QWidget):
 
         layout.addStretch()
 
-        # Nút đổi mật khẩu
-        self.change_password_btn = QPushButton("🔑 Change Password")
-        self.change_password_btn.setFixedHeight(32)
-        self.change_password_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {COLORS['primary']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['primary_hover']};
-            }}
-        """)
-        self.change_password_btn.clicked.connect(self.change_password_clicked.emit)
-        layout.addWidget(self.change_password_btn)
+        # (Đã xóa nút Change Password)
 
     def set_context(self, workspace_name: str, page_label: str) -> None:
         self._workspace_name = workspace_name

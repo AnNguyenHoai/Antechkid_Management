@@ -36,3 +36,8 @@ class TeacherAssignmentRepository(BaseRepository[TeacherAssignment]):
 
     def delete(self, assignment: TeacherAssignment) -> None:
         self._session.delete(assignment)
+    def get_assignment(self, teacher_id: int, class_id: int) -> Optional[TeacherAssignment]:
+        return self._session.query(TeacherAssignment).filter(
+            TeacherAssignment.teacher_id == teacher_id,
+            TeacherAssignment.class_id == class_id
+        ).first()

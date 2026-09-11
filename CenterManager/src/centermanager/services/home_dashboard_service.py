@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-HomeDashboardService - provides aggregated data for Home Workspace (Workspace Launcher).
-Now with permission filtering.
-"""
+"""HomeDashboardService - provides aggregated data for Home Workspace."""
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy.orm import sessionmaker
 
@@ -15,11 +12,16 @@ from centermanager.models.assessment import Assessment
 from centermanager.models.class_ import Class
 from centermanager.models.session import Session
 from centermanager.models.teacher import Teacher
+from centermanager.models.employee import Employee
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.core.current_user import get_current_user
 from centermanager.models.user import User
+
+# === THÊM IMPORT ===
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted
+from centermanager.events.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +33,73 @@ class WorkspaceSummary:
     icon: str
     description: str
     summary_text: str
-    health_status: str          # "good", "warning", "critical"
+    health_status: str
     health_details: str
     quick_action_label: str
     quick_action_target: str
 
 
 class HomeDashboardService:
-    def __init__(self, session_factory: sessionmaker):
+    def __init__(self, session_factory: sessionmaker, event_bus: Optional[EventBus] = None):
         self._session_factory = session_factory
+        self._event_bus = event_bus
+        self._cache = None
+        self._cache_invalidated = True
+        
+        # Register event listeners
+        if event_bus:
+            event_bus.register(StudentArchived, self._on_student_archived)
+            event_bus.register(StudentActivated, self._on_student_activated)
+            event_bus.register(StudentDeleted, self._on_student_deleted)
+            logger.info("HomeDashboardService registered for student events")
+    
+    def _on_student_archived(self, event: StudentArchived) -> None:
+        self._cache_invalidated = True
+        logger.info(f"Cache invalidated: student {event.student_id} archived")
+    
+    def _on_student_activated(self, event: StudentActivated) -> None:
+        self._cache_invalidated = True
+        logger.info(f"Cache invalidated: student {event.student_id} activated")
+    
+    def _on_student_deleted(self, event: StudentDeleted) -> None:
+        self._cache_invalidated = True
+        logger.info(f"Cache invalidated: student {event.student_id} deleted")
 
     def get_workspace_summaries(self) -> List[WorkspaceSummary]:
+        """Get workspace summaries with caching."""
+        if not self._cache_invalidated and self._cache is not None:
+            return self._cache
+        
         with self._session_factory() as session:
             student_repo = StudentRepository(session)
             parent_repo = ParentRepository(session)
             assessment_repo = AssessmentRepository(session)
 
-            total_students = len(student_repo.list_active())
+            all_students = student_repo.list_all_including_deleted()
+            total_students = len(all_students)
+            
+            # Đếm active và archived dựa trên status, không chỉ deleted_at
+            active_count = 0
+            archived_count = 0
+            for s in all_students:
+                if s.deleted_at is not None:
+                    continue
+                if s.status == "ARCHIVED":
+                    archived_count += 1
+                else:
+                    active_count += 1
+            
             parent_count = session.query(Parent).count()
             assessment_count = session.query(Assessment).count()
+            
+            # Chỉ lấy active students để tính thiếu parent/assessment
+            active_students = session.query(Student).filter(
+                Student.deleted_at.is_(None),
+                Student.status != "ARCHIVED"
+            ).all()
+            
             students_without_parent = 0
             students_without_assessment = 0
-            active_students = student_repo.list_active()
             for s in active_students:
                 if not parent_repo.get_by_student(s.id):
                     students_without_parent += 1
@@ -88,7 +135,7 @@ class HomeDashboardService:
             )
             summaries.append(student_ws)
 
-            # Teacher Workspace - requires teacher.view or admin
+            # Teacher Workspace
             class_count = session.query(Class).count()
             session_count = session.query(Session).filter(Session.status == "Scheduled").count()
             teacher_count = session.query(Teacher).count()
@@ -108,7 +155,7 @@ class HomeDashboardService:
                 )
                 summaries.append(teacher_ws)
 
-            # Class Workspace - requires class.view or admin
+            # Class Workspace
             if user and (user.has_permission("class.view") or user.is_admin):
                 class_ws = WorkspaceSummary(
                     workspace_id="class",
@@ -123,9 +170,8 @@ class HomeDashboardService:
                 )
                 summaries.append(class_ws)
 
-            # Finance Workspace - requires finance.view or admin
+            # Finance Workspace
             if user and (user.has_permission("finance.view") or user.is_admin):
-                # Tính revenue và outstanding (placeholder)
                 from centermanager.services.outstanding_service import OutstandingService
                 outstanding_service = OutstandingService(self._session_factory)
                 stats = outstanding_service.get_outstanding_stats()
@@ -145,7 +191,24 @@ class HomeDashboardService:
                 )
                 summaries.append(finance_ws)
 
-            # Admin Workspace - requires user.manage or admin
+            # Employee Workspace
+            if user and (user.has_permission("employee.view.self") or user.has_permission("employee.view.all") or user.is_admin):
+                if user.is_admin or user.has_permission("employee.view.all"):
+                    employee_count = session.query(Employee).filter(Employee.employment_status != "ARCHIVED").count()
+                    active_employee_count = session.query(Employee).filter(Employee.employment_status == "ACTIVE").count()
+                    summary_text = f"{employee_count} employees, {active_employee_count} active"
+                    description = "Manage employee profiles and HR information"
+                else:
+                    summary_text = "My employee profile and attendance"
+                    description = "View your employee profile and attendance"
+                summaries.append(WorkspaceSummary(
+                    workspace_id="employee", name="Employee Workspace", icon="👥",
+                    description=description,
+                    summary_text=summary_text,
+                    health_status="good", health_details="", quick_action_label="Open →", quick_action_target="employee"
+                ))
+
+            # Admin Workspace
             if user and (user.has_permission("user.manage") or user.is_admin):
                 admin_ws = WorkspaceSummary(
                     workspace_id="admin",
@@ -160,4 +223,11 @@ class HomeDashboardService:
                 )
                 summaries.append(admin_ws)
 
+            self._cache = summaries
+            self._cache_invalidated = False
+            logger.info(f"HomeDashboard cache updated: total={total_students}, active={active_count}, archived={archived_count}")
             return summaries
+
+    def refresh(self) -> None:
+        """Force refresh cache."""
+        self._cache_invalidated = True

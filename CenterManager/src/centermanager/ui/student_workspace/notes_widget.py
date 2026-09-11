@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-NotesWidget - display and manage student notes.
-"""
 from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal
@@ -287,6 +284,9 @@ class NotesWidget(QWidget):
                 self.note_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        self.add_btn.setEnabled(enabled)
 
 
 class NoteDialog(QDialog):

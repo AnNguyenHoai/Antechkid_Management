@@ -19,6 +19,7 @@ from .session_service import SessionService
 from .session_note_service import SessionNoteService
 from .report_service import ReportService
 from .report_policy import ReportPolicy
+from .session_report_service import SessionReportService
 
 # Teacher
 from .teacher_service import TeacherService, TeacherNotFoundError, TeacherValidationError
@@ -37,6 +38,13 @@ from .expense_timeline_service import ExpenseTimelineService
 from .outstanding_service import OutstandingService
 from .finance_dashboard_service import FinanceDashboardService
 
+# Write transaction safety guard. Importing the package happens before
+# centermanager.services.write_transaction is requested by MainWindow, so the
+# guard is installed without changing the transaction manager implementation.
+from .write_transaction import WriteTransactionManager
+from .write_transaction_guard import install_write_transaction_guard
+install_write_transaction_guard(WriteTransactionManager)
+
 __all__ = [
     "StudentService",
     "ParentService",
@@ -53,6 +61,7 @@ __all__ = [
     "SessionNoteService",
     "ReportService",
     "ReportPolicy",
+    "SessionReportService",
     "TeacherService",
     "TeacherNotFoundError",
     "TeacherValidationError",
@@ -70,4 +79,5 @@ __all__ = [
     "ExpenseTimelineService",
     "OutstandingService",
     "FinanceDashboardService",
+    "WriteTransactionManager",
 ]

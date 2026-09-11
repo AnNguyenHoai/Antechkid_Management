@@ -12,23 +12,27 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.services.class_service import ClassService
-from centermanager.repositories.student_repository import StudentRepository
-from centermanager.database.engine import create_production_engine
-from sqlalchemy.orm import sessionmaker
+from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
 
 class ClassEnrollmentDialog(QDialog):
+    enrollment_changed = Signal(int)
     def __init__(
         self,
         class_service: ClassService,
         class_id: int,
+        collaboration_manager: CollaborationManager,
+        notification_service: NotificationService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
         self._class_id = class_id
+        self._collaboration_manager = collaboration_manager
+        self._notification_service = notification_service
         self._all_students: List = []
         self._enrolled_ids: List[int] = []
 
@@ -38,6 +42,7 @@ class ClassEnrollmentDialog(QDialog):
 
         self._setup_ui()
         self._load_data()
+        self._update_write_state()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -84,17 +89,21 @@ class ClassEnrollmentDialog(QDialog):
         done_btn.clicked.connect(self.accept)
         layout.addWidget(done_btn)
 
+    def _ensure_enrollment_write(self, action: str) -> bool:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(f"You must be in WRITE mode to {action}.", "warning")
+            return False
+        return True
+
+    def _update_write_state(self) -> None:
+        enabled = self._collaboration_manager.ensure_write()
+        self.enroll_btn.setEnabled(enabled)
+        self.remove_btn.setEnabled(enabled)
+
     def _load_data(self) -> None:
-        engine = create_production_engine()
-        session_factory = sessionmaker(bind=engine)
-
-        with session_factory() as session:
-            repo = StudentRepository(session)
-            self._all_students = repo.list_active()
-
-        # Get currently enrolled students
+        self._all_students = self._class_service.list_active_students()
+        class_obj = self._class_service.get_class_with_details(self._class_id)
         self._enrolled_ids = [s.id for s in self._class_service.get_enrolled_students(self._class_id)]
-
         self._update_lists()
 
     def _filter_students(self, text: str) -> None:
@@ -120,6 +129,8 @@ class ClassEnrollmentDialog(QDialog):
                 self.available_list.addItem(item)
 
     def _enroll_selected(self) -> None:
+        if not self._ensure_enrollment_write("enroll students"):
+            return
         items = self.available_list.selectedItems()
         if not items:
             QMessageBox.warning(self, "Warning", "Please select at least one student.")
@@ -131,6 +142,7 @@ class ClassEnrollmentDialog(QDialog):
                 logger.info(f"Enrolling student {student_id} into class {self._class_id}")
                 self._class_service.enroll_student(self._class_id, student_id)
                 self._enrolled_ids.append(student_id)
+                self.enrollment_changed.emit(self._class_id)
                 logger.info(f"Successfully enrolled student {student_id}")
             except Exception as e:
                 logger.exception(f"Failed to enroll student {student_id}: {e}")
@@ -139,6 +151,8 @@ class ClassEnrollmentDialog(QDialog):
         self._update_lists()
 
     def _remove_selected(self) -> None:
+        if not self._ensure_enrollment_write("remove students"):
+            return
         items = self.enrolled_list.selectedItems()
         if not items:
             QMessageBox.warning(self, "Warning", "Please select at least one student.")
@@ -150,6 +164,7 @@ class ClassEnrollmentDialog(QDialog):
                 logger.info(f"Removing student {student_id} from class {self._class_id}")
                 self._class_service.remove_student(self._class_id, student_id)
                 self._enrolled_ids.remove(student_id)
+                self.enrollment_changed.emit(self._class_id)
                 logger.info(f"Successfully removed student {student_id}")
             except Exception as e:
                 logger.exception(f"Failed to remove student {student_id}: {e}")

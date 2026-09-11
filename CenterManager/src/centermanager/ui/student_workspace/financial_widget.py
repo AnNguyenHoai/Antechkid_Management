@@ -120,8 +120,12 @@ class FinancialWidget(QWidget):
             self.collect_btn.setToolTip("You don't have permission to collect tuition.")
 
     def set_student(self, student_id: int) -> None:
-        """Load financial data for a student."""
+        """Load financial data only for users authorized to view Finance."""
         self._student_id = student_id
+        if not self._can_view_finance():
+            self._incomes = []
+            self._clear()
+            return
         try:
             self._student = self._student_service.get_student(student_id)
         except Exception as e:
@@ -133,9 +137,16 @@ class FinancialWidget(QWidget):
         self._load_incomes()
         self._update_ui()
 
+    def _can_view_finance(self) -> bool:
+        try:
+            return bool(self._permission_service.has_permission("finance.view"))
+        except Exception:
+            logger.exception("Failed to evaluate finance data permission")
+            return False
+
     def _load_incomes(self) -> None:
         """Load income records for the current student."""
-        if self._student_id is None:
+        if self._student_id is None or not self._can_view_finance():
             self._incomes = []
             return
         try:

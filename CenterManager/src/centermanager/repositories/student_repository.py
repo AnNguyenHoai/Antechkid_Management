@@ -5,11 +5,14 @@ Student repository with domain-specific queries.
 import re
 from typing import Optional, List
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from centermanager.models.student import Student
+from centermanager.models.enrollment import Enrollment
+from centermanager.models.class_ import Class
 from centermanager.repositories.base import BaseRepository
 from centermanager.models.parent import Parent
+
 
 class StudentRepository(BaseRepository[Student]):
     """Repository for Student entity with domain-specific methods."""
@@ -54,7 +57,6 @@ class StudentRepository(BaseRepository[Student]):
         Find the highest numeric value from student codes matching pattern ^HS\\d+$.
         Returns None if no valid HS code exists.
         """
-        # Use raw string for regex pattern to avoid escape warnings
         pattern = re.compile(r"^HS(\d+)$")
         all_codes = self.get_all_student_codes()
         max_num = None
@@ -67,6 +69,7 @@ class StudentRepository(BaseRepository[Student]):
                 if max_num is None or num > max_num:
                     max_num = num
         return max_num
+
     def search_students(self, query: str) -> List[Student]:
         """Search active students by code, name, parent phone, parent name."""
         from sqlalchemy import or_
@@ -82,3 +85,19 @@ class StudentRepository(BaseRepository[Student]):
                 )
             ).distinct()
         return q.all()
+
+    def get_with_relations(self, student_id: int) -> Optional[Student]:
+        """Get an active student with the relations required by the workspace."""
+        return (
+            self._session.query(Student)
+            .options(
+                selectinload(Student.enrollments)
+                .selectinload(Enrollment.class_)
+                .selectinload(Class.teachers),
+                selectinload(Student.parents),
+                selectinload(Student.notes_structured),
+                selectinload(Student.assessments),
+            )
+            .filter(Student.id == student_id, Student.deleted_at.is_(None))
+            .first()
+        )

@@ -17,6 +17,7 @@ from centermanager.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from centermanager.models.role import Role
+    from centermanager.models.employee import Employee
 
 
 class User(Base, TimestampMixin):
@@ -27,7 +28,7 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # thêm
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     role_id: Mapped[Optional[int]] = mapped_column(ForeignKey("roles.id"), nullable=True)
 
@@ -38,7 +39,13 @@ class User(Base, TimestampMixin):
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    role: Mapped[Optional[Role]] = relationship("Role", back_populates="users", lazy="selectin")
+    # Authorization decisions may outlive the repository session (the current
+    # user is held by the Qt application), so load role state eagerly and avoid
+    # requiring a detached User to lazy-load its authorization graph.
+    role: Mapped[Optional[Role]] = relationship("Role", back_populates="users", lazy="joined")
+    employee: Mapped[Optional["Employee"]] = relationship(
+        "Employee", back_populates="user", uselist=False, lazy="selectin"
+    )
 
     __table_args__ = (
         UniqueConstraint('username', name='uq_user_username'),

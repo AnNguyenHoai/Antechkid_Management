@@ -61,6 +61,7 @@ class Student(Base, TimestampMixin):
     highlights: Mapped[List[StudentHighlight]] = relationship("StudentHighlight", back_populates="student")
     notes_structured: Mapped[List[Note]] = relationship("Note", back_populates="student", cascade="all, delete-orphan")   # NEW
     documents: Mapped[List[Document]] = relationship("Document", back_populates="student", cascade="all, delete-orphan") # NEW
+    profile_image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     # Trong class Student, thêm dòng:
     reports: Mapped[List[Report]] = relationship("Report", back_populates="student", cascade="all, delete-orphan")
     def __repr__(self) -> str:

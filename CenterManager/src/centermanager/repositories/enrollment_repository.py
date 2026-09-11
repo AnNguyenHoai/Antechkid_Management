@@ -15,12 +15,36 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
     def __init__(self, session: Session) -> None:
         super().__init__(session, Enrollment)
 
-    def exists(self, student_id: int, class_id: int) -> bool:
-        """Check if a student is enrolled in a class."""
+    def exists(self, student_id: int, class_id: int, active_only: bool = True) -> bool:
+        """Check enrollment existence. By default only ACTIVE rows are operational."""
+        query = self._session.query(Enrollment).filter(
+            Enrollment.student_id == student_id,
+            Enrollment.class_id == class_id,
+        )
+        if active_only:
+            query = query.filter(Enrollment.status == "ACTIVE")
+        return query.first() is not None
+
+    def get_active(self, student_id: int, class_id: int) -> Optional[Enrollment]:
         return self._session.query(Enrollment).filter(
             Enrollment.student_id == student_id,
-            Enrollment.class_id == class_id
-        ).first() is not None
+            Enrollment.class_id == class_id,
+            Enrollment.status == "ACTIVE",
+        ).first()
+
+    def get_active_by_class(self, class_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.class_id == class_id,
+            Enrollment.status == "ACTIVE",
+        ).order_by(Enrollment.id).all()
+
+    def get_by_student_and_class(
+        self, student_id: int, class_id: int
+    ) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.student_id == student_id,
+            Enrollment.class_id == class_id,
+        ).order_by(desc(Enrollment.created_at)).all()
 
     def get_by_student(self, student_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).filter(

@@ -4,7 +4,7 @@ TeacherTimeline repository - data access for TeacherTimelineEvent.
 """
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload, Session
 from sqlalchemy import desc
 
 from centermanager.models.teacher_timeline_event import TeacherTimelineEvent
@@ -22,6 +22,18 @@ class TeacherTimelineRepository(BaseRepository[TeacherTimelineEvent]):
         if limit:
             query = query.limit(limit)
         return query.all()
+
+
+    def get_recent_events(self, limit: int = 10) -> List[TeacherTimelineEvent]:
+        # Timeline events leave this repository/session before the UI renders.
+        # Eager-load Teacher so the dashboard never triggers a lazy load on a
+        # detached TeacherTimelineEvent instance.
+        return (
+            self._session.query(TeacherTimelineEvent)
+            .options(joinedload(TeacherTimelineEvent.teacher))
+            .order_by(desc(TeacherTimelineEvent.created_at))
+            .limit(limit).all()
+        )
 
     def add(self, event: TeacherTimelineEvent) -> TeacherTimelineEvent:
         self._session.add(event)

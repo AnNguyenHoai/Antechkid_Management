@@ -102,6 +102,7 @@ class TeacherDocumentsWidget(QWidget):
         self._service = doc_service
         self._teacher_id: Optional[int] = None
         self._documents: List[TeacherDocument] = []
+        self._write_enabled = False
 
         self._setup_ui()
 
@@ -163,6 +164,7 @@ class TeacherDocumentsWidget(QWidget):
 
         for doc in self._documents:
             card = TeacherDocumentCard(doc)
+            card.delete_btn.setEnabled(self._write_enabled)
             self.container_layout.addWidget(card)
         self.container_layout.addStretch()
 
@@ -172,8 +174,13 @@ class TeacherDocumentsWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+    def set_write_enabled(self, enabled: bool) -> None:
+        self._write_enabled = bool(enabled)
+        self.upload_btn.setEnabled(self._write_enabled)
+        self._update_ui()
+
     def _on_upload(self) -> None:
-        if self._teacher_id is None:
+        if not self._write_enabled or self._teacher_id is None:
             return
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -210,19 +217,7 @@ class TeacherDocumentsWidget(QWidget):
         description = desc_edit.text().strip() or None
 
         try:
-            # Get teacher code
-            from centermanager.database.engine import create_production_engine
-            from sqlalchemy.orm import sessionmaker
-            from centermanager.repositories.teacher_repository import TeacherRepository
-
-            engine = create_production_engine()
-            session_factory = sessionmaker(bind=engine)
-            with session_factory() as session:
-                repo = TeacherRepository(session)
-                teacher = repo.get_by_id(self._teacher_id)
-                if teacher is None:
-                    raise ValueError("Teacher not found")
-                teacher_code = teacher.teacher_code
+            teacher_code = self._service.get_teacher_code(self._teacher_id)
 
             self._service.upload_document(
                 teacher_id=self._teacher_id,
@@ -238,6 +233,8 @@ class TeacherDocumentsWidget(QWidget):
             QMessageBox.critical(self, "Upload Error", str(e))
 
     def _delete_document(self, document_id: int) -> None:
+        if not self._write_enabled:
+            return
         reply = QMessageBox.question(
             self, "Confirm Delete",
             "Delete this document?",

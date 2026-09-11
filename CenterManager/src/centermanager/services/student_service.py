@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 StudentService - business logic for Student entity.
-Now integrated with TimelineService.
+Now with ReportPolicy integration and event publishing.
 """
+import logging
 from datetime import date, datetime, timezone
 from typing import List, Optional, Any
+from pathlib import Path
 
-from sqlalchemy.orm import Session, sessionmaker, selectinload
+from sqlalchemy.orm import Session, sessionmaker
 
+from centermanager.core.paths import get_paths
 from centermanager.models.student import Student
-from centermanager.models.enrollment import Enrollment
-from centermanager.models.class_ import Class
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.student_repository import StudentRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.exceptions import (
     StudentNotFoundError,
     StudentValidationError,
@@ -20,6 +21,14 @@ from centermanager.services.exceptions import (
     StudentNotDeletedError,
 )
 from centermanager.services.timeline_service import TimelineService
+from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated
+from centermanager.events.event_bus import EventBus
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from centermanager.services.report_policy import ReportPolicy
+    from centermanager.services.report_service import ReportService
+
+logger = logging.getLogger(__name__)
 
 # Sentinel for "field not supplied"
 UNSET = object()
@@ -28,9 +37,21 @@ UNSET = object()
 class StudentService:
     """Application service for Student lifecycle operations."""
 
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        report_policy: Optional["ReportPolicy"] = None,
+        report_service: Optional["ReportService"] = None,
+        event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._report_policy = report_policy
+        self._report_service = report_service
+        self._event_bus = event_bus
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -48,10 +69,25 @@ class StudentService:
         return normalized
 
     def _generate_student_code(self, session: Session) -> str:
-        repo = StudentRepository(session)
+        repo = self._repository_provider.students(session)
         highest = repo.get_highest_hs_number()
         next_num = (highest or 0) + 1
         return f"HS{next_num:03d}"
+
+    def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
+        """Legacy policy seam.
+
+        STUDENT-2.7 makes the Student Workspace publish lifecycle the canonical
+        trigger for the singleton StudentProfile report. This service method is
+        intentionally non-generating to prevent a pre-publish duplicate report.
+        """
+        if self._report_policy:
+            triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
+            logger.debug(
+                "Report policy evaluated for student %s: %s (generation deferred to publish lifecycle)",
+                student_id,
+                triggers,
+            )
 
     def create_student(
         self,
@@ -85,12 +121,11 @@ class StudentService:
                     enrollment_date=enrollment_date,
                     notes=normalized_notes,
                 )
-                repo = StudentRepository(session)
+                repo = self._repository_provider.students(session)
                 repo.add(student)
                 session.commit()
                 session.refresh(student)
 
-                # Log timeline event
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
@@ -99,7 +134,6 @@ class StudentService:
                         description=f"{student.full_name} ({student.student_code}) was added.",
                         metadata={"student_code": student.student_code},
                     )
-
                 return student
             except Exception:
                 session.rollback()
@@ -107,7 +141,7 @@ class StudentService:
 
     def get_student(self, student_id: int) -> Student:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             student = repo.get_by_id(student_id)
             if student is None or student.deleted_at is not None:
                 raise StudentNotFoundError(f"Student id {student_id} not found or deleted.")
@@ -115,7 +149,7 @@ class StudentService:
 
     def get_student_by_code(self, student_code: str) -> Student:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             student = repo.get_by_code(student_code)
             if student is None or student.deleted_at is not None:
                 raise StudentNotFoundError(f"Student code {student_code} not found or deleted.")
@@ -123,13 +157,110 @@ class StudentService:
 
     def get_student_including_deleted(self, student_id: int) -> Optional[Student]:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             return repo.get_by_id_including_deleted(student_id)
 
     def list_students(self) -> List[Student]:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             return repo.list_active()
+
+    def archive_student(self, student_id: int) -> None:
+        """Archive a student (set status to ARCHIVED) and publish event."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            if student.deleted_at is not None:
+                raise StudentAlreadyDeletedError("Student already archived.")
+
+            previous_status = student.status
+            student.status = "ARCHIVED"
+            session.commit()
+            session.refresh(student)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    student_id=student.id,
+                    event_type=TimelineEventType.STUDENT_UPDATED,
+                    title="Student Archived",
+                    description=f"{student.full_name} ({student.student_code}) was archived.",
+                    metadata={"previous_status": previous_status},
+                )
+
+            if self._event_bus:
+                self._event_bus.publish(StudentArchived(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    previous_status=previous_status,
+                ))
+                logger.info(f"StudentArchived event published for student {student.id}")
+
+    def activate_student(self, student_id: int) -> None:
+        """Activate a student (set status to ACTIVE) and publish event."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            student = repo.get_by_id_including_deleted(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            if student.deleted_at is not None:
+                raise StudentAlreadyDeletedError("Student is archived, cannot activate.")
+
+            previous_status = student.status
+            student.status = "ACTIVE"
+            session.commit()
+            session.refresh(student)
+
+            if self._timeline_service:
+                self._timeline_service.log_event(
+                    student_id=student.id,
+                    event_type=TimelineEventType.STUDENT_UPDATED,
+                    title="Student Activated",
+                    description=f"{student.full_name} ({student.student_code}) was activated.",
+                    metadata={"previous_status": previous_status},
+                )
+
+            if self._event_bus:
+                self._event_bus.publish(StudentActivated(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    previous_status=previous_status,
+                ))
+                logger.info(f"StudentActivated event published for student {student.id}")
+
+    def set_profile_image(self, student_id: int, image_path: Optional[Path]) -> None:
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            student = repo.get_by_id(student_id)
+            if student is None:
+                raise StudentNotFoundError(f"Student {student_id} not found.")
+            if image_path:
+                import shutil
+                student_code = student.student_code
+                target_dir = get_paths().attachment_dir / student_code
+                target_dir.mkdir(parents=True, exist_ok=True)
+                ext = image_path.suffix
+                dest = target_dir / f"profile{ext}"
+                shutil.copy2(image_path, dest)
+                student.profile_image_path = f"{student_code}/profile{ext}"
+            else:
+                if student.profile_image_path:
+                    old_path = get_paths().attachment_dir / student.profile_image_path
+                    if old_path.exists():
+                        old_path.unlink()
+                    student.profile_image_path = None
+            session.commit()
+            if self._event_bus:
+                self._event_bus.publish(StudentUpdated(
+                    student_id=student.id,
+                    student_code=student.student_code,
+                    student_name=student.full_name,
+                    changes=["profile_image_path"],
+                ))
+                logger.info("StudentUpdated event published for profile image change: %s", student.id)
 
     def update_student(
         self,
@@ -144,12 +275,12 @@ class StudentService:
         notes: Any = UNSET,
     ) -> Student:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
             if student is None:
                 raise StudentNotFoundError(f"Student id {student_id} not found.")
 
-            changes = []  # list of strings "field: old -> new"
+            changes = []
 
             if full_name is not UNSET:
                 new_val = self._normalize_text(full_name)
@@ -169,7 +300,7 @@ class StudentService:
 
             if date_of_birth is not UNSET:
                 old_val = student.date_of_birth.strftime("%d/%m/%Y") if student.date_of_birth else "(none)"
-                new_val = date_of_birth  # có thể None hoặc date
+                new_val = date_of_birth
                 new_str = new_val.strftime("%d/%m/%Y") if new_val else "(none)"
                 if old_val != new_str:
                     changes.append(f"date_of_birth: '{old_val}' -> '{new_str}'")
@@ -202,7 +333,7 @@ class StudentService:
                 if old != new:
                     changes.append(f"enrollment_date: '{old}' -> '{new}'")
                 student.enrollment_date = enrollment_date
-                
+
             if notes is not UNSET:
                 new_val = self._normalize_text(notes)
                 old_val = student.notes or "(none)"
@@ -211,7 +342,6 @@ class StudentService:
                 student.notes = new_val
 
             if not changes:
-                # Không có gì thay đổi
                 return student
 
             try:
@@ -227,38 +357,67 @@ class StudentService:
                         description=description,
                         metadata={"changes": changes},
                     )
+
+                self._trigger_report_policy(student.id, "student_updated", {"changes": changes})
+
+                # Student aggregate mutations must be visible to the transaction
+                # dirty tracker. Without this domain event, Finish Editing cannot
+                # know which StudentProfile artifact must be regenerated.
+                if self._event_bus:
+                    self._event_bus.publish(StudentUpdated(
+                        student_id=student.id,
+                        student_code=student.student_code,
+                        student_name=student.full_name,
+                        changes=changes,
+                    ))
+                    logger.info(
+                        "StudentUpdated event published for student %s with %d change(s)",
+                        student.id,
+                        len(changes),
+                    )
                 return student
             except Exception:
                 session.rollback()
                 raise
 
     def delete_student(self, student_id: int) -> None:
+        """Soft delete a student and publish event."""
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
             if student is None:
                 raise StudentNotFoundError(f"Student id {student_id} not found.")
             if student.deleted_at is not None:
                 raise StudentAlreadyDeletedError(f"Student id {student_id} is already deleted.")
+
             student.deleted_at = self._utc_now()
             try:
                 session.commit()
-                # Log timeline event
+                session.refresh(student)
+
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
-                        event_type=TimelineEventType.STUDENT_UPDATED,  # or maybe a dedicated DELETE event?
+                        event_type=TimelineEventType.STUDENT_UPDATED,
                         title="Student Deleted",
                         description=f"{student.full_name} ({student.student_code}) was soft-deleted.",
                         metadata={"deleted": True},
                     )
+
+                if self._event_bus:
+                    self._event_bus.publish(StudentDeleted(
+                        student_id=student.id,
+                        student_code=student.student_code,
+                        student_name=student.full_name,
+                    ))
+                    logger.info(f"StudentDeleted event published for student {student.id}")
             except Exception:
                 session.rollback()
                 raise
 
     def restore_student(self, student_id: int) -> None:
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
             if student is None:
                 raise StudentNotFoundError(f"Student id {student_id} not found.")
@@ -278,30 +437,16 @@ class StudentService:
             except Exception:
                 session.rollback()
                 raise
+
     def search_students(self, query: str) -> List[Student]:
-        """Search active students by multiple fields."""
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             return repo.search_students(query)
 
     def get_student_with_relations(self, student_id: int) -> Student:
-        """
-        Lấy Student với các quan hệ cần thiết đã được eager load.
-        Dùng cho báo cáo và các trường hợp cần dữ liệu liên quan.
-        """
         with self._session_factory() as session:
-            student = (
-                session.query(Student)
-                .options(
-                    selectinload(Student.enrollments)
-                    .selectinload(Enrollment.class_)
-                    .selectinload(Class.teachers),
-                    selectinload(Student.parents),
-                    selectinload(Student.notes_structured),
-                )
-                .filter(Student.id == student_id, Student.deleted_at.is_(None))
-                .first()
-            )
+            repo = self._repository_provider.students(session)
+            student = repo.get_with_relations(student_id)
             if not student:
                 raise StudentNotFoundError(f"Student {student_id} not found")
             return student

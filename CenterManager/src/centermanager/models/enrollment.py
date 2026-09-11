@@ -31,7 +31,7 @@ class Enrollment(Base, TimestampMixin):
     level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
     class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")

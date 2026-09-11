@@ -34,6 +34,7 @@ class ReportsWidget(QWidget):
         self._service = report_service
         self._student_id: Optional[int] = None
         self._reports: List[Dict[str, Any]] = []
+        self._write_enabled = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -175,6 +176,7 @@ class ReportsWidget(QWidget):
         delete_btn = QPushButton("🗑️")
         delete_btn.setFixedHeight(28)
         delete_btn.setStyleSheet("color: #d32f2f;")
+        delete_btn.setEnabled(self._write_enabled)
         delete_btn.clicked.connect(lambda: self._delete_report(report))
         layout.addWidget(delete_btn)
 
@@ -217,6 +219,12 @@ class ReportsWidget(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Lỗi", f"Không thể xóa báo cáo: {str(e)}")
 
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        """Keep destructive report actions unavailable in read mode."""
+        self._write_enabled = enabled
+        self._update_list()
+
     def _on_context_menu(self, pos) -> None:
         item = self.list_widget.itemAt(pos)
         if not item:
@@ -234,6 +242,7 @@ class ReportsWidget(QWidget):
         open_action.triggered.connect(lambda: self._open_report(report))
         menu.addAction(open_action)
         delete_action = QAction("Xóa", self)
+        delete_action.setEnabled(self._write_enabled)
         delete_action.triggered.connect(lambda: self._delete_report(report))
         menu.addAction(delete_action)
         menu.exec(self.list_widget.mapToGlobal(pos))

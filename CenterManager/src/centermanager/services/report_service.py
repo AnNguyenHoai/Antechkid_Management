@@ -12,7 +12,7 @@ from typing import Optional, List
 from centermanager.core.paths import get_paths
 from centermanager.core.current_user import get_current_user
 from centermanager.models.report import Report
-from centermanager.repositories.report_repository import ReportRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.attendance_service import AttendanceService
@@ -36,6 +36,7 @@ class ReportService:
         outstanding_service: OutstandingService,
         income_service: IncomeService,
         session_factory,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._student_service = student_service
         self._parent_service = parent_service
@@ -45,6 +46,7 @@ class ReportService:
         self._outstanding_service = outstanding_service
         self._income_service = income_service
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
         self._generator = StudentReportGenerator(
             student_service,
@@ -72,21 +74,29 @@ class ReportService:
         if output_path is None:
             reports_root = get_paths().runtime_root / "Reports" / "Student" / student.student_code
             reports_root.mkdir(parents=True, exist_ok=True)
-            event_part = trigger_event or report_type.capitalize()
-            date_str = datetime.now().strftime("%Y%m%d_%H%M")
-            filename = f"BaoCao_{event_part}_{date_str}.pdf"
-            output_path = reports_root / filename
+            # One student owns one materialized latest profile report.
+            output_path = reports_root / "StudentProfile.pdf"
 
-        # Generate PDF
-        file_path = self._generator.generate(student_id, output_path)
+        # Generate to a temporary file first, then atomically replace the
+        # current report so a failed generation never destroys the last good PDF.
+        temp_path = output_path.with_suffix(".tmp.pdf")
+        try:
+            file_path = self._generator.generate(student_id, temp_path)
+            file_path.replace(output_path)
+            file_path = output_path
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
-        # Save metadata
+        # Save metadata (replace existing singleton record)
         with self._session_factory() as session:
-            repo = ReportRepository(session)
+            repo = self._repository_provider.reports(session)
             metadata = {
                 "center_name": "AN TECHKIDS",
                 "academic_year": "2026-2027",
             }
+            for existing in repo.get_by_student(student_id):
+                repo.delete(existing)
             report = Report(
                 student_id=student_id,
                 file_path=str(file_path.relative_to(get_paths().runtime_root)),
@@ -105,12 +115,12 @@ class ReportService:
 
     def get_student_reports(self, student_id: int) -> List[Report]:
         with self._session_factory() as session:
-            repo = ReportRepository(session)
+            repo = self._repository_provider.reports(session)
             return repo.get_by_student(student_id)
 
     def get_report_file_path(self, report_id: int) -> Optional[Path]:
         with self._session_factory() as session:
-            repo = ReportRepository(session)
+            repo = self._repository_provider.reports(session)
             report = repo.get_by_id(report_id)
             if report is None:
                 return None
@@ -118,7 +128,7 @@ class ReportService:
 
     def delete_report(self, report_id: int) -> None:
         with self._session_factory() as session:
-            repo = ReportRepository(session)
+            repo = self._repository_provider.reports(session)
             report = repo.get_by_id(report_id)
             if report is None:
                 return
@@ -131,5 +141,13 @@ class ReportService:
     def report_exists(self, student_id: int, trigger_event: str) -> bool:
         """Check if a report with given trigger already exists for this student."""
         with self._session_factory() as session:
-            repo = ReportRepository(session)
+            repo = self._repository_provider.reports(session)
             return repo.get_by_student_and_trigger(student_id, trigger_event) is not None
+
+    def report_exists_on_date(self, student_id: int, trigger_event: str, target_date) -> bool:
+        """Check whether this student already has this trigger's report on target_date."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.reports(session)
+            return repo.exists_for_student_trigger_on_date(
+                student_id, trigger_event, target_date
+            )

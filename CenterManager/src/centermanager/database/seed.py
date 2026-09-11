@@ -54,6 +54,9 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.ATTENDANCE_VIEW,
             PermissionDefinitions.ATTENDANCE_CREATE,
             PermissionDefinitions.ATTENDANCE_UPDATE,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
+            PermissionDefinitions.WORK_REGISTRATION_SELF,
         ]
     )
 
@@ -71,6 +74,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.TEACHER_VIEW,
             PermissionDefinitions.CLASS_VIEW,
             PermissionDefinitions.ATTENDANCE_VIEW,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
         ]
     )
 
@@ -90,6 +95,8 @@ def seed_roles_and_permissions(session: Session) -> None:
             PermissionDefinitions.FINANCE_EXPENSE_UPDATE,
             PermissionDefinitions.FINANCE_EXPENSE_DELETE,
             PermissionDefinitions.REPORT_VIEW,
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
         ]
     )
 
@@ -199,8 +206,8 @@ def _create_admin_user(session: Session, admin_role: Role) -> None:
             session.flush()
         return
 
-    import hashlib
-    password_hash = hashlib.sha256("admin123".encode()).hexdigest()
+    from centermanager.security.password import hash_password
+    password_hash = hash_password("admin123")
 
     admin = User(
         username="admin",

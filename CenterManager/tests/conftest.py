@@ -1,12 +1,14 @@
+# tests/conftest.py
 # -*- coding: utf-8 -*-
-"""
-Pytest fixtures for CenterManager tests.
-"""
+"""Pytest fixtures for CenterManager tests."""
+
 import pytest
-import shutil
+import subprocess
+import json
 import logging
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Thêm src/ vào sys.path để pytest tìm thấy centermanager
 src_path = Path(__file__).resolve().parent.parent / "src"
@@ -15,24 +17,48 @@ if str(src_path) not in sys.path:
 
 from centermanager.core import paths as paths_module
 from centermanager.core import config as config_module
+from centermanager.core import clock as clock_module
 from centermanager.core.paths import get_paths
 
 # Lưu đường dẫn runtime thật để kiểm tra bảo vệ
 REAL_RUNTIME_PATH = get_paths().runtime_root
 
 
+@pytest.fixture(scope="session", autouse=True)
+def qapplication_session():
+    """Ensure the test process owns a real QApplication before Qt tests run.
+
+    Some collaboration tests only need QCoreApplication and create one
+    directly. If that happens before pytest-qt initializes its qapp fixture,
+    later QWidget tests inherit the QCoreApplication. A single QApplication
+    is compatible with both QCoreApplication and QWidget consumers and gives
+    the whole suite one deterministic Qt application lifetime.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    assert isinstance(app, QApplication)
+    yield app
+    app.processEvents()
+
+
 @pytest.fixture
 def clean_paths():
-    """Reset path and config state."""
+    """Reset path, config, and clock state."""
     old_paths = paths_module._paths
     old_config = config_module._config
+    old_clock = clock_module._fixed_clock
     paths_module._paths = None
     config_module._config = None
+    clock_module.reset_clock()
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     yield
     paths_module._paths = old_paths
     config_module._config = old_config
+    clock_module._fixed_clock = old_clock
 
 
 @pytest.fixture
@@ -99,3 +125,120 @@ def test_db(test_db_path):
     engine = create_engine_for_path(test_db_path)
     Base.metadata.create_all(engine)
     yield test_db_path
+
+
+@pytest.fixture(scope="session")
+def seeded_center_manager_remote(tmp_path_factory):
+    """
+    Tạo bare remote repository với cấu trúc CenterManager tối thiểu.
+    Phù hợp cho các test cần clone và publish.
+    """
+    tmp_path = tmp_path_factory.mktemp("seeded_remote")
+    remote_path = tmp_path / "remote.git"
+    remote_path.mkdir()
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, capture_output=True, check=True)
+
+    # Tạo source repo để seed
+    source_path = tmp_path / "source"
+    source_path.mkdir()
+    subprocess.run(["git", "init"], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_path, capture_output=True, check=True)
+
+    # Tạo nội dung cần thiết
+    (source_path / "README.md").write_text("# CenterManager Test Repository")
+    manifest = {
+        "schema_version": 1,
+        "runtime_version": 1,
+        "database_version": 1,
+        "minimum_app_version": "0.1.0",
+        "publisher": "Test",
+        "branch": "main",
+        "created_at": datetime.now().isoformat(),
+        "published_at": None,
+    }
+    with open(source_path / "manifest.json", "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    # Đảm bảo branch là 'main'
+    result = subprocess.run(["git", "branch", "--show-current"], cwd=source_path, capture_output=True, text=True)
+    current_branch = result.stdout.strip()
+    if current_branch != "main":
+        subprocess.run(["git", "branch", "-m", current_branch, "main"], cwd=source_path, capture_output=True, check=True)
+
+    subprocess.run(["git", "add", "."], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "Initial CenterManager structure"], cwd=source_path, capture_output=True, check=True)
+
+    # Push main lên bare remote
+    subprocess.run(["git", "push", str(remote_path), "main"], cwd=source_path, capture_output=True, check=True)
+
+    # Verify remote có refs/heads/main
+    result = subprocess.run(
+        ["git", "--git-dir", str(remote_path), "show-ref", "refs/heads/main"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Remote does not have refs/heads/main")
+
+    # Verify manifest.json tồn tại trong remote
+    show_ref_out = subprocess.run(
+        ["git", "--git-dir", str(remote_path), "show-ref", "refs/heads/main"],
+        capture_output=True, text=True, check=True
+    )
+    commit_hash = show_ref_out.stdout.split()[0]
+    ls_tree = subprocess.run(
+        ["git", "--git-dir", str(remote_path), "ls-tree", commit_hash],
+        capture_output=True, text=True, check=True
+    )
+    if "manifest.json" not in ls_tree.stdout:
+        raise RuntimeError("manifest.json not found in initial commit")
+
+    return remote_path
+
+@pytest.fixture
+def fresh_center_manager_remote(tmp_path):
+    """
+    Tạo bare remote repository với cấu trúc CenterManager tối thiểu.
+    Scope function để mỗi test có remote riêng, không bị ảnh hưởng bởi test khác.
+    """
+    remote_path = tmp_path / "remote.git"
+    remote_path.mkdir()
+    subprocess.run(["git", "init", "--bare"], cwd=remote_path, capture_output=True, check=True)
+
+    source_path = tmp_path / "source"
+    source_path.mkdir()
+    subprocess.run(["git", "init"], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_path, capture_output=True, check=True)
+
+    (source_path / "README.md").write_text("# CenterManager Test Repository")
+    manifest = {
+        "schema_version": 1,
+        "runtime_version": 1,
+        "database_version": 1,
+        "minimum_app_version": "0.1.0",
+        "publisher": "Test",
+        "branch": "main",
+        "created_at": datetime.now().isoformat(),
+        "published_at": None,
+    }
+    with open(source_path / "manifest.json", "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    result = subprocess.run(["git", "branch", "--show-current"], cwd=source_path, capture_output=True, text=True)
+    current_branch = result.stdout.strip()
+    if current_branch != "main":
+        subprocess.run(["git", "branch", "-m", current_branch, "main"], cwd=source_path, capture_output=True, check=True)
+
+    subprocess.run(["git", "add", "."], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "Initial CenterManager structure"], cwd=source_path, capture_output=True, check=True)
+    subprocess.run(["git", "push", str(remote_path), "main"], cwd=source_path, capture_output=True, check=True)
+
+    result = subprocess.run(
+        ["git", "--git-dir", str(remote_path), "show-ref", "refs/heads/main"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Remote does not have refs/heads/main")
+
+    return remote_path
