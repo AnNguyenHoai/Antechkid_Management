@@ -3,8 +3,7 @@ from datetime import date, datetime, time, timedelta
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee import Employee
 from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
-from centermanager.repositories.employee_repository import EmployeeRepository
-from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
 
 
@@ -21,9 +20,10 @@ class EmployeeWorkingTimeService:
     MANAGE = "working_time.manage"
     LOCK = "working_time.lock"
 
-    def __init__(self, session_factory, schedule_service=None):
+    def __init__(self, session_factory, schedule_service=None, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
         self._schedule = schedule_service
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _user(user=None):
@@ -44,7 +44,7 @@ class EmployeeWorkingTimeService:
     def _scope(self, employee_id, user=None, write=False):
         u=self._user(user)
         with self._sf() as s:
-            e=EmployeeRepository(s).get_by_id(employee_id)
+            e=self._repository_provider.employees(s).get_by_id(employee_id)
             if not e: raise EmployeeWorkingTimeValidationError(f"Employee {employee_id} not found.")
             is_self = e.user_id == u.id
             if write:
@@ -86,65 +86,63 @@ class EmployeeWorkingTimeService:
 
     def list_entries(self, employee_id, start_date=None, end_date=None, user=None):
         self._scope(employee_id,user)
-        with self._sf() as s: return EmployeeWorkingTimeRepository(s).list_for_employee(employee_id,start_date,end_date)
+        with self._sf() as s: return self._repository_provider.employee_working_times(s).list_for_employee(employee_id,start_date,end_date)
 
     def create_booking(self, employee_id, work_date, start_time, end_time, work_type="WORK", notes=None, user=None):
         u=self._user(user); self._assert_write_scope(employee_id,u); self._validate_times(start_time,end_time)
         if not isinstance(work_date,date): raise EmployeeWorkingTimeValidationError("Work date is required.")
         if not work_type or len(work_type.strip())>60: raise EmployeeWorkingTimeValidationError("Work type is required and must be at most 60 characters.")
         with self._sf() as s:
-            repo=EmployeeWorkingTimeRepository(s); self._assert_no_overlap(repo,employee_id,work_date,start_time,end_time)
+            repo=self._repository_provider.employee_working_times(s); self._assert_no_overlap(repo,employee_id,work_date,start_time,end_time)
             e=EmployeeWorkingTimeEntry(employee_id=employee_id,work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),source=EmployeeWorkingTimeEntry.SOURCE_MANUAL,status=EmployeeWorkingTimeEntry.STATUS_BOOKED,notes=notes or None,created_by_user_id=u.id)
-            s.add(e); s.commit(); s.refresh(e); return e
+            repo.add(e); s.commit(); return e
 
     def check_in(self, employee_id, at: datetime | None = None, work_type="WORK", notes=None, user=None):
         u=self._user(user); self._assert_write_scope(employee_id,u); at=at or datetime.now()
         with self._sf() as s:
-            repo=EmployeeWorkingTimeRepository(s)
+            repo=self._repository_provider.employee_working_times(s)
             if repo.open_entry(employee_id): raise EmployeeWorkingTimeValidationError("You already have an open working-time entry. Check out first.")
             e=EmployeeWorkingTimeEntry(employee_id=employee_id,work_date=at.date(),start_time=at.time().replace(second=0,microsecond=0),end_time=None,work_type=(work_type or "WORK").strip(),source=EmployeeWorkingTimeEntry.SOURCE_CHECK_IN,status=EmployeeWorkingTimeEntry.STATUS_OPEN,notes=notes or None,created_by_user_id=u.id)
-            s.add(e); s.commit(); s.refresh(e); return e
+            repo.add(e); s.commit(); return e
 
     def check_out(self, entry_id, at: datetime | None = None, user=None):
         u=self._user(user); at=at or datetime.now()
         with self._sf() as s:
-            repo=EmployeeWorkingTimeRepository(s); e=repo.get(entry_id)
+            repo=self._repository_provider.employee_working_times(s); e=repo.get(entry_id)
             if not e: raise EmployeeWorkingTimeValidationError(f"Working-time entry {entry_id} not found.")
             self._assert_write_scope(e.employee_id,u)
             if e.status != EmployeeWorkingTimeEntry.STATUS_OPEN: raise EmployeeWorkingTimeValidationError("Only an open entry can be checked out.")
             if e.work_date != at.date(): raise EmployeeWorkingTimeValidationError("Check-out must be on the same work date as check-in.")
-            end=at.time().replace(second=0,microsecond=0); self._validate_times(e.start_time,end); e.end_time=end; e.status=EmployeeWorkingTimeEntry.STATUS_BOOKED
-            s.commit(); s.refresh(e); return e
+            end=at.time().replace(second=0,microsecond=0); self._validate_times(e.start_time,end); repo.check_out(e,end); s.commit(); return e
 
     def update_booking(self, entry_id, *, work_date, start_time, end_time, work_type, notes=None, user=None):
         u=self._user(user)
         with self._sf() as s:
-            repo=EmployeeWorkingTimeRepository(s); e=repo.get(entry_id)
+            repo=self._repository_provider.employee_working_times(s); e=repo.get(entry_id)
             if not e: raise EmployeeWorkingTimeValidationError(f"Working-time entry {entry_id} not found.")
             self._assert_write_scope(e.employee_id,u); self._validate_times(start_time,end_time)
             if e.status in {EmployeeWorkingTimeEntry.STATUS_APPROVED, EmployeeWorkingTimeEntry.STATUS_LOCKED}: raise EmployeeWorkingTimeAccessDeniedError("Approved or locked working time cannot be edited.")
             self._assert_no_overlap(repo,e.employee_id,work_date,start_time,end_time,e.id)
-            e.work_date=work_date;e.start_time=start_time;e.end_time=end_time;e.work_type=work_type.strip();e.notes=notes or None
-            e.status=EmployeeWorkingTimeEntry.STATUS_BOOKED
-            s.commit();s.refresh(e);return e
+            repo.update_booking(e,work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),notes=notes)
+            s.commit(); return e
 
     def delete_entry(self, entry_id, user=None):
         u=self._user(user)
         with self._sf() as s:
-            repo=EmployeeWorkingTimeRepository(s); e=repo.get(entry_id)
+            repo=self._repository_provider.employee_working_times(s); e=repo.get(entry_id)
             if not e:return
             self._assert_write_scope(e.employee_id,u)
             if e.status in {EmployeeWorkingTimeEntry.STATUS_APPROVED, EmployeeWorkingTimeEntry.STATUS_LOCKED}: raise EmployeeWorkingTimeAccessDeniedError("Approved or locked working time cannot be deleted.")
-            s.delete(e);s.commit()
+            repo.delete(e);s.commit()
 
     def approve(self, entry_id, user=None):
         u=self._user(user)
         if not self._has(u,self.MANAGE): raise EmployeeWorkingTimeAccessDeniedError(f"Permission '{self.MANAGE}' is required.")
         with self._sf() as s:
-            e=EmployeeWorkingTimeRepository(s).get(entry_id)
+            repo=self._repository_provider.employee_working_times(s); e=repo.get(entry_id)
             if not e: raise EmployeeWorkingTimeValidationError("Working-time entry not found.")
             if e.end_time is None: raise EmployeeWorkingTimeValidationError("Open entry must be checked out before approval.")
-            e.status=EmployeeWorkingTimeEntry.STATUS_APPROVED;e.approved_by_user_id=u.id;s.commit();s.refresh(e);return e
+            repo.approve(e,u.id);s.commit();return e
 
     def lock_month(self, employee_id, year, month, user=None):
         u=self._user(user)
@@ -152,10 +150,9 @@ class EmployeeWorkingTimeService:
         start=date(year,month,1); end=date(year+1,1,1)-timedelta(days=1) if month==12 else date(year,month+1,1)-timedelta(days=1)
         with self._sf() as s:
             self._scope(employee_id,u)
-            rows=EmployeeWorkingTimeRepository(s).list_for_employee(employee_id,start,end)
+            repo=self._repository_provider.employee_working_times(s); rows=repo.list_for_employee(employee_id,start,end)
             if any(r.end_time is None for r in rows): raise EmployeeWorkingTimeValidationError("Cannot lock a month containing open entries.")
-            for r in rows: r.status=EmployeeWorkingTimeEntry.STATUS_LOCKED
-            s.commit(); return len(rows)
+            count=repo.lock_entries(rows); s.commit(); return count
 
     def monthly_summary(self, employee_id, year, month, user=None):
         u=self._user(user)
