@@ -19,17 +19,6 @@ SQLAlchemy / Database
 
 Application services must not import or construct concrete repositories, and must not bypass the repository boundary with direct persistence/ORM access.
 
-## Audit scope
-
-Scope: `CenterManager/src/centermanager/services/` and the repository-provider boundary used by those services.
-
-The audit distinguishes four cases:
-
-- **COMPLIANT** — service persistence access is mediated by `RepositoryProvider`/repository contracts.
-- **VIOLATION** — service directly imports/constructs a concrete repository or performs persistence/ORM work itself.
-- **INTENTIONAL** — access is explicitly part of an infrastructure/application composition responsibility and is documented as such.
-- **FOLLOW-UP** — a dependency requires source-level review before classification.
-
 ## Current inventory
 
 | Service / area | Boundary status | Evidence / action |
@@ -43,7 +32,11 @@ The audit distinguishes four cases:
 | `employee_admin_management_service.py` | COMPLIANT | Repository dependencies and operational-history lookup migrated behind provider. |
 | `employee_document_service.py` | COMPLIANT | Repository dependency is behind provider; no concrete repository construction remains. |
 | `employee_service.py` | COMPLIANT | Employee, user, and role repository dependencies migrated behind provider. |
+| `employee_working_time_service.py` | COMPLIANT | Working-time repository and persistence operations migrated behind provider/repository. |
 | `enrollment_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
+| `expense_timeline_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
+| `income_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
+| `permission_service.py` | COMPLIANT | User, role, permission, and employee persistence/query access migrated behind provider. |
 | `report_service.py` | COMPLIANT | Repository access follows the provider boundary. |
 | `student_note_service.py` | COMPLIANT | Concrete repository access migrated behind provider. |
 | `student_service.py` | COMPLIANT | Student repository and relation-loading persistence access migrated behind provider/repository. |
@@ -51,49 +44,28 @@ The audit distinguishes four cases:
 | `teacher_document_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 | `teacher_service.py` | COMPLIANT | Repository dependency migrated behind provider. |
 
-## EP-ARCH-03.24 — Migrated-service persistence closure
+## EP-ARCH-03.26 — PermissionService persistence boundary
 
-The migrated-service boundary now covers the two remaining persistence concerns identified during source audit:
-
-### EmployeeWorkRegistrationService
-
-The service continues to own the transaction boundary and atomic audit orchestration, but no longer performs infrastructure-level transaction admission or ORM state operations itself.
+`PermissionService` is now application-facing through `RepositoryProvider`. It no longer imports or constructs concrete repositories and no longer performs direct SQLAlchemy queries.
 
 ```text
-EmployeeWorkRegistrationService
-        |
-        +--> RepositoryProvider.employee_work_registrations(session)
-        |             |
-        |             +--> begin_write()
-        |             +--> flush()
-        |             +--> refresh()
-        |
-        +--> RepositoryProvider.employee_work_registration_periods(session)
-                      |
-                      +--> refresh()
-                      +--> detach()
+PermissionService
+      |
+      +--> RepositoryProvider.users(session)
+      +--> RepositoryProvider.roles(session)
+      +--> RepositoryProvider.permissions(session)
+      +--> RepositoryProvider.employees(session)
+                  |
+                  v
+          Concrete repositories
+                  |
+                  v
+             SQLAlchemy
 ```
 
-`Session.commit()` remains service-level transaction coordination. It is deliberately not classified as a repository persistence/query bypass: the service owns the atomic transaction that contains both the business mutation and `AuditService.record_in_session()` audit insert.
+The service remains responsible for capability checks, account/role lifecycle validation, password/authentication rules, employee provisioning orchestration, audit orchestration, and transaction completion. Repository methods own ORM query and persistence operations.
 
-### EmployeeScheduleService
-
-Schedule rule/exception creation, update, deletion, flush, and refresh are now delegated to `EmployeeScheduleRepository`. The service performs validation, authorization, overlap checks, and transaction coordination only.
-
-```text
-EmployeeScheduleService
-        |
-        v
-RepositoryProvider.employee_schedules(session)
-        |
-        v
-EmployeeScheduleRepository
-        |
-        v
-SQLAlchemy
-```
-
-The production service also resolves its default provider through `create_default_repository_provider()` rather than constructing the infrastructure provider itself.
+`BaseRepository.flush()` and `BaseRepository.refresh()` provide explicit repository-level state-operation seams. `Session.commit()` remains application-service transaction coordination.
 
 ## Architecture rules
 
@@ -132,7 +104,7 @@ The provider is the application-service seam; concrete repository construction a
 
 ## Remaining work
 
-EP-ARCH-03 is not yet globally closed. The migrated-service set is now hardened, but the remaining legacy services still require source-level classification and migration where they perform direct ORM/persistence work. The next work should be driven by a complete inventory of those remaining services rather than by broad assumptions.
+EP-ARCH-03 is not yet globally closed. The migrated-service set is now larger and hardened, but the remaining legacy services still require source-level classification and migration where they perform direct ORM/persistence work. The next work should continue to be driven by source-verified violations rather than by service names.
 
 ## Definition of done
 
