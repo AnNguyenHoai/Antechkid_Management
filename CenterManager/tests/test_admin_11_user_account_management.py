@@ -6,7 +6,8 @@ def test_lifecycle_error_exists():
     assert "class UserLifecycleError" in read("services/permission_service.py")
 
 def test_management_lists_inactive_accounts():
-    assert "return session.query(User).all()" in read("services/permission_service.py")
+    source = read("services/permission_service.py")
+    assert "return self._repository_provider.users(session).list_all()" in source
 
 def test_both_create_paths_check_duplicate_username():
     source = read("services/permission_service.py")
