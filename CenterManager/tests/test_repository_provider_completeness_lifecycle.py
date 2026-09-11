@@ -31,6 +31,7 @@ EXPECTED_FACTORIES = {
     "students",
     "assessments",
     "reports",
+    "expenses",
     "expense_timeline",
     "incomes",
     "teachers",
