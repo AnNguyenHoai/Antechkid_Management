@@ -7,7 +7,7 @@ from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration, EmployeeWorkRegistrationBlock
 from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
-from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.audit_service import AuditService
 logger=logging.getLogger(__name__)
@@ -18,7 +18,11 @@ class EmployeeWorkRegistrationService:
     SELF_PERMISSION="work_registration.self"; LEGACY_SELF_PERMISSION="working_time.registration.self"; ALL_PERMISSION="work_registration.view.all"; MANAGE_PERMISSION="work_registration.manage"; ADMIN_OVERRIDE_PERMISSION="work_registration.period.admin_override"
     AUDIT_MODULE="employee_work_registration"
     AUDIT_CREATED="WORK_REGISTRATION_CREATED"; AUDIT_UPDATED="WORK_REGISTRATION_UPDATED"; AUDIT_DELETED="WORK_REGISTRATION_DELETED"; AUDIT_SUBMITTED="WORK_REGISTRATION_SUBMITTED"; AUDIT_ACCEPTED="WORK_REGISTRATION_ACCEPTED"; AUDIT_REOPENED="WORK_REGISTRATION_REOPENED"; AUDIT_DEADLINE="WORK_REGISTRATION_DEADLINE_UPDATED"; AUDIT_CLOSED="WORK_REGISTRATION_PERIOD_CLOSED"
-    def __init__(self,session_factory,repository_provider: Optional[RepositoryProvider]=None): self._sf=session_factory; self._repository_provider=repository_provider or SqlAlchemyRepositoryProvider(); self._permission_service=PermissionService(session_factory); self._audit_service=AuditService(session_factory)
+    def __init__(self,session_factory,repository_provider: Optional[RepositoryProvider]=None):
+        self._sf=session_factory
+        self._repository_provider=repository_provider or create_default_repository_provider()
+        self._permission_service=PermissionService(session_factory)
+        self._audit_service=AuditService(session_factory, repository_provider=self._repository_provider)
     def _user(self,user=None):
         u=user or get_current_user()
         if u is None: raise EmployeeWorkRegistrationAccessDeniedError("Authentication is required.")
@@ -58,10 +62,8 @@ class EmployeeWorkRegistrationService:
     def get_period(self,y,m,user=None):
         u=self._user(user)
         with self._sf() as s: employee=self._repository_provider.employees(s).get_by_user_id(u.id)
-        if self._permission_service.has_permission(self.ALL_PERMISSION, u):
-            return self._period_readonly(y,m)
-        if employee is not None and (self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)):
-            return self._period_readonly(y,m)
+        if self._permission_service.has_permission(self.ALL_PERMISSION, u): return self._period_readonly(y,m)
+        if employee is not None and (self._permission_service.has_permission(self.SELF_PERMISSION,u) or self._permission_service.has_permission(self.LEGACY_SELF_PERMISSION,u)): return self._period_readonly(y,m)
         self._require_permission(self.ALL_PERMISSION,u); return self._period_readonly(y,m)
     def _period_readonly(self,y,m):
         with self._sf() as s:p=self._period(s,y,m);s.expunge(p);return p
