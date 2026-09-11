@@ -46,6 +46,19 @@ def _public_factory_names(provider_type: type) -> set[str]:
     }
 
 
+def _bound_session(repository):
+    """Return the caller-owned session used by repositories with either storage convention."""
+    if hasattr(repository, "session"):
+        return repository.session
+    if hasattr(repository, "_session"):
+        return repository._session
+    if hasattr(repository, "_s"):
+        return repository._s
+    raise AssertionError(
+        f"{type(repository).__name__} does not expose its bound session"
+    )
+
+
 def test_repository_provider_protocol_and_implementation_are_complete():
     protocol = _public_factory_names(RepositoryProvider)
     implementation = _public_factory_names(SqlAlchemyRepositoryProvider)
@@ -69,9 +82,9 @@ def test_repository_provider_factories_are_session_scoped_and_not_cached():
 
         assert first is not second, f"{factory_name} returned a cached repository instance"
         assert other_session is not first, f"{factory_name} reused repository across sessions"
-        assert first._session is session_a
-        assert second._session is session_a
-        assert other_session._session is session_b
+        assert _bound_session(first) is session_a
+        assert _bound_session(second) is session_a
+        assert _bound_session(other_session) is session_b
 
 
 def test_repository_provider_factories_have_single_session_parameter():
