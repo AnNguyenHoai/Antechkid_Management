@@ -21,6 +21,7 @@ MIGRATED_SERVICES = {
     "employee_admin_management_service.py",
     "employee_document_service.py",
     "employee_schedule_service.py",
+    "employee_service.py",
     "employee_work_registration_service.py",
     "enrollment_service.py",
     "report_service.py",
