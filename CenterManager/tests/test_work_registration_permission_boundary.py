@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import re
 
 from centermanager.models.permission import PermissionDefinitions
 from centermanager.models.role import RoleDefinitions
@@ -85,7 +86,7 @@ def test_get_period_checks_all_scope_before_employee_self_scope():
     assert all_check in source
     assert self_check in source
     assert source.index(all_check) < source.index(self_check)
-    assert 'return self._period_readonly(y, m)' in source
+    assert re.search(r"return self\._period_readonly\(y,\s*m\)", source)
 
 
 def test_shell_uses_capability_policy_for_registration_navigation():
