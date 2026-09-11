@@ -24,6 +24,7 @@ EXPECTED_FACTORIES = {
     "employee_schedules",
     "employee_work_registration_periods",
     "employee_work_registrations",
+    "employee_working_times",
     "employee_documents",
     "classes",
     "students",
