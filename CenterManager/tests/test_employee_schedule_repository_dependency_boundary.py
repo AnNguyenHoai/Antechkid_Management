@@ -107,6 +107,24 @@ def test_employee_schedule_service_uses_provider_default_factory():
     assert "create_default_repository_provider" in source
 
 
+def test_employee_schedule_service_has_no_direct_session_persistence_calls():
+    source = inspect.getsource(EmployeeScheduleService)
+    forbidden = (
+        "s.add(",
+        "s.add_all(",
+        "s.delete(",
+        "s.flush(",
+        "s.refresh(",
+        "s.query(",
+        "s.execute(",
+        "s.get(",
+        "s.connection(",
+        "s.get_bind(",
+        "exec_driver_sql(",
+    )
+    assert not any(marker in source for marker in forbidden)
+
+
 def test_employee_lookup_uses_injected_repository_provider():
     employee = type("EmployeeRecord", (), {"user_id": 7})()
     session = _Session()
@@ -154,7 +172,7 @@ def test_schedule_mutations_delegate_persistence_to_repository():
     rule = service.add_rule(123, 0, __import__("datetime").time(9), __import__("datetime").time(10), __import__("datetime").date(2040, 1, 1), user=user)
     assert provider.schedule_repo.added_rules == [rule]
 
-    service.delete_rule(99, user=user)  # missing rule remains a no-op
+    service.delete_rule(99, user=user)
     assert provider.schedule_repo.deleted_rules == []
 
 
