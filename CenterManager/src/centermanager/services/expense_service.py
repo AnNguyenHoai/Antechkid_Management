@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 import logging
 from datetime import date, datetime
-from typing import Optional, List, Tuple
-from sqlalchemy.orm import sessionmaker
+from typing import Any, Optional, List, Tuple
 
 from centermanager.models.expense import Expense
-from centermanager.repositories.expense_repository import ExpenseRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.permission_guard import require_permission
@@ -25,13 +24,15 @@ class ExpenseNotFoundError(Exception):
 class ExpenseService:
     def __init__(
         self,
-        session_factory: sessionmaker,
+        session_factory: Any,
         timeline_service: ExpenseTimelineService,
         permission_service: PermissionService,
+        repository_provider: Optional[RepositoryProvider] = None,
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._permission_service = permission_service
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
@@ -97,7 +98,7 @@ class ExpenseService:
         note = self._normalize_text(note)
 
         with self._session_factory() as session:
-            repo = ExpenseRepository(session)
+            repo = self._repository_provider.expenses(session)
             expense = Expense(
                 category=category,
                 description=description,
@@ -110,7 +111,7 @@ class ExpenseService:
             )
             repo.add(expense)
             session.commit()
-            session.refresh(expense)
+            repo.refresh(expense)
 
             self._timeline_service.log_event(
                 expense_id=expense.id,
@@ -124,7 +125,7 @@ class ExpenseService:
     @require_permission("finance.view")
     def get_expense(self, expense_id: int) -> Expense:
         with self._session_factory() as session:
-            repo = ExpenseRepository(session)
+            repo = self._repository_provider.expenses(session)
             expense = repo.get_by_id(expense_id)
             if not expense:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found")
@@ -144,7 +145,7 @@ class ExpenseService:
     ) -> Tuple[List[Expense], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
-            repo = ExpenseRepository(session)
+            repo = self._repository_provider.expenses(session)
             items = repo.list_active(
                 category=category,
                 payment_method=payment_method,
@@ -179,7 +180,7 @@ class ExpenseService:
         note: Optional[str] = None,
     ) -> Expense:
         with self._session_factory() as session:
-            repo = ExpenseRepository(session)
+            repo = self._repository_provider.expenses(session)
             expense = repo.get_by_id_including_deleted(expense_id)
             if not expense or expense.deleted_at is not None:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
@@ -241,7 +242,7 @@ class ExpenseService:
                 return expense
 
             session.commit()
-            session.refresh(expense)
+            repo.refresh(expense)
 
             self._timeline_service.log_event(
                 expense_id=expense.id,
@@ -255,7 +256,7 @@ class ExpenseService:
     @require_permission("finance.expense.delete")
     def delete_expense(self, expense_id: int) -> None:
         with self._session_factory() as session:
-            repo = ExpenseRepository(session)
+            repo = self._repository_provider.expenses(session)
             expense = repo.get_by_id_including_deleted(expense_id)
             if not expense or expense.deleted_at is not None:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found or already deleted")
