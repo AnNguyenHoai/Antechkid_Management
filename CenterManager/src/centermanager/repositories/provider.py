@@ -31,6 +31,8 @@ from centermanager.repositories.teacher_repository import TeacherRepository
 from centermanager.repositories.teacher_assignment_repository import TeacherAssignmentRepository
 from centermanager.repositories.teacher_document_repository import TeacherDocumentRepository
 from centermanager.repositories.note_repository import NoteRepository
+from centermanager.repositories.user_repository import UserRepository
+from centermanager.repositories.role_repository import RoleRepository
 
 
 class RepositoryProvider(Protocol):
@@ -42,6 +44,8 @@ class RepositoryProvider(Protocol):
     def enrollments(self, session: Session) -> EnrollmentRepository: ...
     def sessions(self, session: Session) -> SessionRepository: ...
     def employees(self, session: Session) -> EmployeeRepository: ...
+    def users(self, session: Session) -> UserRepository: ...
+    def roles(self, session: Session) -> RoleRepository: ...
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: ...
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: ...
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: ...
@@ -67,6 +71,8 @@ class SqlAlchemyRepositoryProvider:
     def enrollments(self, session: Session) -> EnrollmentRepository: return EnrollmentRepository(session)
     def sessions(self, session: Session) -> SessionRepository: return SessionRepository(session)
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)
+    def users(self, session: Session) -> UserRepository: return UserRepository(session)
+    def roles(self, session: Session) -> RoleRepository: return RoleRepository(session)
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: return EmployeeScheduleRepository(session)
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: return EmployeeWorkRegistrationPeriodRepository(session)
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: return EmployeeWorkRegistrationRepository(session)
