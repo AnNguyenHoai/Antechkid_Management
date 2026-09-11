@@ -33,6 +33,10 @@ class RoleRepository(BaseRepository[Role]):
             joinedload(Role.users)
         ).all()
 
+    def count_users(self, role_id: int) -> int:
+        """Count users assigned to a role."""
+        return self._session.query(Role).join(Role.users).filter(Role.id == role_id).count()
+
     def add(self, role: Role) -> Role:
         self._session.add(role)
         return role

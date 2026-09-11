@@ -33,6 +33,7 @@ from centermanager.repositories.teacher_document_repository import TeacherDocume
 from centermanager.repositories.note_repository import NoteRepository
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.repositories.role_repository import RoleRepository
+from centermanager.repositories.permission_repository import PermissionRepository
 from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
 
 
@@ -47,6 +48,7 @@ class RepositoryProvider(Protocol):
     def employees(self, session: Session) -> EmployeeRepository: ...
     def users(self, session: Session) -> UserRepository: ...
     def roles(self, session: Session) -> RoleRepository: ...
+    def permissions(self, session: Session) -> PermissionRepository: ...
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: ...
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: ...
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: ...
@@ -75,6 +77,7 @@ class SqlAlchemyRepositoryProvider:
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)
     def users(self, session: Session) -> UserRepository: return UserRepository(session)
     def roles(self, session: Session) -> RoleRepository: return RoleRepository(session)
+    def permissions(self, session: Session) -> PermissionRepository: return PermissionRepository(session)
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: return EmployeeScheduleRepository(session)
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: return EmployeeWorkRegistrationPeriodRepository(session)
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: return EmployeeWorkRegistrationRepository(session)
