@@ -1,13 +1,10 @@
 import json
-from typing import Optional, Any, List, TYPE_CHECKING
+from typing import Optional, Any, List
 
 from centermanager.models.audit_log import AuditLog
 from centermanager.core.current_user import get_current_user
 from centermanager.core.clock import get_clock
 from centermanager.repositories.provider import RepositoryProvider
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
 
 
 class AuditService:
@@ -73,7 +70,7 @@ class AuditService:
 
     def record_in_session(
         self,
-        session: "Session",
+        session,
         action: str,
         module: str,
         target_type: Optional[str] = None,
