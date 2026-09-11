@@ -16,6 +16,8 @@ MIGRATED_SERVICES = (
     "class_service.py",
     "employee_schedule_service.py",
     "employee_admin_management_service.py",
+    "employee_document_service.py",
+    "employee_service.py",
     "enrollment_service.py",
     "expense_timeline_service.py",
     "income_service.py",
