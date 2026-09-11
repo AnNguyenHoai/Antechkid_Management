@@ -10,6 +10,8 @@ MIGRATED_SERVICE_FILES = {
     "audit_service.py",
     "employee_schedule_service.py",
     "employee_work_registration_service.py",
+    "employee_working_time_service.py",
+    "permission_service.py",
 }
 
 # Commit/rollback are intentionally retained as transaction orchestration at
