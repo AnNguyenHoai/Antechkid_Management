@@ -27,5 +27,8 @@ def test_user_account_provisioning_respects_employee_identity_boundary():
 def test_user_delete_does_not_orphan_employee():
     p = ROOT / "src" / "centermanager" / "services" / "permission_service.py"
     source = p.read_text(encoding="utf-8")
-    assert "linked_employee = session.query(Employee).filter(Employee.user_id == user_id).first()" in source
+
+    # The employee lookup is now intentionally owned by UserRepository after the
+    # RepositoryProvider migration. Keep the lifecycle invariant explicit.
+    assert "linked_employee = repo.get_employee_linked_to_user(user_id)" in source
     assert "Deactivate the account instead of deleting it." in source
