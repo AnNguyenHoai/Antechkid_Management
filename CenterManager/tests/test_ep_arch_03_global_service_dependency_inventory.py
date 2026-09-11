@@ -13,10 +13,6 @@ FORBIDDEN_REPOSITORY_IMPORT_MARKER = "from centermanager.repositories."
 FORBIDDEN_REPOSITORY_CONSTRUCTION_MARKER = "Repository("
 
 
-# These services have already been migrated and therefore form the minimum
-# regression set for EP-ARCH-03. The inventory document is the human-readable
-# record; this test prevents accidental reintroduction of concrete repository
-# imports in those services.
 MIGRATED_SERVICES = {
     "assessment_service.py",
     "attendance_service.py",
@@ -25,6 +21,7 @@ MIGRATED_SERVICES = {
     "employee_admin_management_service.py",
     "employee_document_service.py",
     "employee_schedule_service.py",
+    "employee_work_registration_service.py",
     "enrollment_service.py",
     "report_service.py",
     "student_note_service.py",
