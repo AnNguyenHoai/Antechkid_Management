@@ -41,6 +41,11 @@ class RoleLifecycleError(ValueError):
     pass
 
 
+class AuthenticationError(ValueError):
+    """Raised when an authentication or password-change operation is rejected."""
+    pass
+
+
 class PermissionService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
@@ -265,6 +270,79 @@ class PermissionService:
         """Return all accounts, including inactive accounts, for administration."""
         with self._session_factory() as session:
             return session.query(User).all()
+
+    def authenticate_user(self, username: str, password: str) -> User:
+        """Authenticate a user and persist login-attempt state in the service layer."""
+        from centermanager.security.password import verify_password, hash_password
+
+        with self._session_factory() as session:
+            repo = UserRepository(session)
+            user = repo.get_by_username(username)
+            if user is None:
+                raise AuthenticationError("Invalid username or password.")
+
+            if not user.is_active:
+                raise AuthenticationError("Account is deactivated.")
+
+            if user.is_locked:
+                raise AuthenticationError("Account is locked. Please try again later.")
+
+            password_valid, needs_upgrade = verify_password(password, user.password_hash)
+            if not password_valid:
+                user.increment_login_attempts()
+                session.commit()
+                remaining = 5 - user.login_attempts
+                if remaining > 0:
+                    raise AuthenticationError(
+                        f"Invalid username or password. {remaining} attempts remaining."
+                    )
+                raise AuthenticationError("Account locked due to too many failed attempts.")
+
+            if needs_upgrade:
+                user.password_hash = hash_password(password)
+                logger.info("Upgraded legacy password hash for user: %s", username)
+
+            user.reset_login_attempts()
+            from datetime import datetime
+            user.last_login = datetime.now()
+            session.commit()
+            user_id = user.id
+
+        authenticated = self.get_user(user_id)
+        if authenticated is None:
+            raise AuthenticationError("User not found after login.")
+        return authenticated
+
+    def change_password(self, user_id: int, current_password: str, new_password: str) -> User:
+        """Validate and persist a user password change behind the service boundary."""
+        from centermanager.security.password import verify_password, hash_password
+
+        with self._session_factory() as session:
+            user = UserRepository(session).get_by_id_with_role(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User {user_id} not found.")
+
+            password_valid, _ = verify_password(current_password, user.password_hash)
+            if not password_valid:
+                raise AuthenticationError("Current password is incorrect.")
+
+            if len(new_password) < 6:
+                raise AuthenticationError("New password must be at least 6 characters.")
+            if new_password == current_password:
+                raise AuthenticationError("New password must be different from current password.")
+
+            user.password_hash = hash_password(new_password)
+            user.force_password_change = False
+            user.login_attempts = 0
+            user.locked_until = None
+            session.commit()
+            user_id = user.id
+
+        updated_user = self.get_user(user_id)
+        if updated_user is None:
+            raise UserNotFoundError("User not found after password change.")
+        logger.info("Password changed for user %s", updated_user.username)
+        return updated_user
 
     def create_user(
         self,
