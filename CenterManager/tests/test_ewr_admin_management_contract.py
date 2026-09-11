@@ -78,8 +78,9 @@ def test_admin_management_contract_is_separate_from_employee_self_service():
 
 def test_admin_employee_delete_is_blocked_when_operational_history_exists():
     source = (ROOT / "services" / "employee_admin_management_service.py").read_text(encoding="utf-8")
-    assert '"work_registrations": len(employee.work_registrations)' in source
-    assert '"schedule_rules": len(employee.schedule_rules)' in source
-    assert '"schedule_exceptions": len(employee.schedule_exceptions)' in source
-    assert '"working_time_entries": len(employee.working_time_entries)' in source
+    # Operational-history inspection belongs to EmployeeRepository after the
+    # EP-ARCH-03 dependency-boundary migration.  The admin service must consume
+    # the repository contract rather than reach through ORM relationships itself.
+    assert "history_counts = repo.operational_history_counts(employee_id)" in source
+    assert 'if any(history_counts.values()):' in source
     assert "Archive the employee instead." in source
