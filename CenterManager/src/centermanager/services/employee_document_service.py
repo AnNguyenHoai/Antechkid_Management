@@ -6,15 +6,17 @@ import hashlib
 import logging
 from sqlalchemy.orm import sessionmaker
 from centermanager.models.employee_document import EmployeeDocument
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 logger = logging.getLogger(__name__)
 
 class EmployeeDocumentService:
-    def __init__(self, session_factory: sessionmaker, attachments_root: Path):
+    def __init__(self, session_factory: sessionmaker, attachments_root: Path, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
         self._attachments_root = Path(attachments_root)
         self._root = self._attachments_root / 'Employees'
         self._runtime_root = self._attachments_root.parent
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def resolve_document_path(self, document: EmployeeDocument) -> Path:
         """Resolve a stored document path against the runtime root safely.
@@ -41,15 +43,19 @@ class EmployeeDocumentService:
 
     def openable_path(self, document_id: int) -> Path:
         with self._sf() as s:
-            document = s.get(EmployeeDocument, document_id)
+            repo = self._repository_provider.employee_documents(s)
+            document = repo.get_by_id(document_id)
             if document is None:
                 raise FileNotFoundError(f"Employee document {document_id} not found.")
             path = self.resolve_document_path(document)
         if not path.is_file():
             raise FileNotFoundError(f"Employee document file not found: {path}")
         return path
+
     def list_documents(self, employee_id):
-        with self._sf() as s:return s.query(EmployeeDocument).filter_by(employee_id=employee_id).order_by(EmployeeDocument.uploaded_at.desc()).all()
+        with self._sf() as s:
+            return self._repository_provider.employee_documents(s).list_for_employee(employee_id)
+
     def get_runtime_employee_root(self, employee_code: str) -> Path:
         """Return the canonical local storage root for an employee's documents."""
         return self._root / employee_code
@@ -149,6 +155,7 @@ class EmployeeDocumentService:
         # Store a runtime-relative path so it can be reconstructed on every machine.
         rel = str(dst.relative_to(self._runtime_root.resolve()))
         with self._sf() as s:
+            repo = self._repository_provider.employee_documents(s)
             d = EmployeeDocument(
                 employee_id=employee.id,
                 document_type=document_type,
@@ -156,7 +163,7 @@ class EmployeeDocumentService:
                 relative_path=rel,
                 notes=notes,
             )
-            s.add(d)
+            repo.add(d)
             s.commit()
             s.refresh(d)
 

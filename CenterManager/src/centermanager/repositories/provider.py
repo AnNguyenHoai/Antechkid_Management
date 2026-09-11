@@ -20,6 +20,7 @@ from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
 from centermanager.repositories.employee_work_registration_period_repository import EmployeeWorkRegistrationPeriodRepository
 from centermanager.repositories.employee_work_registration_repository import EmployeeWorkRegistrationRepository
+from centermanager.repositories.employee_document_repository import EmployeeDocumentRepository
 from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
@@ -43,6 +44,7 @@ class RepositoryProvider(Protocol):
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: ...
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: ...
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: ...
+    def employee_documents(self, session: Session) -> EmployeeDocumentRepository: ...
     def classes(self, session: Session) -> ClassRepository: ...
     def students(self, session: Session) -> StudentRepository: ...
     def assessments(self, session: Session) -> AssessmentRepository: ...
@@ -66,6 +68,7 @@ class SqlAlchemyRepositoryProvider:
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: return EmployeeScheduleRepository(session)
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: return EmployeeWorkRegistrationPeriodRepository(session)
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: return EmployeeWorkRegistrationRepository(session)
+    def employee_documents(self, session: Session) -> EmployeeDocumentRepository: return EmployeeDocumentRepository(session)
     def classes(self, session: Session) -> ClassRepository: return ClassRepository(session)
     def students(self, session: Session) -> StudentRepository: return StudentRepository(session)
     def assessments(self, session: Session) -> AssessmentRepository: return AssessmentRepository(session)
