@@ -6,37 +6,23 @@ from pathlib import Path
 
 SERVICES_DIR = Path(__file__).resolve().parents[1] / "src" / "centermanager" / "services"
 
-# EP-ARCH-03.20 is intentionally an incremental migration gate. Only services
-# already migrated to the RepositoryProvider boundary are enforced here. The
-# remaining legacy services are tracked for subsequent migration tasks instead
-# of making the first global gate fail on unrelated pre-existing architecture.
+# EP-ARCH-03.20 is an incremental migration gate. Services are added here only
+# after their production persistence access has been migrated behind the
+# RepositoryProvider boundary.
 MIGRATED_SERVICE_FILES = {
+    "audit_service.py",
     "employee_schedule_service.py",
     "employee_work_registration_service.py",
 }
 
 FORBIDDEN_SESSION_METHODS = {
-    "query",
-    "execute",
-    "scalar",
-    "scalars",
-    "get",
-    "add",
-    "add_all",
-    "delete",
-    "flush",
-    "refresh",
-    "commit",
-    "rollback",
-    "merge",
+    "query", "execute", "scalar", "scalars", "get", "add", "add_all",
+    "delete", "flush", "refresh", "commit", "rollback", "merge",
 }
 
 
 def _service_files() -> list[Path]:
-    return sorted(
-        path for path in SERVICES_DIR.glob("*_service.py")
-        if path.name in MIGRATED_SERVICE_FILES
-    )
+    return sorted(path for path in SERVICES_DIR.glob("*_service.py") if path.name in MIGRATED_SERVICE_FILES)
 
 
 def _is_session_name(name: str) -> bool:
@@ -78,7 +64,6 @@ def test_migrated_application_services_do_not_import_sqlalchemy_directly() -> No
         imports = _find_sqlalchemy_imports(tree)
         if imports:
             violations.append(f"{path.name}: {imports}")
-
     assert violations == [], (
         "RepositoryProvider-migrated services must not import SQLAlchemy directly: "
         f"{violations}"
@@ -92,7 +77,6 @@ def test_migrated_application_services_do_not_execute_direct_session_operations(
         operations = _find_direct_session_operations(tree)
         if operations:
             violations.append(f"{path.name}: {operations}")
-
     assert violations == [], (
         "RepositoryProvider-migrated services must not call persistence/session operations directly: "
         f"{violations}"
