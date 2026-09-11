@@ -4,11 +4,11 @@ The UI layer may depend on application services, but must not bypass the
 service boundary by importing repositories or SQLAlchemy, constructing
 repositories/sessions, or issuing persistence operations directly.
 
-The persistence-operation check is intentionally receiver-aware. Qt/PySide
-widgets commonly expose methods such as ``refresh()``, ``add()`` and
-``delete()``; treating every call with those method names as a database
-operation creates false positives. We therefore only classify such calls as
-persistence access when their receiver is explicitly session/repository-like.
+The persistence-operation check is receiver-aware. Qt/PySide widgets commonly
+expose methods such as ``refresh()``, ``add()`` and ``delete()``; treating every
+call with those method names as a database operation creates false positives.
+The guard therefore tracks names that are bound to explicit session/repository
+values and only treats persistence calls on those receivers as violations.
 """
 from __future__ import annotations
 
@@ -25,12 +25,9 @@ FORBIDDEN_SESSION_NAMES = {"Session", "sessionmaker", "scoped_session"}
 FORBIDDEN_QUERY_METHODS = {
     "query", "execute", "commit", "flush", "refresh", "delete", "add", "add_all",
 }
-PERSISTENCE_RECEIVER_NAMES = {
-    "session", "db_session", "database_session", "transaction", "repository",
-    "repositories", "repo", "repos", "_session", "_db_session",
-    "_database_session", "_transaction", "_repository", "_repositories",
-    "_repo", "_repos",
-}
+PERSISTENCE_NAME_TOKENS = (
+    "session", "repository", "repositories", "repo", "repos", "transaction", "unit_of_work",
+)
 
 
 def _attribute_parts(node: ast.AST) -> list[str]:
@@ -44,6 +41,11 @@ def _attribute_parts(node: ast.AST) -> list[str]:
     return parts
 
 
+def _looks_persistence_named(name: str) -> bool:
+    lowered = name.lower()
+    return any(token in lowered for token in PERSISTENCE_NAME_TOKENS)
+
+
 class _UIDependencyVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.forbidden_imports: list[str] = []
@@ -51,11 +53,12 @@ class _UIDependencyVisitor(ast.NodeVisitor):
         self.session_constructors: list[str] = []
         self.query_operations: list[str] = []
         self.repository_references: list[str] = []
+        self._persistence_names: set[str] = set()
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             name = alias.name
-            if name == "centermanager.services" or name.startswith("centermanager.services."):
+            if name.startswith("centermanager.services"):
                 self.service_imports.append(name)
             if any(name == prefix or name.startswith(prefix + ".") for prefix in FORBIDDEN_IMPORT_PREFIXES):
                 self.forbidden_imports.append(name)
@@ -69,6 +72,34 @@ class _UIDependencyVisitor(ast.NodeVisitor):
             self.service_imports.append(module)
         self.generic_visit(node)
 
+    def visit_Assign(self, node: ast.Assign) -> None:
+        value = node.value
+        persistence_value = False
+        if isinstance(value, ast.Call):
+            if isinstance(value.func, ast.Name):
+                persistence_value = _looks_persistence_named(value.func.id) or value.func.id in FORBIDDEN_SESSION_NAMES
+            elif isinstance(value.func, ast.Attribute):
+                persistence_value = _looks_persistence_named(value.func.attr)
+        elif isinstance(value, (ast.Name, ast.Attribute)):
+            parts = _attribute_parts(value)
+            persistence_value = any(_looks_persistence_named(part) for part in parts)
+
+        if persistence_value:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self._persistence_names.add(target.id)
+        self.generic_visit(node)
+
+    def visit_arg(self, node: ast.arg) -> None:
+        if _looks_persistence_named(node.arg):
+            self._persistence_names.add(node.arg)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if _looks_persistence_named(node.id):
+            self._persistence_names.add(node.id)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Name):
             name = node.func.id
@@ -78,10 +109,12 @@ class _UIDependencyVisitor(ast.NodeVisitor):
                 self.repository_references.append(name)
         elif isinstance(node.func, ast.Attribute):
             name = node.func.attr
+            receiver_parts = _attribute_parts(node.func.value)
             if name in FORBIDDEN_SESSION_NAMES:
                 self.session_constructors.append(name)
             if name in FORBIDDEN_QUERY_METHODS and any(
-                part in PERSISTENCE_RECEIVER_NAMES for part in _attribute_parts(node.func.value)
+                part in self._persistence_names or _looks_persistence_named(part)
+                for part in receiver_parts
             ):
                 self.query_operations.append(name)
             if name.endswith("Repository"):
