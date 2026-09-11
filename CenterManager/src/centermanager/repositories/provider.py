@@ -33,6 +33,7 @@ from centermanager.repositories.teacher_document_repository import TeacherDocume
 from centermanager.repositories.note_repository import NoteRepository
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.repositories.role_repository import RoleRepository
+from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
 
 
 class RepositoryProvider(Protocol):
@@ -49,6 +50,7 @@ class RepositoryProvider(Protocol):
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: ...
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: ...
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: ...
+    def employee_working_times(self, session: Session) -> EmployeeWorkingTimeRepository: ...
     def employee_documents(self, session: Session) -> EmployeeDocumentRepository: ...
     def classes(self, session: Session) -> ClassRepository: ...
     def students(self, session: Session) -> StudentRepository: ...
@@ -76,6 +78,7 @@ class SqlAlchemyRepositoryProvider:
     def employee_schedules(self, session: Session) -> EmployeeScheduleRepository: return EmployeeScheduleRepository(session)
     def employee_work_registration_periods(self, session: Session) -> EmployeeWorkRegistrationPeriodRepository: return EmployeeWorkRegistrationPeriodRepository(session)
     def employee_work_registrations(self, session: Session) -> EmployeeWorkRegistrationRepository: return EmployeeWorkRegistrationRepository(session)
+    def employee_working_times(self, session: Session) -> EmployeeWorkingTimeRepository: return EmployeeWorkingTimeRepository(session)
     def employee_documents(self, session: Session) -> EmployeeDocumentRepository: return EmployeeDocumentRepository(session)
     def classes(self, session: Session) -> ClassRepository: return ClassRepository(session)
     def students(self, session: Session) -> StudentRepository: return StudentRepository(session)
