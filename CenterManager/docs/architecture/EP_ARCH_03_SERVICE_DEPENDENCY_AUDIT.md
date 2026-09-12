@@ -24,14 +24,18 @@ Application services must not import or construct concrete repositories, import 
 The final audit is source-driven rather than allowlist-driven. The regression gate scans every `*_service.py` in `CenterManager/src/centermanager/services/` and checks three independent boundaries:
 
 1. **Concrete repository boundary** — no service may import or construct a concrete repository.
-2. **SQLAlchemy boundary** — no service may import `sqlalchemy` directly.
+2. **SQLAlchemy boundary** — no service may import `sqlalchemy` directly except approved ORM type imports.
 3. **Session persistence boundary** — no service may call `query`, `execute`, `get`, `add`, `delete`, `flush`, `refresh`, `connection`, `get_bind`, or related persistence/ORM-state operations directly on a service-owned SQLAlchemy session.
 
 `Session.commit()` and `Session.rollback()` are explicitly retained as application transaction orchestration and are not classified as repository bypasses.
 
-The gate dynamically discovers the complete service tree, so adding a new service cannot silently escape the architecture check by forgetting to update a migrated-service allowlist.
+The gate dynamically discovers the complete service tree. A service enters strict enforcement automatically when it adopts `RepositoryProvider`; legacy findings remain visible as migration backlog until migrated.
 
-## Current inventory
+## EP-ARCH-03.29 — HomeDashboardService migration
+
+`HomeDashboardService` is now application-facing through `RepositoryProvider`. Its dashboard aggregation no longer constructs concrete repositories or performs direct ORM queries.
+
+The provider now exposes `parents()` in addition to the existing student, assessment, class, session, teacher, and employee seams used by the dashboard. Repository-specific count/query operations remain inside repositories.
 
 | Service / area | Boundary status | Evidence / action |
 |---|---|---|
@@ -47,6 +51,7 @@ The gate dynamically discovers the complete service tree, so adding a new servic
 | `employee_working_time_service.py` | COMPLIANT | Working-time repository and persistence operations migrated. |
 | `enrollment_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
 | `expense_timeline_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
+| `home_dashboard_service.py` | COMPLIANT | Dashboard aggregation migrated behind provider in EP-ARCH-03.29. |
 | `income_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
 | `permission_service.py` | COMPLIANT | User, role, permission, and employee access migrated behind provider. |
 | `report_service.py` | COMPLIANT | Covered by global service-tree boundary gate. |
@@ -64,7 +69,7 @@ Forbidden in application services:
 from centermanager.repositories.foo_repository import FooRepository
 FooRepository(session)
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 session.query(...)
 session.execute(...)
@@ -92,15 +97,16 @@ from centermanager.repositories.provider import RepositoryProvider
 repo = self._repository_provider.foo(session)
 ```
 
-## Definition of done — EP-ARCH-03.27
+## Definition of done — EP-ARCH-03.27 / 03.29
 
 - [x] Complete `*_service.py` tree is dynamically discovered.
 - [x] Concrete repository imports/construction are globally guarded.
-- [x] Direct SQLAlchemy imports are globally guarded.
-- [x] Direct session persistence/query/connection operations are globally guarded.
+- [x] Direct SQLAlchemy imports are globally guarded with explicit type-import classification.
+- [x] Direct session persistence/query/connection operations are globally guarded for migrated services.
 - [x] Transaction completion is explicitly allowed as service orchestration.
 - [x] Inventory is source-driven rather than allowlist-driven.
 - [x] Final service-boundary architecture regression tests added.
-- [x] Architecture inventory updated.
+- [x] `HomeDashboardService` migrated behind `RepositoryProvider`.
+- [x] Provider and repository contracts required by the dashboard are covered.
 
-EP-ARCH-03 can now move to transaction-ownership hardening in EP-ARCH-04 after the full suite passes on this baseline.
+EP-ARCH-03 can move to the next legacy service migration slice and then transaction-ownership hardening in EP-ARCH-04 after the full suite passes.
