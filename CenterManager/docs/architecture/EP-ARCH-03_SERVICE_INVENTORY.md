@@ -66,7 +66,7 @@ The strict provider gate remains authoritative for every service that declares `
 
 Batch A promotes the following provider-backed services into the strict inventory:
 
-- `assessment_service.py`: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are already isolated behind `AssessmentRepository`.
-- `attendance_service.py`: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
+- `assessment_service.py` — **AssessmentService**: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are already isolated behind `AssessmentRepository`.
+- `attendance_service.py` — **AttendanceService**: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
 
 These two services therefore move to `PASS` without production logic changes. Remaining legacy services keep their migration slice assignments above.
