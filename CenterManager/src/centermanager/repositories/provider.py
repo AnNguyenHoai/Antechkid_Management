@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Repository dependency boundary for application services."""
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ from centermanager.repositories.attendance_repository import AttendanceRepositor
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.repositories.session_repository import SessionRepository
+from centermanager.repositories.session_note_repository import SessionNoteRepository
 from centermanager.repositories.employee_repository import EmployeeRepository
 from centermanager.repositories.employee_schedule_repository import EmployeeScheduleRepository
 from centermanager.repositories.employee_work_registration_period_repository import EmployeeWorkRegistrationPeriodRepository
@@ -40,6 +40,7 @@ class RepositoryProvider(Protocol):
     def attendance(self, session: Session) -> AttendanceRepository: ...
     def enrollments(self, session: Session) -> EnrollmentRepository: ...
     def sessions(self, session: Session) -> SessionRepository: ...
+    def session_notes(self, session: Session) -> SessionNoteRepository: ...
     def employees(self, session: Session) -> EmployeeRepository: ...
     def users(self, session: Session) -> UserRepository: ...
     def roles(self, session: Session) -> RoleRepository: ...
@@ -70,6 +71,7 @@ class SqlAlchemyRepositoryProvider:
     def attendance(self, session: Session) -> AttendanceRepository: return AttendanceRepository(session)
     def enrollments(self, session: Session) -> EnrollmentRepository: return EnrollmentRepository(session)
     def sessions(self, session: Session) -> SessionRepository: return SessionRepository(session)
+    def session_notes(self, session: Session) -> SessionNoteRepository: return SessionNoteRepository(session)
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)
     def users(self, session: Session) -> UserRepository: return UserRepository(session)
     def roles(self, session: Session) -> RoleRepository: return RoleRepository(session)

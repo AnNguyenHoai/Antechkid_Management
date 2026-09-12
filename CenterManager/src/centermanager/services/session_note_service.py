@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.session import SessionStatus
 from centermanager.models.session_note import SessionNote, TeachingProgress, ClassAtmosphere
-from centermanager.repositories.session_note_repository import SessionNoteRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.session_service import SessionService, SessionNotFoundError
 
 
@@ -25,9 +25,15 @@ class SessionNoteValidationError(SessionNoteServiceError):
 
 
 class SessionNoteService:
-    def __init__(self, session_factory: sessionmaker, session_service: SessionService) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        session_service: SessionService,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._session_service = session_service
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -66,7 +72,7 @@ class SessionNoteService:
 
         # Check if note already exists
         with self._session_factory() as db_session:
-            repo = SessionNoteRepository(db_session)
+            repo = self._repository_provider.session_notes(db_session)
             if repo.exists_by_session(session_id):
                 raise SessionNoteValidationError("A note already exists for this session.")
 
@@ -93,12 +99,12 @@ class SessionNoteService:
             )
             repo.add(note)
             db_session.commit()
-            db_session.refresh(note)
+            repo.refresh(note)
             return note
 
     def get_note(self, session_id: int) -> Optional[SessionNote]:
         with self._session_factory() as db_session:
-            repo = SessionNoteRepository(db_session)
+            repo = self._repository_provider.session_notes(db_session)
             return repo.find_by_session(session_id)
 
     def update_note(
@@ -113,7 +119,7 @@ class SessionNoteService:
         homework: Optional[str] = None,
     ) -> SessionNote:
         with self._session_factory() as db_session:
-            repo = SessionNoteRepository(db_session)
+            repo = self._repository_provider.session_notes(db_session)
             note = repo.find_by_session(session_id)
             if note is None:
                 raise SessionNoteNotFoundError(f"No note found for session {session_id}")
@@ -176,12 +182,12 @@ class SessionNoteService:
                 return note
 
             db_session.commit()
-            db_session.refresh(note)
+            repo.refresh(note)
             return note
 
     def delete_note(self, session_id: int) -> None:
         with self._session_factory() as db_session:
-            repo = SessionNoteRepository(db_session)
+            repo = self._repository_provider.session_notes(db_session)
             note = repo.find_by_session(session_id)
             if note is None:
                 raise SessionNoteNotFoundError(f"No note found for session {session_id}")

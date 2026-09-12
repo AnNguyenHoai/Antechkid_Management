@@ -7,7 +7,7 @@ from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRe
 
 
 EXPECTED_FACTORIES = {
-    "audit_logs", "class_timeline", "attendance", "enrollments", "sessions",
+    "audit_logs", "class_timeline", "attendance", "enrollments", "sessions", "session_notes",
     "employees", "users", "roles", "permissions", "employee_schedules",
     "employee_work_registration_periods", "employee_work_registrations",
     "employee_working_times", "employee_documents", "classes", "students",
