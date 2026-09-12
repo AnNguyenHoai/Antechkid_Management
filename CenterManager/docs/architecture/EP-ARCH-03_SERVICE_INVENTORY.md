@@ -10,21 +10,21 @@ Application services are classified from their source AST:
 - `LEGACY`: does not yet declare `RepositoryProvider`; findings are migration backlog, not CI regressions until the service enters the strict gate.
 - `VIOLATION`: declares `RepositoryProvider` but still has one or more forbidden dependencies/operations. This state must fail CI.
 
-The inventory is generated from the complete `src/centermanager/services/*_service.py` tree and is protected by `tests/test_ep_arch_03_34_service_inventory.py`.
+The strict provider gate remains authoritative for every service that declares `RepositoryProvider`.
 
 ## Current inventory
 
 | Service | Status | Repository imports | Repository constructors | SQLAlchemy imports | Direct persistence | Next migration |
 |---|---|---|---|---|---|---|
-| `assessment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `attendance_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `audit_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `authorization_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `assessment_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `attendance_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `audit_service.py` | LEGACY | already provider-backed; not yet promoted | — | — | — | EP-ARCH-03.35 |
+| `authorization_service.py` | LEGACY | no repository boundary | — | — | — | EP-ARCH-03.35 |
 | `auto_report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `backup_operations_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `class_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `backup_operations_service.py` | LEGACY | no concrete repository dependency | — | — | delegated to platform service | EP-ARCH-03.35 |
+| `class_service.py` | LEGACY | already provider-backed; strict promotion deferred to class boundary slice | — | `sqlalchemy.orm` only | repository-owned | EP-ARCH-03.35 |
 | `class_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `configuration_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
 | `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `employee_schedule_service.py` | PASS | — | — | — | — | — |
@@ -35,7 +35,7 @@ The inventory is generated from the complete `src/centermanager/services/*_servi
 | `expense_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `expense_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `finance_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
-| `git_config_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `git_config_service.py` | LEGACY | no repository boundary | — | — | filesystem persistence | EP-ARCH-03.35 |
 | `home_dashboard_service.py` | PASS | — | — | — | — | — |
 | `income_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `outstanding_service.py` | PASS | — | — | — | — | — |
@@ -62,6 +62,11 @@ The inventory is generated from the complete `src/centermanager/services/*_servi
 | `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
 
-## Next migration
+## EP-ARCH-03.35 Batch A
 
-EP-ARCH-03.35 should use this inventory as the migration backlog and replace each `LEGACY` row's placeholders with concrete findings for the service slice under implementation. The strict gate remains authoritative for every service that already adopts `RepositoryProvider`.
+Batch A promotes the following provider-backed services into the strict inventory:
+
+- `assessment_service.py`: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are already isolated behind `AssessmentRepository`.
+- `attendance_service.py`: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
+
+These two services therefore move to `PASS` without production logic changes. Remaining legacy services keep their migration slice assignments above.
