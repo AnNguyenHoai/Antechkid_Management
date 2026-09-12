@@ -41,7 +41,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `outstanding_service.py` | PASS | — | — | — | — | — |
 | `parent_service.py` | PASS | — | — | — | — | — |
 | `permission_service.py` | PASS | — | — | — | — | — |
-| `report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `report_service.py` | PASS | — | — | — | repository-owned | — |
 | `session_note_service.py` | PASS | — | — | — | — | — |
 | `session_report_service.py` | PASS | — | — | — | — | — |
 | `session_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
@@ -76,4 +76,10 @@ Batch B promotes provider-backed legacy services whose source already satisfies 
 - `audit_service.py` — **AuditService**: provider-backed through `RepositoryProvider.audit_logs(...)`; audit persistence and search remain repository-owned, while transaction completion remains with the service.
 - `class_service.py` — **ClassService**: provider-backed through `RepositoryProvider.classes(...)` and related repository factories; class, enrollment, session, teacher, and student persistence/query access remains repository-owned.
 
-These services are promoted to `PASS` without changing production business logic. Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
+## EP-ARCH-03.35 Batch C
+
+Batch C promotes **ReportService** after closing its last strict-boundary finding. Report metadata CRUD already uses `RepositoryProvider.reports(...)`; the remaining `session.refresh(report)` call was moved behind `ReportRepository.refresh(report)`. Transaction completion remains owned by the service.
+
+- `report_service.py` — **ReportService**: provider-backed through `RepositoryProvider.reports(...)`; report persistence and refresh are repository-owned.
+
+Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.

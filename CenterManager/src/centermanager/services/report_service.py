@@ -108,7 +108,7 @@ class ReportService:
             )
             repo.add(report)
             session.commit()
-            session.refresh(report)
+            repo.refresh(report)
 
         logger.info(f"Student report generated for student {student_id}: {file_path}")
         return file_path
