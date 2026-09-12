@@ -24,8 +24,8 @@ class AttendanceService:
         session_factory: sessionmaker,
         timeline_service: TimelineService,
         permission_service: PermissionService,
-        report_policy: Optional[Any] = None,    # ReportPolicy instance, can be None
-        report_service: Optional[Any] = None,   # ReportService instance, can be None
+        report_policy: Optional[Any] = None,
+        report_service: Optional[Any] = None,
         event_bus: Optional[Any] = None,
         repository_provider: Optional[RepositoryProvider] = None,
     ):
@@ -44,15 +44,13 @@ class AttendanceService:
         return status
 
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
-        """Check if student is enrolled in the class of the session."""
         with self._session_factory() as session:
             session_repo = self._repository_provider.sessions(session)
             session_obj = session_repo.get_by_id(session_id)
             if not session_obj:
                 return False
-            class_id = session_obj.class_id
             enroll_repo = self._repository_provider.enrollments(session)
-            return enroll_repo.exists(student_id, class_id)
+            return enroll_repo.exists(student_id, session_obj.class_id)
 
     @require_permission("attendance.create")
     def create_or_update_attendance(
@@ -61,18 +59,15 @@ class AttendanceService:
         student_id: int,
         status: str,
         arrival_time: Optional[str] = None,
-        teacher_note: Optional[str] = None
+        teacher_note: Optional[str] = None,
     ) -> Attendance:
-        # Validate student enrolled
         if not self._check_student_enrolled(student_id, session_id):
             raise ValueError("Student is not enrolled in this class.")
-
         status = self._validate_status(status)
 
         with self._session_factory() as session:
             repo = self._repository_provider.attendance(session)
             existing = repo.get_by_session_and_student(session_id, student_id)
-
             if existing:
                 old_status = existing.status
                 existing.status = status
@@ -89,87 +84,69 @@ class AttendanceService:
                         event_type=TimelineEventType.ATTENDANCE_UPDATED,
                         title="Attendance Updated",
                         description=f"Session {session_id}: status changed from {old_status} to {status}",
-                        metadata={"session_id": session_id, "old_status": old_status, "new_status": status}
+                        metadata={"session_id": session_id, "old_status": old_status, "new_status": status},
                     )
-
-                # Trigger report policy
                 self._trigger_report_policy(student_id, session_id, status)
-
                 return existing
-            else:
-                attendance = Attendance(
-                    session_id=session_id,
-                    student_id=student_id,
-                    status=status,
-                    arrival_time=arrival_time,
-                    teacher_note=teacher_note
+
+            attendance = Attendance(
+                session_id=session_id,
+                student_id=student_id,
+                status=status,
+                arrival_time=arrival_time,
+                teacher_note=teacher_note,
+            )
+            repo.add(attendance)
+            session.commit()
+            session.refresh(attendance)
+            self._timeline_service.log_event(
+                student_id=student_id,
+                event_type=TimelineEventType.ATTENDANCE_CREATED,
+                title="Attendance Recorded",
+                description=f"Session {session_id}: {status}",
+                metadata={"session_id": session_id, "status": status},
+            )
+            if self._event_bus is not None:
+                self._event_bus.publish(
+                    StudentUpdated(student_id=student_id, student_code="", student_name="", changes=["attendance"])
                 )
-                repo.add(attendance)
-                session.commit()
-                session.refresh(attendance)
-
-                self._timeline_service.log_event(
-                    student_id=student_id,
-                    event_type=TimelineEventType.ATTENDANCE_CREATED,
-                    title="Attendance Recorded",
-                    description=f"Session {session_id}: {status}",
-                    metadata={"session_id": session_id, "status": status}
-                )
-
-                # Attendance is report-relevant student data. Generation is
-                # deferred until Finish Editing publishes successfully.
-                if self._event_bus is not None:
-                    self._event_bus.publish(
-                        StudentUpdated(student_id=student_id, student_code="", student_name="", changes=["attendance"])
-                    )
-
-                return attendance
+            return attendance
 
     def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
-        """Deprecated compatibility hook; generation is deferred to publish lifecycle."""
         return None
 
     @require_permission("attendance.create")
     def batch_update_attendance(
         self,
         session_id: int,
-        student_statuses: Dict[int, str],  # student_id -> status
+        student_statuses: Dict[int, str],
         arrival_time: Optional[str] = None,
-        teacher_note: Optional[str] = None
+        teacher_note: Optional[str] = None,
     ) -> List[Attendance]:
-        """Update multiple students' attendance for a session."""
         results = []
         for student_id, status in student_statuses.items():
-            att = self.create_or_update_attendance(
-                session_id, student_id, status, arrival_time, teacher_note
-            )
-            results.append(att)
+            results.append(self.create_or_update_attendance(session_id, student_id, status, arrival_time, teacher_note))
         return results
 
     @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
         with self._session_factory() as session:
-            repo = self._repository_provider.attendance(session)
-            return repo.get_by_session(session_id)
+            return self._repository_provider.attendance(session).get_by_session(session_id)
 
     @require_permission("attendance.view")
     def get_attendance_for_student(self, student_id: int) -> List[Attendance]:
         with self._session_factory() as session:
-            repo = self._repository_provider.attendance(session)
-            return repo.get_by_student(student_id)
+            return self._repository_provider.attendance(session).get_by_student(student_id)
 
     @require_permission("attendance.view")
     def get_summary_for_session(self, session_id: int) -> Dict[str, int]:
         with self._session_factory() as session:
-            repo = self._repository_provider.attendance(session)
-            return repo.get_summary_by_session(session_id)
+            return self._repository_provider.attendance(session).get_summary_by_session(session_id)
 
     @require_permission("attendance.view")
     def get_attendance_rate_for_student(self, student_id: int) -> float:
-        """Return attendance rate as percentage (0-100)."""
         with self._session_factory() as session:
-            repo = self._repository_provider.attendance(session)
-            attendances = repo.get_by_student(student_id)
+            attendances = self._repository_provider.attendance(session).get_by_student(student_id)
             if not attendances:
                 return 0.0
             present_count = sum(1 for a in attendances if a.status == AttendanceStatus.PRESENT.value)
