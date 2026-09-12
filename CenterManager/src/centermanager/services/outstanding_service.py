@@ -8,20 +8,15 @@ import logging
 from typing import List, Optional, Tuple, Dict
 
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import or_
 
 from centermanager.dto.outstanding_dto import (
     OutstandingDTO,
     StudentOutstandingSummary,
     OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
 )
-from centermanager.repositories.student_repository import StudentRepository
-from centermanager.repositories.class_repository import ClassRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
-from centermanager.repositories.income_repository import IncomeRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.models.enrollment import Enrollment
-from centermanager.models.income import Income
-from centermanager.models.student import Student
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +30,25 @@ class OutstandingService:
     No database writes.
     """
 
-    def __init__(self, session_factory: sessionmaker):
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
-    def _get_total_paid(self, student_id: int, class_id: int) -> int:
+    def _get_total_paid(self, session, student_id: int, class_id: int) -> int:
         """Calculate only Tuition income paid for a student in a specific class."""
-        with self._session_factory() as session:
-            repo = IncomeRepository(session)
-            incomes = repo.list_active(
-                student_id=student_id,
-                class_id=class_id,
-                income_type=self.TUITION_INCOME_TYPE,
-                offset=0,
-                limit=10000,
-            )
-            return int(sum(inc.amount for inc in incomes))
+        repo = self._repository_provider.incomes(session)
+        incomes = repo.list_active(
+            student_id=student_id,
+            class_id=class_id,
+            income_type=self.TUITION_INCOME_TYPE,
+            offset=0,
+            limit=10000,
+        )
+        return int(sum(inc.amount for inc in incomes))
 
     def get_outstanding_for_enrollment(
         self,
@@ -62,29 +61,24 @@ class OutstandingService:
         Returns None if enrollment not found or class fee is not set.
         """
         with self._session_factory() as session:
-            # Get enrollment
+            enroll_repo = self._repository_provider.enrollments(session)
             if enrollment is None:
-                enroll_repo = EnrollmentRepository(session)
-                enrollment = session.query(Enrollment).filter(
-                    Enrollment.student_id == student_id,
-                    Enrollment.class_id == class_id
-                ).first()
+                enrollment = enroll_repo.get_by_student_and_class(student_id, class_id)
+                enrollment = enrollment[0] if enrollment else None
                 if enrollment is None:
                     logger.warning(f"No enrollment found for student {student_id}, class {class_id}")
                     return None
 
-            # Get class
-            class_repo = ClassRepository(session)
+            class_repo = self._repository_provider.classes(session)
             class_obj = class_repo.get_by_id(class_id)
             if class_obj is None:
                 logger.warning(f"Class {class_id} not found")
                 return None
             configured = class_obj.fee is not None and class_obj.fee > 0
             expected = int(class_obj.fee) if configured else 0
-            paid = self._get_total_paid(student_id, class_id)
+            paid = self._get_total_paid(session, student_id, class_id)
 
-            # Get student
-            student_repo = StudentRepository(session)
+            student_repo = self._repository_provider.students(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
                 logger.warning(f"Student {student_id} not found")
@@ -114,26 +108,13 @@ class OutstandingService:
         Returns (list, total_count) for pagination.
         """
         with self._session_factory() as session:
-            enroll_repo = EnrollmentRepository(session)
-            # Lấy tất cả enrollment (không filter status để lấy cả inactive nếu có)
-            query = session.query(Enrollment).filter(Enrollment.class_id.isnot(None))
-
-            # Filter by class
-            if class_id is not None:
-                query = query.filter(Enrollment.class_id == class_id)
-
-            # Filter by search text (student name/code)
-            if search_text:
-                search = f"%{search_text}%"
-                query = query.join(Enrollment.student).filter(
-                    or_(
-                        Student.full_name.ilike(search),
-                        Student.student_code.ilike(search)
-                    )
-                )
-
-            total = query.count()
-            enrollments = query.offset(offset).limit(limit).all()
+            enroll_repo = self._repository_provider.enrollments(session)
+            enrollments, total = enroll_repo.list_for_outstanding(
+                class_id=class_id,
+                search_text=search_text,
+                offset=offset,
+                limit=limit,
+            )
             logger.debug(f"Found {len(enrollments)} enrollments (total {total})")
 
             results = []
@@ -144,12 +125,12 @@ class OutstandingService:
                     enrollment
                 )
                 if dto is not None:
-                    # Apply status filter
                     if status_filter and dto.status != status_filter:
                         continue
                     results.append(dto)
 
-            # Recalculate total after filters (simplified)
+            # Preserve the historical API contract: status filtering is applied
+            # after outstanding calculation, so the returned total is result count.
             return results, len(results)
 
     def get_student_summary(self, student_id: int) -> Optional[StudentOutstandingSummary]:
@@ -157,13 +138,13 @@ class OutstandingService:
         Get aggregated outstanding summary for a student across all classes.
         """
         with self._session_factory() as session:
-            student_repo = StudentRepository(session)
+            student_repo = self._repository_provider.students(session)
             student = student_repo.get_by_id(student_id)
             if student is None:
                 logger.warning(f"Student {student_id} not found")
                 return None
 
-            enroll_repo = EnrollmentRepository(session)
+            enroll_repo = self._repository_provider.enrollments(session)
             enrollments = enroll_repo.get_by_student(student_id)
 
             details = []
