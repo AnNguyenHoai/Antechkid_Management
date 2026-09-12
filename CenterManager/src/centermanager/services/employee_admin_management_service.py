@@ -132,7 +132,7 @@ class EmployeeAdminManagementService:
                 actor=actor,
             )
             session.commit()
-            session.refresh(period)
+            period_repo.refresh(period)
             return period
 
     def delete_registration(
@@ -169,7 +169,7 @@ class EmployeeAdminManagementService:
                 "block_count": len(registration.blocks),
                 "reason": reason,
             }
-            session.delete(registration)
+            repo.delete(registration)
             self._audit_service.record_in_session(
                 session,
                 self.ACTION_REGISTRATION_DELETED,
@@ -214,7 +214,7 @@ class EmployeeAdminManagementService:
 
             employee_code = employee.employee_code
             user_id = employee.user_id
-            session.delete(employee)
+            repo.delete(employee)
             self._audit_service.record_in_session(
                 session,
                 self.ACTION_EMPLOYEE_DELETED,
