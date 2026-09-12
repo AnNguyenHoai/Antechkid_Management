@@ -35,7 +35,10 @@ def test_existing_class_service_already_owns_legacy_enrollment_operations():
 
 def test_attendance_currently_depends_on_enrollment_existence():
     assert "_check_student_enrolled" in ATTENDANCE
-    assert "enroll_repo.exists(student_id, class_id)" in ATTENDANCE
+    # The attendance service now obtains the class through the session repository
+    # and then asks the enrollment repository whether the student is enrolled in
+    # that class. Keep the contract aligned with the provider-backed implementation.
+    assert "enroll_repo.exists(student_id, session_obj.class_id)" in ATTENDANCE
 
 
 def test_enrollment_has_existing_lifecycle_fields_to_formalize():
