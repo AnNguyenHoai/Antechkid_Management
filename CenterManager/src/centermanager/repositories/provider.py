@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Repository dependency boundary for application services.
-
-Services depend on this small provider contract instead of importing concrete
-repository implementations. The SQLAlchemy implementation remains the
-infrastructure adapter and owns construction of repository objects.
-"""
+"""Repository dependency boundary for application services."""
 from __future__ import annotations
 
 from typing import Protocol
-
 from sqlalchemy.orm import Session
 
 from centermanager.repositories.audit_log_repository import AuditLogRepository
@@ -36,11 +30,11 @@ from centermanager.repositories.user_repository import UserRepository
 from centermanager.repositories.role_repository import RoleRepository
 from centermanager.repositories.permission_repository import PermissionRepository
 from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
+from centermanager.repositories.parent_repository import ParentRepository
 
 
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
-
     def audit_logs(self, session: Session) -> AuditLogRepository: ...
     def class_timeline(self, session: Session) -> ClassTimelineRepository: ...
     def attendance(self, session: Session) -> AttendanceRepository: ...
@@ -66,11 +60,11 @@ class RepositoryProvider(Protocol):
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: ...
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: ...
     def notes(self, session: Session) -> NoteRepository: ...
+    def parents(self, session: Session) -> ParentRepository: ...
 
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
-
     def audit_logs(self, session: Session) -> AuditLogRepository: return AuditLogRepository(session)
     def class_timeline(self, session: Session) -> ClassTimelineRepository: return ClassTimelineRepository(session)
     def attendance(self, session: Session) -> AttendanceRepository: return AttendanceRepository(session)
@@ -96,6 +90,7 @@ class SqlAlchemyRepositoryProvider:
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: return TeacherAssignmentRepository(session)
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: return TeacherDocumentRepository(session)
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
+    def parents(self, session: Session) -> ParentRepository: return ParentRepository(session)
 
 
 def create_default_repository_provider() -> RepositoryProvider:
