@@ -18,11 +18,11 @@ The strict provider gate remains authoritative for every service that declares `
 |---|---|---|---|---|---|---|
 | `assessment_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `attendance_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `audit_service.py` | LEGACY | already provider-backed; not yet promoted | — | — | — | EP-ARCH-03.35 |
+| `audit_service.py` | PASS | — | — | — | repository-owned | — |
 | `authorization_service.py` | LEGACY | no repository boundary | — | — | — | EP-ARCH-03.35 |
 | `auto_report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `backup_operations_service.py` | LEGACY | no concrete repository dependency | — | — | delegated to platform service | EP-ARCH-03.35 |
-| `class_service.py` | LEGACY | already provider-backed; strict promotion deferred to class boundary slice | — | `sqlalchemy.orm` only | repository-owned | EP-ARCH-03.35 |
+| `class_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `class_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
@@ -64,9 +64,16 @@ The strict provider gate remains authoritative for every service that declares `
 
 ## EP-ARCH-03.35 Batch A
 
-Batch A promotes the following provider-backed services into the strict inventory:
+Batch A promoted the following provider-backed services into the strict inventory:
 
 - `assessment_service.py` — **AssessmentService**: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are already isolated behind `AssessmentRepository`.
 - `attendance_service.py` — **AttendanceService**: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
 
-These two services therefore move to `PASS` without production logic changes. Remaining legacy services keep their migration slice assignments above.
+## EP-ARCH-03.35 Batch B
+
+Batch B promotes provider-backed legacy services whose source already satisfies the strict RepositoryProvider boundary:
+
+- `audit_service.py` — **AuditService**: provider-backed through `RepositoryProvider.audit_logs(...)`; audit persistence and search remain repository-owned, while transaction completion remains with the service.
+- `class_service.py` — **ClassService**: provider-backed through `RepositoryProvider.classes(...)` and related repository factories; class, enrollment, session, teacher, and student persistence/query access remains repository-owned.
+
+These services are promoted to `PASS` without changing production business logic. Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
