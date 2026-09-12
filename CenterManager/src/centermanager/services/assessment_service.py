@@ -71,21 +71,11 @@ class AssessmentService:
         return score
 
     def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
-        """Evaluate legacy report policy without generating before publish.
-
-        The canonical StudentProfile lifecycle is:
-        committed mutation -> Student report-relevant event -> dirty tracking
-        -> successful publish -> one latest StudentProfile artifact.
-        """
+        """Evaluate legacy report policy without generating before publish."""
         if self._report_policy:
             self._report_policy.check_and_trigger(student_id, event_type, event_data)
 
-    def _publish_assessment_changed(
-        self,
-        student_id: int,
-        assessment_id: int,
-        action: str,
-    ) -> None:
+    def _publish_assessment_changed(self, student_id: int, assessment_id: int, action: str) -> None:
         if self._event_bus:
             self._event_bus.publish(StudentAssessmentChanged(
                 student_id=student_id,
@@ -147,11 +137,8 @@ class AssessmentService:
                     metadata={"assessment_id": assessment.id},
                 )
 
-            # Evaluate policy for compatibility, then publish the committed
-            # Student-report-relevant mutation for transaction dirty tracking.
             self._trigger_report_policy(student_id, "assessment_created", {"assessment_id": assessment.id})
             self._publish_assessment_changed(student_id, assessment.id, "created")
-
             return assessment
 
     def get_assessment(self, assessment_id: int) -> Assessment:
@@ -164,13 +151,11 @@ class AssessmentService:
 
     def get_assessments_for_student(self, student_id: int) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = self._repository_provider.assessments(session)
-            return repo.get_by_student(student_id)
+            return self._repository_provider.assessments(session).get_by_student(student_id)
 
     def get_latest_assessment(self, student_id: int) -> Optional[Assessment]:
         with self._session_factory() as session:
-            repo = self._repository_provider.assessments(session)
-            return repo.get_latest(student_id)
+            return self._repository_provider.assessments(session).get_latest(student_id)
 
     def update_assessment(
         self,
@@ -190,21 +175,18 @@ class AssessmentService:
                 raise AssessmentNotFoundError(f"Assessment id {assessment_id} not found.")
 
             changes = []
-
             if assessment_date is not None:
                 old = assessment.assessment_date.strftime("%d/%m/%Y") if assessment.assessment_date else "(none)"
                 new = assessment_date.strftime("%d/%m/%Y")
                 if old != new:
                     changes.append(f"date: '{old}' -> '{new}'")
                 assessment.assessment_date = assessment_date
-
             if assessment_type is not None:
                 new_val = self._validate_assessment_type(assessment_type)
                 old_val = assessment.assessment_type or "(none)"
                 if old_val != (new_val or "(none)"):
                     changes.append(f"type: '{old_val}' -> '{new_val or '(none)'}'")
                 assessment.assessment_type = new_val
-
             if overall_score is not None:
                 new_val = self._validate_score(overall_score)
                 old_val = assessment.overall_score if assessment.overall_score is not None else "(none)"
@@ -212,7 +194,6 @@ class AssessmentService:
                 if str(old_val) != new_str:
                     changes.append(f"score: '{old_val}' -> '{new_str}'")
                 assessment.overall_score = new_val
-
             if strengths is not None:
                 new_val = self._normalize_text(strengths)
                 if not new_val:
@@ -221,7 +202,6 @@ class AssessmentService:
                 if old_val != new_val:
                     changes.append(f"strengths: '{old_val}' -> '{new_val}'")
                 assessment.strengths = new_val
-
             if improvements is not None:
                 new_val = self._normalize_text(improvements)
                 if not new_val:
@@ -230,7 +210,6 @@ class AssessmentService:
                 if old_val != new_val:
                     changes.append(f"improvements: '{old_val}' -> '{new_val}'")
                 assessment.improvements = new_val
-
             if next_goal is not None:
                 new_val = self._normalize_text(next_goal)
                 if not new_val:
@@ -239,7 +218,6 @@ class AssessmentService:
                 if old_val != new_val:
                     changes.append(f"next_goal: '{old_val}' -> '{new_val}'")
                 assessment.next_goal = new_val
-
             if teacher_comment is not None:
                 new_val = self._normalize_text(teacher_comment)
                 old_val = assessment.teacher_comment or "(none)"
@@ -252,22 +230,16 @@ class AssessmentService:
 
             session.commit()
             session.refresh(assessment)
-
             if self._timeline_service:
-                description = "Updated: " + "; ".join(changes)
                 self._timeline_service.log_event(
                     student_id=assessment.student_id,
                     event_type=TimelineEventType.ASSESSMENT_UPDATED,
                     title="Assessment Updated",
-                    description=description,
+                    description="Updated: " + "; ".join(changes),
                     metadata={"assessment_id": assessment.id, "changes": changes},
                 )
-
-            # Evaluate policy for compatibility, then publish the committed
-            # Student-report-relevant mutation for transaction dirty tracking.
             self._trigger_report_policy(assessment.student_id, "assessment_updated", {"assessment_id": assessment.id})
             self._publish_assessment_changed(assessment.student_id, assessment.id, "updated")
-
             return assessment
 
     def delete_assessment(self, assessment_id: int) -> None:
@@ -279,7 +251,6 @@ class AssessmentService:
             student_id = assessment.student_id
             repo.delete(assessment)
             session.commit()
-
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -288,18 +259,13 @@ class AssessmentService:
                     description=f"Assessment on {assessment.assessment_date.strftime('%d/%m/%Y')} was removed.",
                     metadata={"assessment_id": assessment_id},
                 )
-
-            # Deletion is also report-relevant: the next published StudentProfile
-            # must no longer contain the removed assessment.
             self._trigger_report_policy(student_id, "assessment_deleted", {"assessment_id": assessment_id})
             self._publish_assessment_changed(student_id, assessment_id, "deleted")
 
     def get_all_assessments_with_student(self) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = self._repository_provider.assessments(session)
-            return repo.get_all_with_student()
+            return self._repository_provider.assessments(session).get_all_with_student()
 
     def get_assessments_for_student_with_student(self, student_id: int) -> List[Assessment]:
         with self._session_factory() as session:
-            repo = self._repository_provider.assessments(session)
-            return repo.get_by_student_with_student(student_id)
+            return self._repository_provider.assessments(session).get_by_student_with_student(student_id)
