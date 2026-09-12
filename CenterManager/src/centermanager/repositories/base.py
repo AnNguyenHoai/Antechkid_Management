@@ -28,6 +28,11 @@ class BaseRepository(Generic[T]):
         self._session.add(entity)
         return entity
 
+    def delete(self, entity: T) -> T:
+        """Mark an entity for deletion in the caller-owned transaction."""
+        self._session.delete(entity)
+        return entity
+
     def get_by_id(self, id_value: int) -> Optional[T]:
         """Get entity by primary key."""
         return self._session.get(self._model_class, id_value)
