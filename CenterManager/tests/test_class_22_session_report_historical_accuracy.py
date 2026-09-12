@@ -7,7 +7,7 @@ GENERATOR = Path("src/centermanager/export/pdf/session_report_generator.py").rea
 def test_historical_teacher_is_resolved_from_session_teacher_id():
     assert "def _resolve_teacher_name" in SERVICE
     assert "session.teacher_id" in SERVICE
-    assert "TeacherRepository" in SERVICE
+    assert "self._repository_provider.teachers" in SERVICE
     assert '"teacher_name": teacher_name' in SERVICE
 
 
