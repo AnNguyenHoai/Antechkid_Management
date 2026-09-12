@@ -10,12 +10,12 @@ from typing import Optional
 
 from centermanager.core.paths import get_paths
 from centermanager.export.pdf.session_report_generator import SessionReportGenerator
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.session_service import SessionService
 from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.services.class_service import ClassService
 from centermanager.services.student_highlight_service import StudentHighlightService
-from centermanager.repositories.teacher_repository import TeacherRepository
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class SessionReportService:
         class_service: ClassService,
         highlight_service: Optional[StudentHighlightService] = None,
         generator: Optional[SessionReportGenerator] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_service = session_service
         self._note_service = note_service
@@ -36,6 +37,7 @@ class SessionReportService:
         self._class_service = class_service
         self._highlight_service = highlight_service
         self._generator = generator or SessionReportGenerator()
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _safe_folder_name(value: str, fallback: str) -> str:
@@ -56,7 +58,7 @@ class SessionReportService:
             if session_factory is not None:
                 try:
                     with session_factory() as db_session:
-                        teacher = TeacherRepository(db_session).get_by_id(session.teacher_id)
+                        teacher = self._repository_provider.teachers(db_session).get_by_id(session.teacher_id)
                         if teacher is not None and getattr(teacher, "full_name", None):
                             return teacher.full_name
                 except Exception:
