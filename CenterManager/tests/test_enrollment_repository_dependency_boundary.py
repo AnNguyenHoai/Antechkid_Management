@@ -68,7 +68,8 @@ def test_enrollment_service_uses_injected_repository_provider():
     ]
     enrollment_repo.add.assert_called_once()
     session.commit.assert_called_once()
-    session.refresh.assert_called_once_with(result)
+    enrollment_repo.refresh.assert_called_once_with(result)
+    session.refresh.assert_not_called()
 
 
 def test_enrollment_transition_uses_injected_repositories():
@@ -98,7 +99,8 @@ def test_enrollment_transition_uses_injected_repositories():
         ("classes", session),
     ]
     session.commit.assert_called_once()
-    session.refresh.assert_called_once_with(enrollment)
+    enrollment_repo.refresh.assert_called_once_with(enrollment)
+    session.refresh.assert_not_called()
 
 
 def test_enrollment_service_default_provider_remains_compatible():
