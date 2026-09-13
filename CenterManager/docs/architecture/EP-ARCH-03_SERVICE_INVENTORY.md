@@ -48,7 +48,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `session_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
 | `student_analytics_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_dashboard_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `student_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_export_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_filter_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_highlight_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
@@ -133,6 +133,19 @@ Batch B migrates the remaining Student-domain read/summary application services 
 - `student_summary_service.py` — **StudentSummaryService**: composes existing Student/Parent/Assessment/Timeline services and uses `RepositoryProvider.documents(...)` for its document read; no concrete repository construction remains in the service.
 
 All three services are now `PASS`. Their public behavior and DTO shapes remain unchanged; the migration only moves database access behind the provider boundary. `RepositoryProvider.documents(...)` is now part of the application repository contract for this purpose.
+
+The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
+
+## EP-ARCH-03.36-C Student document boundary
+
+Batch C migrates `StudentDocumentService`, which has both a database-backed Document lifecycle and a filesystem attachment boundary.
+
+- `student_document_service.py` — **StudentDocumentService**: uses `RepositoryProvider.documents(...)` for document persistence and reads; `DocumentRepository` is no longer imported or constructed by the service.
+- Database `add`, `delete`, and `refresh` operations remain repository-owned; transaction completion remains service-owned.
+- Attachment directory creation, file copy, and file deletion remain explicitly filesystem-owned by the service and are not disguised as repository operations.
+- Database repository behavior remains repository-owned; filesystem behavior remains service-owned.
+
+`StudentDocumentService` is now `PASS` and is not migration backlog. The migration preserves its existing public API and document/timeline behavior while normalizing the database dependency boundary.
 
 The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
 
