@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Sentinel for "field not supplied"
 UNSET = object()
 
 
@@ -68,19 +67,12 @@ class StudentService:
             raise StudentValidationError("full_name is required and cannot be blank.")
         return normalized
 
-    def _generate_student_code(self, session: Session) -> str:
-        repo = self._repository_provider.students(session)
+    def _generate_student_code(self, repo) -> str:
         highest = repo.get_highest_hs_number()
         next_num = (highest or 0) + 1
         return f"HS{next_num:03d}"
 
     def _trigger_report_policy(self, student_id: int, event_type: str, event_data: Optional[dict] = None) -> None:
-        """Legacy policy seam.
-
-        STUDENT-2.7 makes the Student Workspace publish lifecycle the canonical
-        trigger for the singleton StudentProfile report. This service method is
-        intentionally non-generating to prevent a pre-publish duplicate report.
-        """
         if self._report_policy:
             triggers = self._report_policy.check_and_trigger(student_id, event_type, event_data)
             logger.debug(
@@ -108,8 +100,9 @@ class StudentService:
         normalized_status = self._normalize_text(status) or "ACTIVE"
 
         with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
             try:
-                student_code = self._generate_student_code(session)
+                student_code = self._generate_student_code(repo)
                 student = Student(
                     student_code=student_code,
                     full_name=normalized_full_name,
@@ -121,10 +114,9 @@ class StudentService:
                     enrollment_date=enrollment_date,
                     notes=normalized_notes,
                 )
-                repo = self._repository_provider.students(session)
                 repo.add(student)
                 session.commit()
-                session.refresh(student)
+                repo.refresh(student)
 
                 if self._timeline_service:
                     self._timeline_service.log_event(
@@ -166,7 +158,6 @@ class StudentService:
             return repo.list_active()
 
     def archive_student(self, student_id: int) -> None:
-        """Archive a student (set status to ARCHIVED) and publish event."""
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
@@ -178,7 +169,7 @@ class StudentService:
             previous_status = student.status
             student.status = "ARCHIVED"
             session.commit()
-            session.refresh(student)
+            repo.refresh(student)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -199,7 +190,6 @@ class StudentService:
                 logger.info(f"StudentArchived event published for student {student.id}")
 
     def activate_student(self, student_id: int) -> None:
-        """Activate a student (set status to ACTIVE) and publish event."""
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
@@ -211,7 +201,7 @@ class StudentService:
             previous_status = student.status
             student.status = "ACTIVE"
             session.commit()
-            session.refresh(student)
+            repo.refresh(student)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -346,7 +336,7 @@ class StudentService:
 
             try:
                 session.commit()
-                session.refresh(student)
+                repo.refresh(student)
 
                 if self._timeline_service:
                     description = "Updated: " + "; ".join(changes)
@@ -360,9 +350,6 @@ class StudentService:
 
                 self._trigger_report_policy(student.id, "student_updated", {"changes": changes})
 
-                # Student aggregate mutations must be visible to the transaction
-                # dirty tracker. Without this domain event, Finish Editing cannot
-                # know which StudentProfile artifact must be regenerated.
                 if self._event_bus:
                     self._event_bus.publish(StudentUpdated(
                         student_id=student.id,
@@ -381,7 +368,6 @@ class StudentService:
                 raise
 
     def delete_student(self, student_id: int) -> None:
-        """Soft delete a student and publish event."""
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
             student = repo.get_by_id_including_deleted(student_id)
@@ -393,7 +379,7 @@ class StudentService:
             student.deleted_at = self._utc_now()
             try:
                 session.commit()
-                session.refresh(student)
+                repo.refresh(student)
 
                 if self._timeline_service:
                     self._timeline_service.log_event(

@@ -54,7 +54,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `student_highlight_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_import_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_note_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
-| `student_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_summary_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `system_operations_service.py` | NON_REPOSITORY | — | — | — | platform/filesystem health checks | — |
 | `teacher_assignment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
@@ -117,6 +117,14 @@ Batch G closes the false-positive legacy classification for services whose respo
 - `system_operations_service.py` — **SystemOperationsService**: platform/filesystem health aggregation; direct SQLite health probing is diagnostic-only and is not application persistence.
 
 These services are therefore `NON_REPOSITORY`, not migration backlog. Database-backed `LEGACY` services remain assigned to their dedicated migration batches.
+
+## EP-ARCH-03.36-A StudentService
+
+`StudentService` is now explicitly provider-backed through `RepositoryProvider.students(...)` and classified as `PASS`. Student persistence/query operations remain repository-owned, while the application service retains business validation, filesystem handling, transaction coordination, timeline orchestration, report-policy evaluation, and event publishing.
+
+- `student_service.py` — **StudentService**: uses `RepositoryProvider.students(...)`; repository owns student query/persistence operations including refresh, while transaction completion remains service-owned.
+
+The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
 
 ## EP-ARCH-03.35 Migration Rule
 
