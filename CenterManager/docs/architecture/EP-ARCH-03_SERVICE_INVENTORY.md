@@ -7,7 +7,8 @@ Baseline: `a23ad673cdaea144244456b782371baf40914756`
 Application services are classified from their source AST:
 
 - `PASS`: imports `RepositoryProvider` and has no concrete repository imports, repository construction, forbidden SQLAlchemy query imports, or direct persistence operations.
-- `LEGACY`: does not yet declare `RepositoryProvider`; findings are migration backlog, not CI regressions until the service enters the strict gate.
+- `NON_REPOSITORY`: service owns a non-database boundary such as authorization policy, filesystem configuration, backup/platform orchestration, or external collaboration operations. It is not required to declare `RepositoryProvider` because there is no application-repository boundary to migrate.
+- `LEGACY`: database-backed application service does not yet declare `RepositoryProvider`; findings are migration backlog, not CI regressions until the service enters the strict gate.
 - `VIOLATION`: declares `RepositoryProvider` but still has one or more forbidden dependencies/operations. This state must fail CI.
 
 The strict provider gate remains authoritative for every service that declares `RepositoryProvider`.
@@ -19,12 +20,12 @@ The strict provider gate remains authoritative for every service that declares `
 | `assessment_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `attendance_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `audit_service.py` | PASS | — | — | — | repository-owned | — |
-| `authorization_service.py` | LEGACY | no repository boundary | — | — | — | EP-ARCH-03.35 |
-| `auto_report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
-| `backup_operations_service.py` | LEGACY | no concrete repository dependency | — | — | delegated to platform service | EP-ARCH-03.35 |
+| `authorization_service.py` | NON_REPOSITORY | — | — | — | — | — |
+| `auto_report_service.py` | NON_REPOSITORY | — | — | — | filesystem state file | — |
+| `backup_operations_service.py` | NON_REPOSITORY | — | — | — | delegated to platform service | — |
 | `class_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `class_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
+| `configuration_service.py` | NON_REPOSITORY | — | — | — | configuration persistence | — |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
 | `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `employee_schedule_service.py` | PASS | — | — | — | — | — |
@@ -35,7 +36,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `expense_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `expense_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `finance_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
-| `git_config_service.py` | LEGACY | no repository boundary | — | — | filesystem persistence | EP-ARCH-03.35 |
+| `git_config_service.py` | NON_REPOSITORY | — | — | — | encrypted filesystem config | — |
 | `home_dashboard_service.py` | PASS | — | — | — | — | — |
 | `income_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `outstanding_service.py` | PASS | — | — | — | repository-owned | — |
@@ -55,43 +56,28 @@ The strict provider gate remains authoritative for every service that declares `
 | `student_note_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_summary_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
-| `system_operations_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `system_operations_service.py` | NON_REPOSITORY | — | — | — | platform/filesystem health checks | — |
 | `teacher_assignment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
 
-## EP-ARCH-03.35 Batch A
+## EP-ARCH-03.35 Batch G
 
-Batch A promoted the following provider-backed services into the strict inventory:
+Batch G closes the false-positive legacy classification for services whose responsibilities are not database-repository backed. These services must not be forced to inject a `RepositoryProvider` merely to satisfy the service boundary gate.
 
-- `assessment_service.py` — **AssessmentService**: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are isolated behind `AssessmentRepository`.
-- `attendance_service.py` — **AttendanceService**: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
+- `authorization_service.py` — **AuthorizationService**: pure capability/policy decision logic; no database repository or persistence responsibility.
+- `auto_report_service.py` — **AutoReportService**: orchestrates `StudentService` and `ReportService`; its only local persistence is a small JSON state file, which is intentionally filesystem-owned and not an application repository concern.
+- `backup_operations_service.py` — **BackupOperationsService**: backup/platform orchestration delegated to the platform layer; no application repository dependency.
+- `configuration_service.py` — **ConfigurationService**: validated configuration lifecycle using the configuration subsystem; no application repository dependency.
+- `git_config_service.py` — **GitConfigService**: encrypted Git configuration stored in the configuration filesystem; Git connectivity is delegated to the platform Git provider.
+- `system_operations_service.py` — **SystemOperationsService**: platform/filesystem health aggregation; direct SQLite health probing is diagnostic-only and is not application persistence.
 
-## EP-ARCH-03.35 Batch B
+These services are therefore `NON_REPOSITORY`, not migration backlog. Database-backed `LEGACY` services remain assigned to their dedicated migration batches.
 
-Batch B promotes provider-backed legacy services whose source satisfies the strict RepositoryProvider boundary:
+## EP-ARCH-03.35 Migration Rule
 
-- `audit_service.py` — **AuditService**: provider-backed through `RepositoryProvider.audit_logs(...)`; audit persistence and search remain repository-owned, while transaction completion remains with the service.
-- `class_service.py` — **ClassService**: provider-backed through `RepositoryProvider.classes(...)` and related repository factories; class, enrollment, session, teacher, and student persistence/query access remains repository-owned.
+A service is only migrated into the strict `PASS` class when it has an application database repository boundary. Non-database responsibilities are explicitly classified as `NON_REPOSITORY` and are excluded from the RepositoryProvider requirement.
 
-## EP-ARCH-03.35 Batch C
-
-Batch C promotes **ReportService** after closing its last strict-boundary finding. Report metadata CRUD uses `RepositoryProvider.reports(...)`; `session.refresh(report)` was moved behind `ReportRepository.refresh(report)`. Transaction completion remains owned by the service.
-
-- `report_service.py` — **ReportService**: provider-backed through `RepositoryProvider.reports(...)`; report persistence and refresh are repository-owned.
-
-## EP-ARCH-03.35 Batch D
-
-Batch D promotes **EnrollmentService** after closing its final direct persistence operation. Enrollment lifecycle reads and writes already use `RepositoryProvider`; the remaining `session.refresh(enrollment)` operations were moved behind `EnrollmentRepository.refresh(enrollment)`. Transaction completion remains owned by the service.
-
-- `enrollment_service.py` — **EnrollmentService**: provider-backed through `RepositoryProvider.enrollments(...)`, `classes(...)`, and `students(...)`; enrollment persistence and refresh are repository-owned.
-
-## EP-ARCH-03.35 Batch E
-
-Batch E promotes **ClassTimelineService** after confirming that its persistence boundary is fully repository-owned. The service obtains `ClassTimelineRepository` only through `RepositoryProvider.class_timeline(...)`; event creation uses `repo.add(...)`, transaction completion remains with the service, and entity refresh uses `repo.refresh(...)`.
-
-- `class_timeline_service.py` — **ClassTimelineService**: provider-backed through `RepositoryProvider.class_timeline(...)`; no concrete repository construction, direct SQLAlchemy query, or direct persistence operation remains in the service.
-
-Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
+Any service that is database-backed and does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
