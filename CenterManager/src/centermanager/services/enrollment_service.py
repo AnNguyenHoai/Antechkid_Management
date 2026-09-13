@@ -81,7 +81,7 @@ class EnrollmentService:
                 status=EnrollmentStatus.ACTIVE.value,
             )
             repo.add(enrollment)
-            session.commit(); session.refresh(enrollment)
+            session.commit(); repo.refresh(enrollment)
             self._publish_change(enrollment, "ENROLLED", None)
             return enrollment
 
@@ -93,7 +93,8 @@ class EnrollmentService:
 
     def _transition(self, enrollment_id: int, target: EnrollmentStatus, end_date: Optional[date]) -> Enrollment:
         with self._session_factory() as session:
-            enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
+            repo = self._repository_provider.enrollments(session)
+            enrollment = repo.get_by_id(enrollment_id)
             if enrollment is None:
                 raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
             class_obj = self._repository_provider.classes(session).get_by_id(enrollment.class_id)
@@ -108,7 +109,7 @@ class EnrollmentService:
             previous_status = enrollment.status
             enrollment.status = target.value
             enrollment.end_date = end_date or date.today()
-            session.commit(); session.refresh(enrollment)
+            session.commit(); repo.refresh(enrollment)
             self._publish_change(
                 enrollment,
                 "COMPLETED" if target == EnrollmentStatus.COMPLETED else "WITHDRAWN",
