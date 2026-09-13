@@ -8,11 +8,11 @@ SERVICE = Path("src/centermanager/services/enrollment_service.py").read_text(enc
 EVENTS = Path("src/centermanager/events/student_events.py").read_text(encoding="utf-8")
 
 def test_24_event_is_published_only_after_database_commit():
-    enroll_commit = SERVICE.index("session.commit(); session.refresh(enrollment)")
+    enroll_commit = SERVICE.index("session.commit(); repo.refresh(enrollment)")
     enroll_event = SERVICE.index('self._publish_change(enrollment, "ENROLLED", None)')
     assert enroll_commit < enroll_event
 
-    transition_commit = SERVICE.index("session.commit(); session.refresh(enrollment)", enroll_commit + 1)
+    transition_commit = SERVICE.index("session.commit(); repo.refresh(enrollment)", enroll_commit + 1)
     transition_event = SERVICE.index("self._publish_change(", transition_commit)
     assert transition_commit < transition_event
 
