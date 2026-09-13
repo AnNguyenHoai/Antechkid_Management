@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 StudentSummaryService - builds summary DTO for a student.
+
+The service composes other application services for domain data and uses the
+RepositoryProvider only for the document read that is still local to this DTO.
 """
-from typing import Optional
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +15,8 @@ from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.exceptions import StudentNotFoundError
-from centermanager.repositories.document_repository import DocumentRepository
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+
 
 class StudentSummaryService:
     def __init__(
@@ -22,13 +25,15 @@ class StudentSummaryService:
         parent_service: ParentService,
         assessment_service: AssessmentService,
         timeline_service: TimelineService,
-        session_factory,  # thêm
+        session_factory: sessionmaker,
+        repository_provider: RepositoryProvider | None = None,
     ) -> None:
         self._student_service = student_service
         self._parent_service = parent_service
         self._assessment_service = assessment_service
         self._timeline_service = timeline_service
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def get_summary(self, student_id: int) -> StudentSummaryDTO:
         """Build summary DTO for a student."""
@@ -37,13 +42,11 @@ class StudentSummaryService:
         except StudentNotFoundError:
             return StudentSummaryDTO()
 
-        # Basic info
         dto = StudentSummaryDTO()
         dto.student_name = student.full_name
         dto.current_level = student.current_level or ""
         dto.learning_status = student.status or ""
 
-        # Age
         if student.date_of_birth:
             today = datetime.now().date()
             age = today.year - student.date_of_birth.year
@@ -51,10 +54,8 @@ class StudentSummaryService:
                 age -= 1
             dto.age = age
 
-        # Parents
         parents = self._parent_service.get_parents_for_student(student_id)
         dto.parent_count = len(parents)
-        # Primary contact
         primary = next((p for p in parents if p.is_primary_contact), None)
         if primary:
             dto.primary_contact_name = primary.name or ""
@@ -63,7 +64,6 @@ class StudentSummaryService:
             dto.primary_contact_name = parents[0].name or ""
             dto.primary_contact_phone = parents[0].phone or ""
 
-        # Assessments
         assessments = self._assessment_service.get_assessments_for_student(student_id)
         dto.assessment_count = len(assessments)
         latest = self._assessment_service.get_latest_assessment(student_id)
@@ -72,16 +72,14 @@ class StudentSummaryService:
             dto.latest_assessment_score = latest.overall_score
             dto.latest_assessment_date = latest.assessment_date.strftime("%d/%m/%Y") if latest.assessment_date else ""
 
-        # Timeline
         events = self._timeline_service.get_student_timeline(student_id)
         dto.timeline_count = len(events)
         if events:
             latest_event = events[0]
             dto.last_activity_title = latest_event.title
-            # Format time
             dt = latest_event.created_at
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)  # sử dụng timezone đã import
+                dt = dt.replace(tzinfo=timezone.utc)
             dt_local = dt.astimezone()
             now = datetime.now().astimezone()
             if dt_local.date() == now.date():
@@ -92,10 +90,8 @@ class StudentSummaryService:
                 time_str = dt_local.strftime("%d/%m/%Y %H:%M")
             dto.last_activity_time = time_str
 
-
         with self._session_factory() as session:
-            from centermanager.repositories.document_repository import DocumentRepository
-            doc_repo = DocumentRepository(session)
+            doc_repo = self._repository_provider.documents(session)
             documents = doc_repo.get_by_student(student_id)
             dto.document_count = len(documents)
 
