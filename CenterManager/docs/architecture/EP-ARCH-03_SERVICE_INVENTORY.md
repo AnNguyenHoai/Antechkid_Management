@@ -46,8 +46,8 @@ The strict provider gate remains authoritative for every service that declares `
 | `session_note_service.py` | PASS | — | — | — | — | — |
 | `session_report_service.py` | PASS | — | — | — | — | — |
 | `session_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
-| `student_analytics_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
-| `student_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_analytics_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `student_dashboard_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_export_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_filter_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
@@ -55,7 +55,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `student_import_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_note_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
 | `student_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `student_summary_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_summary_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `system_operations_service.py` | NON_REPOSITORY | — | — | — | platform/filesystem health checks | — |
 | `teacher_assignment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
@@ -123,6 +123,16 @@ These services are therefore `NON_REPOSITORY`, not migration backlog. Database-b
 `StudentService` is now explicitly provider-backed through `RepositoryProvider.students(...)` and classified as `PASS`. Student persistence/query operations remain repository-owned, while the application service retains business validation, filesystem handling, transaction coordination, timeline orchestration, report-policy evaluation, and event publishing.
 
 - `student_service.py` — **StudentService**: uses `RepositoryProvider.students(...)`; repository owns student query/persistence operations including refresh, while transaction completion remains service-owned.
+
+## EP-ARCH-03.36-B Student read/presentation services
+
+Batch B migrates the remaining Student-domain read/summary application services that still performed database access directly.
+
+- `student_analytics_service.py` — **StudentAnalyticsService**: uses `RepositoryProvider.students(...)` and `RepositoryProvider.assessments(...)`; analytics aggregation remains service-owned while database reads remain repository-owned.
+- `student_dashboard_service.py` — **StudentDashboardService**: uses `RepositoryProvider.students(...)`, `assessments(...)`, `parents(...)`, `sessions(...)`, and `class_timeline(...)`; dashboard DTO aggregation and filtering remain service-owned while database reads remain repository-owned.
+- `student_summary_service.py` — **StudentSummaryService**: composes existing Student/Parent/Assessment/Timeline services and uses `RepositoryProvider.documents(...)` for its document read; no concrete repository construction remains in the service.
+
+All three services are now `PASS`. Their public behavior and DTO shapes remain unchanged; the migration only moves database access behind the provider boundary. `RepositoryProvider.documents(...)` is now part of the application repository contract for this purpose.
 
 The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
 
