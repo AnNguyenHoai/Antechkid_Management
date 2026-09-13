@@ -1,6 +1,6 @@
 # EP-ARCH-03 — Service Boundary Inventory
 
-Baseline: `a23ad673cdaea144244456b782371baf40914756`
+Baseline: `3299b235518ab7d905f34733b934b5c63b84085f`
 
 ## Contract
 
@@ -31,7 +31,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `employee_service.py` | PASS | — | — | — | — | — |
 | `employee_work_registration_service.py` | PASS | — | — | — | — | — |
 | `employee_working_time_service.py` | PASS | — | — | — | — | — |
-| `enrollment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `enrollment_service.py` | PASS | — | — | — | repository-owned | — |
 | `expense_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `expense_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `finance_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
@@ -66,20 +66,26 @@ The strict provider gate remains authoritative for every service that declares `
 
 Batch A promoted the following provider-backed services into the strict inventory:
 
-- `assessment_service.py` — **AssessmentService**: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are already isolated behind `AssessmentRepository`.
+- `assessment_service.py` — **AssessmentService**: provider-backed through `RepositoryProvider.assessments(...)`; repository operations are isolated behind `AssessmentRepository`.
 - `attendance_service.py` — **AttendanceService**: provider-backed through `RepositoryProvider.attendance(...)`, `sessions(...)`, and `enrollments(...)`; no direct SQLAlchemy persistence/query operations remain in the service.
 
 ## EP-ARCH-03.35 Batch B
 
-Batch B promotes provider-backed legacy services whose source already satisfies the strict RepositoryProvider boundary:
+Batch B promotes provider-backed legacy services whose source satisfies the strict RepositoryProvider boundary:
 
 - `audit_service.py` — **AuditService**: provider-backed through `RepositoryProvider.audit_logs(...)`; audit persistence and search remain repository-owned, while transaction completion remains with the service.
 - `class_service.py` — **ClassService**: provider-backed through `RepositoryProvider.classes(...)` and related repository factories; class, enrollment, session, teacher, and student persistence/query access remains repository-owned.
 
 ## EP-ARCH-03.35 Batch C
 
-Batch C promotes **ReportService** after closing its last strict-boundary finding. Report metadata CRUD already uses `RepositoryProvider.reports(...)`; the remaining `session.refresh(report)` call was moved behind `ReportRepository.refresh(report)`. Transaction completion remains owned by the service.
+Batch C promotes **ReportService** after closing its last strict-boundary finding. Report metadata CRUD uses `RepositoryProvider.reports(...)`; `session.refresh(report)` was moved behind `ReportRepository.refresh(report)`. Transaction completion remains owned by the service.
 
 - `report_service.py` — **ReportService**: provider-backed through `RepositoryProvider.reports(...)`; report persistence and refresh are repository-owned.
+
+## EP-ARCH-03.35 Batch D
+
+Batch D promotes **EnrollmentService** after closing its final direct persistence operation. Enrollment lifecycle reads and writes already use `RepositoryProvider`; the remaining `session.refresh(enrollment)` operations were moved behind `EnrollmentRepository.refresh(enrollment)`. Transaction completion remains owned by the service.
+
+- `enrollment_service.py` — **EnrollmentService**: provider-backed through `RepositoryProvider.enrollments(...)`, `classes(...)`, and `students(...)`; enrollment persistence and refresh are repository-owned.
 
 Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
