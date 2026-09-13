@@ -26,7 +26,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `class_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
-| `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `employee_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `employee_schedule_service.py` | PASS | — | — | — | — | — |
 | `employee_service.py` | PASS | — | — | — | — | — |
 | `employee_work_registration_service.py` | PASS | — | — | — | — | — |
@@ -93,5 +93,11 @@ Batch D promotes **EnrollmentService** after closing its final direct persistenc
 Batch E promotes **ClassTimelineService** after confirming that its persistence boundary is fully repository-owned. The service obtains `ClassTimelineRepository` only through `RepositoryProvider.class_timeline(...)`; event creation uses `repo.add(...)`, transaction completion remains with the service, and entity refresh uses `repo.refresh(...)`.
 
 - `class_timeline_service.py` — **ClassTimelineService**: provider-backed through `RepositoryProvider.class_timeline(...)`; no concrete repository construction, direct SQLAlchemy query, or direct persistence operation remains in the service.
+
+## EP-ARCH-03.35 Batch F
+
+Batch F promotes **EmployeeDocumentService** after closing its final direct persistence operation. Document metadata lookup and creation already use `RepositoryProvider.employee_documents(...)`; the remaining `session.refresh(d)` operation was moved behind `EmployeeDocumentRepository.refresh(d)`. Filesystem document handling remains intentionally owned by the service because it is not a database repository concern.
+
+- `employee_document_service.py` — **EmployeeDocumentService**: provider-backed through `RepositoryProvider.employee_documents(...)`; database persistence and refresh are repository-owned while managed filesystem operations remain service-owned.
 
 Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
