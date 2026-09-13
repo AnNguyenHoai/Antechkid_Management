@@ -63,6 +63,48 @@ The strict provider gate remains authoritative for every service that declares `
 | `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
 
+## EP-ARCH-03.35 Batch A
+
+Batch A promotes already-provider-backed legacy services into the strict service-boundary inventory without changing their business behavior.
+
+- `assessment_service.py` — **AssessmentService**: provider-backed assessment repository boundary; database persistence remains repository-owned.
+- `attendance_service.py` — **AttendanceService**: provider-backed attendance, enrollment, and session repository boundary; database persistence remains repository-owned.
+
+These services are `PASS` and are not migration backlog.
+
+## EP-ARCH-03.35 Batch B
+
+Batch B promotes already-provider-backed services into the strict service-boundary inventory.
+
+- `audit_service.py` — **AuditService**: uses `RepositoryProvider` for audit repository operations; persistence remains repository-owned.
+- `class_service.py` — **ClassService**: uses `RepositoryProvider` for class and related repository operations; persistence remains repository-owned.
+
+These services are `PASS` and are not migration backlog.
+
+## EP-ARCH-03.35 Batch D
+
+Batch D promotes `EnrollmentService` into the strict provider-backed inventory.
+
+- `enrollment_service.py` — **EnrollmentService**: uses `RepositoryProvider.enrollments(...)`; repository owns refresh/persistence operations while transaction ownership remains in the service.
+
+`EnrollmentService` is `PASS` and is not migration backlog.
+
+## EP-ARCH-03.35 Batch E
+
+Batch E promotes `ClassTimelineService` into the strict provider-backed inventory.
+
+- `class_timeline_service.py` — **ClassTimelineService**: uses `RepositoryProvider.class_timeline(...)`; repository owns add/refresh persistence operations while transaction ownership remains in the service.
+
+`ClassTimelineService` is `PASS` and is not migration backlog.
+
+## EP-ARCH-03.35 Batch F
+
+Batch F promotes `EmployeeDocumentService` into the strict provider-backed inventory.
+
+- `employee_document_service.py` — **EmployeeDocumentService**: uses `RepositoryProvider.employee_documents(...)`; repository owns database refresh/persistence operations while document filesystem behavior remains service-owned.
+
+`EmployeeDocumentService` is `PASS` and is not migration backlog.
+
 ## EP-ARCH-03.35 Batch G
 
 Batch G closes the false-positive legacy classification for services whose responsibilities are not database-repository backed. These services must not be forced to inject a `RepositoryProvider` merely to satisfy the service boundary gate.
