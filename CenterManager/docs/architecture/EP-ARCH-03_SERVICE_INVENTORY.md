@@ -146,6 +146,19 @@ Batch C migrates `StudentDocumentService`, which has both a database-backed Docu
 
 The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
 
+## EP-ARCH-03.36-C Student document boundary
+
+Batch C migrates `StudentDocumentService`, which has both a database-backed Document lifecycle and a filesystem attachment boundary.
+
+- `student_document_service.py` — **StudentDocumentService**: uses `RepositoryProvider.documents(...)` for document persistence and reads; `DocumentRepository` is no longer imported or constructed by the service.
+- Database `add`, `delete`, and `refresh` operations remain repository-owned; transaction completion remains service-owned.
+- Attachment directory creation, file copy, and file deletion remain explicitly filesystem-owned by the service and are not disguised as repository operations.
+- Database repository behavior remains repository-owned; filesystem behavior remains service-owned.
+
+`StudentDocumentService` is now `PASS` and is not migration backlog. The migration preserves its existing public API and document/timeline behavior while normalizing the database dependency boundary.
+
+The remaining Student-domain legacy services stay assigned to EP-ARCH-03.36 for later migration slices.
+
 ## EP-ARCH-03.35 Migration Rule
 
 A service is only migrated into the strict `PASS` class when it has an application database repository boundary. Non-database responsibilities are explicitly classified as `NON_REPOSITORY` and are excluded from the RepositoryProvider requirement.
