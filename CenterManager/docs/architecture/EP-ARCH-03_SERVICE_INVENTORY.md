@@ -23,7 +23,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `auto_report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `backup_operations_service.py` | LEGACY | no concrete repository dependency | — | — | delegated to platform service | EP-ARCH-03.35 |
 | `class_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `class_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `class_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
 | `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
@@ -87,5 +87,11 @@ Batch C promotes **ReportService** after closing its last strict-boundary findin
 Batch D promotes **EnrollmentService** after closing its final direct persistence operation. Enrollment lifecycle reads and writes already use `RepositoryProvider`; the remaining `session.refresh(enrollment)` operations were moved behind `EnrollmentRepository.refresh(enrollment)`. Transaction completion remains owned by the service.
 
 - `enrollment_service.py` — **EnrollmentService**: provider-backed through `RepositoryProvider.enrollments(...)`, `classes(...)`, and `students(...)`; enrollment persistence and refresh are repository-owned.
+
+## EP-ARCH-03.35 Batch E
+
+Batch E closes the remaining direct persistence operation in **ClassTimelineService**. Class timeline reads and writes already use `RepositoryProvider.class_timeline(...)`; the remaining `session.refresh(event)` operation is now delegated to `ClassTimelineRepository.refresh(event)`. Transaction completion remains owned by the application service.
+
+- `class_timeline_service.py` — **ClassTimelineService**: provider-backed through `RepositoryProvider.class_timeline(...)`; timeline persistence and refresh are repository-owned.
 
 Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
