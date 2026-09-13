@@ -68,6 +68,11 @@ class StudentService:
         return normalized
 
     def _generate_student_code(self, repo) -> str:
+        # Preserve compatibility for legacy callers that pass a Session directly.
+        # The lookup still crosses the RepositoryProvider boundary; the service
+        # never performs persistence/query operations on the Session itself.
+        if isinstance(repo, Session):
+            repo = self._repository_provider.students(repo)
         highest = repo.get_highest_hs_number()
         next_num = (highest or 0) + 1
         return f"HS{next_num:03d}"

@@ -37,12 +37,17 @@ def test_batch_g_documents_service_boundary_reason():
 
 def test_batch_g_does_not_reclassify_database_backed_legacy_services():
     source = INVENTORY.read_text(encoding="utf-8")
+    # StudentService was explicitly migrated by EP-ARCH-03.36-A and is no
+    # longer legacy. Keep the remaining database-backed services in the
+    # migration backlog until their dedicated slices are implemented.
     for service_name in (
         "expense_service.py",
         "income_service.py",
         "session_service.py",
-        "student_service.py",
         "teacher_service.py",
     ):
         row = _row(source, service_name)
         assert "| LEGACY |" in row, row
+
+    student_row = _row(source, "student_service.py")
+    assert "| PASS |" in student_row, student_row
