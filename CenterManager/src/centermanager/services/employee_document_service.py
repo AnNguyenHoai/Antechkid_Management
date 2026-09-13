@@ -31,7 +31,6 @@ class EmployeeDocumentService:
         elif raw.parts and raw.parts[0].lower() == self._attachments_root.name.lower():
             candidate = (self._runtime_root / raw).resolve()
         else:
-            # Legacy records may store Employees/... relative to Attachments.
             candidate = (self._attachments_root / raw).resolve()
 
         allowed = self._attachments_root.resolve()
@@ -62,7 +61,6 @@ class EmployeeDocumentService:
 
     def get_repository_employee_root(self, employee_code: str) -> Path:
         """Return the canonical repository mirror root for an employee's documents."""
-        # runtime_root is .../runtime; repository is .../runtime/repository
         return self._runtime_root / "repository" / "Attachments" / "Employees" / employee_code
 
     def get_repository_relative_path(self, document: EmployeeDocument) -> Path:
@@ -70,8 +68,6 @@ class EmployeeDocumentService:
         relative = Path(document.relative_path)
         if relative.is_absolute():
             raise ValueError("Employee document paths must be relative.")
-        # Stored employee paths are relative to runtime, e.g.
-        # Attachments/Employees/EMP-00001/CV/file.pdf.
         return relative
 
     def document_sync_locations(self, document: EmployeeDocument) -> dict:
@@ -97,8 +93,6 @@ class EmployeeDocumentService:
             "repository_path": repo_path,
             "runtime_exists": runtime_exists,
             "repository_exists": repository_exists,
-            # "synced" means the two physical copies exist and contain the
-            # same bytes, not merely that both paths exist.
             "checksum_match": checksum_match,
             "synced": runtime_exists and repository_exists and checksum_match,
         }
@@ -143,7 +137,6 @@ class EmployeeDocumentService:
         name = f'{uuid.uuid4().hex}_{src.name}'
         dst = (folder / name).resolve()
 
-        # The destination must stay inside managed Employee attachments.
         allowed = self._attachments_root.resolve()
         try:
             dst.relative_to(allowed)
@@ -152,7 +145,6 @@ class EmployeeDocumentService:
 
         shutil.copy2(src, dst)
 
-        # Store a runtime-relative path so it can be reconstructed on every machine.
         rel = str(dst.relative_to(self._runtime_root.resolve()))
         with self._sf() as s:
             repo = self._repository_provider.employee_documents(s)
@@ -165,7 +157,7 @@ class EmployeeDocumentService:
             )
             repo.add(d)
             s.commit()
-            s.refresh(d)
+            repo.refresh(d)
 
         logger.info(
             "Employee document uploaded: employee_id=%s type=%s filename=%s "

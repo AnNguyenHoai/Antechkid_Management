@@ -27,7 +27,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `class_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `configuration_service.py` | NON_REPOSITORY | — | — | — | configuration persistence | — |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
-| `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `employee_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `employee_schedule_service.py` | PASS | — | — | — | — | — |
 | `employee_service.py` | PASS | — | — | — | — | — |
 | `employee_work_registration_service.py` | PASS | — | — | — | — | — |
