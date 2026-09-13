@@ -93,9 +93,9 @@ Batch D promotes `EnrollmentService` into the strict provider-backed inventory.
 
 Batch E promotes `ClassTimelineService` into the strict provider-backed inventory.
 
-- `class_timeline_service.py` — **ClassTimelineService**: uses `RepositoryProvider.class_timeline(...)`; repository owns add/refresh persistence operations while transaction ownership remains in the service.
+- `class_timeline_service.py` — **ClassTimelineService**: uses `RepositoryProvider.class_timeline(...)`; repository owns add/refresh persistence operations while transaction ownership remains in the service. Database persistence is explicitly **repository-owned**.
 
-`ClassTimelineService` is `PASS` and is not migration backlog.
+These operations are repository-owned and `ClassTimelineService` is `PASS` and is not migration backlog.
 
 ## EP-ARCH-03.35 Batch F
 
