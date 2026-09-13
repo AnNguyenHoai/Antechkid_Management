@@ -31,6 +31,7 @@ from centermanager.repositories.role_repository import RoleRepository
 from centermanager.repositories.permission_repository import PermissionRepository
 from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
 from centermanager.repositories.parent_repository import ParentRepository
+from centermanager.repositories.document_repository import DocumentRepository
 
 
 class RepositoryProvider(Protocol):
@@ -62,6 +63,7 @@ class RepositoryProvider(Protocol):
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: ...
     def notes(self, session: Session) -> NoteRepository: ...
     def parents(self, session: Session) -> ParentRepository: ...
+    def documents(self, session: Session) -> DocumentRepository: ...
 
 
 class SqlAlchemyRepositoryProvider:
@@ -93,6 +95,7 @@ class SqlAlchemyRepositoryProvider:
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: return TeacherDocumentRepository(session)
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
     def parents(self, session: Session) -> ParentRepository: return ParentRepository(session)
+    def documents(self, session: Session) -> DocumentRepository: return DocumentRepository(session)
 
 
 def create_default_repository_provider() -> RepositoryProvider:
