@@ -23,7 +23,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `auto_report_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
 | `backup_operations_service.py` | LEGACY | no concrete repository dependency | — | — | delegated to platform service | EP-ARCH-03.35 |
 | `class_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `class_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
+| `class_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `configuration_service.py` | LEGACY | no repository boundary | — | — | configuration persistence | EP-ARCH-03.35 |
 | `employee_admin_management_service.py` | PASS | — | — | — | — | — |
 | `employee_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.35 |
@@ -38,7 +38,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `git_config_service.py` | LEGACY | no repository boundary | — | — | filesystem persistence | EP-ARCH-03.35 |
 | `home_dashboard_service.py` | PASS | — | — | — | — | — |
 | `income_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
-| `outstanding_service.py` | PASS | — | — | — | — | — |
+| `outstanding_service.py` | PASS | — | — | — | repository-owned | — |
 | `parent_service.py` | PASS | — | — | — | — | — |
 | `permission_service.py` | PASS | — | — | — | — | — |
 | `report_service.py` | PASS | — | — | — | repository-owned | — |
@@ -87,5 +87,11 @@ Batch C promotes **ReportService** after closing its last strict-boundary findin
 Batch D promotes **EnrollmentService** after closing its final direct persistence operation. Enrollment lifecycle reads and writes already use `RepositoryProvider`; the remaining `session.refresh(enrollment)` operations were moved behind `EnrollmentRepository.refresh(enrollment)`. Transaction completion remains owned by the service.
 
 - `enrollment_service.py` — **EnrollmentService**: provider-backed through `RepositoryProvider.enrollments(...)`, `classes(...)`, and `students(...)`; enrollment persistence and refresh are repository-owned.
+
+## EP-ARCH-03.35 Batch E
+
+Batch E promotes **ClassTimelineService** after confirming that its persistence boundary is fully repository-owned. The service obtains `ClassTimelineRepository` only through `RepositoryProvider.class_timeline(...)`; event creation uses `repo.add(...)`, transaction completion remains with the service, and entity refresh uses `repo.refresh(...)`.
+
+- `class_timeline_service.py` — **ClassTimelineService**: provider-backed through `RepositoryProvider.class_timeline(...)`; no concrete repository construction, direct SQLAlchemy query, or direct persistence operation remains in the service.
 
 Any service that does not yet declare `RepositoryProvider` remains in the migration backlog until its own migration slice is implemented.
