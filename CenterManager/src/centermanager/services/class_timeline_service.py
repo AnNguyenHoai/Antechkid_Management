@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ClassTimelineService - log timeline events for classes.
 """
@@ -55,7 +54,7 @@ class ClassTimelineService:
             repo = self._repository_provider.class_timeline(session)
             repo.add(event)
             session.commit()
-            session.refresh(event)
+            repo.refresh(event)
             return event
 
     def get_class_timeline(self, class_id: int, limit: Optional[int] = None) -> List[ClassTimelineEvent]:
