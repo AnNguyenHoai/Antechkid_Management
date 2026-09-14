@@ -1,9 +1,7 @@
 """Repository dependency boundary for application services."""
 from __future__ import annotations
-
 from typing import Protocol
 from sqlalchemy.orm import Session
-
 from centermanager.repositories.audit_log_repository import AuditLogRepository
 from centermanager.repositories.attendance_repository import AttendanceRepository
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
@@ -32,7 +30,7 @@ from centermanager.repositories.permission_repository import PermissionRepositor
 from centermanager.repositories.employee_working_time_repository import EmployeeWorkingTimeRepository
 from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.document_repository import DocumentRepository
-
+from centermanager.repositories.student_highlight_repository import StudentHighlightRepository
 
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
@@ -64,7 +62,7 @@ class RepositoryProvider(Protocol):
     def notes(self, session: Session) -> NoteRepository: ...
     def parents(self, session: Session) -> ParentRepository: ...
     def documents(self, session: Session) -> DocumentRepository: ...
-
+    def student_highlights(self, session: Session) -> StudentHighlightRepository: ...
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -96,7 +94,7 @@ class SqlAlchemyRepositoryProvider:
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
     def parents(self, session: Session) -> ParentRepository: return ParentRepository(session)
     def documents(self, session: Session) -> DocumentRepository: return DocumentRepository(session)
-
+    def student_highlights(self, session: Session) -> StudentHighlightRepository: return StudentHighlightRepository(session)
 
 def create_default_repository_provider() -> RepositoryProvider:
     """Create the production provider for legacy callers during migration."""
