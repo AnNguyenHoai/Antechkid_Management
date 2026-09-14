@@ -89,30 +89,26 @@ class FinancePeriodDefinition:
         cls, anchor_date: date, target_date: date, duration_months: int
     ) -> tuple[date, date]:
         FinancePeriod.validate_duration(duration_months)
-        # Periods are calendar buckets anchored by effective_from. The first
-        # period always begins exactly on anchor_date; subsequent periods begin
-        # duration_months later on the same calendar day (clamped to month end).
-        if target_date == anchor_date:
-            bucket = 0
-        elif target_date > anchor_date:
+        if target_date < anchor_date:
+            # Historical dates are assigned to the preceding full bucket.
+            months = (
+                (anchor_date.year - target_date.year) * 12
+                + anchor_date.month
+                - target_date.month
+            )
+            if cls.add_months(target_date, months) > anchor_date:
+                months += 1
+            bucket = -((months + duration_months - 1) // duration_months)
+        else:
             months = (
                 (target_date.year - anchor_date.year) * 12
                 + target_date.month
                 - anchor_date.month
             )
             candidate = cls.add_months(anchor_date, months)
-            bucket = months if candidate <= target_date else months - 1
-            bucket = bucket // duration_months
-        else:
-            months = (
-                (anchor_date.year - target_date.year) * 12
-                + anchor_date.month
-                - target_date.month
-            )
-            candidate = cls.add_months(anchor_date, -months)
-            bucket = -((months + duration_months - 1) // duration_months)
             if candidate > target_date:
-                bucket -= 1
+                months -= 1
+            bucket = months // duration_months
 
-        candidate_start = cls.add_months(anchor_date, bucket * duration_months)
-        return cls.bounds_for(candidate_start, duration_months)
+        period_start = cls.add_months(anchor_date, bucket * duration_months)
+        return cls.bounds_for(period_start, duration_months)
