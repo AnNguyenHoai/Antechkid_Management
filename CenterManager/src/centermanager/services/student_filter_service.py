@@ -16,9 +16,6 @@ class StudentFilterService:
         """Apply filters and return matching active students."""
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
-            # Archived filtering is repository-owned: Student.status == "ARCHIVED".
-            # Keep the marker here for the legacy lifecycle contract; query construction
-            # itself belongs exclusively to StudentRepository.filter_students().
             students = repo.filter_students(filter_criteria)
 
             if filter_criteria.age_min is not None or filter_criteria.age_max is not None:
