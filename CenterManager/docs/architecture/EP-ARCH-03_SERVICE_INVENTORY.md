@@ -63,9 +63,60 @@ The strict provider gate remains authoritative for every service that declares `
 | `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
 
+## EP-ARCH-03.35 Batch A
+- `assessment_service.py` — **AssessmentService**: provider-backed assessment repository boundary; persistence remains repository-owned.
+- `attendance_service.py` — **AttendanceService**: provider-backed attendance/enrollment/session repository boundary; persistence remains repository-owned.
+
+## EP-ARCH-03.35 Batch B
+- `audit_service.py` — **AuditService**: uses `RepositoryProvider`; persistence remains repository-owned.
+- `class_service.py` — **ClassService**: uses `RepositoryProvider`; persistence remains repository-owned.
+
+## EP-ARCH-03.35 Batch D
+- `enrollment_service.py` — **EnrollmentService**: uses `RepositoryProvider.enrollments(...)`; repository owns refresh/persistence and service owns transaction completion.
+
+## EP-ARCH-03.35 Batch E
+- `class_timeline_service.py` — **ClassTimelineService**: uses `RepositoryProvider.class_timeline(...)`; repository owns persistence. Database persistence is explicitly **repository-owned**.
+
+## EP-ARCH-03.35 Batch F
+- `employee_document_service.py` — **EmployeeDocumentService**: uses `RepositoryProvider.employee_documents(...)`; repository owns database operations while document filesystem behavior remains service-owned.
+
+## EP-ARCH-03.35 Batch G
+Batch G closes the false-positive legacy classification for non-database services. These services must not be forced to inject a `RepositoryProvider`.
+- `authorization_service.py` — **AuthorizationService**: pure capability/policy logic.
+- `auto_report_service.py` — **AutoReportService**: orchestrates existing services; local JSON state is filesystem-owned.
+- `backup_operations_service.py` — **BackupOperationsService**: platform orchestration.
+- `configuration_service.py` — **ConfigurationService**: configuration subsystem.
+- `git_config_service.py` — **GitConfigService**: encrypted filesystem configuration and platform Git provider.
+- `system_operations_service.py` — **SystemOperationsService**: platform/filesystem health aggregation.
+
+## EP-ARCH-03.36-A StudentService
+`StudentService` — **StudentService** is explicitly provider-backed through `RepositoryProvider.students(...)` and classified as `PASS`. Student query/persistence operations remain repository-owned while business validation, transaction coordination, timeline/report/event orchestration remain service-owned.
+
+## EP-ARCH-03.36-B Student read/presentation services
+- `student_analytics_service.py` — **StudentAnalyticsService**: `RepositoryProvider.students(...)` and `assessments(...)`; aggregation remains service-owned.
+- `student_dashboard_service.py` — **StudentDashboardService**: provider-backed student/assessment/parent/session/timeline reads; DTO aggregation remains service-owned.
+- `student_summary_service.py` — **StudentSummaryService**: uses `RepositoryProvider.documents(...)` and existing domain services.
+
+All three are `PASS`; database reads remain repository-owned.
+
+## EP-ARCH-03.36-C Student document boundary
+`StudentDocumentService` has both database and filesystem responsibilities.
+- `student_document_service.py` — **StudentDocumentService**: uses `RepositoryProvider.documents(...)`; database add/delete/refresh are repository-owned and transaction completion is service-owned.
+- Attachment directory creation, file copy, and file deletion remain explicitly filesystem-owned by the service.
+- `filesystem behavior remains service-owned`.
+
+`StudentDocumentService` is `PASS` and is not migration backlog.
+
+## EP-ARCH-03.36-D Student filter/highlight boundary
+Batch D migrates the Student filtering and highlight application services behind the repository boundary.
+- `student_filter_service.py` — **StudentFilterService**: uses `RepositoryProvider.students(...)`; database-backed filtering is repository-owned while age calculation remains service-owned.
+- `student_highlight_service.py` — **StudentHighlightService**: uses `RepositoryProvider.student_highlights(...)`; repository owns highlight query/add/delete/refresh operations while validation, transaction coordination, and event publishing remain service-owned.
+
+Both services are `PASS` and are not migration backlog. Database persistence/query behavior is repository-owned.
+
 ## EP-FIN-01 FinancePeriodService
 - `finance_period_service.py` — **FinancePeriodService**: uses `RepositoryProvider.finance_periods(...)`; period persistence/query operations remain repository-owned while Admin authorization and period business rules remain service-owned.
 - The service is classified as `PASS` and is not migration backlog.
 
-## EP-ARCH-03 Migration Rule
+## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
