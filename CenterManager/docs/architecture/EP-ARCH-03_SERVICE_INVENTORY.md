@@ -80,7 +80,7 @@ The strict provider gate remains authoritative for every service that declares `
 - `employee_document_service.py` — **EmployeeDocumentService**: uses `RepositoryProvider.employee_documents(...)`; repository owns database operations while document filesystem behavior remains service-owned.
 
 ## EP-ARCH-03.35 Batch G
-Batch G closes false-positive legacy classification for non-database services. These services must not be forced to inject `RepositoryProvider`.
+Batch G closes the false-positive legacy classification for non-database services. These services must not be forced to inject a `RepositoryProvider`.
 - `authorization_service.py` — **AuthorizationService**: pure capability/policy logic.
 - `auto_report_service.py` — **AutoReportService**: orchestrates existing services; local JSON state is filesystem-owned.
 - `backup_operations_service.py` — **BackupOperationsService**: platform orchestration.
@@ -89,7 +89,7 @@ Batch G closes false-positive legacy classification for non-database services. T
 - `system_operations_service.py` — **SystemOperationsService**: platform/filesystem health aggregation.
 
 ## EP-ARCH-03.36-A StudentService
-`StudentService` is explicitly provider-backed through `RepositoryProvider.students(...)` and classified as `PASS`. Student query/persistence operations remain repository-owned while business validation, transaction coordination, timeline/report/event orchestration remain service-owned.
+`StudentService` — **StudentService** is explicitly provider-backed through `RepositoryProvider.students(...)` and classified as `PASS`. Student query/persistence operations remain repository-owned while business validation, transaction coordination, timeline/report/event orchestration remain service-owned.
 
 ## EP-ARCH-03.36-B Student read/presentation services
 - `student_analytics_service.py` — **StudentAnalyticsService**: `RepositoryProvider.students(...)` and `assessments(...)`; aggregation remains service-owned.
