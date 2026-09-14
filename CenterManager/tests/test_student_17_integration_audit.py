@@ -12,6 +12,7 @@ TX = (ROOT / "services/write_transaction.py").read_text(encoding="utf-8")
 STUDENT_SERVICE = (ROOT / "services/student_service.py").read_text(encoding="utf-8")
 REPORT_SERVICE = (ROOT / "services/report_service.py").read_text(encoding="utf-8")
 REPORT_GENERATOR = (ROOT / "export/pdf/student_report_generator.py").read_text(encoding="utf-8")
+STUDENT_REPOSITORY = (ROOT / "repositories/student_repository.py").read_text(encoding="utf-8")
 
 
 def test_finish_flow_generates_reports_only_from_dirty_student_aggregates():
@@ -82,8 +83,7 @@ def test_student_lifecycle_events_track_dirty_aggregate():
 
 
 def test_archive_filter_is_explicitly_supported():
-    filter_service = (ROOT / "services/student_filter_service.py").read_text(encoding="utf-8")
-    assert "ARCHIVED" in filter_service
+    assert 'Student.status == "ARCHIVED"' in STUDENT_REPOSITORY
 
 
 def test_latest_report_policy_is_not_historical_accumulation():
