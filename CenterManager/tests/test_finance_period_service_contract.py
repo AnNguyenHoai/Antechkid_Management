@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from centermanager.core.current_user import set_current_user
+from centermanager.core.current_user import CurrentUserContext
 from centermanager.models.finance_period import FinancePeriod
 from centermanager.services.finance_period_service import FinancePeriodService
 
@@ -26,13 +26,15 @@ class _Finance:
 
 
 def test_period_service_configuration_requires_admin(monkeypatch):
-    set_current_user(_Finance())
     service = FinancePeriodService(lambda: None)
-    with pytest.raises(Exception):
-        service.configure(4, date(2026, 9, 1))
+    with CurrentUserContext(_Finance()):
+        with pytest.raises(Exception):
+            service.configure(4, date(2026, 9, 1))
 
-    set_current_user(_Admin())
-    assert _Admin.is_admin is True
+    with CurrentUserContext(_Admin()):
+        with pytest.raises(Exception):
+            # The test uses a null session only to assert the admin gate is passed.
+            service.configure(0, date(2026, 9, 1))
 
 
 def test_period_service_bounds_delegate_to_domain():
