@@ -40,6 +40,8 @@ class Capability(str, Enum):
     FINANCE_EXPENSE_CREATE = "finance.expense.create"
     FINANCE_EXPENSE_UPDATE = "finance.expense.update"
     FINANCE_EXPENSE_DELETE = "finance.expense.delete"
+    FINANCE_PERIOD_VIEW = "finance.period.view"
+    FINANCE_PERIOD_MANAGE = "finance.period.manage"
     REPORT_VIEW = "report.view"
     SETTING_UPDATE = "setting.update"
 
@@ -100,9 +102,6 @@ class Capability(str, Enum):
 
     @classmethod
     def from_value(cls, value: str) -> "Capability":
-        # Persisted/test fixtures from before EP-ARCH-02 may still contain this
-        # identifier. Accept it only as an input alias; the canonical value is
-        # always returned and no legacy value is added to the registry.
         value = LEGACY_CAPABILITY_ALIASES.get(value, value)
         try:
             return cls(value)
@@ -134,24 +133,17 @@ class Capability(str, Enum):
         return "other"
 
 
-# Legacy persisted identifier -> canonical capability identifier. This is an
-# input-compatibility boundary, not a second capability vocabulary.
 LEGACY_CAPABILITY_ALIASES = {
     "working_time.registration.self": Capability.WORK_REGISTRATION_SELF.value,
 }
 
-
-# Explicit policy-only capabilities are not seeded into generic role matrices.
 ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
     Capability.WORK_REGISTRATION_DELETE.value,
     Capability.EMPLOYEE_DELETE.value,
+    Capability.FINANCE_PERIOD_MANAGE.value,
 })
 
-# Employee Workspace management is an explicit domain boundary. Manager and
-# admin roles may enter the all-employee management surface, but this does not
-# grant unrelated employee capabilities and does not create a generic admin
-# bypass in AuthorizationService.
 IMPLICIT_ROLE_CAPABILITIES = {
     "admin": frozenset({
         Capability.EMPLOYEE_VIEW_ALL.value,
@@ -164,8 +156,6 @@ IMPLICIT_ROLE_CAPABILITIES = {
     }),
 }
 
-# Broad employee update also authorizes the narrower self-profile update scope.
-# No read capability implies a write capability.
 IMPLIED_CAPABILITIES = {
     Capability.EMPLOYEE_UPDATE.value: frozenset({Capability.EMPLOYEE_UPDATE_SELF.value}),
 }
