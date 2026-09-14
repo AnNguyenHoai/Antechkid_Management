@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
-from typing import Optional, Tuple
+from typing import Optional
 
-from sqlalchemy import Integer, String, UniqueConstraint
+from sqlalchemy import Date, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from centermanager.database.base import Base
@@ -12,21 +12,15 @@ from centermanager.models.mixins import TimestampMixin
 
 
 class FinancePeriod(Base, TimestampMixin):
-    """Canonical finance period configuration.
-
-    One active configuration defines the duration, in calendar months, used by
-    Finance to partition time into billing/reporting periods. The configured
-    duration is intentionally stored as domain data rather than hard-coded in
-    Finance services.
-    """
+    """Canonical finance-period configuration used by Finance features."""
 
     __tablename__ = "finance_periods"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     duration_months: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")
-    effective_from: Mapped[date] = mapped_column(nullable=False)
-    effective_to: Mapped[Optional[date]] = mapped_column(nullable=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("effective_from", name="uq_finance_period_effective_from"),
@@ -35,13 +29,8 @@ class FinancePeriod(Base, TimestampMixin):
     STATUS_ACTIVE = "ACTIVE"
     STATUS_INACTIVE = "INACTIVE"
     VALID_STATUSES = frozenset({STATUS_ACTIVE, STATUS_INACTIVE})
-
     MIN_DURATION_MONTHS = 1
     MAX_DURATION_MONTHS = 24
-
-    def __post_init__(self) -> None:
-        self.validate_duration(self.duration_months)
-        self.validate_status(self.status)
 
     @classmethod
     def validate_duration(cls, duration_months: int) -> int:
@@ -65,15 +54,9 @@ class FinancePeriod(Base, TimestampMixin):
         return self.status == self.STATUS_ACTIVE
 
     def contains(self, target_date: date) -> bool:
-        """Return whether target_date lies inside this configured period."""
         if target_date < self.effective_from:
             return False
-        if self.effective_to is not None and target_date > self.effective_to:
-            return False
-        return True
-
-    def key(self) -> Tuple[int, int]:
-        return self.duration_months, self.effective_from.toordinal()
+        return self.effective_to is None or target_date <= self.effective_to
 
     def __repr__(self) -> str:
         return (
@@ -83,11 +66,12 @@ class FinancePeriod(Base, TimestampMixin):
 
 
 class FinancePeriodDefinition:
-    """Pure domain helper for calculating period boundaries."""
+    """Pure calculations for calendar-month finance periods."""
 
     @staticmethod
     def add_months(source_date: date, months: int) -> date:
-        FinancePeriod.validate_duration(months)
+        if not isinstance(months, int):
+            raise ValueError("months must be an integer.")
         absolute = source_date.year * 12 + (source_date.month - 1) + months
         year, month_index = divmod(absolute, 12)
         month = month_index + 1
@@ -96,8 +80,9 @@ class FinancePeriodDefinition:
 
     @classmethod
     def bounds_for(cls, start_date: date, duration_months: int) -> tuple[date, date]:
+        FinancePeriod.validate_duration(duration_months)
         end_exclusive = cls.add_months(start_date, duration_months)
-        return start_date, end_exclusive.fromordinal(end_exclusive.toordinal() - 1)
+        return start_date, date.fromordinal(end_exclusive.toordinal() - 1)
 
     @classmethod
     def period_for_date(
