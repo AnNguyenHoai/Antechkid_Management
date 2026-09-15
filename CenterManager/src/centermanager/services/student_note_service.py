@@ -8,14 +8,22 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.note import Note, NoteType
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.note_repository import NoteRepository
+from centermanager.repositories.provider import RepositoryProvider
 from centermanager.services.timeline_service import TimelineService
 
 
 class StudentNoteService:
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None):
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        if repository_provider is None:
+            raise ValueError("repository_provider is required")
+        self._repository_provider = repository_provider
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
@@ -29,12 +37,7 @@ class StudentNoteService:
             raise ValueError(f"Invalid note type. Must be one of: {', '.join(valid)}")
         return note_type
 
-    def create_note(
-        self,
-        student_id: int,
-        note_type: str,
-        content: str,
-    ) -> Note:
+    def create_note(self, student_id: int, note_type: str, content: str) -> Note:
         normalized_type = self._validate_note_type(note_type)
         normalized_content = self._normalize_text(content)
         if not normalized_content:
@@ -46,10 +49,10 @@ class StudentNoteService:
                 note_type=normalized_type,
                 content=normalized_content,
             )
-            repo = NoteRepository(session)
+            repo = self._repository_provider.notes(session)
             repo.add(note)
             session.commit()
-            session.refresh(note)
+            repo.refresh(note)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -63,12 +66,12 @@ class StudentNoteService:
 
     def get_notes_for_student(self, student_id: int) -> List[Note]:
         with self._session_factory() as session:
-            repo = NoteRepository(session)
+            repo = self._repository_provider.notes(session)
             return repo.get_by_student(student_id)
 
-    def get_note_by_id(self, note_id: int) -> Optional[Note]:   # NEW
+    def get_note_by_id(self, note_id: int) -> Optional[Note]:
         with self._session_factory() as session:
-            repo = NoteRepository(session)
+            repo = self._repository_provider.notes(session)
             return repo.get_by_id(note_id)
 
     def update_note(
@@ -78,7 +81,7 @@ class StudentNoteService:
         content: Optional[str] = None,
     ) -> Note:
         with self._session_factory() as session:
-            repo = NoteRepository(session)
+            repo = self._repository_provider.notes(session)
             note = repo.get_by_id(note_id)
             if note is None:
                 raise ValueError(f"Note with id {note_id} not found.")
@@ -92,12 +95,12 @@ class StudentNoteService:
                 note.content = norm
 
             session.commit()
-            session.refresh(note)
+            repo.refresh(note)
             return note
 
     def delete_note(self, note_id: int) -> None:
         with self._session_factory() as session:
-            repo = NoteRepository(session)
+            repo = self._repository_provider.notes(session)
             note = repo.get_by_id(note_id)
             if note is None:
                 raise ValueError(f"Note with id {note_id} not found.")

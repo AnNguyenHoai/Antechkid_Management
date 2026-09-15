@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import List, Tuple
 
 import openpyxl
+from sqlalchemy.orm import sessionmaker
 
+from centermanager.repositories.provider import RepositoryProvider
 from centermanager.services.student_service import StudentService
 from centermanager.services.exceptions import StudentValidationError
 
@@ -18,42 +20,42 @@ logger = logging.getLogger(__name__)
 class StudentImportService:
     """Service to import students from Excel file."""
 
-    def __init__(self, student_service: StudentService) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        student_service: StudentService,
+        repository_provider: RepositoryProvider,
+    ) -> None:
+        self._session_factory = session_factory
         self._student_service = student_service
+        self._repository_provider = repository_provider
 
     def import_from_excel(self, file_path: Path) -> Tuple[int, int, List[str]]:
-        """
-        Import students from Excel file.
-
-        Returns:
-            Tuple (success_count, error_count, error_messages)
-        """
+        """Import students from Excel file."""
         wb = openpyxl.load_workbook(file_path)
         ws = wb.active
-        errors = []
+        errors: List[str] = []
         success = 0
 
-        # Expect header row, data starts at row 2
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or (not row[0] and not row[1]):  # skip completely empty rows
+            if not row or (not row[0] and not row[1]):
                 continue
 
             try:
-                # Columns: Code, Full Name, Preferred Name, DOB, Gender, Status, Level, Notes
                 code = row[0] if row[0] else None
                 full_name = row[1]
                 if not full_name:
                     errors.append(f"Row {row_idx}: Full name is required")
                     continue
 
-                # If code provided, check uniqueness
                 if code:
-                    existing = self._student_service.get_student_by_code(str(code))
+                    with self._session_factory() as session:
+                        repo = self._repository_provider.students(session)
+                        existing = repo.get_by_code(str(code))
                     if existing:
                         errors.append(f"Row {row_idx}: Student code {code} already exists")
                         continue
 
-                # Parse DOB
                 dob = None
                 if row[3]:
                     try:
@@ -65,7 +67,6 @@ class StudentImportService:
                         errors.append(f"Row {row_idx}: Invalid date format (use YYYY-MM-DD)")
                         continue
 
-                # Create student
                 student = self._student_service.create_student(
                     full_name=str(full_name).strip(),
                     preferred_name=str(row[2]).strip() if row[2] else None,
@@ -76,11 +77,11 @@ class StudentImportService:
                     notes=str(row[7]).strip() if row[7] else None,
                 )
                 success += 1
-                logger.info(f"Imported student {student.student_code}: {student.full_name}")
+                logger.info("Imported student %s: %s", student.student_code, student.full_name)
             except StudentValidationError as e:
                 errors.append(f"Row {row_idx}: {str(e)}")
             except Exception as e:
-                logger.exception(f"Error importing row {row_idx}")
+                logger.exception("Error importing row %s", row_idx)
                 errors.append(f"Row {row_idx}: {str(e)}")
 
         return success, len(errors), errors

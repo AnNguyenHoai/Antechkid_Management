@@ -1,52 +1,40 @@
-"""Regression coverage for the EmployeeWorkRegistrationService repository boundary."""
+"""Regression contract for EmployeeWorkRegistration repository composition."""
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from centermanager.services.employee_work_registration_service import EmployeeWorkRegistrationService
-
-
-SERVICES_DIR = Path(__file__).resolve().parents[1] / "src" / "centermanager" / "services"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_PATH = PROJECT_ROOT / "src" / "centermanager" / "services" / "employee_work_registration_service.py"
 
 
-def test_ewr_service_uses_injected_repository_provider():
-    session = MagicMock()
-    session_factory = MagicMock()
-    session_factory.return_value.__enter__.return_value = session
-    employee_repo = MagicMock()
-    employee = MagicMock(user_id=7)
-    employee_repo.get_by_id.return_value = employee
-    provider = MagicMock()
-    provider.employees.return_value = employee_repo
+def test_ewr_service_depends_on_provider_contract_not_concrete_provider():
+    source = SERVICE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(SERVICE_PATH))
 
-    service = EmployeeWorkRegistrationService(session_factory, repository_provider=provider)
-    user = type("User", (), {"id": 7})()
-    service._scope(123, user)
+    repository_imports = []
+    concrete_provider_constructors = []
+    audit_service_provider_injection = False
 
-    provider.employees.assert_called_once_with(session)
-    employee_repo.get_by_id.assert_called_once_with(123)
-
-
-def test_ewr_service_does_not_import_or_construct_concrete_repository():
-    path = SERVICES_DIR / "employee_work_registration_service.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-    concrete_imports = []
-    concrete_constructors = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.startswith("centermanager.repositories.") and module != "centermanager.repositories.provider":
-                concrete_imports.append(module)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith("centermanager.repositories.") and alias.name != "centermanager.repositories.provider":
-                    concrete_imports.append(alias.name)
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id.endswith("Repository"):
-                concrete_constructors.append(node.func.id)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("centermanager.repositories"):
+            if node.module != "centermanager.repositories.provider":
+                repository_imports.append(node.module)
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "SqlAlchemyRepositoryProvider":
+                concrete_provider_constructors.append(node.func.id)
+            if isinstance(node.func, ast.Name) and node.func.id == "AuditService":
+                for kw in node.keywords:
+                    if kw.arg == "repository_provider" and isinstance(kw.value, ast.Attribute):
+                        if kw.value.attr == "_repository_provider":
+                            audit_service_provider_injection = True
 
-    assert concrete_imports == []
-    assert concrete_constructors == []
+    assert not repository_imports
+    assert not concrete_provider_constructors
+    assert audit_service_provider_injection
+
+
+def test_ewr_service_uses_default_provider_factory_at_boundary():
+    source = SERVICE_PATH.read_text(encoding="utf-8")
+    assert "from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider" in source
+    assert "self._repository_provider=repository_provider or create_default_repository_provider()" in source

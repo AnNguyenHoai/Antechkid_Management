@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ParentService - business logic for Parent entity.
-Now integrated with TimelineService.
+Now integrated with TimelineService and EventBus.
 """
 from typing import List, Optional
 
@@ -9,9 +9,29 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.parent import Parent, RelationshipType
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.parent_repository import ParentRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.exceptions import StudentServiceError, StudentValidationError
 from centermanager.services.timeline_service import TimelineService
+from centermanager.events.event_bus import EventBus
+from centermanager.events.event import Event
+
+
+class ParentAdded(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
+
+
+class ParentUpdated(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
+
+
+class ParentDeleted(Event):
+    def __init__(self, parent_id: int, student_id: int):
+        self.parent_id = parent_id
+        self.student_id = student_id
 
 
 class ParentServiceError(StudentServiceError):
@@ -27,9 +47,17 @@ class ParentValidationError(ParentServiceError):
 
 
 class ParentService:
-    def __init__(self, session_factory: sessionmaker, timeline_service: Optional[TimelineService] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        timeline_service: Optional[TimelineService] = None,
+        event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        self._event_bus = event_bus
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -52,7 +80,7 @@ class ParentService:
 
     def get_parents_for_student(self, student_id: int) -> List[Parent]:
         with self._session_factory() as session:
-            repo = ParentRepository(session)
+            repo = self._repository_provider.parents(session)
             return repo.get_by_student(student_id)
 
     def create_parent(
@@ -78,6 +106,7 @@ class ParentService:
         norm_notes = self._normalize_text(notes)
 
         with self._session_factory() as session:
+            repo = self._repository_provider.parents(session)
             parent = Parent(
                 student_id=student_id,
                 name=norm_name,
@@ -89,12 +118,10 @@ class ParentService:
                 notes=norm_notes,
                 is_primary_contact=is_primary_contact,
             )
-            repo = ParentRepository(session)
             repo.add(parent)
             session.commit()
-            session.refresh(parent)
+            repo.refresh(parent)
 
-            # Log timeline event
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -103,6 +130,9 @@ class ParentService:
                     description=f"{norm_relationship or 'Guardian'}: {norm_name}",
                     metadata={"parent_id": parent.id},
                 )
+
+            if self._event_bus:
+                self._event_bus.publish(ParentAdded(parent.id, student_id))
 
             return parent
 
@@ -119,7 +149,7 @@ class ParentService:
         is_primary_contact: Optional[bool] = None,
     ) -> Parent:
         with self._session_factory() as session:
-            repo = ParentRepository(session)
+            repo = self._repository_provider.parents(session)
             parent = repo.get_by_id(parent_id)
             if parent is None:
                 raise ParentNotFoundError(f"Parent id {parent_id} not found.")
@@ -187,9 +217,9 @@ class ParentService:
                 return parent
 
             session.commit()
-            session.refresh(parent)
-            # Trong update_parent, sau khi commit và refresh:
-            if self._timeline_service and changes:
+            repo.refresh(parent)
+
+            if self._timeline_service:
                 description = "Updated: " + "; ".join(changes)
                 self._timeline_service.log_event(
                     student_id=parent.student_id,
@@ -199,11 +229,14 @@ class ParentService:
                     metadata={"changes": changes},
                 )
 
+            if self._event_bus:
+                self._event_bus.publish(ParentUpdated(parent.id, parent.student_id))
+
             return parent
 
     def delete_parent(self, parent_id: int) -> None:
         with self._session_factory() as session:
-            repo = ParentRepository(session)
+            repo = self._repository_provider.parents(session)
             parent = repo.get_by_id(parent_id)
             if parent is None:
                 raise ParentNotFoundError(f"Parent id {parent_id} not found.")
@@ -212,7 +245,6 @@ class ParentService:
             repo.delete(parent)
             session.commit()
 
-            # Log timeline event
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -221,3 +253,6 @@ class ParentService:
                     description=f"Deleted {name or 'guardian'}",
                     metadata={"parent_id": parent_id},
                 )
+
+            if self._event_bus:
+                self._event_bus.publish(ParentDeleted(parent_id, student_id))

@@ -37,7 +37,14 @@ class Config:
             return current
         except (KeyError, TypeError):
             return default
+    def get_collaboration_settings(self) -> dict:
+        """Get collaboration-specific settings."""
+        return self._data.get("collaboration", {})
 
+    def set_collaboration_settings(self, settings: dict) -> None:
+        """Update collaboration settings and save."""
+        self._data["collaboration"] = settings
+        save_config(self._data)
     @property
     def raw(self) -> Dict[str, Any]:
         return copy.deepcopy(self._data)

@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 Note repository - data access for Note entity.
 """
-from typing import List
+from typing import List, Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from centermanager.models.note import Note
 from centermanager.repositories.base import BaseRepository
@@ -19,6 +18,9 @@ class NoteRepository(BaseRepository[Note]):
         return self._session.query(Note).filter(
             Note.student_id == student_id
         ).order_by(desc(Note.created_at)).all()
+
+    def get_by_id(self, note_id: int) -> Optional[Note]:
+        return self._session.query(Note).filter(Note.id == note_id).first()
 
     def add(self, note: Note) -> Note:
         self._session.add(note)

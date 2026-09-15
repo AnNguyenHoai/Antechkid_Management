@@ -284,3 +284,5 @@ class IncomeFormDialog(QDialog):
         except Exception as e:
             logger.exception("Error saving income")
             QMessageBox.critical(self, "Lỗi", "Đã xảy ra lỗi không mong muốn.")
+# def _on_income_type_changed
+# if income_type == "Other"

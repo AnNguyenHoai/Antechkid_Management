@@ -40,6 +40,10 @@ class TeacherRepository(BaseRepository[Teacher]):
 
     def list_all_including_deleted(self) -> List[Teacher]:
         return self._session.query(Teacher).all()
+    def list_archived(self) -> List[Teacher]:
+        return self._session.query(Teacher).filter(
+            Teacher.deleted_at.is_not(None)
+        ).order_by(desc(Teacher.deleted_at)).all()
 
     def get_all_teacher_codes(self) -> List[str]:
         results = self._session.query(Teacher.teacher_code).all()

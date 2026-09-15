@@ -9,6 +9,7 @@ from .enrollment_repository import EnrollmentRepository
 from .class_repository import ClassRepository
 from .note_repository import NoteRepository
 from .document_repository import DocumentRepository
+from .employee_document_repository import EmployeeDocumentRepository
 
 # RBAC Repositories
 from .user_repository import UserRepository
@@ -40,6 +41,7 @@ __all__ = [
     "ClassRepository",
     "NoteRepository",
     "DocumentRepository",
+    "EmployeeDocumentRepository",
     "UserRepository",
     "RoleRepository",
     "PermissionRepository",

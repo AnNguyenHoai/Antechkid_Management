@@ -1,23 +1,18 @@
 # -*- coding: utf-8 -*-
-"""
-StudentDashboardService - provides aggregated data for the Student Workspace dashboard.
+"""StudentDashboardService - aggregated data for the Student Workspace dashboard.
+
+The service owns presentation aggregation only. Database access is delegated to
+repositories supplied by RepositoryProvider.
 """
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, date, timedelta
+from typing import List
 
 from sqlalchemy.orm import sessionmaker
-from datetime import date, timedelta
+
 from centermanager.models.student import Student
-from centermanager.models.timeline_event import TimelineEvent
-from centermanager.models.assessment import Assessment
-from centermanager.models.parent import Parent
-from centermanager.repositories.student_repository import StudentRepository
-from centermanager.repositories.timeline_repository import TimelineRepository
-from centermanager.repositories.assessment_repository import AssessmentRepository
-from centermanager.repositories.parent_repository import ParentRepository
-from centermanager.models.session import Session
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
 logger = logging.getLogger(__name__)
 
@@ -44,38 +39,58 @@ class AttentionStudent:
     student_code: str
     full_name: str
     reason: str
+
+
 @dataclass
 class UpcomingEvent:
-    event_type: str  # "birthday", "assessment", "session"
+    event_type: str
     student_name: str
     student_code: str
     date: date
     details: str
+
 
 @dataclass
 class QuickInsights:
     avg_assessment_score: float
     avg_age: float
     total_parents: int
-    assessment_completion_rate: float  # percentage of students with at least one assessment
+    assessment_completion_rate: float
+    parent_coverage_rate: float
+
+
+@dataclass
+class TodaySummary:
+    today_classes: int = 0
+    today_assessments: int = 0
+    today_birthdays: list = None
+    upcoming_sessions: int = 0
+    pending_tasks: int = 0
+
 
 class StudentDashboardService:
-    def __init__(self, session_factory: sessionmaker) -> None:
+    def __init__(self, session_factory: sessionmaker, repository_provider: RepositoryProvider | None = None) -> None:
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def get_stats(self) -> DashboardStats:
+        """Get dashboard statistics with correct active/archived counts based on status."""
         with self._session_factory() as session:
-            repo = StudentRepository(session)
+            repo = self._repository_provider.students(session)
             all_students = repo.list_all_including_deleted()
-            total = len(all_students)
-            active = sum(1 for s in all_students if s.deleted_at is None)
-            archived = total - active
+            visible_students = [s for s in all_students if s.deleted_at is None]
+            total = len(visible_students)
+
+            active = sum(1 for s in visible_students if s.status != "ARCHIVED")
+            archived = sum(1 for s in visible_students if s.status == "ARCHIVED")
+
             now = datetime.now()
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            new_this_month = sum(1 for s in all_students
-                                 if s.created_at >= month_start and s.deleted_at is None)
+            new_this_month = sum(
+                1 for s in visible_students
+                if s.created_at >= month_start and s.status != "ARCHIVED"
+            )
             logger.info(f"Dashboard stats: total={total}, active={active}, archived={archived}, new={new_this_month}")
-            # Sửa lỗi: trả về đúng tham số
             return DashboardStats(
                 total=total,
                 active=active,
@@ -85,9 +100,8 @@ class StudentDashboardService:
 
     def get_recent_activities(self, limit: int = 10) -> List[RecentActivity]:
         with self._session_factory() as session:
-            events = session.query(TimelineEvent).order_by(
-                TimelineEvent.created_at.desc()
-            ).limit(limit).all()
+            repo = self._repository_provider.class_timeline(session)
+            events = sorted(repo.list_all(), key=lambda ev: ev.created_at, reverse=True)[:limit]
             result = []
             for ev in events:
                 student = ev.student
@@ -99,40 +113,12 @@ class StudentDashboardService:
                 ))
             return result
 
-    def get_students_requiring_attention(self) -> List[AttentionStudent]:
-        with self._session_factory() as session:
-            repo = StudentRepository(session)
-            active_students = repo.list_active()
-            parent_repo = ParentRepository(session)
-            assessment_repo = AssessmentRepository(session)
-            result = []
-            for student in active_students:
-                parents = parent_repo.get_by_student(student.id)
-                if not parents:
-                    result.append(AttentionStudent(
-                        student_id=student.id,
-                        student_code=student.student_code,
-                        full_name=student.full_name,
-                        reason="Missing parent information"
-                    ))
-                    continue
-                assessments = assessment_repo.get_by_student(student.id)
-                if not assessments:
-                    result.append(AttentionStudent(
-                        student_id=student.id,
-                        student_code=student.student_code,
-                        full_name=student.full_name,
-                        reason="No assessment recorded"
-                    ))
-                    continue
-            return result
     def get_students_requiring_attention(self, limit: int = 10) -> List[AttentionStudent]:
-        """Get students needing attention."""
         with self._session_factory() as session:
-            repo = StudentRepository(session)
-            parent_repo = ParentRepository(session)
-            assessment_repo = AssessmentRepository(session)
-            active_students = repo.list_active()
+            student_repo = self._repository_provider.students(session)
+            parent_repo = self._repository_provider.parents(session)
+            assessment_repo = self._repository_provider.assessments(session)
+            active_students = student_repo.list_active_non_archived()
             result = []
             for student in active_students:
                 parents = parent_repo.get_by_student(student.id)
@@ -156,15 +142,14 @@ class StudentDashboardService:
             return result[:limit]
 
     def get_upcoming_events(self) -> List[UpcomingEvent]:
-        """Get upcoming events (birthdays, assessments, sessions)."""
         today = date.today()
         upcoming = []
         with self._session_factory() as session:
-            # Upcoming birthdays (next 30 days)
-            students = session.query(Student).all()
+            student_repo = self._repository_provider.students(session)
+            session_repo = self._repository_provider.sessions(session)
+            students = student_repo.list_active_non_archived()
             for s in students:
                 if s.date_of_birth:
-                    # Calculate next birthday
                     dob = s.date_of_birth
                     next_birthday = date(today.year, dob.month, dob.day)
                     if next_birthday < today:
@@ -178,37 +163,29 @@ class StudentDashboardService:
                             date=next_birthday,
                             details=f"Birthday in {days_until} days"
                         ))
-            # Upcoming assessments (next 7 days) - if we have assessment_date, else we can use created_at
-            # For now, we'll just list recent assessments? Actually we don't have future assessments.
-            # We can skip or use a placeholder.
-            # Upcoming sessions (next 7 days)
+
+            sessions = session_repo.list_all()
             week_later = today + timedelta(days=7)
-            sessions = session.query(Session).filter(
-                Session.scheduled_date >= today,
-                Session.scheduled_date <= week_later,
-                Session.status == "Scheduled"
-            ).all()
             for sess in sessions:
-                # Get class name if needed
-                class_name = sess.class_.name if sess.class_ else "Class"
-                upcoming.append(UpcomingEvent(
-                    event_type="session",
-                    student_name="",  # session doesn't have direct student, we can show class name
-                    student_code="",
-                    date=sess.scheduled_date,
-                    details=f"Session: {sess.title} ({class_name})"
-                ))
-            # Sort by date
+                if today <= sess.scheduled_date <= week_later and sess.status == "Scheduled":
+                    class_name = sess.class_.name if sess.class_ else "Class"
+                    upcoming.append(UpcomingEvent(
+                        event_type="session",
+                        student_name="",
+                        student_code="",
+                        date=sess.scheduled_date,
+                        details=f"Session: {sess.title} ({class_name})"
+                    ))
             upcoming.sort(key=lambda x: x.date)
             return upcoming[:10]
 
     def get_quick_insights(self) -> QuickInsights:
-        """Calculate quick insights."""
         with self._session_factory() as session:
-            repo = StudentRepository(session)
-            active_students = repo.list_active()
+            student_repo = self._repository_provider.students(session)
+            assessment_repo = self._repository_provider.assessments(session)
+            parent_repo = self._repository_provider.parents(session)
+            active_students = student_repo.list_active_non_archived()
             total_students = len(active_students)
-            # Average age
             total_age = 0
             age_count = 0
             today = date.today()
@@ -219,75 +196,63 @@ class StudentDashboardService:
                     age_count += 1
             avg_age = total_age / age_count if age_count > 0 else 0
 
-            # Average assessment score
-            assessment_repo = AssessmentRepository(session)
-            all_assessments = session.query(Assessment).all()
+            all_assessments = assessment_repo.list_all()
             scores = [a.overall_score for a in all_assessments if a.overall_score is not None]
             avg_score = sum(scores) / len(scores) if scores else 0
 
-            # Total parents
-            parent_count = session.query(Parent).count()
+            active_student_ids = {s.id for s in active_students}
+            students_with_parent = {
+                p.student_id for p in parent_repo.list_all()
+                if p.student_id in active_student_ids
+            }
+            parent_count = len(students_with_parent)
+            parent_coverage_rate = len(students_with_parent) / total_students if total_students > 0 else 0
 
-            # Assessment completion rate (students with at least one assessment)
-            students_with_assessment = set()
-            for a in all_assessments:
-                students_with_assessment.add(a.student_id)
+            students_with_assessment = {
+                a.student_id for a in all_assessments
+                if a.student_id in active_student_ids
+            }
             completion_rate = len(students_with_assessment) / total_students if total_students > 0 else 0
 
             return QuickInsights(
                 avg_assessment_score=round(avg_score, 1),
                 avg_age=round(avg_age, 1),
                 total_parents=parent_count,
-                assessment_completion_rate=round(completion_rate * 100, 1)
+                assessment_completion_rate=round(completion_rate * 100, 1),
+                parent_coverage_rate=round(parent_coverage_rate * 100, 1)
             )
 
-    def get_today_summary(self):
-        """Return a summary of today's activities."""
-        from dataclasses import dataclass
-        from datetime import date, timedelta
-
-        @dataclass
-        class TodaySummary:
-            today_classes: int = 0
-            today_assessments: int = 0
-            today_birthdays: list = None
-            upcoming_sessions: int = 0
-            pending_tasks: int = 0
-
+    def get_today_summary(self) -> TodaySummary:
         today = date.today()
         with self._session_factory() as session:
-            # Số lớp học hôm nay
-            sessions_today = session.query(Session).filter(
-                Session.scheduled_date == today,
-                Session.status == 'Scheduled'
-            ).count()
+            student_repo = self._repository_provider.students(session)
+            session_repo = self._repository_provider.sessions(session)
+            assessment_repo = self._repository_provider.assessments(session)
+            parent_repo = self._repository_provider.parents(session)
 
-            # Số đánh giá hôm nay
-            assessments_today = session.query(Assessment).filter(
-                Assessment.assessment_date == today
-            ).count()
+            sessions = session_repo.list_all()
+            sessions_today = sum(1 for s in sessions if s.scheduled_date == today and s.status == 'Scheduled')
+            upcoming = sum(1 for s in sessions if today < s.scheduled_date <= today + timedelta(days=7) and s.status == 'Scheduled')
+            all_assessments = assessment_repo.list_all()
+            assessments_today = sum(1 for a in all_assessments if a.assessment_date == today)
 
-            # Sinh nhật hôm nay
-            students = session.query(Student).all()
+            students = student_repo.list_active_non_archived()
             today_birthdays = [
                 s.full_name for s in students
                 if s.date_of_birth and s.date_of_birth.month == today.month and s.date_of_birth.day == today.day
             ]
 
-            # Số buổi học sắp tới (7 ngày)
-            upcoming = session.query(Session).filter(
-                Session.scheduled_date > today,
-                Session.scheduled_date <= today + timedelta(days=7),
-                Session.status == 'Scheduled'
-            ).count()
-
-            # Số học sinh cần chú ý (thiếu phụ huynh hoặc đánh giá)
-            students_without_parent = session.query(Student).filter(
-                ~Student.id.in_(session.query(Parent.student_id).distinct())
-            ).count()
-            students_without_assessment = session.query(Student).filter(
-                ~Student.id.in_(session.query(Assessment.student_id).distinct())
-            ).count()
+            active_student_ids = {s.id for s in students}
+            students_with_parent = {
+                p.student_id for p in parent_repo.list_all()
+                if p.student_id in active_student_ids
+            }
+            students_with_assessment = {
+                a.student_id for a in all_assessments
+                if a.student_id in active_student_ids
+            }
+            students_without_parent = len(active_student_ids - students_with_parent)
+            students_without_assessment = len(active_student_ids - students_with_assessment)
             pending_tasks = students_without_parent + students_without_assessment
 
             return TodaySummary(

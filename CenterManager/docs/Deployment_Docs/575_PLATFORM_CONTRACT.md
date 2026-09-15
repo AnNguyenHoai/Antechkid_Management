@@ -20,6 +20,8 @@ Depends On
 
 570_SHARED_KERNEL.md
 
+590_PERMISSION_CAPABILITY_CONTRACT.md
+
 ---
 
 # Table of Contents
@@ -32,11 +34,12 @@ Depends On
 6. Collaboration Contracts
 7. Module Contracts
 8. Runtime Contracts
-9. Extension Contracts
-10. Compatibility Rules
-11. Versioning Rules
-12. Breaking Changes
-13. Architectural Guarantees
+9. Security Contracts
+10. Extension Contracts
+11. Compatibility Rules
+12. Versioning Rules
+13. Breaking Changes
+14. Architectural Guarantees
 
 ---
 
@@ -110,7 +113,7 @@ without exposing implementation.
 
 # 4. Contract Categories
 
-The Platform defines five categories of contracts.
+The Platform defines six categories of contracts.
 
 Runtime Contracts
 
@@ -119,6 +122,8 @@ Module Contracts
 Collaboration Contracts
 
 Storage Contracts
+
+Security Contracts
 
 Extension Contracts
 
@@ -210,7 +215,41 @@ or cloud-specific behavior.
 
 ---
 
-# 9. Extension Contracts
+# 9. Security Contracts
+
+Security and authorization semantics are defined by
+
+`590_PERMISSION_CAPABILITY_CONTRACT.md`.
+
+The security contract is the single canonical vocabulary for
+
+Role
+
+Capability
+
+Authorization Decision
+
+and their relationship with
+
+Workspace state,
+
+Edit Session state,
+
+and domain invariants.
+
+Protected application flows must use canonical capability identifiers.
+
+Role-name checks, UI `READ/WRITE` state, and control visibility are not authorization sources of truth.
+
+Administrative operations must use explicit administrative capabilities.
+
+Authorization denial must not mutate business state.
+
+The security contract is platform-wide; individual Modules and Workspaces must not create competing permission registries.
+
+---
+
+# 10. Extension Contracts
 
 Extensions may contribute
 
@@ -232,7 +271,7 @@ All interactions occur through Extension Contracts.
 
 ---
 
-# 10. Compatibility Rules
+# 11. Compatibility Rules
 
 The Platform follows backward compatibility whenever possible.
 
@@ -246,9 +285,11 @@ Existing semantics must not change.
 
 Optional capabilities are preferred over mandatory changes.
 
+Security capability identifiers are public contract values. Renaming, removing, or changing their meaning is a breaking change.
+
 ---
 
-# 11. Versioning Rules
+# 12. Versioning Rules
 
 Contracts follow semantic versioning.
 
@@ -268,7 +309,7 @@ Every contract declares its own version.
 
 ---
 
-# 12. Breaking Changes
+# 13. Breaking Changes
 
 Breaking changes include
 
@@ -282,11 +323,13 @@ Changing ownership.
 
 Changing event meaning.
 
+Removing or renaming a canonical capability.
+
 Breaking changes require a new major Platform version.
 
 ---
 
-# 13. Contract Testing
+# 14. Contract Testing
 
 Every contract must be testable.
 
@@ -300,11 +343,23 @@ Error behavior
 
 Backward compatibility
 
+Security contracts additionally verify
+
+Canonical capability names
+
+Role-to-capability policy
+
+Role/capability separation
+
+READ/WRITE state separation
+
+Authorization denial safety
+
 Implementations are considered valid only if they satisfy the contract.
 
 ---
 
-# 14. Architectural Guarantees
+# 15. Architectural Guarantees
 
 The Platform guarantees
 
@@ -322,11 +377,13 @@ Stable extension mechanism.
 
 Stable module boundaries.
 
+Stable authorization vocabulary.
+
 These guarantees define the Platform identity.
 
 ---
 
-# 15. Rules
+# 16. Rules
 
 Rule PC1
 
@@ -352,6 +409,14 @@ Rule PC5
 
 Platform contracts are part of the Platform Specification.
 
+Rule PC6
+
+Authorization semantics are defined once and consumed everywhere.
+
+Rule PC7
+
+Role identity, capability authorization, and operational state remain separate concerns.
+
 ---
 
 # Summary
@@ -371,3 +436,7 @@ They ensure long-term stability,
 replaceability,
 
 and predictable evolution.
+
+The permission and capability model is governed by
+
+`590_PERMISSION_CAPABILITY_CONTRACT.md`.

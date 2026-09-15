@@ -1,0 +1,134 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+from centermanager.models.permission import PermissionDefinitions
+from centermanager.models.role import RoleDefinitions
+from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
+from centermanager.ui.employee_workspace.employee_workspace_capabilities import (
+    EmployeeWorkspaceCapabilities,
+)
+
+
+ROOT = Path(__file__).resolve().parent.parent
+SERVICE = ROOT / "src" / "centermanager" / "services" / "employee_service.py"
+
+
+class FakePermissionService:
+    def __init__(self, permissions=()):
+        self.permissions = set(permissions)
+
+    def has_permission(self, permission_name, user=None):
+        return permission_name in self.permissions
+
+    def has_any_permission(self, permission_names, user=None):
+        return bool(self.permissions.intersection(permission_names))
+
+    def is_admin(self, user=None):
+        return bool(user and user.role and user.role.name == RoleDefinitions.ADMIN)
+
+
+def user(role=RoleDefinitions.TEACHER, permissions=()):
+    return SimpleNamespace(
+        role=SimpleNamespace(name=role),
+        permissions=set(permissions),
+    )
+
+
+def test_view_self_never_grants_update_self():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({PermissionDefinitions.EMPLOYEE_VIEW_SELF}), user()
+    )
+    assert caps.employee_profile_self
+    assert not caps.employee_update_self
+    assert not caps.can_edit_profile(True)
+
+
+def test_update_self_is_explicit():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({
+            PermissionDefinitions.EMPLOYEE_VIEW_SELF,
+            PermissionDefinitions.EMPLOYEE_UPDATE_SELF,
+        }),
+        user(),
+    )
+    assert caps.can_edit_profile(True)
+    assert not caps.can_edit_profile(False)
+
+
+def test_update_all_is_independent_from_view_all():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({PermissionDefinitions.EMPLOYEE_VIEW_ALL}), user()
+    )
+    assert caps.employee_view_all
+    assert not caps.employee_update_all
+    assert not caps.can_edit_profile(False)
+
+
+def test_working_time_read_does_not_grant_write():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({PermissionDefinitions.WORKING_TIME_VIEW_SELF}), user()
+    )
+    assert caps.attendance_self
+    assert not caps.attendance_create_self
+    assert not caps.attendance_manage
+
+
+def test_schedule_read_does_not_grant_manage():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({
+            PermissionDefinitions.SCHEDULE_VIEW_SELF,
+            PermissionDefinitions.SCHEDULE_VIEW_ALL,
+        }),
+        user(),
+    )
+    assert caps.schedule_self
+    assert caps.schedule_all
+    assert not caps.schedule_manage
+
+
+def test_registration_review_does_not_grant_manage():
+    caps = EmployeeWorkspaceCapabilities.resolve(
+        FakePermissionService({PermissionDefinitions.WORK_REGISTRATION_VIEW_ALL}), user()
+    )
+    assert caps.registration_all
+    assert not caps.registration_manage
+
+
+def test_capability_policy_accepts_lightweight_principal():
+    principal = SimpleNamespace(
+        role=SimpleNamespace(name=RoleDefinitions.TEACHER),
+        permissions={PermissionDefinitions.EMPLOYEE_UPDATE_SELF},
+    )
+    assert EmployeeCapabilityPolicy.has(
+        principal, PermissionDefinitions.EMPLOYEE_UPDATE_SELF
+    )
+    assert not EmployeeCapabilityPolicy.has(
+        principal, PermissionDefinitions.EMPLOYEE_VIEW_ALL
+    )
+
+
+def test_admin_only_implicit_capability_grant():
+    manager = user(RoleDefinitions.MANAGER)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_CREATE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_UPDATE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.EMPLOYEE_ARCHIVE)
+    assert not EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)
+
+
+def test_schedule_view_all_does_not_grant_schedule_manage():
+    principal = user(
+        RoleDefinitions.TEACHER,
+        permissions={PermissionDefinitions.SCHEDULE_VIEW_ALL},
+    )
+    assert EmployeeCapabilityPolicy.has(principal, PermissionDefinitions.SCHEDULE_VIEW_ALL)
+    assert not EmployeeCapabilityPolicy.has(principal, PermissionDefinitions.SCHEDULE_MANAGE)
+
+
+def test_manager_schedule_manage_requires_explicit_permission():
+    manager = user(
+        RoleDefinitions.MANAGER,
+        permissions={PermissionDefinitions.SCHEDULE_VIEW_ALL},
+    )
+    assert not EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)
+    manager.permissions.add(PermissionDefinitions.SCHEDULE_MANAGE)
+    assert EmployeeCapabilityPolicy.has(manager, PermissionDefinitions.SCHEDULE_MANAGE)

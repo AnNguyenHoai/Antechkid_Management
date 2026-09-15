@@ -28,6 +28,14 @@ class ClassRepository(BaseRepository[Class]):
             Class.deleted_at.is_(None)
         ).order_by(Class.name).all()
 
+    def list_archived(self) -> List[Class]:
+        return self._session.query(Class).options(
+            joinedload(Class.teachers),
+            joinedload(Class.enrollments)
+        ).filter(
+            Class.deleted_at.is_not(None)
+        ).order_by(Class.name).all()
+
     def list_all(self) -> List[Class]:
         return self._session.query(Class).options(
             joinedload(Class.teachers),

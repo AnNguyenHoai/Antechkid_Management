@@ -89,9 +89,9 @@ class TeacherDashboardPage(QWidget):
             teachers = self._teacher_service.list_teachers()
             total = len(teachers)
             active = sum(1 for t in teachers if t.status == "ACTIVE")
-            total_assignments = 0
-            for t in teachers:
-                total_assignments += len(self._assignment_service.get_assigned_classes(t.id))
+            # TeacherService returns teachers with assigned_classes eagerly available.
+            # Avoid one assignment-service query per teacher on every dashboard refresh.
+            total_assignments = sum(len(t.assigned_classes) for t in teachers)
 
             self.stats_grid.set_metrics([
                 {"icon": "👨‍🏫", "label": "Total Teachers", "value": str(total)},
@@ -112,20 +112,7 @@ class TeacherDashboardPage(QWidget):
     def _refresh_recent_activities(self) -> None:
         self.recent_list.clear()
         try:
-            teachers = self._teacher_service.list_teachers()
-            all_events = []
-            for t in teachers:
-                events = self._timeline_service.get_teacher_timeline(t.id, limit=5)
-                for ev in events:
-                    all_events.append({
-                        'time': ev.created_at,
-                        'title': ev.title,
-                        'description': ev.description or '',
-                        'teacher_name': t.full_name,
-                        'event_type': ev.event_type
-                    })
-            all_events.sort(key=lambda x: x['time'], reverse=True)
-            recent = all_events[:10]
+            recent = self._timeline_service.get_recent_events(limit=10)
 
             if recent:
                 for ev in recent:
@@ -139,13 +126,14 @@ class TeacherDashboardPage(QWidget):
                         "DocumentUploaded": "📎",
                         "DocumentDeleted": "🗑️",
                     }
-                    icon = icon_map.get(ev['event_type'], "📌")
-                    subtitle = f"Teacher: {ev['teacher_name']}"
+                    icon = icon_map.get(ev.event_type, "📌")
+                    teacher_name = ev.teacher.full_name if ev.teacher is not None else f"Teacher #{ev.teacher_id}"
+                    subtitle = f"Teacher: {teacher_name}"
                     card = ActivityCard(
                         icon=icon,
-                        title=ev['title'],
+                        title=ev.title,
                         subtitle=subtitle,
-                        time=ev['time']
+                        time=ev.created_at
                     )
                     list_item = QListWidgetItem()
                     list_item.setSizeHint(card.sizeHint())

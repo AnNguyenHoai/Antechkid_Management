@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 IncomeService - business logic for Income entity.
-Now supports income without student/class.
+Now supports income without student/class and canonical Finance period allocation.
 """
 from datetime import date, datetime
 from typing import Optional, List, Tuple
@@ -9,15 +9,17 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.income import Income
+from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.income_repository import IncomeRepository
-from centermanager.repositories.enrollment_repository import EnrollmentRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
+from centermanager.events.event_bus import EventBus
+from centermanager.events.finance_events import FinanceDataChanged
 
 
 class IncomeServiceError(Exception):
@@ -40,12 +42,20 @@ class IncomeService:
         class_service: ClassService,
         timeline_service: TimelineService,
         permission_service: PermissionService,
+        repository_provider: Optional[RepositoryProvider] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._session_factory = session_factory
         self._student_service = student_service
         self._class_service = class_service
         self._timeline_service = timeline_service
         self._permission_service = permission_service
+        self._repository_provider = repository_provider or create_default_repository_provider()
+        self._event_bus = event_bus
+
+    def _publish_finance_change(self, action: str, income_id: int) -> None:
+        if self._event_bus is not None:
+            self._event_bus.publish(FinanceDataChanged(entity="income", action=action, entity_id=income_id))
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -57,6 +67,16 @@ class IncomeService:
         if amount <= 0:
             raise IncomeValidationError("Amount must be greater than 0.")
         return amount
+
+    def _validate_income_ownership(self, income_type, student_id, class_id):
+        if income_type == "Tuition":
+            if student_id is None or class_id is None:
+                raise IncomeValidationError("Tuition requires both student and class.")
+        elif income_type == "Other":
+            if student_id is not None or class_id is not None:
+                raise IncomeValidationError("Other income must not be student linked.")
+        elif (student_id is None) != (class_id is None):
+            raise IncomeValidationError("Student-linked income requires both student and class.")
 
     def _validate_income_type(self, income_type: str) -> str:
         valid = ["Tuition", "Book", "Robot Kit", "Material", "Other"]
@@ -72,8 +92,22 @@ class IncomeService:
 
     def _check_student_enrolled(self, student_id: int, class_id: int) -> bool:
         with self._session_factory() as session:
-            repo = EnrollmentRepository(session)
+            repo = self._repository_provider.enrollments(session)
             return repo.exists(student_id, class_id)
+
+    def _resolve_finance_period_start(self, session, payment_date: date) -> date:
+        """Resolve the canonical period bucket for a payment date."""
+        config = self._repository_provider.finance_periods(session).get_active(payment_date)
+        if config is None:
+            raise IncomeValidationError(
+                f"No active Finance period configuration covers payment date {payment_date.isoformat()}."
+            )
+        period_start, _ = FinancePeriodDefinition.period_for_date(
+            config.effective_from,
+            payment_date,
+            config.duration_months,
+        )
+        return period_start
 
     @require_permission("finance.income.create")
     def create_income(
@@ -88,32 +122,29 @@ class IncomeService:
         received_by: Optional[str] = None,
         note: Optional[str] = None,
     ) -> Income:
-        """
-        Create an income record. If student_id and class_id are None, treat as other income source.
-        """
-        # Validate fields
+        """Create an income record and allocate it to the canonical Finance period."""
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
         payment_method = self._validate_payment_method(payment_method)
+        self._validate_income_ownership(income_type, student_id, class_id)
         if payment_date is None:
             raise IncomeValidationError("Payment date is required.")
         payment_period = self._normalize_text(payment_period)
         received_by = self._normalize_text(received_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
 
-        # Validate student/class if provided
         if student_id is not None:
-            self._student_service.get_student(student_id)  # raises if not found
+            self._student_service.get_student(student_id)
         if class_id is not None:
-            self._class_service.get_class(class_id)  # raises if not found
+            self._class_service.get_class(class_id)
 
-        # If both student and class are provided, check enrollment
         if student_id is not None and class_id is not None:
             if not self._check_student_enrolled(student_id, class_id):
                 raise IncomeValidationError("Student is not enrolled in the selected class.")
 
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
+            finance_period_start = self._resolve_finance_period_start(session, payment_date)
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -122,21 +153,21 @@ class IncomeService:
                 payment_method=payment_method,
                 payment_date=payment_date,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 received_by=received_by,
                 note=note,
             )
             repo.add(income)
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
-            # Log timeline if student exists
             if student_id is not None:
                 class_name = self._class_service.get_class(class_id).name if class_id else "N/A"
                 self._timeline_service.log_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_CREATED,
                     title=f"Income Created: {income_type}",
-                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {payment_period or 'N/A'}",
+                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {finance_period_start.isoformat()}",
                     metadata={
                         "income_id": income.id,
                         "class_id": class_id,
@@ -144,18 +175,16 @@ class IncomeService:
                         "income_type": income_type,
                         "payment_method": payment_method,
                         "payment_period": payment_period,
+                        "finance_period_start": finance_period_start.isoformat(),
                     }
                 )
-            else:
-                # Optionally log to system timeline if you have one
-                pass
-
+            self._publish_finance_change("created", income.id)
             return income
 
     @require_permission("finance.view")
     def get_income(self, income_id: int) -> Income:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id(income_id)
             if income is None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found.")
@@ -174,16 +203,18 @@ class IncomeService:
         search_text: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
+        finance_period_start: Optional[date] = None,
     ) -> Tuple[List[Income], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             items = repo.list_active(
                 student_id=student_id,
                 class_id=class_id,
                 income_type=income_type,
                 payment_method=payment_method,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 date_from=date_from,
                 date_to=date_to,
                 search_text=search_text,
@@ -196,6 +227,7 @@ class IncomeService:
                 income_type=income_type,
                 payment_method=payment_method,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 date_from=date_from,
                 date_to=date_to,
                 search_text=search_text,
@@ -211,9 +243,10 @@ class IncomeService:
         payment_date: Optional[date] = None,
         payment_period: Optional[str] = None,
         note: Optional[str] = None,
+        received_by: Optional[str] = None,
     ) -> Income:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
@@ -233,6 +266,14 @@ class IncomeService:
                 if income.payment_date != payment_date:
                     changed.append(f"payment_date: {income.payment_date} -> {payment_date}")
                 income.payment_date = payment_date
+
+            new_finance_period_start = self._resolve_finance_period_start(session, income.payment_date)
+            if income.finance_period_start != new_finance_period_start:
+                changed.append(
+                    f"finance_period_start: {income.finance_period_start} -> {new_finance_period_start}"
+                )
+                income.finance_period_start = new_finance_period_start
+
             if payment_period is not None:
                 new_period = self._normalize_text(payment_period)
                 old_period = income.payment_period or "(none)"
@@ -240,6 +281,11 @@ class IncomeService:
                 if old_period != new_str:
                     changed.append(f"payment_period: {old_period} -> {new_str}")
                 income.payment_period = new_period
+            if received_by is not None:
+                new_received_by = self._normalize_text(received_by) or "System"
+                if income.received_by != new_received_by:
+                    changed.append(f"received_by: {income.received_by} -> {new_received_by}")
+                income.received_by = new_received_by
             if note is not None:
                 note = self._normalize_text(note)
                 old_note = income.note or "(none)"
@@ -252,9 +298,8 @@ class IncomeService:
                 return income
 
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
-            # Log timeline if student exists
             if income.student_id is not None:
                 self._timeline_service.log_event(
                     student_id=income.student_id,
@@ -263,22 +308,21 @@ class IncomeService:
                     description="Updated: " + "; ".join(changed),
                     metadata={"income_id": income.id, "changes": changed}
                 )
+            self._publish_finance_change("updated", income.id)
             return income
 
     @require_permission("finance.income.delete")
     def delete_income(self, income_id: int) -> None:
         with self._session_factory() as session:
-            repo = IncomeRepository(session)
+            repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or already deleted.")
 
             student_id = income.student_id
-            # Soft delete
             income.deleted_at = datetime.now()
             session.commit()
 
-            # Log timeline if student exists
             if student_id is not None:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -287,3 +331,4 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
+            self._publish_finance_change("deleted", income_id)

@@ -226,7 +226,7 @@ class StudentDashboardPage(QWidget):
             self.insights_grid.set_metrics([
                 {"icon": "📊", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5"},
                 {"icon": "🎂", "label": "Avg Age", "value": str(insights.avg_age)},
-                {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.assessment_completion_rate}%"},
+                {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.parent_coverage_rate}%"},
             ], columns=3)
         except Exception as e:
             logger.exception("Failed to load insights")

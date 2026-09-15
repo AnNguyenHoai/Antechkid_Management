@@ -1,9 +1,4 @@
-# src/centermanager/ui/teacher_workspace/teacher_workspace_shell.py
 # -*- coding: utf-8 -*-
-"""
-TeacherWorkspaceShell - main shell for Teacher Workspace.
-Now forwards class_clicked signal to parent.
-"""
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -19,9 +14,14 @@ from centermanager.ui.teacher_workspace.teacher_detail_page import TeacherDetail
 from centermanager.ui.teacher_workspace.teacher_dashboard_page import TeacherDashboardPage
 
 
+class _NullNotificationService:
+    def notify(self, *args, **kwargs) -> None:
+        return None
+
+
 class TeacherWorkspaceShell(QWidget):
     go_home = Signal()
-    navigate_to_class = Signal(int)  # <-- thêm signal để điều hướng đến class
+    navigate_to_class = Signal(int)
 
     def __init__(
         self,
@@ -29,6 +29,8 @@ class TeacherWorkspaceShell(QWidget):
         assignment_service,
         document_service,
         timeline_service,
+        platform_context=None,          # <-- THÊM
+        collaboration_manager=None,     # <-- THÊM
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -36,11 +38,13 @@ class TeacherWorkspaceShell(QWidget):
         self._assignment_service = assignment_service
         self._document_service = document_service
         self._timeline_service = timeline_service
+        self._platform_context = platform_context
+        self._collaboration_manager = collaboration_manager
 
         self._current_teacher_id: Optional[int] = None
+        self._notification_service = _NullNotificationService()
 
         self._setup_ui()
-        self._connect_signals()
         self.navigate_to("dashboard")
 
     def _setup_ui(self) -> None:
@@ -81,8 +85,11 @@ class TeacherWorkspaceShell(QWidget):
             self._assignment_service,
             self._document_service,
             self._timeline_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.list_page.teacher_selected.connect(self._on_teacher_selected)
+        self.list_page.teacher_changed.connect(self._on_teacher_changed)
         self.content_stack.addWidget(self.list_page)
 
         # Teacher Detail
@@ -91,18 +98,16 @@ class TeacherWorkspaceShell(QWidget):
             self._assignment_service,
             self._document_service,
             self._timeline_service,
+            self._collaboration_manager,
+            self._notification_service,
         )
         self.detail_page.back_clicked.connect(self._on_back_from_detail)
         self.detail_page.teacher_updated.connect(self._on_teacher_updated)
-        self.detail_page.class_clicked.connect(self.navigate_to_class.emit)  # <-- forward signal
+        self.detail_page.class_clicked.connect(self.navigate_to_class.emit)
         self.content_stack.addWidget(self.detail_page)
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
-
-    def _connect_signals(self) -> None:
-        self.nav.page_selected.connect(self.navigate_to)
-        self.header.back_home_clicked.connect(self.go_home.emit)
 
     def navigate_to(self, page_id: str) -> None:
         if page_id == "dashboard":
@@ -128,4 +133,27 @@ class TeacherWorkspaceShell(QWidget):
         self.list_page.refresh()
 
     def _on_teacher_updated(self) -> None:
+        self._refresh_teacher_views()
+
+    def _on_teacher_changed(self) -> None:
+        self._refresh_teacher_views()
+
+    def _refresh_teacher_views(self) -> None:
+        # Mutations may originate from the list or detail page. Keep all
+        # dependent read models synchronized without changing navigation.
         self.list_page.refresh()
+        self.dashboard_page.refresh()
+
+        # If the detail page is currently visible, reload the same aggregate
+        # so edits, assignments and documents cannot leave stale detail data.
+        if (
+            self._current_teacher_id is not None
+            and self.content_stack.currentWidget() is self.detail_page
+        ):
+            self.detail_page.load_teacher(self._current_teacher_id)
+
+    def set_write_enabled(self, enabled: bool) -> None:
+        if hasattr(self.list_page, 'set_write_enabled'):
+            self.list_page.set_write_enabled(enabled)
+        if hasattr(self.detail_page, 'set_write_enabled'):
+            self.detail_page.set_write_enabled(enabled)
