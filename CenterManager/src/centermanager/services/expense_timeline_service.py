@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
-from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 
 
 class ExpenseTimelineService:
@@ -21,7 +21,7 @@ class ExpenseTimelineService:
         repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
-        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def log_event(
         self,
@@ -45,5 +45,5 @@ class ExpenseTimelineService:
             repo = self._repository_provider.expense_timeline(session)
             repo.add(event)
             session.commit()
-            session.refresh(event)
+            repo.refresh(event)
             return event
