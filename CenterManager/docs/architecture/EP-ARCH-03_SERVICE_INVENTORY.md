@@ -35,6 +35,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `expense_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `expense_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `finance_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
+| `finance_period_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `git_config_service.py` | NON_REPOSITORY | — | — | — | encrypted filesystem config | — |
 | `home_dashboard_service.py` | PASS | — | — | — | — | — |
 | `income_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
@@ -112,6 +113,10 @@ Batch D migrates the Student filtering and highlight application services behind
 - `student_highlight_service.py` — **StudentHighlightService**: uses `RepositoryProvider.student_highlights(...)`; repository owns highlight query/add/delete/refresh operations while validation, transaction coordination, and event publishing remain service-owned.
 
 Both services are `PASS` and are not migration backlog. Database persistence/query behavior is repository-owned.
+
+## EP-FIN-01 FinancePeriodService
+- `finance_period_service.py` — **FinancePeriodService**: uses `RepositoryProvider.finance_periods(...)`; period persistence/query operations remain repository-owned while Admin authorization and period business rules remain service-owned.
+- The service is classified as `PASS` and is not migration backlog.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.

@@ -1,13 +1,17 @@
 """Finance period domain foundation.
 
-Revision ID: 1e10a009
-Revises: 1e10a008
+Revision ID: 1e10a018
+Revises: 1e10a017
+
+EP-FIN-01. The finance-period revision must remain on the single Alembic
+migration chain; 1e10a009 is already occupied by the employee work-registration
+business-model migration.
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "1e10a009"
-down_revision = "1e10a008"
+revision = "1e10a018"
+down_revision = "1e10a017"
 branch_labels = None
 depends_on = None
 
@@ -45,9 +49,6 @@ def upgrade():
             {"name": name, "description": description},
         )
 
-    # Only finance.view-style read access is persisted as a role grant here.
-    # finance.period.manage remains an explicit Admin-only authorization policy
-    # in the capability layer and is intentionally not granted through roles.
     permission_id = bind.execute(
         sa.text("SELECT id FROM permissions WHERE name = 'finance.period.view'")
     ).scalar()
@@ -70,8 +71,7 @@ def upgrade():
 
 def downgrade():
     bind = op.get_bind()
-    period_permission_names = ("finance.period.view", "finance.period.manage")
-    for name in period_permission_names:
+    for name in ("finance.period.view", "finance.period.manage"):
         permission_id = bind.execute(
             sa.text("SELECT id FROM permissions WHERE name = :name"),
             {"name": name},
