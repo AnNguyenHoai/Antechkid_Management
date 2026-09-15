@@ -54,7 +54,7 @@ class TeacherTimelineService:
             repo = self._repository_provider.teacher_timeline(session)
             repo.add(event)
             session.commit()
-            session.refresh(event)
+            repo.refresh(event)
             return event
 
     def get_teacher_timeline(self, teacher_id: int, limit: Optional[int] = None) -> List[TeacherTimelineEvent]:

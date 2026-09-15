@@ -57,10 +57,10 @@ The strict provider gate remains authoritative for every service that declares `
 | `student_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_summary_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `system_operations_service.py` | NON_REPOSITORY | — | — | — | platform/filesystem health checks | — |
-| `teacher_assignment_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
-| `teacher_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
-| `teacher_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
-| `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
+| `teacher_assignment_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `teacher_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `teacher_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `teacher_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 
 ## EP-ARCH-03.35 Batch A
@@ -139,6 +139,14 @@ Both services are `PASS` and are not migration backlog. Database persistence/que
 `FinanceDashboardService` is a read-only application-level aggregation/orchestration service. It does not own a database session, construct repositories, execute SQLAlchemy queries, or perform persistence. It composes the already provider-backed `IncomeService`, `ExpenseService`, and `OutstandingService` APIs. Therefore it is explicitly classified as `NON_REPOSITORY`, not `PASS` or `LEGACY`.
 
 This classification closes the EP-ARCH-03.38 Finance Dashboard audit without introducing a redundant repository layer or duplicating finance query logic in the dashboard service.
+
+## EP-ARCH-03.39 Teacher services repository boundary
+- `teacher_service.py` — **TeacherService** uses `RepositoryProvider.teachers(...)`; teacher CRUD, search, archive/restore, and relation reads remain repository-backed while validation, transaction coordination, timeline orchestration, and event publishing remain service-owned.
+- `teacher_assignment_service.py` — **TeacherAssignmentService** uses `RepositoryProvider.teacher_assignments(...)`, `teachers(...)`, and `classes(...)`; assignment persistence and lookup remain repository-owned while validation, transaction coordination, timeline orchestration, and event publishing remain service-owned.
+- `teacher_document_service.py` — **TeacherDocumentService** uses `RepositoryProvider.teacher_documents(...)` and `teachers(...)`; database persistence/query operations remain repository-owned while attachment filesystem operations and compensation/cleanup remain service-owned.
+- `teacher_timeline_service.py` — **TeacherTimelineService** uses `RepositoryProvider.teacher_timeline(...)`; timeline persistence/query/refresh operations remain repository-owned while event construction/serialization remains service-owned.
+
+All four Teacher services are promoted to `PASS`. No concrete repository construction or direct session persistence/query operation remains in the application-service layer.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
