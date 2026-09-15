@@ -23,7 +23,7 @@ class Income(Base, TimestampMixin):
     __tablename__ = "incomes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    
+
     # For student-related income: student_id and class_id can be NULL for other income sources
     student_id: Mapped[Optional[int]] = mapped_column(ForeignKey("students.id"), nullable=True)
     class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
@@ -33,6 +33,10 @@ class Income(Base, TimestampMixin):
     payment_method: Mapped[str] = mapped_column(String(50), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
     payment_period: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Canonical Finance period bucket derived from payment_date and the active
+    # FinancePeriod configuration effective on that date. Legacy payment_period
+    # remains as display/user-entered metadata for compatibility.
+    finance_period_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     received_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

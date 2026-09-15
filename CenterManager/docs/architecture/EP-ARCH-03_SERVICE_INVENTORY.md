@@ -38,7 +38,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `finance_period_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `git_config_service.py` | NON_REPOSITORY | — | — | — | encrypted filesystem config | — |
 | `home_dashboard_service.py` | PASS | — | — | — | — | — |
-| `income_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
+| `income_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `outstanding_service.py` | PASS | — | — | — | repository-owned | — |
 | `parent_service.py` | PASS | — | — | — | — | — |
 | `permission_service.py` | PASS | — | — | — | — | — |
@@ -117,6 +117,12 @@ Both services are `PASS` and are not migration backlog. Database persistence/que
 ## EP-FIN-01 FinancePeriodService
 - `finance_period_service.py` — **FinancePeriodService**: uses `RepositoryProvider.finance_periods(...)`; period persistence/query operations remain repository-owned while Admin authorization and period business rules remain service-owned.
 - The service is classified as `PASS` and is not migration backlog.
+
+## EP-FIN-02 Period-aware Income & Outstanding
+- `income_service.py` — **IncomeService** is now provider-backed through `RepositoryProvider.incomes(...)` and allocates every newly created/updated income to the canonical Finance period bucket derived from its payment date.
+- `outstanding_service.py` — **OutstandingService** resolves the configured Finance period, filters enrollments by period/class/course/student, and calculates Tuition paid only within that period.
+- `IncomeRepository` owns period-aware income filtering; `EnrollmentRepository` owns period/course/student filtering.
+- Outstanding statuses are explicitly `Not Yet`, `Partial`, `Paid`, `Overpaid`, or `No Tuition Configured`.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.

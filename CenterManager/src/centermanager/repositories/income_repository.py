@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import date, datetime
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import desc, or_
 
 from centermanager.models.income import Income
 from centermanager.repositories.base import BaseRepository
@@ -18,6 +18,10 @@ class IncomeRepository(BaseRepository[Income]):
 
     def add(self, income: Income) -> Income:
         self._session.add(income)
+        return income
+
+    def refresh(self, income: Income) -> Income:
+        self._session.refresh(income)
         return income
 
     def get_by_id(self, income_id: int) -> Optional[Income]:
@@ -44,6 +48,7 @@ class IncomeRepository(BaseRepository[Income]):
         search_text: Optional[str] = None,
         offset: int = 0,
         limit: int = 20,
+        finance_period_start: Optional[date] = None,
     ) -> List[Income]:
         query = self._session.query(Income).options(
             joinedload(Income.student),
@@ -60,6 +65,8 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.payment_method == payment_method)
         if payment_period:
             query = query.filter(Income.payment_period == payment_period)
+        if finance_period_start:
+            query = query.filter(Income.finance_period_start == finance_period_start)
         if date_from:
             query = query.filter(Income.payment_date >= date_from)
         if date_to:
@@ -89,6 +96,7 @@ class IncomeRepository(BaseRepository[Income]):
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
     ) -> int:
         query = self._session.query(Income).filter(Income.deleted_at.is_(None))
         if student_id is not None:
@@ -101,6 +109,8 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.payment_method == payment_method)
         if payment_period:
             query = query.filter(Income.payment_period == payment_period)
+        if finance_period_start:
+            query = query.filter(Income.finance_period_start == finance_period_start)
         if date_from:
             query = query.filter(Income.payment_date >= date_from)
         if date_to:

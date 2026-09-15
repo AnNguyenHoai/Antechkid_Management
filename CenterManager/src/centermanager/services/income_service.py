@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 IncomeService - business logic for Income entity.
-Now supports income without student/class.
+Now supports income without student/class and canonical Finance period allocation.
 """
 from datetime import date, datetime
 from typing import Optional, List, Tuple
@@ -9,8 +9,9 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.income import Income
+from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.timeline_service import TimelineService
@@ -46,7 +47,7 @@ class IncomeService:
         self._class_service = class_service
         self._timeline_service = timeline_service
         self._permission_service = permission_service
-        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -86,6 +87,20 @@ class IncomeService:
             repo = self._repository_provider.enrollments(session)
             return repo.exists(student_id, class_id)
 
+    def _resolve_finance_period_start(self, session, payment_date: date) -> date:
+        """Resolve the canonical period bucket for a payment date."""
+        config = self._repository_provider.finance_periods(session).get_active(payment_date)
+        if config is None:
+            raise IncomeValidationError(
+                f"No active Finance period configuration covers payment date {payment_date.isoformat()}."
+            )
+        period_start, _ = FinancePeriodDefinition.period_for_date(
+            config.effective_from,
+            payment_date,
+            config.duration_months,
+        )
+        return period_start
+
     @require_permission("finance.income.create")
     def create_income(
         self,
@@ -99,12 +114,11 @@ class IncomeService:
         received_by: Optional[str] = None,
         note: Optional[str] = None,
     ) -> Income:
-        """
-        Create an income record. If student_id and class_id are None, treat as other income source.
-        """
+        """Create an income record and allocate it to the canonical Finance period."""
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
         payment_method = self._validate_payment_method(payment_method)
+        self._validate_income_ownership(income_type, student_id, class_id)
         if payment_date is None:
             raise IncomeValidationError("Payment date is required.")
         payment_period = self._normalize_text(payment_period)
@@ -122,6 +136,7 @@ class IncomeService:
 
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
+            finance_period_start = self._resolve_finance_period_start(session, payment_date)
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -130,12 +145,13 @@ class IncomeService:
                 payment_method=payment_method,
                 payment_date=payment_date,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 received_by=received_by,
                 note=note,
             )
             repo.add(income)
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
             if student_id is not None:
                 class_name = self._class_service.get_class(class_id).name if class_id else "N/A"
@@ -143,7 +159,7 @@ class IncomeService:
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_CREATED,
                     title=f"Income Created: {income_type}",
-                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {payment_period or 'N/A'}",
+                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {finance_period_start.isoformat()}",
                     metadata={
                         "income_id": income.id,
                         "class_id": class_id,
@@ -151,11 +167,9 @@ class IncomeService:
                         "income_type": income_type,
                         "payment_method": payment_method,
                         "payment_period": payment_period,
+                        "finance_period_start": finance_period_start.isoformat(),
                     }
                 )
-            else:
-                pass
-
             return income
 
     @require_permission("finance.view")
@@ -180,6 +194,7 @@ class IncomeService:
         search_text: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
+        finance_period_start: Optional[date] = None,
     ) -> Tuple[List[Income], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
@@ -190,6 +205,7 @@ class IncomeService:
                 income_type=income_type,
                 payment_method=payment_method,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 date_from=date_from,
                 date_to=date_to,
                 search_text=search_text,
@@ -202,6 +218,7 @@ class IncomeService:
                 income_type=income_type,
                 payment_method=payment_method,
                 payment_period=payment_period,
+                finance_period_start=finance_period_start,
                 date_from=date_from,
                 date_to=date_to,
                 search_text=search_text,
@@ -239,6 +256,14 @@ class IncomeService:
                 if income.payment_date != payment_date:
                     changed.append(f"payment_date: {income.payment_date} -> {payment_date}")
                 income.payment_date = payment_date
+
+            new_finance_period_start = self._resolve_finance_period_start(session, income.payment_date)
+            if income.finance_period_start != new_finance_period_start:
+                changed.append(
+                    f"finance_period_start: {income.finance_period_start} -> {new_finance_period_start}"
+                )
+                income.finance_period_start = new_finance_period_start
+
             if payment_period is not None:
                 new_period = self._normalize_text(payment_period)
                 old_period = income.payment_period or "(none)"
@@ -258,7 +283,7 @@ class IncomeService:
                 return income
 
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
             if income.student_id is not None:
                 self._timeline_service.log_event(
@@ -290,11 +315,3 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
-
-# update lifecycle: income.received_by = new_received_by
-
-
-# Regression contracts retained for Finance workflow:
-# "created", income.id
-# "updated", income.id
-# "deleted", income_id
