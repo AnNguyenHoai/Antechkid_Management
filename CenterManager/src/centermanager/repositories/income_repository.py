@@ -20,6 +20,10 @@ class IncomeRepository(BaseRepository[Income]):
         self._session.add(income)
         return income
 
+    def refresh(self, income: Income) -> Income:
+        self._session.refresh(income)
+        return income
+
     def get_by_id(self, income_id: int) -> Optional[Income]:
         return self._session.query(Income).options(
             joinedload(Income.student),
