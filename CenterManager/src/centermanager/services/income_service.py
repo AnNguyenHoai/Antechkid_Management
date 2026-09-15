@@ -275,7 +275,7 @@ class IncomeService:
                 note = self._normalize_text(note)
                 old_note = income.note or "(none)"
                 new_note = note or "(none)"
-                if old_note != new_str:
+                if old_note != new_note:
                     changed.append(f"note: {old_note} -> {new_note}")
                 income.note = note
 
