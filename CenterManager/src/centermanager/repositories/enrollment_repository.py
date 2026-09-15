@@ -53,13 +53,13 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
     def list_for_outstanding(
         self,
         class_id: Optional[int] = None,
+        search_text: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100,
         course_name: Optional[str] = None,
         student_id: Optional[int] = None,
         period_start=None,
         period_end=None,
-        search_text: Optional[str] = None,
-        offset: int = 0,
-        limit: int = 100,
     ) -> Tuple[List[Enrollment], int]:
         """List enrollments used by the Finance outstanding read model."""
         query = self._session.query(Enrollment).join(Enrollment.student).filter(
