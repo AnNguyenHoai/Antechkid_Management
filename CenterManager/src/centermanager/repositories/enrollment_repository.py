@@ -8,6 +8,7 @@ from sqlalchemy import desc, or_
 
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.student import Student
+from centermanager.models.class_ import Class
 from centermanager.repositories.base import BaseRepository
 
 
@@ -49,14 +50,13 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             Enrollment.student_id == student_id
         ).order_by(desc(Enrollment.created_at)).all()
 
-    def get_by_class(self, class_id: int) -> List[Enrollment]:
-        return self._session.query(Enrollment).filter(
-            Enrollment.class_id == class_id
-        ).order_by(Enrollment.id).all()
-
     def list_for_outstanding(
         self,
         class_id: Optional[int] = None,
+        course_name: Optional[str] = None,
+        student_id: Optional[int] = None,
+        period_start=None,
+        period_end=None,
         search_text: Optional[str] = None,
         offset: int = 0,
         limit: int = 100,
@@ -67,16 +67,41 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         )
         if class_id is not None:
             query = query.filter(Enrollment.class_id == class_id)
+        if course_name:
+            search_course = f"%{course_name.strip()}%"
+            query = query.join(Enrollment.class_).filter(
+                or_(
+                    Enrollment.course_name.ilike(search_course),
+                    Class.course.ilike(search_course),
+                )
+            )
+        if student_id is not None:
+            query = query.filter(Enrollment.student_id == student_id)
+        if period_start is not None:
+            query = query.filter(
+                or_(Enrollment.end_date.is_(None), Enrollment.end_date >= period_start)
+            )
+        if period_end is not None:
+            query = query.filter(
+                or_(Enrollment.start_date.is_(None), Enrollment.start_date <= period_end)
+            )
         if search_text:
             search = f"%{search_text}%"
             query = query.filter(
                 or_(
                     Student.full_name.ilike(search),
                     Student.student_code.ilike(search),
+                    Enrollment.course_name.ilike(search),
+                    Enrollment.class_name.ilike(search),
                 )
             )
         total = query.count()
         return query.offset(offset).limit(limit).all(), total
+
+    def get_by_class(self, class_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).filter(
+            Enrollment.class_id == class_id
+        ).order_by(Enrollment.id).all()
 
     def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
         from sqlalchemy.orm import joinedload
