@@ -30,9 +30,6 @@ class TeacherDocumentService:
         self._timeline_service = timeline_service
         self._event_bus = event_bus
         if repository_provider is None:
-            # The application composition root historically constructs the
-            # timeline service before this service. Reuse its already-injected
-            # repository provider rather than constructing infrastructure here.
             repository_provider = getattr(timeline_service, "_repository_provider", None)
         if repository_provider is None:
             raise ValueError("repository_provider is required")
@@ -68,7 +65,6 @@ class TeacherDocumentService:
         teacher_folder = attachment_root / teacher_code
         teacher_folder.mkdir(parents=True, exist_ok=True)
 
-        # A UUID avoids same-second collisions while preserving the original name in DB.
         safe_name = f"{uuid.uuid4().hex}_{source_path.name}"
         dest_path = teacher_folder / safe_name
         relative_path = f"teachers/{teacher_code}/{safe_name}"
@@ -87,9 +83,8 @@ class TeacherDocumentService:
                 repo = self._repository_provider.teacher_documents(session)
                 repo.add(doc)
                 session.commit()
-                session.refresh(doc)
+                repo.refresh(doc)
         except Exception:
-            # Compensate the physical side effect when DB persistence fails.
             try:
                 if dest_path.exists():
                     dest_path.unlink()
@@ -120,8 +115,6 @@ class TeacherDocumentService:
             return repo.get_by_teacher(teacher_id)
 
     def delete_document(self, document_id: int) -> None:
-        # Keep the physical file until the DB delete has committed. If the DB
-        # transaction fails, the DB record still points to a valid file.
         with self._session_factory() as session:
             repo = self._repository_provider.teacher_documents(session)
             doc = repo.get_by_id(document_id)
@@ -135,9 +128,6 @@ class TeacherDocumentService:
             repo.delete(doc)
             session.commit()
 
-        # Post-commit cleanup is intentionally best-effort. A failed physical
-        # delete cannot corrupt DB consistency; the file becomes an orphan that
-        # can be handled by runtime cleanup.
         try:
             if file_path.exists():
                 file_path.unlink()
