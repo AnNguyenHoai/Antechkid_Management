@@ -86,6 +86,7 @@ Batch G closes the false-positive legacy classification for non-database service
 - `auto_report_service.py` — **AutoReportService**: orchestrates existing services; local JSON state is filesystem-owned.
 - `backup_operations_service.py` — **BackupOperationsService**: platform orchestration.
 - `configuration_service.py` — **ConfigurationService**: configuration subsystem.
+- `finance_dashboard_service.py` — **FinanceDashboardService**: read-only application-level aggregation/orchestration over provider-backed finance services; no database session, repository construction, SQLAlchemy query, or persistence boundary.
 - `git_config_service.py` — **GitConfigService**: encrypted filesystem configuration and platform Git provider.
 - `system_operations_service.py` — **SystemOperationsService**: platform/filesystem health aggregation.
 
