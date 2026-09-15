@@ -18,6 +18,8 @@ from centermanager.services.timeline_service import TimelineService
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
+from centermanager.events.event_bus import EventBus
+from centermanager.events.finance_events import FinanceDataChanged
 
 
 class IncomeServiceError(Exception):
@@ -41,6 +43,7 @@ class IncomeService:
         timeline_service: TimelineService,
         permission_service: PermissionService,
         repository_provider: Optional[RepositoryProvider] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._session_factory = session_factory
         self._student_service = student_service
@@ -48,6 +51,11 @@ class IncomeService:
         self._timeline_service = timeline_service
         self._permission_service = permission_service
         self._repository_provider = repository_provider or create_default_repository_provider()
+        self._event_bus = event_bus
+
+    def _publish_finance_change(self, action: str, income_id: int) -> None:
+        if self._event_bus is not None:
+            self._event_bus.publish(FinanceDataChanged(entity="income", action=action, entity_id=income_id))
 
     def _normalize_text(self, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -170,6 +178,7 @@ class IncomeService:
                         "finance_period_start": finance_period_start.isoformat(),
                     }
                 )
+            self._publish_finance_change("created", income.id)
             return income
 
     @require_permission("finance.view")
@@ -234,6 +243,7 @@ class IncomeService:
         payment_date: Optional[date] = None,
         payment_period: Optional[str] = None,
         note: Optional[str] = None,
+        received_by: Optional[str] = None,
     ) -> Income:
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
@@ -271,6 +281,11 @@ class IncomeService:
                 if old_period != new_str:
                     changed.append(f"payment_period: {old_period} -> {new_str}")
                 income.payment_period = new_period
+            if received_by is not None:
+                new_received_by = self._normalize_text(received_by) or "System"
+                if income.received_by != new_received_by:
+                    changed.append(f"received_by: {income.received_by} -> {new_received_by}")
+                income.received_by = new_received_by
             if note is not None:
                 note = self._normalize_text(note)
                 old_note = income.note or "(none)"
@@ -293,6 +308,7 @@ class IncomeService:
                     description="Updated: " + "; ".join(changed),
                     metadata={"income_id": income.id, "changes": changed}
                 )
+            self._publish_finance_change("updated", income.id)
             return income
 
     @require_permission("finance.income.delete")
@@ -315,3 +331,4 @@ class IncomeService:
                     description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id}
                 )
+            self._publish_finance_change("deleted", income_id)

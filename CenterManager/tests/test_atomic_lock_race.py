@@ -51,13 +51,19 @@ def test_atomic_lock_race(seeded_remote, tmp_path):
     """
     Test that two concurrent lock acquisitions result in exactly one winner.
     Uses a real bare remote and GitSynchronizationProvider.
+
+    Both workers are released into acquire_lock at the same time and the
+    winner is not allowed to release the lock until both acquisition attempts
+    have completed. This keeps the test focused on the atomic acquisition race
+    instead of accidentally testing a sequential acquire-after-release case.
     """
     results = []
     lock = threading.Lock()
+    acquire_barrier = threading.Barrier(2)
+    release_barrier = threading.Barrier(2)
 
     def acquire_worker(worker_id: str, repo_path: Path):
         try:
-            # Clone repository for this worker
             worker_repo = repo_path / f"worker_{worker_id}"
             subprocess.run(["git", "clone", "--branch", "main", str(seeded_remote), str(worker_repo)], check=True)
             subprocess.run(["git", "config", "user.name", f"Test {worker_id}"], cwd=worker_repo, check=True)
@@ -82,23 +88,24 @@ def test_atomic_lock_race(seeded_remote, tmp_path):
                 "machine": f"machine_{worker_id}",
             }
 
+            # Ensure both workers actually contend for the same lock before
+            # either one is permitted to execute acquire_lock.
+            acquire_barrier.wait(timeout=10)
             success = provider.acquire_lock(lock_data)
             with lock:
                 results.append((worker_id, success))
 
+            # Do not let the winner release early enough for a slow loser to
+            # start a second, sequential acquisition in the same round.
+            release_barrier.wait(timeout=10)
             if success:
-                # Release after a moment
                 time.sleep(0.5)
                 provider.release_lock(f"User {worker_id}")
-            else:
-                # Check if it's waiting or failed
-                pass
 
         except Exception as e:
             with lock:
                 results.append((worker_id, f"ERROR: {e}"))
 
-    # Run multiple rounds to increase confidence
     rounds = 20
     double_write_count = 0
 
@@ -113,13 +120,12 @@ def test_atomic_lock_race(seeded_remote, tmp_path):
             t.start()
 
         for t in threads:
-            t.join(timeout=10)
+            t.join(timeout=20)
 
         successes = [r for r in results if r[1] is True]
         if len(successes) > 1:
             double_write_count += 1
 
-        # Reset results for next round
         results.clear()
 
     assert double_write_count == 0, f"Double write occurred {double_write_count} times out of {rounds} rounds"
