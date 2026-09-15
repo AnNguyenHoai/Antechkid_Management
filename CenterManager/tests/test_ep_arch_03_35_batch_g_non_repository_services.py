@@ -38,10 +38,12 @@ def test_batch_g_documents_service_boundary_reason():
 
 def test_batch_g_does_not_reclassify_database_backed_legacy_services():
     source = INVENTORY.read_text(encoding="utf-8")
-    # SessionService and TimelineService were subsequently migrated by EP-ARCH-03.37.
+    # Teacher services were subsequently migrated by EP-ARCH-03.39.
     # Keep only services that are still genuinely in the legacy backlog here.
     for service_name in (
-        "teacher_service.py",
+        "student_export_service.py",
+        "student_import_service.py",
+        "student_note_service.py",
     ):
         row = _row(source, service_name)
         assert "| LEGACY |" in row, row
@@ -53,6 +55,10 @@ def test_batch_g_does_not_reclassify_database_backed_legacy_services():
         "expense_timeline_service.py",
         "session_service.py",
         "timeline_service.py",
+        "teacher_service.py",
+        "teacher_assignment_service.py",
+        "teacher_document_service.py",
+        "teacher_timeline_service.py",
     ):
         row = _row(source, service_name)
         assert "| PASS |" in row, row
