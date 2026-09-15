@@ -58,7 +58,7 @@ class TeacherAssignmentService:
             assignment = TeacherAssignment(teacher_id=teacher_id, class_id=class_id)
             repo.add(assignment)
             session.commit()
-            session.refresh(assignment)
+            repo.refresh(assignment)
 
             self._timeline_service.log_event(
                 teacher_id=teacher_id,
