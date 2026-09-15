@@ -32,8 +32,8 @@ The strict provider gate remains authoritative for every service that declares `
 | `employee_work_registration_service.py` | PASS | — | — | — | — | — |
 | `employee_working_time_service.py` | PASS | — | — | — | — | — |
 | `enrollment_service.py` | PASS | — | — | — | repository-owned | — |
-| `expense_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
-| `expense_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
+| `expense_service.py` | PASS | — | — | — | repository-owned | — |
+| `expense_timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `finance_dashboard_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.38 |
 | `finance_period_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `git_config_service.py` | NON_REPOSITORY | — | — | — | encrypted filesystem config | — |
@@ -123,6 +123,11 @@ Both services are `PASS` and are not migration backlog. Database persistence/que
 - `outstanding_service.py` — **OutstandingService** resolves the configured Finance period, filters enrollments by period/class/course/student, and calculates Tuition paid only within that period.
 - `IncomeRepository` owns period-aware income filtering; `EnrollmentRepository` owns period/course/student filtering.
 - Outstanding statuses are explicitly `Not Yet`, `Partial`, `Paid`, `Overpaid`, or `No Tuition Configured`.
+
+## EP-ARCH-03.38 Expense repository boundary
+- `expense_service.py` — **ExpenseService** uses `RepositoryProvider.expenses(...)`; validation, authorization, transaction completion, and expense timeline orchestration remain service-owned while database persistence/query operations remain repository-owned.
+- `expense_timeline_service.py` — **ExpenseTimelineService** uses `RepositoryProvider.expense_timeline(...)`; event construction/serialization remains service-owned while database persistence and refresh are repository-owned.
+- Both services are promoted to `PASS`; no concrete repository construction or direct session persistence/query operation remains in the application-service layer.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
