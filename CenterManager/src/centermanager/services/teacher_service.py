@@ -124,7 +124,7 @@ class TeacherService:
             repo = self._repository_provider.teachers(session)
             repo.add(teacher)
             session.commit()
-            session.refresh(teacher)
+            repo.refresh(teacher)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -265,7 +265,7 @@ class TeacherService:
                 return teacher
 
             session.commit()
-            session.refresh(teacher)
+            repo.refresh(teacher)
 
             if self._timeline_service:
                 self._timeline_service.log_event(

@@ -13,9 +13,9 @@ TEACHER_SERVICES = {
 }
 
 FORBIDDEN_SESSION_OPERATIONS = (
-    ".query(", ".execute(", ".scalar(", ".scalars(", ".get(", ".add(",
-    ".add_all(", ".delete(", ".merge(", ".expunge(", ".expire(",
-    ".get_bind(", ".connection(", ".exec_driver_sql(", ".refresh(",
+    "session.query(", "session.execute(", "session.scalar(", "session.scalars(", "session.get(", "session.add(",
+    "session.add_all(", "session.delete(", "session.merge(", "session.expunge(", "session.expire(",
+    "session.get_bind(", "session.connection(", "session.exec_driver_sql(", "session.refresh(",
 )
 
 
