@@ -51,14 +51,7 @@ class OutstandingService:
             config.duration_months,
         )
 
-    def _get_total_paid(
-        self,
-        session,
-        student_id: int,
-        class_id: int,
-        period_start: date,
-        period_end: date,
-    ) -> int:
+    def _get_total_paid(self, session, student_id: int, class_id: int, period_start: date, period_end: date) -> int:
         """Calculate Tuition income paid by the student/class in one Finance period."""
         repo = self._repository_provider.incomes(session)
         incomes = repo.list_active(
@@ -110,13 +103,7 @@ class OutstandingService:
                 return None
             configured = class_obj.fee is not None and class_obj.fee > 0
             expected = int(class_obj.fee) if configured else 0
-            paid = self._get_total_paid(
-                session,
-                student_id,
-                class_id,
-                resolved_period_start,
-                resolved_period_end,
-            )
+            paid = self._get_total_paid(session, student_id, class_id, resolved_period_start, resolved_period_end)
 
             student_repo = self._repository_provider.students(session)
             student = student_repo.get_by_id(student_id)
@@ -181,12 +168,7 @@ class OutstandingService:
                     results.append(dto)
             return results, len(results)
 
-    def get_student_summary(
-        self,
-        student_id: int,
-        period_start: Optional[date] = None,
-        on_date: Optional[date] = None,
-    ) -> Optional[StudentOutstandingSummary]:
+    def get_student_summary(self, student_id: int, period_start: Optional[date] = None, on_date: Optional[date] = None) -> Optional[StudentOutstandingSummary]:
         """Get aggregated outstanding summary for a student in one Finance period."""
         with self._session_factory() as session:
             target_date = on_date or date.today()
@@ -210,16 +192,15 @@ class OutstandingService:
                 limit=10000,
             )
             details = []
-            seen_pairs = set()
+            seen_class_ids = set()
             total_expected = 0
             total_paid = 0
             has_unconfigured_tuition = False
 
             for enrollment in enrollments:
-                pair = (enrollment.student_id, enrollment.class_id)
-                if pair in seen_pairs or enrollment.class_id is None:
+                if enrollment.class_id is None or enrollment.class_id in seen_class_ids:
                     continue
-                seen_pairs.add(pair)
+                seen_class_ids.add(enrollment.class_id)
                 dto = self.get_outstanding_for_enrollment(
                     student_id,
                     enrollment.class_id,
@@ -257,17 +238,9 @@ class OutstandingService:
                 has_unconfigured_tuition=has_unconfigured_tuition,
             )
 
-    def get_outstanding_stats(
-        self,
-        period_start: Optional[date] = None,
-        on_date: Optional[date] = None,
-    ) -> Dict[str, int]:
+    def get_outstanding_stats(self, period_start: Optional[date] = None, on_date: Optional[date] = None) -> Dict[str, int]:
         """Get summary statistics for a selected Finance period."""
-        all_dtos, _ = self.get_all_outstanding(
-            period_start=period_start,
-            on_date=on_date,
-            limit=10000,
-        )
+        all_dtos, _ = self.get_all_outstanding(period_start=period_start, on_date=on_date, limit=10000)
         total_students = len(set(dto.student_id for dto in all_dtos if dto.outstanding > 0))
         total_outstanding = sum(dto.outstanding for dto in all_dtos if dto.outstanding > 0)
         total_expected = sum(dto.expected_tuition for dto in all_dtos)
