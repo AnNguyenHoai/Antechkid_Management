@@ -45,7 +45,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `report_service.py` | PASS | — | — | — | repository-owned | — |
 | `session_note_service.py` | PASS | — | — | — | — | — |
 | `session_report_service.py` | PASS | — | — | — | — | — |
-| `session_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
+| `session_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_analytics_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_dashboard_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
@@ -61,7 +61,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `teacher_document_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
 | `teacher_timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.39 |
-| `timeline_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.37 |
+| `timeline_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 
 ## EP-ARCH-03.35 Batch A
 - `assessment_service.py` — **AssessmentService**: provider-backed assessment repository boundary; persistence remains repository-owned.
@@ -123,6 +123,11 @@ Both services are `PASS` and are not migration backlog. Database persistence/que
 - `outstanding_service.py` — **OutstandingService** resolves the configured Finance period, filters enrollments by period/class/course/student, and calculates Tuition paid only within that period.
 - `IncomeRepository` owns period-aware income filtering; `EnrollmentRepository` owns period/course/student filtering.
 - Outstanding statuses are explicitly `Not Yet`, `Partial`, `Paid`, `Overpaid`, or `No Tuition Configured`.
+
+## EP-ARCH-03.37 Session/Timeline repository boundary
+- `session_service.py` — **SessionService** uses `RepositoryProvider.sessions(...)` and `RepositoryProvider.classes(...)`; validation, authorization, transaction completion, timeline orchestration, and event publishing remain service-owned while session/class persistence/query operations remain repository-owned.
+- `timeline_service.py` — **TimelineService** uses `RepositoryProvider.timeline(...)`; event construction/serialization remains service-owned while timeline persistence/query/refresh operations remain repository-owned.
+- Both services are promoted to `PASS`; no concrete repository construction or direct session persistence/query operation remains in the application-service layer.
 
 ## EP-ARCH-03.38 Expense repository boundary
 - `expense_service.py` — **ExpenseService** uses `RepositoryProvider.expenses(...)`; validation, authorization, transaction completion, and expense timeline orchestration remain service-owned while database persistence/query operations remain repository-owned.
