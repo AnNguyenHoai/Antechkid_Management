@@ -9,24 +9,25 @@ from typing import List, Optional
 
 import openpyxl
 from openpyxl.styles import Font, Alignment
+from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.paths import get_paths
 from centermanager.models.student import Student
-from centermanager.services.student_service import StudentService
+from centermanager.repositories.provider import RepositoryProvider
 
 
 class StudentExportService:
     """Service to export student list to Excel and CSV."""
 
-    def __init__(self, student_service: StudentService) -> None:
-        self._student_service = student_service
+    def __init__(self, session_factory: sessionmaker, repository_provider: RepositoryProvider) -> None:
+        self._session_factory = session_factory
+        self._repository_provider = repository_provider
 
     def export_all_active(self, file_path: Optional[Path] = None) -> Path:
-        """
-        Export all active students to Excel.
-        This is a convenience method that calls export_excel with all active students.
-        """
-        students = self._student_service.list_students()
+        """Export all active students to Excel."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            students = repo.list_active()
         return self.export_excel(students, file_path)
 
     def export_excel(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
@@ -80,10 +81,9 @@ class StudentExportService:
                 try:
                     if len(str(cell.value)) > max_len:
                         max_len = len(str(cell.value))
-                except:
+                except Exception:
                     pass
-            adjusted_width = min(max_len + 2, 30)
-            ws.column_dimensions[col_letter].width = adjusted_width
+            ws.column_dimensions[col_letter].width = min(max_len + 2, 30)
 
         wb.save(file_path)
         return file_path
