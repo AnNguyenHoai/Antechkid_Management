@@ -9,6 +9,7 @@ EXPECTED_NON_REPOSITORY = {
     "auto_report_service.py": "AutoReportService",
     "backup_operations_service.py": "BackupOperationsService",
     "configuration_service.py": "ConfigurationService",
+    "finance_dashboard_service.py": "FinanceDashboardService",
     "git_config_service.py": "GitConfigService",
     "system_operations_service.py": "SystemOperationsService",
 }
