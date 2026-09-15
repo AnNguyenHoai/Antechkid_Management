@@ -39,12 +39,12 @@ class IncomeRepository(BaseRepository[Income]):
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
-        finance_period_start: Optional[date] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
         offset: int = 0,
         limit: int = 20,
+        finance_period_start: Optional[date] = None,
     ) -> List[Income]:
         query = self._session.query(Income).options(
             joinedload(Income.student),
@@ -89,10 +89,10 @@ class IncomeRepository(BaseRepository[Income]):
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
-        finance_period_start: Optional[date] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
     ) -> int:
         query = self._session.query(Income).filter(Income.deleted_at.is_(None))
         if student_id is not None:
