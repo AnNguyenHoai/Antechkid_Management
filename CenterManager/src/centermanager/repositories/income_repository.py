@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import date, datetime
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import desc, or_
 
 from centermanager.models.income import Income
 from centermanager.repositories.base import BaseRepository
@@ -39,6 +39,7 @@ class IncomeRepository(BaseRepository[Income]):
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
@@ -60,6 +61,8 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.payment_method == payment_method)
         if payment_period:
             query = query.filter(Income.payment_period == payment_period)
+        if finance_period_start:
+            query = query.filter(Income.finance_period_start == finance_period_start)
         if date_from:
             query = query.filter(Income.payment_date >= date_from)
         if date_to:
@@ -86,6 +89,7 @@ class IncomeRepository(BaseRepository[Income]):
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
@@ -101,6 +105,8 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.payment_method == payment_method)
         if payment_period:
             query = query.filter(Income.payment_period == payment_period)
+        if finance_period_start:
+            query = query.filter(Income.finance_period_start == finance_period_start)
         if date_from:
             query = query.filter(Income.payment_date >= date_from)
         if date_to:
