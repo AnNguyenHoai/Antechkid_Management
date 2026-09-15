@@ -37,12 +37,9 @@ def test_batch_g_documents_service_boundary_reason():
 
 def test_batch_g_does_not_reclassify_database_backed_legacy_services():
     source = INVENTORY.read_text(encoding="utf-8")
-    # StudentService and IncomeService were explicitly migrated by their
-    # dedicated architecture slices and are no longer legacy. ExpenseService
-    # and ExpenseTimelineService were subsequently migrated by EP-ARCH-03.38A.
+    # SessionService and TimelineService were subsequently migrated by EP-ARCH-03.37.
     # Keep only services that are still genuinely in the legacy backlog here.
     for service_name in (
-        "session_service.py",
         "teacher_service.py",
     ):
         row = _row(source, service_name)
@@ -53,6 +50,8 @@ def test_batch_g_does_not_reclassify_database_backed_legacy_services():
         "income_service.py",
         "expense_service.py",
         "expense_timeline_service.py",
+        "session_service.py",
+        "timeline_service.py",
     ):
         row = _row(source, service_name)
         assert "| PASS |" in row, row
