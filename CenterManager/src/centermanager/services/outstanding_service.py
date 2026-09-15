@@ -192,14 +192,17 @@ class OutstandingService:
                 limit=10000,
             )
             details = []
+            seen_pairs = set()
             seen_class_ids = set()
             total_expected = 0
             total_paid = 0
             has_unconfigured_tuition = False
 
             for enrollment in enrollments:
-                if enrollment.class_id is None or enrollment.class_id in seen_class_ids:
+                enrollment_pair = (enrollment.student_id, enrollment.class_id)
+                if enrollment.class_id is None or enrollment_pair in seen_pairs or enrollment.class_id in seen_class_ids:
                     continue
+                seen_pairs.add(enrollment_pair)
                 seen_class_ids.add(enrollment.class_id)
                 dto = self.get_outstanding_for_enrollment(
                     student_id,
