@@ -87,7 +87,7 @@ class TeacherDocumentService:
                 repo = self._repository_provider.teacher_documents(session)
                 repo.add(doc)
                 session.commit()
-                session.refresh(doc)
+                repo.refresh(doc)
         except Exception:
             # Compensate the physical side effect when DB persistence fails.
             try:
