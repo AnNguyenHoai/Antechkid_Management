@@ -189,12 +189,12 @@ class IncomeService:
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
-        finance_period_start: Optional[date] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         search_text: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
+        finance_period_start: Optional[date] = None,
     ) -> Tuple[List[Income], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
@@ -275,7 +275,7 @@ class IncomeService:
                 note = self._normalize_text(note)
                 old_note = income.note or "(none)"
                 new_note = note or "(none)"
-                if old_note != new_note:
+                if old_note != new_str:
                     changed.append(f"note: {old_note} -> {new_note}")
                 income.note = note
 
