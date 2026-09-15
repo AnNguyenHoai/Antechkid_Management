@@ -32,6 +32,7 @@ from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.document_repository import DocumentRepository
 from centermanager.repositories.student_highlight_repository import StudentHighlightRepository
 from centermanager.repositories.finance_period_repository import FinancePeriodRepository
+from centermanager.repositories.timeline_repository import TimelineRepository
 
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
@@ -65,6 +66,7 @@ class RepositoryProvider(Protocol):
     def documents(self, session: Session) -> DocumentRepository: ...
     def student_highlights(self, session: Session) -> StudentHighlightRepository: ...
     def finance_periods(self, session: Session) -> FinancePeriodRepository: ...
+    def timeline(self, session: Session) -> TimelineRepository: ...
 
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
@@ -98,6 +100,7 @@ class SqlAlchemyRepositoryProvider:
     def documents(self, session: Session) -> DocumentRepository: return DocumentRepository(session)
     def student_highlights(self, session: Session) -> StudentHighlightRepository: return StudentHighlightRepository(session)
     def finance_periods(self, session: Session) -> FinancePeriodRepository: return FinancePeriodRepository(session)
+    def timeline(self, session: Session) -> TimelineRepository: return TimelineRepository(session)
 
 def create_default_repository_provider() -> RepositoryProvider:
     """Create the production provider for legacy callers during migration."""
