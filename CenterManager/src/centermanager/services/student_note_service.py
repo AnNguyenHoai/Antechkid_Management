@@ -21,10 +21,9 @@ class StudentNoteService:
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
+        if repository_provider is None:
+            raise ValueError("repository_provider is required")
         self._repository_provider = repository_provider
-        if self._repository_provider is None:
-            from centermanager.repositories.provider import SqlAlchemyRepositoryProvider
-            self._repository_provider = SqlAlchemyRepositoryProvider()
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
@@ -53,7 +52,7 @@ class StudentNoteService:
             repo = self._repository_provider.notes(session)
             repo.add(note)
             session.commit()
-            session.refresh(note)
+            repo.refresh(note)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -96,7 +95,7 @@ class StudentNoteService:
                 note.content = norm
 
             session.commit()
-            session.refresh(note)
+            repo.refresh(note)
             return note
 
     def delete_note(self, note_id: int) -> None:
