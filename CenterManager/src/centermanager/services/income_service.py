@@ -151,7 +151,7 @@ class IncomeService:
             )
             repo.add(income)
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
             if student_id is not None:
                 class_name = self._class_service.get_class(class_id).name if class_id else "N/A"
@@ -283,7 +283,7 @@ class IncomeService:
                 return income
 
             session.commit()
-            session.refresh(income)
+            repo.refresh(income)
 
             if income.student_id is not None:
                 self._timeline_service.log_event(
