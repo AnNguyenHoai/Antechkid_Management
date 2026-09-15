@@ -36,12 +36,11 @@ class OutstandingService:
             config = period_repo.get_active(period_start)
             if config is None:
                 return None
-            start, end = FinancePeriodDefinition.period_for_date(
+            return FinancePeriodDefinition.period_for_date(
                 config.effective_from,
                 period_start,
                 config.duration_months,
             )
-            return start, end
 
         config = period_repo.get_active(on_date)
         if config is None:
@@ -142,14 +141,14 @@ class OutstandingService:
     def get_all_outstanding(
         self,
         class_id: Optional[int] = None,
+        status_filter: Optional[str] = None,
+        search_text: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100,
         course_name: Optional[str] = None,
         student_id: Optional[int] = None,
         period_start: Optional[date] = None,
-        status_filter: Optional[str] = None,
-        search_text: Optional[str] = None,
         on_date: Optional[date] = None,
-        offset: int = 0,
-        limit: int = 100,
     ) -> Tuple[List[OutstandingDTO], int]:
         """Get period-aware outstanding rows with class/course/student/status filters."""
         target_date = on_date or date.today()
