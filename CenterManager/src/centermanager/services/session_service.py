@@ -8,14 +8,11 @@ from typing import Optional, List
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.session import Session, SessionStatus
-from centermanager.repositories.session_repository import SessionRepository
-from centermanager.repositories.class_repository import ClassRepository
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.events.event_bus import EventBus
 from centermanager.events.class_events import ClassSessionChanged
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.core.permission_guard import require_permission
-from sqlalchemy.orm import selectinload
-from centermanager.models.enrollment import Enrollment
 
 class SessionServiceError(Exception):
     pass
@@ -30,9 +27,15 @@ class SessionValidationError(SessionServiceError):
 
 
 class SessionService:
-    def __init__(self, session_factory: sessionmaker, event_bus: Optional[EventBus] = None) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        event_bus: Optional[EventBus] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
         self._event_bus = event_bus
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _publish_class_session_changed(self, session_obj: Session, action: str) -> None:
         if self._event_bus is not None:
@@ -76,12 +79,12 @@ class SessionService:
 
     def _get_next_session_number(self, class_id: int) -> int:
         with self._session_factory() as session:
-            repo = SessionRepository(session)
+            repo = self._repository_provider.sessions(session)
             latest = repo.get_latest_session_number(class_id)
             return (latest or 0) + 1
 
     def _require_active_class(self, db_session, class_id: int):
-        class_obj = ClassRepository(db_session).get_by_id(class_id)
+        class_obj = self._repository_provider.classes(db_session).get_by_id(class_id)
         if class_obj is None:
             raise SessionValidationError(f"Class with id {class_id} not found.")
         if class_obj.deleted_at is not None:
@@ -106,7 +109,6 @@ class SessionService:
         teacher_id: Optional[int] = None,
         note: Optional[str] = None,
     ) -> Session:
-        # Validate
         norm_title = self._validate_title(title)
         norm_topic = self._normalize_text(lesson_topic)
         norm_note = self._normalize_text(note)
@@ -114,14 +116,13 @@ class SessionService:
         start_time, end_time = self._validate_time(start_time, end_time) if start_time and end_time else (None, None)
         status = self._validate_status(status)
 
-        # Validate that the class is active before creating a new session.
         with self._session_factory() as db_session:
             self._require_active_class(db_session, class_id)
 
         session_number = self._get_next_session_number(class_id)
 
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             session_obj = Session(
                 class_id=class_id,
                 session_number=session_number,
@@ -137,9 +138,8 @@ class SessionService:
             )
             repo.add(session_obj)
             db_session.commit()
-            db_session.refresh(session_obj)
+            repo.refresh(session_obj)
 
-            # Log class timeline
             timeline_service = ClassTimelineService(self._session_factory)
             timeline_service.log_event(
                 class_id=class_id,
@@ -154,7 +154,7 @@ class SessionService:
     @require_permission("lesson.view")
     def get_session(self, session_id: int) -> Session:
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
@@ -163,7 +163,7 @@ class SessionService:
     @require_permission("lesson.view")
     def get_sessions_for_class(self, class_id: int) -> List[Session]:
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             return repo.get_by_class_ordered_desc(class_id)
 
     @require_permission("lesson.update")
@@ -181,7 +181,7 @@ class SessionService:
         note: Optional[str] = None,
     ) -> Session:
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
@@ -260,7 +260,7 @@ class SessionService:
                 return session_obj
 
             db_session.commit()
-            db_session.refresh(session_obj)
+            repo.refresh(session_obj)
 
             timeline_service = ClassTimelineService(self._session_factory)
             timeline_service.log_event(
@@ -276,7 +276,7 @@ class SessionService:
     @require_permission("lesson.cancel")
     def cancel_session(self, session_id: int) -> Session:
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
@@ -284,7 +284,7 @@ class SessionService:
                 raise SessionValidationError("Session already cancelled.")
             session_obj.status = SessionStatus.CANCELLED.value
             db_session.commit()
-            db_session.refresh(session_obj)
+            repo.refresh(session_obj)
 
             timeline_service = ClassTimelineService(self._session_factory)
             timeline_service.log_event(
@@ -299,7 +299,7 @@ class SessionService:
     @require_permission("lesson.delete")
     def delete_session(self, session_id: int) -> None:
         with self._session_factory() as db_session:
-            repo = SessionRepository(db_session)
+            repo = self._repository_provider.sessions(db_session)
             session_obj = repo.get_by_id(session_id)
             if session_obj is None:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
