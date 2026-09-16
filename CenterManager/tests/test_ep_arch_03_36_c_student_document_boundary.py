@@ -10,7 +10,7 @@ def test_student_document_service_declares_repository_provider():
     source = SERVICE.read_text(encoding="utf-8")
     assert "centermanager.repositories.provider" in source
     assert "RepositoryProvider" in source
-    assert "SqlAlchemyRepositoryProvider" in source
+    assert "create_default_repository_provider" in source
 
 
 def test_student_document_service_has_no_concrete_repository_import_or_constructor():
