@@ -1,4 +1,5 @@
 """Phase 2 — Architecture Hardening contracts for migrated Student services."""
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,9 +30,7 @@ FORBIDDEN_SESSION_OPERATIONS = {
 }
 
 
-def _service_ast(filename: str):
-    import ast
-
+def _service_ast(filename: str) -> ast.AST:
     return ast.parse((SRC / filename).read_text(encoding="utf-8"), filename=filename)
 
 
@@ -46,8 +45,6 @@ def test_phase2_student_services_are_provider_backed():
 
 
 def test_phase2_student_services_do_not_construct_concrete_repositories():
-    import ast
-
     forbidden_names = {
         "StudentRepository",
         "NoteRepository",
@@ -60,8 +57,6 @@ def test_phase2_student_services_do_not_construct_concrete_repositories():
 
 
 def test_phase2_student_services_do_not_call_forbidden_session_methods():
-    import ast
-
     for filename, class_name in STUDENT_SERVICES.items():
         tree = _service_ast(filename)
         for node in ast.walk(tree):
