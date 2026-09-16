@@ -33,16 +33,21 @@ def test_inventory_marks_known_clean_services_as_pass():
         assert "| PASS |" in row, row
 
 
-def test_inventory_preserves_legacy_backlog():
+def test_inventory_preserves_architecture_migration_history():
     source = INVENTORY.read_text(encoding="utf-8")
-    assert "| LEGACY |" in source
-    assert "EP-ARCH-03.35" in source
-    assert "EP-ARCH-03.36" in source
-    assert "EP-ARCH-03.37" in source
-    assert "EP-ARCH-03.38" in source
-    assert "EP-ARCH-03.39" in source
+    # These identifiers document completed architecture slices; they must
+    # remain in the inventory even after their services leave the legacy list.
+    for phase in (
+        "EP-ARCH-03.35",
+        "EP-ARCH-03.36",
+        "EP-ARCH-03.37",
+        "EP-ARCH-03.38",
+        "EP-ARCH-03.39",
+    ):
+        assert phase in source
 
 
-def test_inventory_has_no_violation_status_at_baseline():
+def test_inventory_has_no_stale_legacy_or_violation_status():
     source = INVENTORY.read_text(encoding="utf-8")
+    assert "| LEGACY |" not in source
     assert "| VIOLATION |" not in source
