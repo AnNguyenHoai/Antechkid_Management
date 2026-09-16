@@ -23,6 +23,7 @@ from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.repositories.teacher_repository import TeacherRepository
 from centermanager.repositories.teacher_assignment_repository import TeacherAssignmentRepository
 from centermanager.repositories.teacher_document_repository import TeacherDocumentRepository
+from centermanager.repositories.teacher_timeline_repository import TeacherTimelineRepository
 from centermanager.repositories.note_repository import NoteRepository
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.repositories.role_repository import RoleRepository
@@ -61,6 +62,7 @@ class RepositoryProvider(Protocol):
     def teachers(self, session: Session) -> TeacherRepository: ...
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: ...
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: ...
+    def teacher_timeline(self, session: Session) -> TeacherTimelineRepository: ...
     def notes(self, session: Session) -> NoteRepository: ...
     def parents(self, session: Session) -> ParentRepository: ...
     def documents(self, session: Session) -> DocumentRepository: ...
@@ -95,6 +97,7 @@ class SqlAlchemyRepositoryProvider:
     def teachers(self, session: Session) -> TeacherRepository: return TeacherRepository(session)
     def teacher_assignments(self, session: Session) -> TeacherAssignmentRepository: return TeacherAssignmentRepository(session)
     def teacher_documents(self, session: Session) -> TeacherDocumentRepository: return TeacherDocumentRepository(session)
+    def teacher_timeline(self, session: Session) -> TeacherTimelineRepository: return TeacherTimelineRepository(session)
     def notes(self, session: Session) -> NoteRepository: return NoteRepository(session)
     def parents(self, session: Session) -> ParentRepository: return ParentRepository(session)
     def documents(self, session: Session) -> DocumentRepository: return DocumentRepository(session)
