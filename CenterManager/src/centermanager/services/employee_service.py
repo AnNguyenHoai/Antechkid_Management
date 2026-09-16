@@ -140,7 +140,7 @@ class EmployeeService:
                 employment_status=Employee.STATUS_ACTIVE, user_id=user.id,
             )
             employee_repo.add(employee)
-            session.commit(); session.refresh(employee)
+            session.commit(); employee_repo.refresh(employee)
             logger.info(
                 "Repaired legacy user-to-employee link: user_id=%s employee_id=%s",
                 user.id, employee.id,
@@ -216,7 +216,7 @@ class EmployeeService:
                 employment_status=status, hire_date=hire_date or get_clock().today(),
                 user_id=user_id,
             )
-            repo.add(e); s.commit(); s.refresh(e); return e
+            repo.add(e); s.commit(); repo.refresh(e); return e
 
     def create_employee_with_account(
         self, full_name: str, username: str, role_name: str, *,
@@ -270,7 +270,7 @@ class EmployeeService:
                 position=self._text(position), employment_status=status,
                 hire_date=hire_date or get_clock().today(), user_id=user.id,
             )
-            repo.add(employee); s.commit(); s.refresh(employee)
+            repo.add(employee); s.commit(); repo.refresh(employee)
             employee._temporary_password = temp_password
             employee._account_username = username
             return employee
@@ -294,7 +294,7 @@ class EmployeeService:
             if not self._is_employee_account(user):
                 raise EmployeeValidationError("Administrator accounts cannot be linked to an employee profile.")
             employee.user_id = user_id
-            s.commit(); s.refresh(employee); return employee
+            s.commit(); repo.refresh(employee); return employee
 
     def get_employee(self, employee_id: int, user: Optional[User] = None) -> Employee:
         return self.get_employee_for_user(employee_id, user)
@@ -312,12 +312,13 @@ class EmployeeService:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             e.employment_status = self._validate_status(status)
             e.termination_date = termination_date
-            s.commit(); s.refresh(e); return e
+            s.commit(); self._repository_provider.employees(s).refresh(e); return e
 
     def update_employee(self, employee_id: int, **data) -> Employee:
         actor = self._require_user(None)
         with self._session_factory() as s:
-            e = self._repository_provider.employees(s).get_by_id(employee_id)
+            repo = self._repository_provider.employees(s)
+            e = repo.get_by_id(employee_id)
             if not e:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             is_self = e.user_id == actor.id
@@ -345,4 +346,4 @@ class EmployeeService:
             if "hire_date" in data:
                 self._require_capability(actor, self.UPDATE)
                 e.hire_date = data["hire_date"]
-            s.commit(); s.refresh(e); return e
+            s.commit(); repo.refresh(e); return e

@@ -76,7 +76,7 @@ class AttendanceService:
                 if teacher_note is not None:
                     existing.teacher_note = teacher_note
                 session.commit()
-                session.refresh(existing)
+                repo.refresh(existing)
 
                 if old_status != status:
                     self._timeline_service.log_event(
@@ -98,7 +98,7 @@ class AttendanceService:
             )
             repo.add(attendance)
             session.commit()
-            session.refresh(attendance)
+            repo.refresh(attendance)
             self._timeline_service.log_event(
                 student_id=student_id,
                 event_type=TimelineEventType.ATTENDANCE_CREATED,
