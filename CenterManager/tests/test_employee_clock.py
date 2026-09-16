@@ -24,9 +24,6 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
         def commit(self):
             pass
 
-        def refresh(self, obj):
-            pass
-
     class FakeRepo:
         def get_by_user_id(self, user_id):
             return None
@@ -36,6 +33,9 @@ def test_create_employee_defaults_hire_date_to_injected_today(monkeypatch):
 
         def add(self, employee):
             employee.id = 1
+
+        def refresh(self, obj):
+            pass
 
     class FakeUserRepo:
         def get_by_id_with_role(self, user_id):

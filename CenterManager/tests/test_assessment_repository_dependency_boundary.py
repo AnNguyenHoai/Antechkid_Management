@@ -29,6 +29,9 @@ def test_assessment_service_uses_injected_repository_provider():
         def add(self, entity):
             entity.id = 42
 
+        def refresh(self, entity):
+            pass
+
     class FakeProvider:
         def __init__(self):
             self.calls = []
@@ -45,9 +48,6 @@ def test_assessment_service_uses_injected_repository_provider():
             return False
 
         def commit(self):
-            pass
-
-        def refresh(self, entity):
             pass
 
     class FakeFactory:
