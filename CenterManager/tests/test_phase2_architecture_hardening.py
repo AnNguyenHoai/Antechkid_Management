@@ -72,7 +72,5 @@ def test_phase2_student_services_do_not_call_forbidden_session_methods():
 
 
 def test_phase2_student_services_keep_transaction_boundary_explicit():
-    for filename, class_name in STUDENT_SERVICES.items():
-        source = (SRC / filename).read_text(encoding="utf-8")
-        if filename in {"student_note_service.py"}:
-            assert "session.commit()" in source, f"{class_name} must keep transaction completion explicit"
+    source = (SRC / "student_note_service.py").read_text(encoding="utf-8")
+    assert "session.commit()" in source, "StudentNoteService must keep transaction completion explicit"
