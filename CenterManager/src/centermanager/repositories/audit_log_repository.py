@@ -28,13 +28,8 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         return q.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit).all()
 
     def persist(self, log: AuditLog) -> AuditLog:
-        """Persist an audit row and return the refreshed entity.
-
-        AuditService intentionally does not own SQLAlchemy persistence calls;
-        this repository method keeps the existing record() transaction behavior
-        behind the repository boundary.
-        """
+        """Persist an audit row within the caller-owned transaction."""
         self.add(log)
-        self._session.commit()
-        self._session.refresh(log)
+        self.flush()
+        self.refresh(log)
         return log
