@@ -45,8 +45,3 @@ class BaseRepository(Generic[T]):
         """Refresh an entity from the caller-owned persistence context."""
         self._session.refresh(entity)
         return entity
-
-    @property
-    def session(self) -> Session:
-        """Get the underlying session."""
-        return self._session
