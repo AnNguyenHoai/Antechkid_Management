@@ -426,16 +426,16 @@ def test_transaction_rollback(test_db_path):
     """
     service = _create_service(test_db_path)
 
-    # Monkeypatch the repository's add method to simulate failure after flush
-    # We'll patch StudentRepository.add to call original, then flush, then raise.
+    # Monkeypatch the repository's add method to simulate failure after flush.
+    # The repository intentionally exposes no public SQLAlchemy Session accessor,
+    # so use the repository's own transaction-scoped operation instead of reaching
+    # through the repository boundary.
     original_add = StudentRepository.add
 
     def failing_add(repo_self, entity):
-        # Add the entity to session (like original)
-        repo_self.session.add(entity)
-        # Force flush to write to DB (within transaction)
-        repo_self.session.flush()
-        # Now simulate an error after flush, before commit
+        original_add(repo_self, entity)
+        repo_self.flush()
+        # Now simulate an error after flush, before commit.
         raise RuntimeError("Forced transaction failure")
 
     with patch.object(StudentRepository, 'add', failing_add):
