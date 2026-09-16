@@ -141,7 +141,7 @@ class ClassService:
             repo = self._repository_provider.classes(session)
             repo.add(class_obj)
             session.commit()
-            session.refresh(class_obj)
+            repo.refresh(class_obj)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -258,7 +258,7 @@ class ClassService:
                 return class_obj
 
             session.commit()
-            session.refresh(class_obj)
+            repo.refresh(class_obj)
 
             if self._timeline_service:
                 self._timeline_service.log_event(

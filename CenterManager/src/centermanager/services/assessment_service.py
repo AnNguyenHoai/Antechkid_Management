@@ -125,7 +125,7 @@ class AssessmentService:
             repo = self._repository_provider.assessments(session)
             repo.add(assessment)
             session.commit()
-            session.refresh(assessment)
+            repo.refresh(assessment)
 
             if self._timeline_service:
                 score_str = f" ({norm_score}/5)" if norm_score is not None else ""
@@ -229,7 +229,7 @@ class AssessmentService:
                 return assessment
 
             session.commit()
-            session.refresh(assessment)
+            repo.refresh(assessment)
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=assessment.student_id,

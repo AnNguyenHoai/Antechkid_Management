@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.document import Document
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.provider import RepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.timeline_service import TimelineService
 from centermanager.core.paths import get_paths
 
@@ -26,10 +26,7 @@ class StudentDocumentService:
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
-        self._repository_provider = repository_provider
-        if self._repository_provider is None:
-            from centermanager.repositories.provider import SqlAlchemyRepositoryProvider
-            self._repository_provider = SqlAlchemyRepositoryProvider()
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
