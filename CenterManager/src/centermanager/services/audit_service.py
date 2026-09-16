@@ -8,11 +8,7 @@ from centermanager.repositories.provider import RepositoryProvider, create_defau
 
 
 class AuditService:
-    """Application service for audit records.
-
-    Persistence is delegated to the injected RepositoryProvider. The service
-    does not construct concrete repositories or access SQLAlchemy directly.
-    """
+    """Application service for audit records."""
 
     def __init__(self, session_factory, repository_provider: Optional[RepositoryProvider] = None):
         self._session_factory = session_factory
@@ -69,7 +65,9 @@ class AuditService:
             log = self.record_in_session(session, action, module, target_type, target_id,
                                         target_name, result, details, actor, entity_type,
                                         entity_id, summary)
-            return self._repository_provider.audit_logs(session).persist(log)
+            self._repository_provider.audit_logs(session).persist(log)
+            session.commit()
+            return log
 
     def list_logs(self, **filters) -> List[AuditLog]:
         with self._session_factory() as session:
