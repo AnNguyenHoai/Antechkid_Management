@@ -36,19 +36,14 @@ def test_batch_g_documents_service_boundary_reason():
     assert "must not be forced to inject a `RepositoryProvider`" in source
 
 
-def test_batch_g_does_not_reclassify_database_backed_legacy_services():
+def test_batch_g_does_not_reclassify_migrated_database_backed_services():
     source = INVENTORY.read_text(encoding="utf-8")
-    # Teacher services were subsequently migrated by EP-ARCH-03.39.
-    # Keep only services that are still genuinely in the legacy backlog here.
+    # Student export/import/note services were migrated by EP-ARCH-03.36 and
+    # must remain PASS alongside the other completed repository-boundary slices.
     for service_name in (
         "student_export_service.py",
         "student_import_service.py",
         "student_note_service.py",
-    ):
-        row = _row(source, service_name)
-        assert "| LEGACY |" in row, row
-
-    for service_name in (
         "student_service.py",
         "income_service.py",
         "expense_service.py",
