@@ -49,11 +49,11 @@ The strict provider gate remains authoritative for every service that declares `
 | `student_analytics_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_dashboard_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_document_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `student_export_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_export_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_filter_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_highlight_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
-| `student_import_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
-| `student_note_service.py` | LEGACY | pending audit follow-up | pending audit follow-up | pending audit follow-up | pending audit follow-up | EP-ARCH-03.36 |
+| `student_import_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
+| `student_note_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `student_summary_service.py` | PASS | — | — | `sqlalchemy.orm` only | repository-owned | — |
 | `system_operations_service.py` | NON_REPOSITORY | — | — | — | platform/filesystem health checks | — |
@@ -147,6 +147,14 @@ This classification closes the EP-ARCH-03.38 Finance Dashboard audit without int
 - `teacher_timeline_service.py` — **TeacherTimelineService** uses `RepositoryProvider.teacher_timeline(...)`; timeline persistence/query/refresh operations remain repository-owned while event construction/serialization remains service-owned.
 
 All four Teacher services are promoted to `PASS`. No concrete repository construction or direct session persistence/query operation remains in the application-service layer.
+
+## Phase 2 — Architecture Hardening
+The first Phase 2 hardening slice closes stale architecture classification for the Student export/import/note services.
+- `student_export_service.py` — **StudentExportService** is provider-backed through `RepositoryProvider.students(...)`; student reads remain repository-owned while Excel/CSV generation remains service-owned.
+- `student_import_service.py` — **StudentImportService** is provider-backed through `RepositoryProvider.students(...)`; duplicate-code lookup remains repository-owned while workbook parsing, validation delegation, and import orchestration remain service-owned.
+- `student_note_service.py` — **StudentNoteService** is provider-backed through `RepositoryProvider.notes(...)`; note persistence/refresh/query remain repository-owned while validation and timeline orchestration remain service-owned.
+
+All three are now `PASS`. They are not migration backlog.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
