@@ -110,20 +110,52 @@ def temp_runtime(tmp_path, clean_paths):
 
 @pytest.fixture
 def test_db_path(tmp_path):
-    """Create a temporary database path for testing."""
+    """Create a valid test database for legacy service tests.
+
+    EP-SEC-01 intentionally makes ``create_engine_for_path`` strict: a
+    missing database must never be materialized implicitly. The pre-existing
+    test suite historically relied on SQLAlchemy creating the temporary file
+    when ``Base.metadata.create_all(engine)`` opened the engine. Keep that
+    fixture contract explicit by creating a valid SQLite file before handing
+    the path to tests. Tests that need missing/corrupt databases should create
+    their own path instead of using this fixture.
+    """
+    from centermanager.database.engine import create_engine_for_path
+    from centermanager.database.base import Base
+    from centermanager import models  # noqa: F401
+    import sqlite3
+
     db_path = tmp_path / "test.db"
-    return db_path
+
+    # Bootstrap the test database explicitly because the production/test
+    # engine is now forbidden from materializing missing databases.
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE __test_database_marker__ (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    engine = create_engine_for_path(db_path)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    # Do not leak a test-only table into tests that inspect the real schema.
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("DROP TABLE __test_database_marker__")
+        connection.commit()
+    finally:
+        connection.close()
+
+    yield db_path
 
 
 @pytest.fixture
 def test_db(test_db_path):
-    """Create a temporary database with initialized tables."""
-    from centermanager.database.engine import create_engine_for_path
-    from centermanager.database.base import Base
-    from centermanager import models  # noqa
-
-    engine = create_engine_for_path(test_db_path)
-    Base.metadata.create_all(engine)
+    """Provide a temporary database with initialized tables."""
     yield test_db_path
 
 
