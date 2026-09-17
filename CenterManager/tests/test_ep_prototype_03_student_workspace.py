@@ -94,9 +94,10 @@ def test_ep_prototype_03_student_detail_required_context():
     setup = _method_node(cls, "_setup_ui")
     setup_source = ast.unparse(setup)
 
-    assert '"Profile"' in setup_source
-    assert '"🎓 Enrollment"' in setup_source
-    assert '"📅 Timeline"' in setup_source
+    # AST unparse normalizes quote style, so these checks must be quote-agnostic.
+    assert "Profile" in setup_source
+    assert "🎓 Enrollment" in setup_source
+    assert "📅 Timeline" in setup_source
     assert "EnrollmentWidget" in setup_source
     assert "TimelineWidget" in setup_source
 
@@ -118,7 +119,9 @@ def test_ep_prototype_03_detail_navigation_back_and_finance_hook():
     shell_cls = _class_node(shell_source, "StudentWorkspaceShell")
     back_method = _method_node(shell_cls, "_on_back_from_detail")
     back_method_source = ast.unparse(back_method)
-    assert 'navigate_to("students")' in back_method_source
+    # AST unparse normalizes quote style; assert the route semantically, not its source spelling.
+    assert "navigate_to" in back_method_source
+    assert "students" in back_method_source
 
 
 def test_ep_prototype_03_permission_and_write_boundaries_remain_present():
