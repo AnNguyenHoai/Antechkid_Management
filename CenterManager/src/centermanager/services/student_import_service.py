@@ -5,12 +5,12 @@ StudentImportService - imports students from Excel.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import openpyxl
 from sqlalchemy.orm import sessionmaker
 
-from centermanager.repositories.provider import RepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.student_service import StudentService
 from centermanager.services.exceptions import StudentValidationError
 
@@ -24,11 +24,11 @@ class StudentImportService:
         self,
         session_factory: sessionmaker,
         student_service: StudentService,
-        repository_provider: RepositoryProvider,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._student_service = student_service
-        self._repository_provider = repository_provider
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def import_from_excel(self, file_path: Path) -> Tuple[int, int, List[str]]:
         """Import students from Excel file."""
