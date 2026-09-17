@@ -98,6 +98,41 @@ def test_ep_arch_04_7_repositories_do_not_instantiate_session_or_engine_lifecycl
     assert not violations, "Repositories must not instantiate Session/engine factories or control transaction lifecycle:\n" + "\n".join(violations)
 
 
+def _constructor_receives_session(init: ast.FunctionDef) -> bool:
+    return any(arg.arg == "session" for arg in init.args.args)
+
+
+def _stores_session_directly(init: ast.FunctionDef) -> bool:
+    return any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "_session"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "session"
+        for node in ast.walk(init)
+    )
+
+
+def _delegates_session_to_super(init: ast.FunctionDef) -> bool:
+    for node in ast.walk(init):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Call) or not isinstance(node.func.value.func, ast.Name):
+            continue
+        if node.func.value.func.id != "super" or node.func.attr != "__init__":
+            continue
+        if any(isinstance(arg, ast.Name) and arg.id == "session" for arg in node.args):
+            return True
+        if any(keyword.arg == "session" and isinstance(keyword.value, ast.Name) and keyword.value.id == "session" for keyword in node.keywords):
+            return True
+    return False
+
+
 def test_ep_arch_04_7_repository_constructors_receive_injected_session_and_store_it_privately():
     violations: list[str] = []
     for path in _concrete_repository_files():
@@ -107,26 +142,11 @@ def test_ep_arch_04_7_repository_constructors_receive_injected_session_and_store
             if init is None:
                 violations.append(f"{path.name}:{cls.name}: missing __init__")
                 continue
-            if not any(arg.arg == "session" for arg in init.args.args):
+            if not _constructor_receives_session(init):
                 violations.append(f"{path.name}:{cls.name}: __init__ must accept session explicitly")
                 continue
-            stores_session = any(
-                isinstance(n, ast.Assign)
-                and any(isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == "self" and t.attr == "_session" for t in n.targets)
-                and isinstance(n.value, ast.Name) and n.value.id == "session"
-                for n in ast.walk(init)
-            )
-            delegates_to_base = any(
-                isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Attribute)
-                and isinstance(n.func.value, ast.Call)
-                and isinstance(n.func.value.func, ast.Name)
-                and n.func.value.func.id == "super"
-                and n.func.attr == "__init__"
-                for n in ast.walk(init)
-            )
-            if not stores_session and not delegates_to_base:
-                violations.append(f"{path.name}:{cls.name}: injected session must be stored as self._session or delegated to BaseRepository")
+            if not (_stores_session_directly(init) or _delegates_session_to_super(init)):
+                violations.append(f"{path.name}:{cls.name}: injected session must be stored as self._session or delegated to BaseRepository with session")
     assert not violations, "Repository session dependency/lifecycle contract drift detected:\n" + "\n".join(violations)
 
 
