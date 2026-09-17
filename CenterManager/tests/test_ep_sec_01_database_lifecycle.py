@@ -20,7 +20,7 @@ def test_missing_database_is_recovery_required_and_never_created(tmp_path: Path)
     with pytest.raises(DatabaseLifecycleError):
         lifecycle.require_available()
 
-    engine = create_engine_for_path(db_path)
+    engine = create_engine_for_path(db_path, allow_create=False)
     with pytest.raises(DatabaseLifecycleError):
         with engine.connect():
             pass
@@ -35,12 +35,13 @@ def test_empty_file_is_corrupted(tmp_path: Path):
     assert DatabaseLifecycle(db_path).inspect() is DatabaseLifecycleState.CORRUPTED
 
 
-def test_empty_sqlite_database_is_invalid_schema(tmp_path: Path):
+def test_empty_sqlite_database_is_corrupted(tmp_path: Path):
+    """A zero-byte SQLite file is indistinguishable from an arbitrary blank file."""
     db_path = tmp_path / "center.db"
     connection = sqlite3.connect(db_path)
     connection.close()
 
-    assert DatabaseLifecycle(db_path).inspect() is DatabaseLifecycleState.INVALID_SCHEMA
+    assert DatabaseLifecycle(db_path).inspect() is DatabaseLifecycleState.CORRUPTED
     with pytest.raises(DatabaseLifecycleError):
         DatabaseLifecycle(db_path).require_available()
 
@@ -58,7 +59,7 @@ def test_valid_sqlite_database_is_available(tmp_path: Path):
     assert lifecycle.inspect() is DatabaseLifecycleState.AVAILABLE
     lifecycle.require_available()
 
-    engine = create_engine_for_path(db_path)
+    engine = create_engine_for_path(db_path, allow_create=False)
     try:
         with engine.connect() as connection:
             assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
