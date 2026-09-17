@@ -37,6 +37,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-dev.txt
 
+      - name: Configure Git identity for integration tests
+        run: |
+          git config --global user.name "CenterManager CI"
+          git config --global user.email "ci@centermanager.invalid"
+
       - name: Run full pytest suite
         env:
           QT_QPA_PLATFORM: offscreen

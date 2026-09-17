@@ -154,6 +154,16 @@ def test_db_path(tmp_path):
 
 
 @pytest.fixture
+def migration_db_path(tmp_path):
+    """Provide a blank SQLite file specifically for Alembic migration tests."""
+    import sqlite3
+    db_path = tmp_path / "migration.db"
+    connection = sqlite3.connect(db_path)
+    connection.close()
+    return db_path
+
+
+@pytest.fixture
 def test_db(test_db_path):
     """Provide a temporary database with initialized tables."""
     yield test_db_path
