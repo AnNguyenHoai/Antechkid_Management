@@ -3,8 +3,9 @@
 """Build the CenterManager Windows prototype release.
 
 The application is packaged as a one-file PyInstaller executable while the
-mutable ``runtime/`` directory stays beside the executable. Runtime data must
-never be embedded into the executable.
+mutable ``runtime/`` directory stays beside the executable. Alembic migration
+assets remain external beside the executable as immutable release resources.
+Runtime data must never be embedded into the executable.
 
 Usage:
     python build_release.py
@@ -42,13 +43,36 @@ def clean_outputs() -> None:
             shutil.rmtree(path)
 
 
-def copy_runtime_template() -> None:
+def copy_runtime_template(destination_root: Path) -> None:
     """Copy only the immutable runtime template; never ship live DB/backups."""
     src_runtime = PROJECT_ROOT / "runtime"
-    dst_runtime = PACKAGE_ROOT / "runtime"
+    dst_runtime = destination_root / "runtime"
     if not src_runtime.exists():
         raise FileNotFoundError(f"Runtime template not found: {src_runtime}")
     shutil.copytree(src_runtime, dst_runtime, ignore=RUNTIME_EXCLUDES)
+
+
+def copy_migration_assets(destination_root: Path) -> None:
+    """Copy immutable Alembic assets beside the executable."""
+    src_migrations = PROJECT_ROOT / "migrations"
+    dst_migrations = destination_root / "migrations"
+    src_alembic_ini = PROJECT_ROOT / "alembic.ini"
+    if not src_migrations.exists():
+        raise FileNotFoundError(f"Migration directory not found: {src_migrations}")
+    if not src_alembic_ini.exists():
+        raise FileNotFoundError(f"Alembic config not found: {src_alembic_ini}")
+    shutil.copytree(src_migrations, dst_migrations)
+    shutil.copy2(src_alembic_ini, destination_root / "alembic.ini")
+
+
+def stage_intermediate_dist(executable: Path) -> None:
+    """Keep the freshly built ``dist/CenterManager.exe`` directly runnable.
+
+    This is a developer/build smoke-test convenience; the distributable
+    package is assembled separately under ``release/``.
+    """
+    copy_runtime_template(DIST_ROOT)
+    copy_migration_assets(DIST_ROOT)
 
 
 def write_release_readme() -> None:
@@ -56,9 +80,10 @@ def write_release_readme() -> None:
         f"# CenterManager {VERSION}\n\n"
         "Windows prototype release.\n\n"
         "## Start\n\n"
-        "Run `CenterManager.exe`. Mutable application data is stored in the `runtime/` folder beside the executable.\n\n"
+        "Run `CenterManager.exe`. Mutable application data is stored in the `runtime/` folder beside the executable. Alembic migration assets are stored in the `migrations/` folder beside the executable.\n\n"
         "## Important\n\n"
-        "- Do not delete or rename the `runtime/` folder.\n"
+        "- Do not delete or rename the `runtime/` or `migrations/` folders.\n"
+        "- Keep `alembic.ini` beside `CenterManager.exe`.\n"
         "- Configure Git synchronization on first launch when requested.\n"
         "- Use the application's backup flow for test data.\n"
         "- If startup fails, inspect `error.log` beside the executable and `runtime/Logs/`.\n",
@@ -80,7 +105,8 @@ def write_uat_checklist() -> None:
         "- [ ] Export/report actions produce expected files.\n"
         "- [ ] Backup/restore can be exercised with test data.\n"
         "- [ ] Restarting the executable preserves expected runtime data.\n"
-        "- [ ] No source checkout or Python installation is required to launch.\n",
+        "- [ ] No source checkout or Python installation is required to launch.\n"
+        "- [ ] `migrations/` and `alembic.ini` remain beside the executable.\n",
         encoding="utf-8",
     )
 
@@ -122,6 +148,7 @@ def build_executable() -> Path:
     executable = DIST_ROOT / f"{APP_NAME}.exe"
     if not executable.exists():
         raise FileNotFoundError(f"PyInstaller did not create {executable}")
+    stage_intermediate_dist(executable)
     return executable
 
 
@@ -129,7 +156,8 @@ def create_release_package(executable: Path) -> Path:
     """Assemble the portable release directory and ZIP archive."""
     PACKAGE_ROOT.mkdir(parents=True, exist_ok=True)
     shutil.copy2(executable, PACKAGE_ROOT / executable.name)
-    copy_runtime_template()
+    copy_runtime_template(PACKAGE_ROOT)
+    copy_migration_assets(PACKAGE_ROOT)
     write_release_readme()
     write_uat_checklist()
 
