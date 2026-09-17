@@ -1,78 +1,119 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Build script for CenterManager release packaging.
-Generates a standalone executable with bundled runtime and Git.
+"""Build the CenterManager Windows prototype release.
+
+The application is packaged as a one-file PyInstaller executable while the
+mutable ``runtime/`` directory stays beside the executable.  This is
+intentional: runtime data (database, credentials/configuration, attachments,
+logs and backups) must never be embedded into the executable.
 
 Usage:
     python build_release.py
 
-Output: dist/CenterManager/
+Output:
+    release/CenterManager-v0.1.0-prototype-windows-x64/
+    release/CenterManager-v0.1.0-prototype-windows-x64.zip
 """
 
 import os
 import shutil
-import sys
+import subprocess
 from pathlib import Path
+
 import PyInstaller.__main__
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-VERSION = "1.0.0"
+VERSION = "0.1.0-prototype"
 APP_NAME = "CenterManager"
+RELEASE_NAME = f"{APP_NAME}-v{VERSION}-windows-x64"
+DIST_ROOT = PROJECT_ROOT / "dist"
+RELEASE_ROOT = PROJECT_ROOT / "release"
+PACKAGE_ROOT = RELEASE_ROOT / RELEASE_NAME
 
 
-def clean_dist():
-    """Remove previous build artifacts."""
-    for dir_name in ["dist", "build"]:
-        dir_path = PROJECT_ROOT / dir_name
-        if dir_path.exists():
-            shutil.rmtree(dir_path)
+RUNTIME_EXCLUDES = shutil.ignore_patterns(
+    "*.db",
+    "*.db-journal",
+    "*.db-wal",
+    "*.db-shm",
+    "*.sqlite",
+    "*.sqlite3",
+    "logs",
+    "Logs",
+    "cache",
+    "Cache",
+    "temp",
+    "Temp",
+    "backup",
+    "Backup",
+)
 
 
-def copy_runtime_and_config():
-    """Copy runtime/ (with metadata) and config/ into dist."""
-    dist_root = PROJECT_ROOT / "dist" / APP_NAME
+def clean_outputs() -> None:
+    """Remove generated build/release directories only."""
+    for path in (DIST_ROOT, PROJECT_ROOT / "build", RELEASE_ROOT):
+        if path.exists():
+            shutil.rmtree(path)
 
-    # Copy runtime
+
+def copy_runtime_template() -> None:
+    """Copy only the immutable runtime template; never ship live DB/backups."""
     src_runtime = PROJECT_ROOT / "runtime"
-    dst_runtime = dist_root / "runtime"
-    if dst_runtime.exists():
-        shutil.rmtree(dst_runtime)
-    shutil.copytree(src_runtime, dst_runtime, ignore=shutil.ignore_patterns(
-        "*.db", "*.db-journal", "logs", "cache", "temp", "backup"
-    ))
-
-    # Create config folder for user settings (optional)
-    (dist_root / "config").mkdir(exist_ok=True)
-
-    # Copy portable Git if present
-    git_src = PROJECT_ROOT / "git"
-    if git_src.exists():
-        git_dst = dist_root / "git"
-        if git_dst.exists():
-            shutil.rmtree(git_dst)
-        shutil.copytree(git_src, git_dst)
+    dst_runtime = PACKAGE_ROOT / "runtime"
+    if not src_runtime.exists():
+        raise FileNotFoundError(f"Runtime template not found: {src_runtime}")
+    shutil.copytree(src_runtime, dst_runtime, ignore=RUNTIME_EXCLUDES)
 
 
-def build():
-    """Run PyInstaller."""
-    clean_dist()
-    print("Building CenterManager...")
+def write_release_readme() -> None:
+    (PACKAGE_ROOT / "README_RELEASE.md").write_text(
+        f"""# CenterManager {VERSION}\n\n"
+        "Windows prototype release.\n\n"
+        "## Start\n\n"
+        "Run `CenterManager.exe`. The mutable application data is stored in the `runtime/` folder beside the executable.\n\n"
+        "## Important\n\n"
+        "- Do not delete or rename the `runtime/` folder.\n"
+        "- Configure Git synchronization on first launch when requested.\n"
+        "- Back up application data using the application's backup flow; do not copy a live SQLite database while the application is running.\n"
+        "- If startup fails, inspect `error.log` beside the executable and the files under `runtime/Logs/`.\n"
+        """,
+        encoding="utf-8",
+    )
 
+
+def write_uat_checklist() -> None:
+    (PACKAGE_ROOT / "UAT_CHECKLIST.md").write_text(
+        """# CenterManager Prototype UAT Checklist\n\n"
+        "- [ ] Launch `CenterManager.exe` from a clean Windows user directory.\n"
+        "- [ ] First-run configuration can be completed.\n"
+        "- [ ] Login succeeds with the test account.\n"
+        "- [ ] Student workspace opens and navigation works.\n"
+        "- [ ] Class and Teacher workspaces open.\n"
+        "- [ ] Session / Attendance / Assessment flows open.\n"
+        "- [ ] Finance workspace opens.\n"
+        "- [ ] Student Timeline opens.\n"
+        "- [ ] Export/report actions produce files under `runtime/Export/` or `runtime/Reports/`.\n"
+        "- [ ] Backup/restore flow can be exercised with a test backup.\n"
+        "- [ ] Restarting the executable preserves expected runtime data.\n"
+        "- [ ] No source checkout, Python installation, or developer environment is required to launch the executable.\n"
+        """,
+        encoding="utf-8",
+    )
+
+
+def build_executable() -> Path:
+    """Build the one-file, windowed executable."""
     args = [
         "run.py",
         "--name", APP_NAME,
-        "--onefile",   # thay vì --onefile
+        "--onefile",
         "--windowed",
-        "--add-data", f"runtime{os.pathsep}runtime",
         "--paths", str(PROJECT_ROOT / "src"),
+        "--version-file", str(PROJECT_ROOT / "version_metadata.txt"),
     ]
 
-    # Add git data if portable git exists
-    if (PROJECT_ROOT / "git").exists():
-        args.extend(["--add-data", f"git{os.pathsep}git"])
-
-    # Hidden imports
+    # Let PyInstaller discover the complete application package while keeping
+    # runtime data external and mutable.
     hidden_imports = [
         "centermanager",
         "centermanager.core",
@@ -83,33 +124,50 @@ def build():
         "centermanager.ui",
         "centermanager.export",
         "centermanager.platform",
+        "centermanager.events",
         "alembic",
         "sqlalchemy",
         "openpyxl",
         "reportlab",
-        "pyside6",
+        "bcrypt",
+        "git",
+        "PySide6",
     ]
-    for mod in hidden_imports:
-        args.extend(["--hidden-import", mod])
+    for module in hidden_imports:
+        args.extend(["--hidden-import", module])
 
-    # Version file
-    version_file = PROJECT_ROOT / "version_metadata.txt"
-    if version_file.exists():
-        args.extend(["--version-file", str(version_file)])
-
-    print(f"PyInstaller arguments: {args}")
     PyInstaller.__main__.run(args)
-
-    # After build, copy runtime and git
-    copy_runtime_and_config()
-
-    print(f"Build complete. Executable is in: dist/{APP_NAME}/")
-    size_mb = sum(f.stat().st_size for f in (PROJECT_ROOT / "dist" / APP_NAME).rglob('*')) / (1024 * 1024)
-    print(f"Size: {size_mb:.1f} MB")
+    executable = DIST_ROOT / f"{APP_NAME}.exe"
+    if not executable.exists():
+        raise FileNotFoundError(f"PyInstaller did not create {executable}")
+    return executable
 
 
-def main():
-    build()
+def create_release_package(executable: Path) -> Path:
+    """Assemble the portable release directory and ZIP archive."""
+    PACKAGE_ROOT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(executable, PACKAGE_ROOT / executable.name)
+    copy_runtime_template()
+    write_release_readme()
+    write_uat_checklist()
+
+    archive = shutil.make_archive(
+        str(RELEASE_ROOT / RELEASE_NAME),
+        "zip",
+        root_dir=RELEASE_ROOT,
+        base_dir=RELEASE_NAME,
+    )
+    return Path(archive)
+
+
+def main() -> None:
+    clean_outputs()
+    print(f"Building {APP_NAME} {VERSION}...")
+    executable = build_executable()
+    archive = create_release_package(executable)
+    size_mb = archive.stat().st_size / (1024 * 1024)
+    print(f"Release package: {archive}")
+    print(f"ZIP size: {size_mb:.1f} MB")
 
 
 if __name__ == "__main__":
