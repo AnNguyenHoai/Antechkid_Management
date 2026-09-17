@@ -110,20 +110,45 @@ def temp_runtime(tmp_path, clean_paths):
 
 @pytest.fixture
 def test_db_path(tmp_path):
-    """Create a temporary database path for testing."""
+    """Create a valid empty test database for legacy service tests.
+
+    EP-SEC-01 intentionally makes ``create_engine_for_path`` strict: a
+    missing database must never be materialized implicitly. The pre-existing
+    test suite historically relied on SQLAlchemy creating the temporary file
+    when ``Base.metadata.create_all(engine)`` opened the engine. Keep that
+    fixture contract explicit by materializing a real schema before handing
+    the path to tests. Tests that need to exercise missing/corrupt databases
+    should create their own path instead of using this fixture.
+    """
+    from centermanager.database.engine import create_engine_for_path
+    from centermanager.database.base import Base
+    from centermanager import models  # noqa: F401
+
     db_path = tmp_path / "test.db"
-    return db_path
+    # The strict production engine only opens existing, schema-valid files.
+    # Build the test database explicitly, preserving the old fixture's
+    # expectation that callers receive a ready-to-initialize database.
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE __test_database_marker__ (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    engine = create_engine_for_path(db_path)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    yield db_path
 
 
 @pytest.fixture
 def test_db(test_db_path):
-    """Create a temporary database with initialized tables."""
-    from centermanager.database.engine import create_engine_for_path
-    from centermanager.database.base import Base
-    from centermanager import models  # noqa
-
-    engine = create_engine_for_path(test_db_path)
-    Base.metadata.create_all(engine)
+    """Provide a temporary database with initialized tables."""
     yield test_db_path
 
 
