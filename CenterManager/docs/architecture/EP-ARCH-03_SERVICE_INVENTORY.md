@@ -42,6 +42,7 @@ The strict provider gate remains authoritative for every service that declares `
 | `outstanding_service.py` | PASS | — | — | — | repository-owned | — |
 | `parent_service.py` | PASS | — | — | — | — | — |
 | `permission_service.py` | PASS | — | — | — | — | — |
+| `product_hardening_service.py` | NON_REPOSITORY | — | — | — | policy/path guards | — |
 | `report_service.py` | PASS | — | — | — | repository-owned | — |
 | `session_note_service.py` | PASS | — | — | — | — | — |
 | `session_report_service.py` | PASS | — | — | — | — | — |
@@ -155,6 +156,9 @@ The first Phase 2 hardening slice closes stale architecture classification for t
 - `student_note_service.py` — **StudentNoteService** is provider-backed through `RepositoryProvider.notes(...)`; note persistence/refresh/query remain repository-owned while validation and timeline orchestration remain service-owned.
 
 All three are now `PASS`. They are not migration backlog.
+
+## Phase 2 hardening — ProductHardeningService
+- `product_hardening_service.py` — **ProductHardeningService** is a cross-cutting non-database guard for canonical authorization and managed filesystem paths. It is classified as `NON_REPOSITORY` and does not own a database session or repository.
 
 ## EP-ARCH-03.35 Migration Rule
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
