@@ -23,9 +23,14 @@ class StudentImportService:
     def __init__(
         self,
         session_factory: sessionmaker,
-        student_service: StudentService,
+        student_service: Optional[StudentService] = None,
         repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
+        if student_service is None and isinstance(session_factory, StudentService):
+            student_service = session_factory
+            session_factory = student_service._session_factory
+        if student_service is None:
+            raise ValueError("student_service is required")
         self._session_factory = session_factory
         self._student_service = student_service
         self._repository_provider = repository_provider or create_default_repository_provider()
