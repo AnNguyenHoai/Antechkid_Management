@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QDate
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
     QComboBox, QPlainTextEdit, QPushButton, QHBoxLayout,
-    QMessageBox, QLabel
+    QMessageBox, QLabel, QWidget
 )
 
 from centermanager.models.assessment import AssessmentType
