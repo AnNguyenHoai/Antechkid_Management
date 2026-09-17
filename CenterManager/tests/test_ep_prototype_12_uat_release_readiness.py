@@ -27,8 +27,11 @@ def _method_node(node: ast.ClassDef, name: str) -> ast.FunctionDef:
 
 
 def test_ep_prototype_12_prior_prototype_regression_contracts_are_present():
-    for number in range(1, 12):
+    # EP-PROTOTYPE-01 predates the later documentation naming convention.
+    assert (DOCS / "PROTOTYPE_SCOPE.md").is_file(), "missing EP-PROTOTYPE-01 documentation"
+    for number in range(2, 12):
         assert list(DOCS.glob(f"EP-PROTOTYPE-{number:02d}_*.md")), f"missing EP-PROTOTYPE-{number:02d} documentation"
+    for number in range(1, 12):
         assert list(TESTS.glob(f"test_ep_prototype_{number:02d}_*.py")), f"missing EP-PROTOTYPE-{number:02d} regression test"
 
 
