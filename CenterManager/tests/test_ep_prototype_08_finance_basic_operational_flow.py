@@ -24,21 +24,29 @@ def _method_node(node: ast.ClassDef, name: str) -> ast.FunctionDef:
     )
 
 
+def _string_constants(node: ast.AST) -> set[str]:
+    """Return string literals from an AST node without depending on source quoting."""
+    return {
+        value
+        for child in ast.walk(node)
+        if isinstance(child, ast.Constant)
+        and isinstance((value := child.value), str)
+    }
+
+
 def test_ep_prototype_08_finance_shell_owns_basic_navigation():
     source = _read(SHELL)
     cls = _class_node(source, "FinanceWorkspaceShell")
     setup = _method_node(cls, "_setup_ui")
     navigate = _method_node(cls, "navigate_to")
     setup_source = ast.unparse(setup)
-    navigate_source = ast.unparse(navigate)
+    navigate_constants = _string_constants(navigate)
 
     assert "FinanceDashboardPage" in setup_source
     assert "IncomeListPage" in setup_source
     assert "ExpenseListPage" in setup_source
     assert "navigate_to" in source
-    assert '"income"' in navigate_source
-    assert '"expense"' in navigate_source
-    assert '"dashboard"' in navigate_source
+    assert {"income", "expense", "dashboard"}.issubset(navigate_constants)
 
 
 def test_ep_prototype_08_finance_access_is_permission_gated():
