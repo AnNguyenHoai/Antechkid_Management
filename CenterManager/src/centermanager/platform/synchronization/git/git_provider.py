@@ -4,7 +4,6 @@ import subprocess
 import shutil
 from pathlib import Path
 from typing import Optional
-import logging
 
 from .git_exceptions import (
     GitException,
@@ -18,8 +17,6 @@ from .git_exceptions import (
 )
 from .git_credentials import GitCredentials
 from .git_status import GitStatus
-
-logger = logging.getLogger(__name__)
 
 
 class GitProvider:
@@ -74,7 +71,7 @@ class GitProvider:
         except GitNetworkError:
             self._status = GitStatus.OFFLINE
             raise
-        except GitPullFailed as e:
+        except GitPullFailed:
             self._status = GitStatus.ERROR
             raise
         except GitMergeRequired:
@@ -95,25 +92,18 @@ class GitProvider:
     def push(self) -> bool:
         """Push local commits to remote. Works even if no changes but has pending commits."""
         try:
-            # Check if there is anything to push (local ahead of remote)
             if self.has_pending_push():
                 self._run_git_command(["push", "origin", self._credentials.branch])
-                self._status = GitStatus.CONNECTED
-                return True
-            # No pending push, consider success
             self._status = GitStatus.CONNECTED
             return True
-        except GitNetworkError as e:
+        except GitNetworkError:
             self._status = GitStatus.OFFLINE
-            logger.error(f"Push failed: Network error - {e}")
             raise
-        except GitPushFailed as e:
+        except GitPushFailed:
             self._status = GitStatus.ERROR
-            logger.error(f"Push failed: {e}")
             raise
         except Exception as e:
             self._status = GitStatus.ERROR
-            logger.exception(f"Push failed: {e}")
             raise GitException(f"Push failed: {e}")
 
     def has_pending_push(self) -> bool:
@@ -126,18 +116,18 @@ class GitProvider:
             try:
                 remote_commit = self._run_git_command(["rev-parse", remote_ref]).strip()
             except GitException:
-                # Remote branch not found, meaning no upstream, so pending push
                 return True
             return local_commit != remote_commit
         except Exception:
             return False
 
     def status(self) -> dict:
+        # Do not expose repository path or raw Git error details through a
+        # status payload that may be rendered by UI/diagnostic surfaces.
         return {
             "status": self._status.value,
-            "repo_path": str(self._repo_path),
             "branch": self._credentials.branch if self._credentials else None,
-            "last_error": self._last_error,
+            "last_error": "Git operation failed" if self._last_error else None,
         }
 
     def connection_status(self) -> str:
@@ -168,29 +158,24 @@ class GitProvider:
             )
             if result.returncode != 0:
                 stderr = result.stderr
-                logger.error(f"Git command failed: {' '.join(cmd)}")
-                logger.error(f"stderr: {stderr}")
-                # Raise appropriate exception based on error
                 if "authentication" in stderr.lower() or "authorization" in stderr.lower():
-                    raise GitAuthenticationFailed(stderr)
+                    raise GitAuthenticationFailed("Git authentication failed")
                 elif "not found" in stderr.lower() or "does not exist" in stderr.lower():
-                    raise GitRepositoryNotFound(stderr)
+                    raise GitRepositoryNotFound("Git repository was not found")
                 elif "merge conflict" in stderr.lower() or "need to pull" in stderr.lower():
-                    raise GitMergeRequired(stderr)
+                    raise GitMergeRequired("Git merge is required")
                 elif "pull" in cmd and "failed" in stderr.lower():
-                    raise GitPullFailed(stderr)
+                    raise GitPullFailed("Git pull failed")
                 elif "push" in cmd and "failed" in stderr.lower():
-                    raise GitPushFailed(stderr)
+                    raise GitPushFailed("Git push failed")
                 elif "could not read from remote" in stderr.lower() or "network" in stderr.lower():
-                    raise GitNetworkError(stderr)
+                    raise GitNetworkError("Git network operation failed")
                 else:
-                    raise GitException(stderr)
+                    raise GitException("Git command failed")
             return result.stdout
-        except subprocess.CalledProcessError as e:
-            logger.exception(f"Git command execution failed: {e}")
-            raise GitException(f"Git command failed: {e}")
+        except subprocess.CalledProcessError:
+            raise GitException("Git command execution failed")
         except FileNotFoundError:
             self._status = GitStatus.ERROR
             self._last_error = "Git executable not found"
-            logger.error("Git executable not found in PATH.")
             raise GitException("Git executable not found in PATH.")
