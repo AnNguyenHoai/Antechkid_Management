@@ -1,31 +1,42 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
 import logging
+import sqlite3
 from pathlib import Path
+from urllib.parse import quote
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
 from centermanager.core.paths import get_paths
+from centermanager.database.lifecycle import DatabaseLifecycle, DatabaseLifecycleError, DatabaseLifecycleState
 
 logger = logging.getLogger(__name__)
 
+
 def get_database_path() -> Path:
-    paths = get_paths()
-    db_dir = paths.database_dir
-    db_dir.mkdir(parents=True, exist_ok=True)
-    return db_dir / "center.db"
+    """Return the runtime database path without creating the database file."""
+    return get_paths().database_dir / "center.db"
+
 
 def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
+    """Create a SQLite engine that can only open an existing healthy database."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    database_uri = f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode=rw"
 
-    # Sử dụng SQLite thuần, không mã hóa
+    def connect_existing_database():
+        DatabaseLifecycle(db_path).require_available()
+        return sqlite3.connect(
+            database_uri,
+            uri=True,
+            check_same_thread=False,
+        )
+
     engine = create_engine(
-        f"sqlite:///{db_path}",
+        "sqlite://",
         echo=echo,
-        connect_args={"check_same_thread": False},
+        creator=connect_existing_database,
         poolclass=NullPool,
     )
 
@@ -37,8 +48,14 @@ def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
 
     return engine
 
+
 def create_production_engine(echo: bool = False) -> Engine:
+    """Create the production engine without ever materializing a missing DB."""
     db_path = get_database_path()
-    if not db_path.exists():
-        logger.info("Database file not found. A new database will be created.")
+    state = DatabaseLifecycle(db_path).inspect()
+    if state is not DatabaseLifecycleState.AVAILABLE:
+        logger.warning(
+            "Runtime database is not currently available: state=%s; recovery is required before first use",
+            state.value,
+        )
     return create_engine_for_path(db_path, echo=echo)
