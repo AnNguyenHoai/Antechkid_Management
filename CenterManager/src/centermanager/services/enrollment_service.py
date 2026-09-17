@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
+from enum import Enum
 from typing import Callable, List, Optional
 
 from centermanager.models.enrollment import Enrollment
@@ -12,7 +12,7 @@ from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentEnrollmentChanged
 
 
-class EnrollmentStatus(StrEnum):
+class EnrollmentStatus(str, Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     WITHDRAWN = "WITHDRAWN"

@@ -5,7 +5,7 @@ MetricCard - Reusable card for displaying a single metric.
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from centermanager.ui.design_system.tokens import COLORS, SPACING, BORDER_RADIUS
 
