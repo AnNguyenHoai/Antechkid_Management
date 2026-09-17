@@ -10,7 +10,7 @@ def test_redacts_token_embedded_in_git_url():
     redacted = redact_sensitive_text(message)
 
     assert secret not in redacted
-    assert "[REDACTED]@github.com/example/repo.git" in redacted
+    assert "[REDACTED_URL]" in redacted
 
 
 def test_redacts_github_pat_outside_url():
@@ -41,4 +41,4 @@ def test_redacting_formatter_sanitizes_exception_text():
 
     rendered = RedactingFormatter("%(message)s").format(record)
     assert secret not in rendered
-    assert "[REDACTED]@github.com/example/repo.git" in rendered
+    assert "[REDACTED_URL]" in rendered
