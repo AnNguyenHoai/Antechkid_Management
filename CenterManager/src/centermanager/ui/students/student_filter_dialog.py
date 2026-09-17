@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QComboBox, QSpinBox, QLineEdit, QPushButton,
-    QLabel, QMessageBox
+    QLabel, QMessageBox, QWidget
 )
 
 from centermanager.dto.student_filter_dto import StudentFilter
