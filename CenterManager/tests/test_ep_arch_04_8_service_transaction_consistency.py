@@ -76,26 +76,29 @@ def _is_session_factory_context(node: ast.With) -> bool:
     return False
 
 
-def _commit_has_context_manager_rollback_boundary(method: ast.AST) -> bool:
-    """Return True when every service commit is enclosed by an owned session context.
+def _node_contains(root: ast.AST, target: ast.AST) -> bool:
+    return any(child is target for child in ast.walk(root))
 
-    SQLAlchemy's Session context manager closes the application-owned session on
-    exceptional exit, which rolls back an active transaction. This is a valid
-    exception-safe lifecycle boundary and avoids requiring duplicate rollback
-    boilerplate in every mutation method.
-    """
-    for node in ast.walk(method):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "commit":
-            continue
-        if not any(
-            isinstance(parent, ast.With) and _is_session_factory_context(parent)
-            for parent in ast.walk(method)
-            if isinstance(parent, ast.With)
-        ):
-            return False
-    return _contains_transaction_call(method, "commit")
+
+def _commit_has_context_manager_rollback_boundary(method: ast.AST) -> bool:
+    """Verify every commit is enclosed by an application-owned session context."""
+    commits = [
+        child for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "commit"
+    ]
+    if not commits:
+        return False
+
+    session_contexts = [
+        child for child in ast.walk(method)
+        if isinstance(child, ast.With) and _is_session_factory_context(child)
+    ]
+    return all(
+        any(_node_contains(context, commit) for context in session_contexts)
+        for commit in commits
+    )
 
 
 def test_ep_arch_04_8_repositories_do_not_control_transactions():
