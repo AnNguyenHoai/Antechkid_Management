@@ -13,15 +13,15 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.paths import get_paths
 from centermanager.models.student import Student
-from centermanager.repositories.provider import RepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 
 
 class StudentExportService:
     """Service to export student list to Excel and CSV."""
 
-    def __init__(self, session_factory: sessionmaker, repository_provider: RepositoryProvider) -> None:
+    def __init__(self, session_factory: sessionmaker, repository_provider: Optional[RepositoryProvider] = None) -> None:
         self._session_factory = session_factory
-        self._repository_provider = repository_provider
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def export_all_active(self, file_path: Optional[Path] = None) -> Path:
         """Export all active students to Excel."""
