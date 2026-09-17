@@ -94,15 +94,18 @@ def test_ep_prototype_03_student_detail_required_context():
     setup = _method_node(cls, "_setup_ui")
     setup_source = ast.unparse(setup)
 
-    # AST unparse normalizes quote style, so these checks must be quote-agnostic.
     assert "Profile" in setup_source
     assert "🎓 Enrollment" in setup_source
-    assert "📅 Timeline" in setup_source
     assert "EnrollmentWidget" in setup_source
-    assert "TimelineWidget" in setup_source
+
+    # Timeline is part of the Profile tab's vertical content, not a separate tab.
+    profile_method = _method_node(cls, "_create_profile_tab")
+    profile_source = ast.unparse(profile_method)
+    assert "📅 Timeline" in profile_source
+    assert "TimelineWidget" in profile_source
 
     # Existing operational surfaces needed by the Golden Flow remain exposed.
-    assert "AssessmentSection" in setup_source
+    assert "AssessmentSection" in profile_source
     assert "StudentAttendanceWidget" in setup_source
 
 
