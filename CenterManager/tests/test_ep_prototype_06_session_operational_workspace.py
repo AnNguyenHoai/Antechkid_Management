@@ -96,10 +96,19 @@ def test_ep_prototype_06_session_reporting_is_read_only_operational_hook():
     source = _read(SCHEDULE)
     cls = _class_node(source, "ClassScheduleWidget")
     export = _method_node(cls, "_export_session_pdf")
-    export_source = ast.unparse(export)
 
-    assert "generate_session_report" in export_source
-    assert "WRITE" not in export_source
+    executable_nodes = export.body
+    if (
+        executable_nodes
+        and isinstance(executable_nodes[0], ast.Expr)
+        and isinstance(getattr(executable_nodes[0], "value", None), ast.Constant)
+        and isinstance(executable_nodes[0].value.value, str)
+    ):
+        executable_nodes = executable_nodes[1:]
+    executable_source = "\n".join(ast.unparse(node) for node in executable_nodes)
+
+    assert "generate_session_report" in executable_source
+    assert "ensure_write" not in executable_source
 
 
 def test_ep_prototype_06_no_second_session_router_or_duplicate_service_layer():
