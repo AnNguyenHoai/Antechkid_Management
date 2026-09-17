@@ -2,13 +2,36 @@
 """
 Logging setup for CenterManager.
 
-Configures console and file logging with UTF-8 encoding.
+Configures console and file logging with UTF-8 encoding and redacts
+credential-bearing Git URLs and common token formats from rendered logs.
 """
 import logging
+import re
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+
+
+_SENSITIVE_PATTERNS = (
+    (re.compile(r"(?i)(https?://)([^\s/@:]+(?::[^\s/@]*)?@)"), r"\1[REDACTED]@"),
+    (re.compile(r"(?i)\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_\-]+\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"(?i)(\b(?:token|access_token|password|passwd|secret)\s*[=:]\s*)[^\s,&]+"), r"\1[REDACTED]"),
+)
+
+
+def redact_sensitive_text(text: str) -> str:
+    """Redact credential material before it reaches console or file logs."""
+    redacted = text
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+class RedactingFormatter(logging.Formatter):
+    """Formatter that sanitizes the fully rendered record, including tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_sensitive_text(super().format(record))
 
 
 def setup_logging(
@@ -20,41 +43,25 @@ def setup_logging(
     max_bytes: int = 5 * 1024 * 1024,  # 5MB
     backup_count: int = 3,
 ) -> None:
-    """
-    Configure logging for both console and file.
-
-    Args:
-        log_dir: Directory to store log files.
-        app_name: Application name for log header.
-        app_version: Application version for log header.
-        console_level: Log level for console output.
-        file_level: Log level for file output.
-        max_bytes: Maximum size of each log file before rotation.
-        backup_count: Number of rotated log files to keep.
-    """
-    # Ensure log directory exists
+    """Configure console and file logging with credential redaction."""
     log_dir.mkdir(parents=True, exist_ok=True)
 
     log_file = log_dir / f"{app_name.lower().replace(' ', '_')}.log"
 
-    # Configure root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Allow all levels, handlers filter
-
-    # Remove any existing handlers to avoid duplicates
+    root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
 
-    # ----- Console handler -----
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, console_level.upper(), logging.INFO))
-    console_format = logging.Formatter(
-        "%(levelname)s - %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    console_handler.setFormatter(
+        RedactingFormatter(
+            "%(levelname)s - %(name)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
     )
-    console_handler.setFormatter(console_format)
     root_logger.addHandler(console_handler)
 
-    # ----- File handler (with rotation) -----
     file_handler = RotatingFileHandler(
         log_file,
         maxBytes=max_bytes,
@@ -62,14 +69,14 @@ def setup_logging(
         encoding="utf-8",
     )
     file_handler.setLevel(getattr(logging, file_level.upper(), logging.DEBUG))
-    file_format = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    file_handler.setFormatter(
+        RedactingFormatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
     )
-    file_handler.setFormatter(file_format)
     root_logger.addHandler(file_handler)
 
-    # Log startup banner
     logger = logging.getLogger("centermanager")
     logger.info(f"{app_name} v{app_version} starting")
     logger.info(f"Log file: {log_file}")
