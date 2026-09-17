@@ -5,15 +5,9 @@
 The application is packaged as a one-file PyInstaller executable while the
 mutable ``runtime/`` directory stays beside the executable. Runtime data must
 never be embedded into the executable.
-
-Usage:
-    python build_release.py
-
-Output:
-    release/CenterManager-v0.1.0-prototype-windows-x64/
-    release/CenterManager-v0.1.0-prototype-windows-x64.zip
 """
 
+import os
 import shutil
 from pathlib import Path
 
@@ -31,15 +25,35 @@ RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "*.db", "*.db-journal", "*.db-wal", "*.db-shm",
     "*.sqlite", "*.sqlite3",
     "logs", "Logs", "cache", "Cache", "temp", "Temp",
-    "backup", "Backup",
+    "backup", "Backup", "repository", ".git", "__pycache__",
 )
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove a generated tree and handle Windows read-only files safely."""
+    def _on_rm_error(func, target, exc_info):
+        try:
+            os.chmod(target, 0o700)
+            func(target)
+        except OSError:
+            raise
+
+    shutil.rmtree(path, onerror=_on_rm_error)
 
 
 def clean_outputs() -> None:
     """Remove generated build/release directories only."""
     for path in (DIST_ROOT, PROJECT_ROOT / "build", RELEASE_ROOT):
         if path.exists():
-            shutil.rmtree(path)
+            try:
+                _remove_tree(path)
+            except PermissionError as exc:
+                raise PermissionError(
+                    f"Cannot clean release output '{path}'. "
+                    "Close CenterManager.exe, Git clients, terminals, or other "
+                    "processes using files under this directory, then run "
+                    "build_release.py again."
+                ) from exc
 
 
 def copy_runtime_template() -> None:
@@ -49,6 +63,19 @@ def copy_runtime_template() -> None:
     if not src_runtime.exists():
         raise FileNotFoundError(f"Runtime template not found: {src_runtime}")
     shutil.copytree(src_runtime, dst_runtime, ignore=RUNTIME_EXCLUDES)
+
+
+def copy_migration_assets() -> None:
+    """Ship Alembic assets beside the portable executable for frozen startup."""
+    for name in ("alembic.ini", "migrations"):
+        source = PROJECT_ROOT / name
+        target = PACKAGE_ROOT / name
+        if not source.exists():
+            raise FileNotFoundError(f"Required migration asset not found: {source}")
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(source, target)
 
 
 def write_release_readme() -> None:
@@ -61,6 +88,7 @@ def write_release_readme() -> None:
         "- Do not delete or rename the `runtime/` folder.\n"
         "- Configure Git synchronization on first launch when requested.\n"
         "- Use the application's backup flow for test data.\n"
+        "- Alembic migration assets are shipped with the release and are required for startup.\n"
         "- If startup fails, inspect `error.log` beside the executable and `runtime/Logs/`.\n",
         encoding="utf-8",
     )
@@ -88,32 +116,18 @@ def write_uat_checklist() -> None:
 def build_executable() -> Path:
     """Build the one-file, windowed executable."""
     args = [
-        "run.py",
-        "--name", APP_NAME,
-        "--onefile",
-        "--windowed",
+        "run.py", "--name", APP_NAME, "--onefile", "--windowed",
         "--paths", str(PROJECT_ROOT / "src"),
         "--version-file", str(PROJECT_ROOT / "version_metadata.txt"),
+        "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
+        "--add-data", f"{PROJECT_ROOT / 'migrations'}{os.pathsep}migrations",
     ]
-
     hidden_imports = [
-        "centermanager",
-        "centermanager.core",
-        "centermanager.database",
-        "centermanager.models",
-        "centermanager.repositories",
-        "centermanager.services",
-        "centermanager.ui",
-        "centermanager.export",
-        "centermanager.platform",
-        "centermanager.events",
-        "alembic",
-        "sqlalchemy",
-        "openpyxl",
-        "reportlab",
-        "bcrypt",
-        "git",
-        "PySide6",
+        "centermanager", "centermanager.core", "centermanager.database",
+        "centermanager.models", "centermanager.repositories",
+        "centermanager.services", "centermanager.ui", "centermanager.export",
+        "centermanager.platform", "centermanager.events", "alembic",
+        "sqlalchemy", "openpyxl", "reportlab", "bcrypt", "git", "PySide6",
     ]
     for module in hidden_imports:
         args.extend(["--hidden-import", module])
@@ -130,14 +144,12 @@ def create_release_package(executable: Path) -> Path:
     PACKAGE_ROOT.mkdir(parents=True, exist_ok=True)
     shutil.copy2(executable, PACKAGE_ROOT / executable.name)
     copy_runtime_template()
+    copy_migration_assets()
     write_release_readme()
     write_uat_checklist()
-
     archive = shutil.make_archive(
-        str(RELEASE_ROOT / RELEASE_NAME),
-        "zip",
-        root_dir=RELEASE_ROOT,
-        base_dir=RELEASE_NAME,
+        str(RELEASE_ROOT / RELEASE_NAME), "zip",
+        root_dir=RELEASE_ROOT, base_dir=RELEASE_NAME,
     )
     return Path(archive)
 
