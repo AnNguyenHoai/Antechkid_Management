@@ -82,13 +82,19 @@ def test_ep_prototype_11_student_flow_connects_detail_to_operational_surfaces():
 
     detail_source = _read(STUDENT_DETAIL)
     detail_cls = _class_node(detail_source, "StudentDetailPage")
+    setup_detail = _method_node(detail_cls, "_setup_ui")
     profile = _method_node(detail_cls, "_create_profile_tab")
     populate = _method_node(detail_cls, "_populate_profile")
+    setup_detail_source = ast.unparse(setup_detail)
     profile_source = ast.unparse(profile)
     populate_source = ast.unparse(populate)
-    assert "EnrollmentWidget" in profile_source
+
+    # These surfaces are intentionally split across StudentDetailPage helpers:
+    # Enrollment and Attendance are top-level tabs created by _setup_ui, while
+    # Assessment and Timeline belong to the Profile tab.
+    assert "EnrollmentWidget" in setup_detail_source
+    assert "StudentAttendanceWidget" in setup_detail_source
     assert "AssessmentSection" in profile_source
-    assert "StudentAttendanceWidget" in profile_source
     assert "TimelineWidget" in profile_source
     assert "get_student_timeline" in populate_source
 
