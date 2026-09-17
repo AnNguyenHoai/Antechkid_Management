@@ -1,13 +1,7 @@
 name: Pytest Suite
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main_repos
-      - 'ep-*'
-      - 'fix-*'
-  pull_request:
     branches:
       - main_repos
 
@@ -26,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
