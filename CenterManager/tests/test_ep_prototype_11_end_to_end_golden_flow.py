@@ -45,6 +45,25 @@ def test_ep_prototype_11_home_to_workspace_selection_contract():
     assert "central_stack.setCurrentWidget" in selected_source
 
 
+def test_ep_prototype_11_application_shell_wires_cross_workspace_signals():
+    source = _read(MAIN_WINDOW)
+    cls = _class_node(source, "MainWindow")
+
+    home_setup = _method_node(cls, "_setup_home")
+    student_setup = _method_node(cls, "_setup_student_workspace")
+    teacher_setup = _method_node(cls, "_setup_teacher_workspace")
+    class_setup = _method_node(cls, "_setup_class_workspace")
+    finance_setup = _method_node(cls, "_setup_finance_workspace")
+
+    assert "workspace_selected.connect" in ast.unparse(home_setup)
+    assert "student_workspace.go_home.connect" in ast.unparse(student_setup)
+    assert "student_workspace.go_to_finance.connect" in ast.unparse(student_setup)
+    assert "teacher_workspace.go_home.connect" in ast.unparse(teacher_setup)
+    assert "teacher_workspace.navigate_to_class.connect" in ast.unparse(teacher_setup)
+    assert "class_workspace.go_home.connect" in ast.unparse(class_setup)
+    assert "finance_workspace.go_home.connect" in ast.unparse(finance_setup)
+
+
 def test_ep_prototype_11_student_flow_connects_detail_to_operational_surfaces():
     shell_source = _read(STUDENT_SHELL)
     shell_cls = _class_node(shell_source, "StudentWorkspaceShell")
