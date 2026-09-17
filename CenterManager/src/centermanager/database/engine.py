@@ -19,14 +19,29 @@ def get_database_path() -> Path:
     return get_paths().database_dir / "center.db"
 
 
-def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
-    """Create a SQLite engine that can only open an existing healthy database."""
+def create_engine_for_path(
+    db_path: Path,
+    echo: bool = False,
+    *,
+    allow_create: bool = True,
+) -> Engine:
+    """Create a SQLite engine for a specific path.
+
+    ``allow_create=True`` preserves the low-level helper's historical test and
+    bootstrap behavior. Production runtime creation must go through
+    ``create_production_engine()``, which always passes ``allow_create=False``
+    and therefore rejects a missing database instead of silently materializing
+    a new empty one.
+    """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    database_uri = f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode=rw"
 
-    def connect_existing_database():
-        DatabaseLifecycle(db_path).require_available()
+    mode = "rwc" if allow_create else "rw"
+    database_uri = f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode={mode}"
+
+    def connect_database():
+        if not allow_create:
+            DatabaseLifecycle(db_path).require_available()
         return sqlite3.connect(
             database_uri,
             uri=True,
@@ -36,7 +51,7 @@ def create_engine_for_path(db_path: Path, echo: bool = False) -> Engine:
     engine = create_engine(
         "sqlite://",
         echo=echo,
-        creator=connect_existing_database,
+        creator=connect_database,
         poolclass=NullPool,
     )
 
@@ -58,4 +73,4 @@ def create_production_engine(echo: bool = False) -> Engine:
             "Runtime database is not currently available: state=%s; recovery is required before first use",
             state.value,
         )
-    return create_engine_for_path(db_path, echo=echo)
+    return create_engine_for_path(db_path, echo=echo, allow_create=False)
