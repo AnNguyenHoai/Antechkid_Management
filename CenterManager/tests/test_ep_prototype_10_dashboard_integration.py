@@ -76,8 +76,11 @@ def test_ep_prototype_10_main_window_owns_application_workspace_routing():
     selected_source = ast.unparse(selected)
     go_home_source = ast.unparse(go_home)
 
+    # ast.unparse() normalizes string literals to its own quoting style, so
+    # validate the semantic workspace identifiers rather than the source-level
+    # quote character used in the dictionary/condition literals.
     for workspace_id in ("student", "teacher", "class", "finance", "employee", "admin"):
-        assert f'"{workspace_id}"' in selected_source
+        assert workspace_id in selected_source
 
     assert "permission_map" in selected_source
     assert "teacher.view" in selected_source
