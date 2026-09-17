@@ -77,6 +77,9 @@ The historical migration notes below remain authoritative for the completed repo
 - Student, Session, Timeline, Expense, Teacher, Finance-period, import/export/note and related services remain covered by the completed migration slices.
 - Phase 2 introduces `ProductHardeningService` as a small non-database cross-cutting guard for canonical authorization and managed filesystem paths; it does not own a database session or repository.
 
+## Phase 2 hardening — ProductHardeningService
+- `product_hardening_service.py` — **ProductHardeningService** is a cross-cutting non-database guard for canonical authorization and managed filesystem paths. It is classified as `NON_REPOSITORY` and does not own a database session or repository.
+
 ## EP-ARCH-03.35 Migration Rule
 
 A service is only migrated into strict `PASS` when it has an application database repository boundary. Non-database responsibilities are `NON_REPOSITORY` and excluded from the RepositoryProvider requirement. Database-backed services without `RepositoryProvider` remain migration backlog until their own migration slice.
