@@ -128,6 +128,10 @@ def build_executable() -> Path:
         "centermanager.services", "centermanager.ui", "centermanager.export",
         "centermanager.platform", "centermanager.events", "alembic",
         "sqlalchemy", "openpyxl", "reportlab", "bcrypt", "git", "PySide6",
+        # Alembic's migrations/env.py imports this stdlib submodule explicitly.
+        # PyInstaller may not collect it transitively from the dynamic Alembic
+        # migration loader, so make the dependency explicit for frozen builds.
+        "logging.config",
     ]
     for module in hidden_imports:
         args.extend(["--hidden-import", module])
