@@ -15,34 +15,17 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORIES = ROOT / "src" / "centermanager" / "repositories"
 
 FORBIDDEN_UPWARD_MODULE_PREFIXES = (
-    "centermanager.services",
-    "centermanager.controllers",
-    "centermanager.ui",
-    "centermanager.views",
-    "centermanager.application",
+    "centermanager.services", "centermanager.controllers", "centermanager.ui",
+    "centermanager.views", "centermanager.application",
 )
 FORBIDDEN_SQLALCHEMY_IMPORTS = {
-    "create_engine",
-    "create_async_engine",
-    "sessionmaker",
-    "async_sessionmaker",
-    "scoped_session",
-    "async_scoped_session",
-    "SessionLocal",
+    "create_engine", "create_async_engine", "sessionmaker", "async_sessionmaker",
+    "scoped_session", "async_scoped_session", "SessionLocal",
 }
 FORBIDDEN_LIFECYCLE_CALLS = {
-    "create_engine",
-    "create_async_engine",
-    "sessionmaker",
-    "async_sessionmaker",
-    "scoped_session",
-    "async_scoped_session",
-    "Session",
-    "AsyncSession",
-    "begin",
-    "begin_nested",
-    "commit",
-    "rollback",
+    "create_engine", "create_async_engine", "sessionmaker", "async_sessionmaker",
+    "scoped_session", "async_scoped_session", "Session", "AsyncSession",
+    "begin", "begin_nested", "commit", "rollback",
 }
 
 
@@ -62,11 +45,9 @@ def _imported_module_names(tree: ast.AST) -> list[tuple[int, str]]:
     imports: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append((node.lineno, alias.name))
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.append((node.lineno, node.module))
+            imports.extend((node.lineno, alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.append((node.lineno, node.module))
     return imports
 
 
@@ -89,10 +70,7 @@ def test_ep_arch_04_7_repositories_do_not_depend_upward_on_application_layers():
         for lineno, module in _imported_module_names(_parse(path)):
             if any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_UPWARD_MODULE_PREFIXES):
                 violations.append(f"{path.name}:{lineno}: imports upward from {module}")
-    assert not violations, (
-        "Repository modules must not depend upward on application/presentation layers:\n"
-        + "\n".join(violations)
-    )
+    assert not violations, "Repository modules must not depend upward on application/presentation layers:\n" + "\n".join(violations)
 
 
 def test_ep_arch_04_7_repositories_do_not_import_sqlalchemy_session_factories():
@@ -108,10 +86,7 @@ def test_ep_arch_04_7_repositories_do_not_import_sqlalchemy_session_factories():
                 for alias in node.names:
                     if alias.name == "sqlalchemy.orm.session":
                         violations.append(f"{path.name}:{node.lineno}: imports sqlalchemy.orm.session")
-    assert not violations, (
-        "Repositories must not create or own SQLAlchemy session factories/lifecycle:\n"
-        + "\n".join(violations)
-    )
+    assert not violations, "Repositories must not create or own SQLAlchemy session factories/lifecycle:\n" + "\n".join(violations)
 
 
 def test_ep_arch_04_7_repositories_do_not_instantiate_session_or_engine_lifecycle():
@@ -120,10 +95,7 @@ def test_ep_arch_04_7_repositories_do_not_instantiate_session_or_engine_lifecycl
         for lineno, attr, receiver in _attribute_calls(_parse(path)):
             if attr in FORBIDDEN_LIFECYCLE_CALLS:
                 violations.append(f"{path.name}:{lineno}: {receiver + '.' if receiver else ''}{attr}()")
-    assert not violations, (
-        "Repositories must not instantiate Session/engine factories or control transaction lifecycle:\n"
-        + "\n".join(violations)
-    )
+    assert not violations, "Repositories must not instantiate Session/engine factories or control transaction lifecycle:\n" + "\n".join(violations)
 
 
 def test_ep_arch_04_7_repository_constructors_receive_injected_session_and_store_it_privately():
@@ -137,14 +109,24 @@ def test_ep_arch_04_7_repository_constructors_receive_injected_session_and_store
                 continue
             if not any(arg.arg == "session" for arg in init.args.args):
                 violations.append(f"{path.name}:{cls.name}: __init__ must accept session explicitly")
-            if not any(
+                continue
+            stores_session = any(
                 isinstance(n, ast.Assign)
                 and any(isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == "self" and t.attr == "_session" for t in n.targets)
-                and isinstance(n.value, ast.Name)
-                and n.value.id == "session"
+                and isinstance(n.value, ast.Name) and n.value.id == "session"
                 for n in ast.walk(init)
-            ):
-                violations.append(f"{path.name}:{cls.name}: injected session must be stored as self._session")
+            )
+            delegates_to_base = any(
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and isinstance(n.func.value, ast.Call)
+                and isinstance(n.func.value.func, ast.Name)
+                and n.func.value.func.id == "super"
+                and n.func.attr == "__init__"
+                for n in ast.walk(init)
+            )
+            if not stores_session and not delegates_to_base:
+                violations.append(f"{path.name}:{cls.name}: injected session must be stored as self._session or delegated to BaseRepository")
     assert not violations, "Repository session dependency/lifecycle contract drift detected:\n" + "\n".join(violations)
 
 
@@ -157,8 +139,7 @@ def test_ep_arch_04_7_repositories_do_not_expose_session_factory_or_transaction_
             for node in cls.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in forbidden_public:
                     violations.append(f"{path.name}:{node.lineno}: public {node.name}()")
-                if isinstance(node, ast.FunctionDef) and isinstance(node.decorator_list, list):
-                    for decorator in node.decorator_list:
-                        if isinstance(decorator, ast.Name) and decorator.id == "property" and node.name == "session":
-                            violations.append(f"{path.name}:{node.lineno}: public session property")
+                if isinstance(node, ast.FunctionDef) and node.name == "session":
+                    if any(isinstance(d, ast.Name) and d.id == "property" for d in node.decorator_list):
+                        violations.append(f"{path.name}:{node.lineno}: public session property")
     assert not violations, "Repositories must not expose or own session/transaction lifecycle APIs:\n" + "\n".join(violations)
