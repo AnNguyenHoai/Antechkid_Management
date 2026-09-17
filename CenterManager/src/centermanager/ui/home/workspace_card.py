@@ -7,7 +7,7 @@ Now with flexible sizing.
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy
 
 from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING
 
@@ -49,14 +49,12 @@ class WorkspaceCard(QFrame):
                 background: {COLORS['gray_100']};
             }}
         """)
-        # Set size policy to expand both directions
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumHeight(180)  # ensure minimum height
+        self.setMinimumHeight(180)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        # Top row: icon + name + status indicator
         top_layout = QHBoxLayout()
         icon_label = QLabel(icon)
         icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
@@ -68,7 +66,6 @@ class WorkspaceCard(QFrame):
 
         top_layout.addStretch()
 
-        # Status indicator
         status_color = {
             "good": COLORS['success'],
             "warning": COLORS['warning'],
@@ -84,19 +81,16 @@ class WorkspaceCard(QFrame):
 
         layout.addLayout(top_layout)
 
-        # Description
         desc_label = QLabel(description)
         desc_label.setStyleSheet(f"font-size: 13px; color: {COLORS['muted']};")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
-        # Summary text
         summary_label = QLabel(summary_text)
         summary_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
         summary_label.setWordWrap(True)
         layout.addWidget(summary_label)
 
-        # Quick action button
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.action_btn = QPushButton(quick_action_label)
@@ -117,7 +111,6 @@ class WorkspaceCard(QFrame):
         btn_layout.addWidget(self.action_btn)
         layout.addLayout(btn_layout)
 
-        # Make whole card clickable
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> None:
