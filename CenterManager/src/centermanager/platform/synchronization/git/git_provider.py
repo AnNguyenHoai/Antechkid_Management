@@ -148,14 +148,16 @@ class GitProvider:
             env["GIT_USER"] = self._credentials.username
             env["GIT_PASSWORD"] = self._credentials.token
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self._repo_path),
-                capture_output=True,
-                text=True,
-                env=env,
-                check=False,
-            )
+            run_kwargs = {
+                "cwd": str(self._repo_path),
+                "capture_output": True,
+                "text": True,
+                "env": env,
+                "check": False,
+            }
+            if os.name == "nt":
+                run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run(cmd, **run_kwargs)
             if result.returncode != 0:
                 stderr = result.stderr
                 if "authentication" in stderr.lower() or "authorization" in stderr.lower():
