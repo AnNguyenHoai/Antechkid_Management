@@ -104,16 +104,6 @@ def _contains_session_factory_context(method: ast.AST) -> bool:
     return False
 
 
-def _has_boundary_marker(method: ast.AST) -> bool:
-    source = ast.get_source_segment(
-        _parse(Path(getattr(method, "_audit_source", ""))) if False else ast.Module(body=[], type_ignores=[]),
-        method,
-    )
-    del source
-    doc = ast.get_docstring(method) or ""
-    return "independent transaction" in doc.lower() or "transaction boundary" in doc.lower()
-
-
 def test_ep_arch_04_9_service_composition_is_inventory_complete():
     """Source discovery must produce a deterministic service-composition inventory."""
     edges: list[str] = []
