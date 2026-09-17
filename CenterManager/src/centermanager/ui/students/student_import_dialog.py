@@ -8,7 +8,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QTextEdit, QProgressBar, QMessageBox
 )
 
@@ -37,7 +37,6 @@ class StudentImportDialog(QDialog):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # File selection
         file_layout = QHBoxLayout()
         self.file_label = QLabel("No file selected")
         self.file_label.setStyleSheet("color: #666;")
@@ -47,18 +46,15 @@ class StudentImportDialog(QDialog):
         file_layout.addWidget(self.browse_btn)
         layout.addLayout(file_layout)
 
-        # Progress bar (for future)
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
 
-        # Log area
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText("Import log will appear here...")
         layout.addWidget(self.log_text)
 
-        # Buttons
         btn_layout = QHBoxLayout()
         self.import_btn = QPushButton("Import")
         self.import_btn.setEnabled(False)
@@ -91,7 +87,7 @@ class StudentImportDialog(QDialog):
 
         self.import_btn.setEnabled(False)
         self.progress.setVisible(True)
-        self.progress.setRange(0, 0)  # indeterminate
+        self.progress.setRange(0, 0)
 
         try:
             success, errors, error_list = self._service.import_from_excel(self._file_path)
