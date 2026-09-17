@@ -110,26 +110,25 @@ def temp_runtime(tmp_path, clean_paths):
 
 @pytest.fixture
 def test_db_path(tmp_path):
-    """Create a valid empty test database for legacy service tests.
+    """Create a valid test database for legacy service tests.
 
     EP-SEC-01 intentionally makes ``create_engine_for_path`` strict: a
     missing database must never be materialized implicitly. The pre-existing
     test suite historically relied on SQLAlchemy creating the temporary file
     when ``Base.metadata.create_all(engine)`` opened the engine. Keep that
-    fixture contract explicit by materializing a real schema before handing
-    the path to tests. Tests that need to exercise missing/corrupt databases
-    should create their own path instead of using this fixture.
+    fixture contract explicit by creating a valid SQLite file before handing
+    the path to tests. Tests that need missing/corrupt databases should create
+    their own path instead of using this fixture.
     """
     from centermanager.database.engine import create_engine_for_path
     from centermanager.database.base import Base
     from centermanager import models  # noqa: F401
-
-    db_path = tmp_path / "test.db"
-    # The strict production engine only opens existing, schema-valid files.
-    # Build the test database explicitly, preserving the old fixture's
-    # expectation that callers receive a ready-to-initialize database.
     import sqlite3
 
+    db_path = tmp_path / "test.db"
+
+    # Bootstrap the test database explicitly because the production/test
+    # engine is now forbidden from materializing missing databases.
     connection = sqlite3.connect(db_path)
     try:
         connection.execute("CREATE TABLE __test_database_marker__ (id INTEGER PRIMARY KEY)")
@@ -142,6 +141,14 @@ def test_db_path(tmp_path):
         Base.metadata.create_all(engine)
     finally:
         engine.dispose()
+
+    # Do not leak a test-only table into tests that inspect the real schema.
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("DROP TABLE __test_database_marker__")
+        connection.commit()
+    finally:
+        connection.close()
 
     yield db_path
 
