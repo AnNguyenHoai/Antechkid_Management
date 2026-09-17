@@ -42,12 +42,19 @@ jobs:
       - name: Verify release package
         shell: pwsh
         run: |
-          $zip = "release/CenterManager-v0.1.0-prototype-windows-x64.zip"
-          $exe = "release/CenterManager-v0.1.0-prototype-windows-x64/CenterManager.exe"
-          $runtime = "release/CenterManager-v0.1.0-prototype-windows-x64/runtime"
+          $root = "release/CenterManager-v0.1.0-prototype-windows-x64"
+          $zip = "$root.zip"
+          $exe = "$root/CenterManager.exe"
+          $runtime = "$root/runtime"
+          $migrations = "$root/migrations"
+          $alembic = "$root/alembic.ini"
           if (!(Test-Path $zip)) { throw "Release ZIP was not created: $zip" }
           if (!(Test-Path $exe)) { throw "Executable was not created: $exe" }
           if (!(Test-Path $runtime)) { throw "External runtime directory was not created: $runtime" }
+          if (!(Test-Path $migrations)) { throw "Migration directory was not created: $migrations" }
+          if (!(Test-Path "$migrations/env.py")) { throw "Migration env.py is missing" }
+          if (!(Test-Path "$migrations/versions")) { throw "Migration versions directory is missing" }
+          if (!(Test-Path $alembic)) { throw "Alembic config is missing: $alembic" }
           if ((Get-Item $exe).Length -le 0) { throw "Executable is empty" }
 
       - name: Upload prototype artifact
