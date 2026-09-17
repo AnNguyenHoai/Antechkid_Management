@@ -6,11 +6,9 @@
 
 ## Objective
 
-Audit the boundary between application-service composition and transaction ownership after EP-ARCH-04.8.
+Audit service composition and transaction ownership without introducing a Unit of Work or changing production behavior.
 
-The goal is not to introduce a new Unit of Work abstraction. The goal is to make hidden transaction boundaries visible and prevent future service composition from accidentally splitting one logical mutation across independent transactions.
-
-## Target architecture
+## Contract
 
 ```text
 Application Service A
@@ -19,42 +17,41 @@ Application Service A
         |
         +---- Application Service B
                   |
-                  X no hidden independent commit
+                  X no hidden independent transaction
 ```
 
-A caller that owns a logical mutation must be able to reason about the complete mutation as one transaction unless an independent operation is intentionally documented and explicitly isolated.
+A logical mutation must not silently call another service that owns an independent commit boundary. Service composition itself is inventoried dynamically; only calls into methods proven by source analysis to contain `commit()` are considered transaction-owning nested calls.
 
-## Findings at the requested baseline
+## Baseline findings
 
-### 1. Service composition is a missing global contract
+### 1. The original 04.9 gate was too broad
 
-EP-ARCH-04.8 validates commit/rollback behavior inside individual service methods, but it does not validate transaction boundaries across service-to-service composition.
+The first implementation treated every service-looking call inside a committing method as a nested transaction violation. This incorrectly classified ordinary permission checks and best-effort audit calls as transaction-owning composition. It also required manual docstrings on dozens of existing methods even when the child service did not commit.
 
-The new EP-ARCH-04.9 source gate inventories service composition and checks committing methods that also compose another service.
+The corrected gate uses a conservative source-driven check:
 
-### 2. Best-effort audit currently forms an intentional independent transaction
+- resolve service aliases created by assignments;
+- identify service methods that actually contain `commit()`;
+- flag only a caller that commits inside an application-owned session and invokes one of those transaction-owning child methods;
+- exclude the existing `AuditService` best-effort independent boundary.
 
-`PermissionService._audit()` constructs `AuditService` and calls `AuditService.record(...)` from a separate service/session boundary while swallowing audit failures. This is intentionally treated as an explicit exception in this audit contract because changing it would alter failure semantics for administration workflows.
+### 2. Best-effort audit remains an intentional independent boundary
 
-This is a documented follow-up candidate, not a production behavior change in EP-ARCH-04.9.
+`PermissionService._audit()` calls `AuditService.record(...)` through a separate session and intentionally swallows audit failures. This remains unchanged and is not treated as business-transaction nesting by the regression gate.
 
-### 3. Repository transaction primitives require stronger protection
+A future product-safe task may evaluate caller-transaction participation for audit logging.
 
-EP-ARCH-04.7 prevents repositories from creating/owning Session and engine lifecycles, while EP-ARCH-04.8 prevents repository `commit()` / `rollback()` calls. That still leaves lower-level transaction primitives such as `begin()`, `begin_nested()`, and `exec_driver_sql()` capable of manipulating transaction state from inside repositories.
+### 3. Repository transaction primitives are explicitly guarded
 
-EP-ARCH-04.9 adds a regression gate for those primitives.
+Repositories must not call low-level transaction/connection primitives such as `begin()`, `begin_nested()`, `commit()`, `rollback()`, or `exec_driver_sql()` through their private session/connection objects.
 
-## Enforced contract
+## Enforced invariants
 
-1. Service composition must be source-discoverable across the complete `*_service.py` tree.
-2. A committing service method that also composes another service must have an explicit transaction-boundary explanation rather than silently creating a nested independent boundary.
-3. Intentional independent service operations are narrowly allowlisted and documented.
-4. Repositories must not manipulate transaction state through low-level session/connection transaction primitives.
-5. This task does not change production behavior, repository APIs, or introduce UnitOfWork.
-
-## Known follow-up
-
-`PermissionService._audit()` should be reconsidered in a separate product-safe task. The current behavior intentionally treats audit storage as best-effort and independent from the caller mutation. Converting it to caller-transaction participation would require reviewing existing callers and failure expectations first.
+1. Service composition inventory is dynamically derived from every `*_service.py` file and deterministically ordered.
+2. A committing service must not synchronously invoke a known transaction-owning child service through a hidden independent boundary.
+3. `AuditService` remains an explicit best-effort independent operation until separately redesigned.
+4. Repositories must not manipulate transaction state through low-level Session/Connection transaction primitives.
+5. No production behavior or UnitOfWork abstraction is introduced by this task.
 
 ## Validation
 

@@ -1,17 +1,4 @@
-"""EP-ARCH-04.9 — nested service transaction and atomicity audit gate.
-
-Contract:
-- application-service composition must not introduce hidden independent transaction
-  boundaries for a logical mutation;
-- child services that are invoked from another service must not silently commit their
-  own independent session when the caller owns the logical mutation;
-- repository code must not acquire transaction state directly through connection/
-  driver transaction primitives;
-- intentional independent operations must be explicit and narrowly allowlisted.
-
-This task is audit/regression protection only. It intentionally does not change
-production service composition or introduce a UnitOfWork abstraction.
-"""
+"""EP-ARCH-04.9 — nested service transaction and atomicity audit gate."""
 from __future__ import annotations
 
 import ast
@@ -21,13 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ROOT / "src" / "centermanager" / "services"
 REPOSITORIES = ROOT / "src" / "centermanager" / "repositories"
 
-# Current baseline finding: PermissionService._audit() deliberately performs
-# best-effort audit in its own service/session and swallows audit failures.
-# Keep this exception narrow and explicit until a product-safe atomic audit design
-# can be implemented separately.
-INDEPENDENT_SERVICE_OPERATIONS = {
-    ("permission_service.py", "_audit"),
-}
+# Existing, deliberate best-effort audit boundary. AuditService.record() owns
+# its own session by design and is not treated as business-transaction nesting.
+INDEPENDENT_SERVICE_CLASSES = {"AuditService"}
 
 
 def _parse(path: Path) -> ast.Module:
@@ -43,50 +26,11 @@ def _repository_files() -> list[Path]:
 
 
 def _method_defs(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
-    return [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-
-
-def _method_key(path: Path, method: ast.AST) -> tuple[str, str]:
-    return path.name, getattr(method, "name", "<unknown>")
-
-
-def _called_service_targets(method: ast.AST) -> list[tuple[str, str, int]]:
-    calls: list[tuple[str, str, int]] = []
-    for node in ast.walk(method):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        receiver = node.func.value
-        if isinstance(receiver, ast.Name):
-            calls.append((receiver.id, node.func.attr, node.lineno))
-        elif isinstance(receiver, ast.Attribute):
-            if isinstance(receiver.value, ast.Name) and receiver.value.id == "self":
-                calls.append((receiver.attr, node.func.attr, node.lineno))
-    return calls
-
-
-def _service_class_instantiations(method: ast.AST) -> list[tuple[str, int]]:
-    results: list[tuple[str, int]] = []
-    for node in ast.walk(method):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Name) and node.func.id.endswith("Service"):
-            results.append((node.func.id, node.lineno))
-        elif isinstance(node.func, ast.Attribute) and node.func.attr.endswith("Service"):
-            results.append((node.func.attr, node.lineno))
-    return results
+    return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
 def _contains_commit(method: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "commit"
-        for node in ast.walk(method)
-    )
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "commit" for n in ast.walk(method))
 
 
 def _contains_session_factory_context(method: ast.AST) -> bool:
@@ -95,27 +39,80 @@ def _contains_session_factory_context(method: ast.AST) -> bool:
             continue
         for item in node.items:
             context = item.context_expr
-            if isinstance(context, ast.Call) and isinstance(context.func, ast.Attribute):
-                if context.func.attr in {"_sf", "_session_factory"} and not context.args and not context.keywords:
-                    return True
-            if isinstance(context, ast.Call) and isinstance(context.func, ast.Name):
-                if context.func.id in {"session_factory", "SessionLocal"}:
-                    return True
+            if isinstance(context, ast.Call) and isinstance(context.func, ast.Attribute) and context.func.attr in {"_sf", "_session_factory"} and not context.args and not context.keywords:
+                return True
+            if isinstance(context, ast.Call) and isinstance(context.func, ast.Name) and context.func.id in {"session_factory", "SessionLocal"}:
+                return True
     return False
 
 
-def test_ep_arch_04_9_service_composition_is_inventory_complete():
-    """Source discovery must produce a deterministic service-composition inventory."""
+def _service_aliases(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        class_name = func.id if isinstance(func, ast.Name) and func.id.endswith("Service") else func.attr if isinstance(func, ast.Attribute) and func.attr.endswith("Service") else None
+        if not class_name:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name):
+            aliases[target.id] = class_name
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
+            aliases[target.attr] = class_name
+    return aliases
+
+
+def _service_edges(path: Path, tree: ast.Module) -> list[str]:
+    aliases = _service_aliases(tree)
     edges: list[str] = []
+    for method in _method_defs(tree):
+        for node in ast.walk(method):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            receiver = node.func.value
+            receiver_name = receiver.id if isinstance(receiver, ast.Name) else receiver.attr if isinstance(receiver, ast.Attribute) and isinstance(receiver.value, ast.Name) and receiver.value.id == "self" else None
+            if receiver_name in aliases:
+                edges.append(f"{path.name}:{node.lineno}: {method.name}() -> {aliases[receiver_name]}.{node.func.attr}()")
+    return edges
+
+
+def _transaction_methods_by_service() -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
     for path in _service_files():
         tree = _parse(path)
-        for method in _method_defs(tree):
-            for receiver, target, lineno in _called_service_targets(method):
-                if receiver.lower().endswith("service") or "service" in receiver.lower():
-                    edges.append(f"{path.name}:{lineno}: {method.name}() -> {receiver}.{target}()")
-            for service_name, lineno in _service_class_instantiations(method):
-                if _method_key(path, method) not in INDEPENDENT_SERVICE_OPERATIONS:
-                    edges.append(f"{path.name}:{lineno}: {method.name}() instantiates {service_name}")
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name.endswith("Service"):
+                methods = {m.name for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and _contains_commit(m)}
+                if methods:
+                    result[node.name] = methods
+    return result
+
+
+def _nested_transaction_calls(path: Path, tree: ast.Module) -> list[str]:
+    aliases = _service_aliases(tree)
+    transaction_methods = _transaction_methods_by_service()
+    violations: list[str] = []
+    for method in _method_defs(tree):
+        if not _contains_commit(method) or not _contains_session_factory_context(method):
+            continue
+        for node in ast.walk(method):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            receiver = node.func.value
+            receiver_name = receiver.id if isinstance(receiver, ast.Name) else receiver.attr if isinstance(receiver, ast.Attribute) and isinstance(receiver.value, ast.Name) and receiver.value.id == "self" else None
+            service_class = aliases.get(receiver_name)
+            if not service_class or service_class in INDEPENDENT_SERVICE_CLASSES:
+                continue
+            if node.func.attr in transaction_methods.get(service_class, set()):
+                violations.append(f"{path.name}:{node.lineno}: {method.name}() invokes transaction-owning {service_class}.{node.func.attr}()")
+    return violations
+
+
+def test_ep_arch_04_9_service_composition_inventory_is_deterministic():
+    edges: list[str] = []
+    for path in _service_files():
+        edges.extend(_service_edges(path, _parse(path)))
     assert edges == sorted(edges), "Service composition inventory must be deterministically ordered."
 
 
@@ -123,42 +120,17 @@ def test_ep_arch_04_9_no_repository_connection_transaction_primitives():
     violations: list[str] = []
     forbidden = {"begin", "begin_nested", "commit", "rollback", "exec_driver_sql"}
     for path in _repository_files():
-        tree = _parse(path)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr not in forbidden:
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr not in forbidden:
                 continue
             receiver = node.func.value
-            if isinstance(receiver, ast.Attribute) and receiver.attr == "_session":
-                violations.append(
-                    f"{path.name}:{node.lineno}: repository controls transaction/connection via _session.{node.func.attr}()"
-                )
-            elif isinstance(receiver, ast.Attribute) and receiver.attr == "_connection":
-                violations.append(
-                    f"{path.name}:{node.lineno}: repository controls transaction via _connection.{node.func.attr}()"
-                )
+            if isinstance(receiver, ast.Attribute) and receiver.attr in {"_session", "_connection"}:
+                violations.append(f"{path.name}:{node.lineno}: repository controls transaction via {receiver.attr}.{node.func.attr}()")
     assert not violations, "Repository transaction primitive drift detected:\n" + "\n".join(violations)
 
 
-def test_ep_arch_04_9_nested_service_with_commit_is_explicit():
-    """Nested service use inside a committing method must have an explicit contract."""
+def test_ep_arch_04_9_no_hidden_nested_transaction_boundary():
     violations: list[str] = []
     for path in _service_files():
-        tree = _parse(path)
-        for method in _method_defs(tree):
-            if not _contains_commit(method):
-                continue
-            service_calls = _called_service_targets(method)
-            service_instances = _service_class_instantiations(method)
-            if not service_calls and not service_instances:
-                continue
-            if _method_key(path, method) in INDEPENDENT_SERVICE_OPERATIONS:
-                continue
-            if _contains_session_factory_context(method):
-                doc = ast.get_docstring(method) or ""
-                if "independent transaction" not in doc.lower() and "transaction boundary" not in doc.lower():
-                    violations.append(
-                        f"{path.name}:{method.lineno}: {method.name}() composes another service inside a transaction without explicit boundary documentation"
-                    )
-    assert not violations, "Nested service transaction boundary must be explicit:\n" + "\n".join(violations)
+        violations.extend(_nested_transaction_calls(path, _parse(path)))
+    assert not violations, "Hidden nested service transaction boundary detected:\n" + "\n".join(violations)
