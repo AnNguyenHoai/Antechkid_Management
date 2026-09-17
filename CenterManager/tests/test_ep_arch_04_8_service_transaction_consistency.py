@@ -3,9 +3,10 @@
 Contract:
 - application services may own transaction boundaries;
 - repository modules own no commit/rollback lifecycle;
-- every service commit must have an explicit rollback path in the same service method;
-- services must not silently mix transaction-owned and non-owned session lifecycles;
-- transaction ownership must remain visible in source and consistent across mutating methods.
+- every service commit must have an exception-safe rollback path;
+- rollback may be explicit in the same method or provided by an application-owned
+  session context manager enclosing the commit;
+- services must not silently mix transaction-owned and non-owned session lifecycles.
 """
 from __future__ import annotations
 
@@ -40,20 +41,19 @@ def _transaction_calls(tree: ast.AST) -> list[ast.Call]:
 
 
 def _method_defs(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
-    methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            methods.append(node)
-    return methods
+    return [
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
 
 
 def _contains_transaction_call(node: ast.AST, method_name: str) -> bool:
-    for child in ast.walk(node):
-        if not isinstance(child, ast.Call):
-            continue
-        if isinstance(child.func, ast.Attribute) and child.func.attr == method_name:
-            return True
-    return False
+    return any(
+        isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == method_name
+        for child in ast.walk(node)
+    )
 
 
 def _exception_handlers(node: ast.AST) -> list[ast.ExceptHandler]:
@@ -62,6 +62,43 @@ def _exception_handlers(node: ast.AST) -> list[ast.ExceptHandler]:
 
 def _handler_contains(node: ast.ExceptHandler, method_name: str) -> bool:
     return _contains_transaction_call(node, method_name)
+
+
+def _is_session_factory_context(node: ast.With) -> bool:
+    for item in node.items:
+        context = item.context_expr
+        if isinstance(context, ast.Call) and isinstance(context.func, ast.Attribute):
+            if context.func.attr in {"_sf", "_session_factory"} and not context.args and not context.keywords:
+                return True
+        if isinstance(context, ast.Call) and isinstance(context.func, ast.Name):
+            if context.func.id in {"session_factory", "SessionLocal"}:
+                return True
+    return False
+
+
+def _node_contains(root: ast.AST, target: ast.AST) -> bool:
+    return any(child is target for child in ast.walk(root))
+
+
+def _commit_has_context_manager_rollback_boundary(method: ast.AST) -> bool:
+    """Verify every commit is enclosed by an application-owned session context."""
+    commits = [
+        child for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "commit"
+    ]
+    if not commits:
+        return False
+
+    session_contexts = [
+        child for child in ast.walk(method)
+        if isinstance(child, ast.With) and _is_session_factory_context(child)
+    ]
+    return all(
+        any(_node_contains(context, commit) for context in session_contexts)
+        for commit in commits
+    )
 
 
 def test_ep_arch_04_8_repositories_do_not_control_transactions():
@@ -85,8 +122,8 @@ def test_ep_arch_04_8_service_commit_requires_same_method_rollback_path():
                 continue
             if _contains_transaction_call(method, "rollback"):
                 continue
-            # A commit inside a method without rollback in that same method leaves
-            # exception-driven transaction recovery implicit and inconsistent.
+            if _commit_has_context_manager_rollback_boundary(method):
+                continue
             violations.append(f"{path.name}:{method.lineno}: {method.name}() commits without rollback path")
     assert not violations, "Service transaction boundary must provide an explicit rollback path:\n" + "\n".join(violations)
 
