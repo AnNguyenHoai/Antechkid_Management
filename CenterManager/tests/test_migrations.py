@@ -12,19 +12,19 @@ def _get_migration_files():
     return [f for f in versions_dir.glob("*.py") if f.name != "__init__.py"]
 
 
-def _upgrade_to_head(test_db_path):
+def _upgrade_to_head(migration_db_path):
     from alembic import command
     from alembic.config import Config
 
     project_root = Path(__file__).resolve().parent.parent
     alembic_cfg = Config(str(project_root / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
-    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{test_db_path}")
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{migration_db_path}")
     command.upgrade(alembic_cfg, "head")
     return alembic_cfg
 
 
-def test_migration_upgrade(test_db_path):
+def test_migration_upgrade(migration_db_path):
     """A fresh database upgrades to the complete schema at Alembic head."""
     migration_files = _get_migration_files()
     if not migration_files:
@@ -33,8 +33,8 @@ def test_migration_upgrade(test_db_path):
     from sqlalchemy import inspect
     from centermanager.database.engine import create_engine_for_path
 
-    _upgrade_to_head(test_db_path)
-    engine = create_engine_for_path(test_db_path)
+    _upgrade_to_head(migration_db_path)
+    engine = create_engine_for_path(migration_db_path)
     inspector = inspect(engine)
 
     expected_tables = {
@@ -48,15 +48,15 @@ def test_migration_upgrade(test_db_path):
     assert "alembic_version" in actual_tables
 
 
-def test_employee_timestamp_defaults_and_persistence_after_migration(test_db_path):
+def test_employee_timestamp_defaults_and_persistence_after_migration(migration_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
     from sqlalchemy import inspect
     from sqlalchemy.orm import sessionmaker
     from centermanager.database.engine import create_engine_for_path
     from centermanager.models.employee import Employee
 
-    _upgrade_to_head(test_db_path)
-    engine = create_engine_for_path(test_db_path)
+    _upgrade_to_head(migration_db_path)
+    engine = create_engine_for_path(migration_db_path)
     inspector = inspect(engine)
     columns = {column["name"]: column for column in inspector.get_columns("employees")}
 
@@ -82,8 +82,7 @@ def test_employee_timestamp_defaults_and_persistence_after_migration(test_db_pat
         assert employee.updated_at is not None
 
 
-
-def test_existing_employee_database_upgrades_timestamp_defaults(test_db_path):
+def test_existing_employee_database_upgrades_timestamp_defaults(migration_db_path):
     """A database already at 1e10a002 upgrades safely to the timestamp fix."""
     from alembic import command
     from sqlalchemy import inspect
@@ -93,19 +92,19 @@ def test_existing_employee_database_upgrades_timestamp_defaults(test_db_path):
     from alembic.config import Config
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{test_db_path}")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{migration_db_path}")
 
     command.upgrade(cfg, "1e10a002")
     command.upgrade(cfg, "head")
 
-    engine = create_engine_for_path(test_db_path)
+    engine = create_engine_for_path(migration_db_path)
     columns = {column["name"]: column for column in inspect(engine).get_columns("employees")}
     for column_name in ("created_at", "updated_at"):
         assert columns[column_name]["default"] is not None
         assert "CURRENT_TIMESTAMP" in str(columns[column_name]["default"]).upper()
 
 
-def test_migration_downgrade(test_db_path):
+def test_migration_downgrade(migration_db_path):
     """The canonical monthly registration schema explicitly does not support downgrade."""
     migration_files = _get_migration_files()
     if not migration_files:
@@ -113,7 +112,7 @@ def test_migration_downgrade(test_db_path):
 
     from alembic import command
 
-    alembic_cfg = _upgrade_to_head(test_db_path)
+    alembic_cfg = _upgrade_to_head(migration_db_path)
     with pytest.raises(
         RuntimeError,
         match="Downgrade from the canonical monthly registration schema is not supported",
@@ -121,12 +120,12 @@ def test_migration_downgrade(test_db_path):
         command.downgrade(alembic_cfg, "base")
 
 
-def test_employee_access_permissions_exist_after_migration(test_db_path):
+def test_employee_access_permissions_exist_after_migration(migration_db_path):
     """Employee self/all permissions are part of the persisted schema contract."""
     from sqlalchemy import text
     from sqlalchemy import create_engine
-    _upgrade_to_head(test_db_path)
-    engine = create_engine(f"sqlite:///{test_db_path}")
+    _upgrade_to_head(migration_db_path)
+    engine = create_engine(f"sqlite:///{migration_db_path}")
     with engine.connect() as conn:
         names = {
             row[0] for row in conn.execute(
