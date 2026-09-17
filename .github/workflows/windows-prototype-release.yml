@@ -1,0 +1,58 @@
+name: Windows Prototype Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-prototype"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: CenterManager
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: CenterManager/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run release packaging contracts
+        run: python -m pytest tests/test_phase_2_release_contracts.py tests/test_ep_release_01_packaging_contract.py -q
+
+      - name: Build Windows prototype
+        run: python build_release.py
+
+      - name: Verify release package
+        shell: pwsh
+        run: |
+          $zip = "release/CenterManager-v0.1.0-prototype-windows-x64.zip"
+          $exe = "release/CenterManager-v0.1.0-prototype-windows-x64/CenterManager.exe"
+          $runtime = "release/CenterManager-v0.1.0-prototype-windows-x64/runtime"
+          if (!(Test-Path $zip)) { throw "Release ZIP was not created: $zip" }
+          if (!(Test-Path $exe)) { throw "Executable was not created: $exe" }
+          if (!(Test-Path $runtime)) { throw "External runtime directory was not created: $runtime" }
+          if ((Get-Item $exe).Length -le 0) { throw "Executable is empty" }
+
+      - name: Upload prototype artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CenterManager-v0.1.0-prototype-windows-x64
+          path: CenterManager/release/CenterManager-v0.1.0-prototype-windows-x64.zip
+          if-no-files-found: error
