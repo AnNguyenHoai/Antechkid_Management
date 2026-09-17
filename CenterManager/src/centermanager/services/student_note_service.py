@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.note import Note, NoteType
 from centermanager.models.timeline_event import TimelineEventType
-from centermanager.repositories.provider import RepositoryProvider
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.timeline_service import TimelineService
 
 
@@ -21,9 +21,11 @@ class StudentNoteService:
     ):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
-        if repository_provider is None:
-            raise ValueError("repository_provider is required")
-        self._repository_provider = repository_provider
+        # Keep legacy/application callers compatible while still allowing the
+        # provider to be injected explicitly by the composition root.
+        self._repository_provider = (
+            repository_provider or create_default_repository_provider()
+        )
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
