@@ -12,7 +12,7 @@ def test_sensitive_git_url_is_redacted():
         f"remote https://{secret}@github.com/example/repo.git"
     )
     assert secret not in redacted
-    assert "[REDACTED]@github.com/example/repo.git" in redacted
+    assert "[REDACTED_URL]" in redacted
 
 
 def test_common_github_token_is_redacted():
@@ -26,3 +26,4 @@ def test_release_does_not_turn_git_configuration_into_log_content():
     source = (ROOT / "src/centermanager/core/logging.py").read_text(encoding="utf-8")
     assert "RedactingFormatter" in source
     assert "redact_sensitive_text" in source
+    assert "Log file: {log_file}" not in source
