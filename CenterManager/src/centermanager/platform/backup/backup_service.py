@@ -8,12 +8,15 @@ from typing import Optional
 from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
 from centermanager.events.collaboration_events import BackupCreated, BackupFailed
+from centermanager.database.session import refresh_runtime_db
 
 logger = logging.getLogger(__name__)
+
 
 class BackupResult:
     def __init__(self, success: bool, backup_path: Optional[Path] = None, error: Optional[str] = None):
         self.success, self.backup_path, self.error = success, backup_path, error
+
 
 class BackupService:
     FORMAT_VERSION = 2
@@ -124,7 +127,7 @@ class BackupService:
             meta_src = backup_path / manifest["metadata"]
             paths.database_dir.mkdir(parents=True, exist_ok=True)
             paths.metadata_dir.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic-ish replace: copy to temporary sibling first, then replace.
+
             db_tmp = paths.database_dir / f".center.db.restore-{uuid.uuid4().hex}.tmp"
             shutil.copy2(db_src, db_tmp)
             db_error = self._validate_sqlite(db_tmp)
@@ -132,6 +135,7 @@ class BackupService:
                 db_tmp.unlink(missing_ok=True)
                 return BackupResult(False, error=db_error)
             os.replace(db_tmp, paths.database_dir / "center.db")
+
             meta_target = paths.metadata_dir
             meta_tmp = meta_target.parent / f".metadata.restore-{uuid.uuid4().hex}"
             shutil.copytree(meta_src, meta_tmp)
@@ -146,6 +150,10 @@ class BackupService:
                 raise
             if old_meta.exists():
                 shutil.rmtree(old_meta)
+
+            # The database file has been replaced. Dispose all existing
+            # SQLAlchemy engine resources and point future sessions to it.
+            refresh_runtime_db()
             logger.info("Backup restored: %s", backup_path)
             return BackupResult(True, backup_path)
         except Exception as exc:
