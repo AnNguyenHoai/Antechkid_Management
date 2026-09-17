@@ -14,6 +14,7 @@ Output:
     release/CenterManager-v0.1.0-prototype-windows-x64.zip
 """
 
+import os
 import shutil
 from pathlib import Path
 
@@ -32,14 +33,42 @@ RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "*.sqlite", "*.sqlite3",
     "logs", "Logs", "cache", "Cache", "temp", "Temp",
     "backup", "Backup",
+    # The synchronization working copy is created/managed at runtime and must
+    # never be copied from a developer checkout into a release package.
+    "repository", ".git",
+    "__pycache__",
 )
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove a generated tree and handle Windows read-only files safely."""
+    def _on_rm_error(func, target, exc_info):
+        # Git pack/index files can carry read-only attributes on Windows.
+        # Clear the attribute and retry once. A genuinely locked file will
+        # still fail, in which case the error below tells the developer what
+        # must be closed instead of silently producing a partial build.
+        try:
+            os.chmod(target, 0o700)
+            func(target)
+        except OSError:
+            raise
+
+    shutil.rmtree(path, onerror=_on_rm_error)
 
 
 def clean_outputs() -> None:
     """Remove generated build/release directories only."""
     for path in (DIST_ROOT, PROJECT_ROOT / "build", RELEASE_ROOT):
         if path.exists():
-            shutil.rmtree(path)
+            try:
+                _remove_tree(path)
+            except PermissionError as exc:
+                raise PermissionError(
+                    f"Cannot clean release output '{path}'. "
+                    "Close CenterManager.exe, Git clients, terminals, or other "
+                    "processes using files under this directory, then run "
+                    "build_release.py again."
+                ) from exc
 
 
 def copy_runtime_template() -> None:
