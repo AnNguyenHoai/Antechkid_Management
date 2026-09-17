@@ -7,6 +7,9 @@ from centermanager.platform.synchronization.git.git_credentials import GitCreden
 from centermanager.platform.synchronization.git.git_status import GitStatus
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_redacts_git_remote_and_windows_path():
     text = (
         r"clone https://user:secret@example.com/org/private.git "
@@ -65,8 +68,8 @@ def test_git_provider_status_does_not_expose_repository_path_or_raw_error():
 
 
 def test_git_provider_source_contains_no_sensitive_runtime_logging():
-    source = Path(
-        "CenterManager/src/centermanager/platform/synchronization/git/git_provider.py"
+    source = (
+        ROOT / "src/centermanager/platform/synchronization/git/git_provider.py"
     ).read_text(encoding="utf-8")
     assert "logger." not in source
     assert "'repo_path': str(self._repo_path)" not in source
