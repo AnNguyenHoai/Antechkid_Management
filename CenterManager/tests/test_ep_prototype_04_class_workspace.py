@@ -91,12 +91,17 @@ def test_ep_prototype_04_class_detail_required_context():
     overview = _method_node(cls, "_create_overview_tab")
     overview_source = ast.unparse(overview)
 
-    # Core class identity/context.
+    # Core class identity/context rendered by the overview tab.
     assert "name_label" in overview_source
     assert "status_badge" in overview_source
     assert "course_label" in overview_source
-    assert "students_label" in overview_source
-    assert "capacity_label" in overview_source
+
+    # Stats are constructed by their dedicated helper and embedded in the overview.
+    stats = _method_node(cls, "_create_stats")
+    stats_source = ast.unparse(stats)
+    assert "students_label" in stats_source
+    assert "capacity_label" in stats_source
+    assert "self.stats_widget = self._create_stats()" in overview_source
 
     # Golden Flow context: teacher, students, sessions and timeline.
     assert "Assigned Teacher" in overview_source
