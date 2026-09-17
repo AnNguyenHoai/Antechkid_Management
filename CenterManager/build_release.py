@@ -3,9 +3,8 @@
 """Build the CenterManager Windows prototype release.
 
 The application is packaged as a one-file PyInstaller executable while the
-mutable ``runtime/`` directory stays beside the executable.  This is
-intentional: runtime data (database, credentials/configuration, attachments,
-logs and backups) must never be embedded into the executable.
+mutable ``runtime/`` directory stays beside the executable. Runtime data must
+never be embedded into the executable.
 
 Usage:
     python build_release.py
@@ -15,9 +14,7 @@ Output:
     release/CenterManager-v0.1.0-prototype-windows-x64.zip
 """
 
-import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -30,22 +27,11 @@ DIST_ROOT = PROJECT_ROOT / "dist"
 RELEASE_ROOT = PROJECT_ROOT / "release"
 PACKAGE_ROOT = RELEASE_ROOT / RELEASE_NAME
 
-
 RUNTIME_EXCLUDES = shutil.ignore_patterns(
-    "*.db",
-    "*.db-journal",
-    "*.db-wal",
-    "*.db-shm",
-    "*.sqlite",
-    "*.sqlite3",
-    "logs",
-    "Logs",
-    "cache",
-    "Cache",
-    "temp",
-    "Temp",
-    "backup",
-    "Backup",
+    "*.db", "*.db-journal", "*.db-wal", "*.db-shm",
+    "*.sqlite", "*.sqlite3",
+    "logs", "Logs", "cache", "Cache", "temp", "Temp",
+    "backup", "Backup",
 )
 
 
@@ -67,36 +53,34 @@ def copy_runtime_template() -> None:
 
 def write_release_readme() -> None:
     (PACKAGE_ROOT / "README_RELEASE.md").write_text(
-        f"""# CenterManager {VERSION}\n\n"
+        f"# CenterManager {VERSION}\n\n"
         "Windows prototype release.\n\n"
         "## Start\n\n"
-        "Run `CenterManager.exe`. The mutable application data is stored in the `runtime/` folder beside the executable.\n\n"
+        "Run `CenterManager.exe`. Mutable application data is stored in the `runtime/` folder beside the executable.\n\n"
         "## Important\n\n"
         "- Do not delete or rename the `runtime/` folder.\n"
         "- Configure Git synchronization on first launch when requested.\n"
-        "- Back up application data using the application's backup flow; do not copy a live SQLite database while the application is running.\n"
-        "- If startup fails, inspect `error.log` beside the executable and the files under `runtime/Logs/`.\n"
-        """,
+        "- Use the application's backup flow for test data.\n"
+        "- If startup fails, inspect `error.log` beside the executable and `runtime/Logs/`.\n",
         encoding="utf-8",
     )
 
 
 def write_uat_checklist() -> None:
     (PACKAGE_ROOT / "UAT_CHECKLIST.md").write_text(
-        """# CenterManager Prototype UAT Checklist\n\n"
+        "# CenterManager Prototype UAT Checklist\n\n"
         "- [ ] Launch `CenterManager.exe` from a clean Windows user directory.\n"
-        "- [ ] First-run configuration can be completed.\n"
+        "- [ ] Complete first-run configuration.\n"
         "- [ ] Login succeeds with the test account.\n"
-        "- [ ] Student workspace opens and navigation works.\n"
+        "- [ ] Student workspace and navigation work.\n"
         "- [ ] Class and Teacher workspaces open.\n"
         "- [ ] Session / Attendance / Assessment flows open.\n"
         "- [ ] Finance workspace opens.\n"
         "- [ ] Student Timeline opens.\n"
-        "- [ ] Export/report actions produce files under `runtime/Export/` or `runtime/Reports/`.\n"
-        "- [ ] Backup/restore flow can be exercised with a test backup.\n"
+        "- [ ] Export/report actions produce expected files.\n"
+        "- [ ] Backup/restore can be exercised with test data.\n"
         "- [ ] Restarting the executable preserves expected runtime data.\n"
-        "- [ ] No source checkout, Python installation, or developer environment is required to launch the executable.\n"
-        """,
+        "- [ ] No source checkout or Python installation is required to launch.\n",
         encoding="utf-8",
     )
 
@@ -112,8 +96,6 @@ def build_executable() -> Path:
         "--version-file", str(PROJECT_ROOT / "version_metadata.txt"),
     ]
 
-    # Let PyInstaller discover the complete application package while keeping
-    # runtime data external and mutable.
     hidden_imports = [
         "centermanager",
         "centermanager.core",
