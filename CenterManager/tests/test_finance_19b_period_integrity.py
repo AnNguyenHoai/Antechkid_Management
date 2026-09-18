@@ -128,4 +128,4 @@ def test_integrity_migration_extends_current_single_head():
     assert 'revision = "1e10a020"' in source
     assert 'down_revision = "1e10a019"' in source
     assert "ck_finance_period_effective_range" in source
-    assert "overlapping periods exist" in source
+    assert "latest-effective-from-wins" in source
