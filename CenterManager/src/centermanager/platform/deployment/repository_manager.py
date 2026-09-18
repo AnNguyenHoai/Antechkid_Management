@@ -43,7 +43,7 @@ class RepositoryManager:
             email="",
         )
         # Pass git executable to GitProvider
-        provider = GitProvider(self._repo_path, creds)
+        provider = GitProvider(self._repo_path, creds, git_executable=self._git_executable)
         if self._git_executable:
             # GitProvider does not currently accept git_executable; we'll need to extend it.
             # For now, we assume system git is available.
