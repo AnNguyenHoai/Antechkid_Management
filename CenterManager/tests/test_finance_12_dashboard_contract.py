@@ -55,11 +55,24 @@ def test_dashboard_payment_methods_are_normalized():
     assert data["Other"] == 50
 
 
+def test_dashboard_data_exposes_outstanding_metrics():
+    service = FinanceDashboardService(
+        FakeIncomeService(), FakeExpenseService(), FakeOutstandingService()
+    )
+    data = service.get_dashboard_data()
+    assert data["total_outstanding"] == 500
+    assert data["students_with_debt"] == 2
+    assert data["unconfigured_tuition_count"] == 1
+
+
 def test_dashboard_ui_consumes_outstanding_metrics():
     source = Path("src/centermanager/ui/finance_workspace/finance_dashboard_page.py").read_text(encoding="utf-8")
-    assert 'total_outstanding = data.get("total_outstanding", 0)' in source
-    assert 'net_cash_month' in source
-    assert 'net_bank_month' in source
+    assert 'data.get("total_outstanding", 0)' in source
+    assert 'data.get("students_with_debt", 0)' in source
+    assert 'data.get("unconfigured_tuition_count", 0)' in source
+    assert "Outstanding Tuition" in source
+    assert "Students With Debt" in source
+    assert "Tuition Not Configured" in source
 
 
 def test_app_injects_outstanding_source_of_truth():
