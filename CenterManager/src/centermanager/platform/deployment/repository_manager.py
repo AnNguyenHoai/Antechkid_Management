@@ -10,7 +10,7 @@ from centermanager.platform.synchronization.git.git_provider import GitProvider
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
 from centermanager.platform.synchronization.git.git_exceptions import GitException
 from centermanager.platform.deployment.deployment_config import DeploymentConfig
-from centermanager.platform.deployment.git_locator import locate_git
+from centermanager.core.git_locator import locate_git
 from centermanager.core.paths import get_paths
 
 logger = logging.getLogger(__name__)
