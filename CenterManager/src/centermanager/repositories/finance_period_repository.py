@@ -39,6 +39,28 @@ class FinancePeriodRepository:
             .order_by(FinancePeriod.effective_from.desc())
         )
 
+    def get_effective(self, on_date: date) -> Optional[FinancePeriod]:
+        """Return the configuration whose inclusive date range covers on_date.
+
+        Historical configurations remain effective for their recorded range even
+        after their lifecycle status changes to INACTIVE.
+        """
+        return self._session.scalar(
+            select(FinancePeriod)
+            .where(
+                FinancePeriod.effective_from <= on_date,
+                (FinancePeriod.effective_to.is_(None) | (FinancePeriod.effective_to >= on_date)),
+            )
+            .order_by(FinancePeriod.effective_from.desc())
+        )
+
+    def get_next(self, effective_from: date) -> Optional[FinancePeriod]:
+        return self._session.scalar(
+            select(FinancePeriod)
+            .where(FinancePeriod.effective_from > effective_from)
+            .order_by(FinancePeriod.effective_from.asc())
+        )
+
     def list_all(self) -> List[FinancePeriod]:
         return list(
             self._session.scalars(
