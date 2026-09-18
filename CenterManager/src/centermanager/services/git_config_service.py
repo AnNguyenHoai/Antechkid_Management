@@ -13,7 +13,7 @@ from centermanager.core.paths import get_paths
 from centermanager.core.crypto import encrypt_git_config, decrypt_git_config
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
 from centermanager.platform.synchronization.git.git_provider import GitProvider
-from centermanager.platform.deployment.git_locator import locate_git
+from centermanager.core.git_locator import locate_git
 
 logger = logging.getLogger(__name__)
 
