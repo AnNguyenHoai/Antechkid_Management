@@ -3,9 +3,7 @@
 
 import pytest
 import time
-import uuid
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, patch
 
 from centermanager.platform.sync import (
     RuntimeSyncService,
@@ -16,13 +14,10 @@ from centermanager.platform.sync import (
     ReloadState,
 )
 from centermanager.platform.synchronization import (
-    VersionResolver,
     VersionStatus,
-    RetryPolicy,
     SynchronizationResult,
     SyncResult,
 )
-from centermanager.events.event_bus import EventBus
 
 
 class TestAutoPullPolicy:
@@ -154,12 +149,6 @@ class TestRuntimeSyncService:
         manager.get_context.return_value = context
         return manager
 
-    @pytest.fixture
-    def mock_sync_provider(self):
-        provider = Mock()
-        provider.health.return_value = True
-        return provider
-
     def test_initialization(self, mock_sync_manager, mock_collab_manager, mock_context_manager):
         service = RuntimeSyncService(
             sync_manager=mock_sync_manager,
@@ -176,7 +165,7 @@ class TestRuntimeSyncService:
             context_manager=mock_context_manager,
             poll_interval=1,
         )
-        result = service.check_for_updates()
+        service.check_for_updates()
         mock_sync_manager.check_updates.assert_called_once()
 
     def test_start_stop(self, mock_sync_manager, mock_collab_manager, mock_context_manager):
@@ -214,6 +203,12 @@ class TestRuntimeSyncService:
         service._pending_update = True
         service._remote_version = 2
 
-        result = service.execute_sync()
+        # This unit test isolates orchestration. Repository->runtime database
+        # materialization has dedicated source-of-truth tests and is mandatory
+        # in production; it must not be bypassed by the implementation.
+        with patch.object(service, "_apply_runtime_update", return_value=True) as apply_update:
+            result = service.execute_sync()
+
         mock_sync_manager.begin_sync.assert_called_once()
+        apply_update.assert_called_once()
         assert result is True
