@@ -47,7 +47,7 @@ class GitRepository:
                         # Already has auth? Replace
                         rest = rest.split("@")[-1]
                     url = f"{protocol}://{self._credentials.token}@{rest}"
-                    cmd = ["git", "clone", url, str(self._repo_path)]
+                    cmd = [self._git_command(), "clone", url, str(self._repo_path)]
             self._run_cmd(cmd)
             # Set branch if not default
             if self._credentials.branch != "main":
@@ -96,12 +96,12 @@ class GitRepository:
             raise GitError(error_msg)
 
     def _checkout_branch(self) -> None:
-        cmd = ["git", "checkout", self._credentials.branch]
+        cmd = [self._git_command(), "checkout", self._credentials.branch]
         self._run_cmd(cmd)
 
     def fetch(self) -> bool:
         try:
-            cmd = ["git", "fetch", "origin"]
+            cmd = [self._git_command(), "fetch", "origin"]
             self._run_cmd(cmd)
             return True
         except GitError as e:
@@ -110,7 +110,7 @@ class GitRepository:
 
     def pull(self) -> bool:
         try:
-            cmd = ["git", "pull", "origin", self._credentials.branch]
+            cmd = [self._git_command(), "pull", "origin", self._credentials.branch]
             self._run_cmd(cmd)
             return True
         except GitError as e:
@@ -120,9 +120,9 @@ class GitRepository:
     def commit(self, message: str) -> bool:
         try:
             # Add all changes
-            self._run_cmd(["git", "add", "."])
+            self._run_cmd([self._git_command(), "add", "."])
             # Commit
-            self._run_cmd(["git", "commit", "-m", message])
+            self._run_cmd([self._git_command(), "commit", "-m", message])
             return True
         except GitError as e:
             logger.error(f"Commit failed: {e}")
@@ -130,7 +130,7 @@ class GitRepository:
 
     def push(self) -> bool:
         try:
-            cmd = ["git", "push", "origin", self._credentials.branch]
+            cmd = [self._git_command(), "push", "origin", self._credentials.branch]
             self._run_cmd(cmd)
             return True
         except GitError as e:
@@ -139,21 +139,21 @@ class GitRepository:
 
     def current_commit(self) -> Optional[str]:
         try:
-            output = self._run_cmd(["git", "rev-parse", "HEAD"])
+            output = self._run_cmd([self._git_command(), "rev-parse", "HEAD"])
             return output[:7] if output else None
         except GitError:
             return None
 
     def current_branch(self) -> Optional[str]:
         try:
-            output = self._run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+            output = self._run_cmd([self._git_command(), "rev-parse", "--abbrev-ref", "HEAD"])
             return output if output else None
         except GitError:
             return None
 
     def status(self) -> Dict[str, Any]:
         try:
-            output = self._run_cmd(["git", "status", "--porcelain"])
+            output = self._run_cmd([self._git_command(), "status", "--porcelain"])
             changes = []
             if output:
                 for line in output.split("\n"):
@@ -175,7 +175,7 @@ class GitRepository:
 
     def validate(self) -> bool:
         try:
-            self._run_cmd(["git", "status"])
+            self._run_cmd([self._git_command(), "status"])
             return True
         except GitError:
             return False
