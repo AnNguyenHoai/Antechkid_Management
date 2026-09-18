@@ -21,7 +21,11 @@ def test_initialize_runtime_database_creates_missing_file(tmp_path):
 
     assert result == db_path
     assert db_path.is_file()
-    assert sqlite3.connect(db_path).execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    connection = sqlite3.connect(db_path)
+    try:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        connection.close()
 
 
 def test_initialize_runtime_database_never_overwrites_existing_database(tmp_path):
