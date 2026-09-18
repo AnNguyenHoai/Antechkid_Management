@@ -72,12 +72,12 @@ def test_ep_prototype_08_dashboard_exposes_finance_summary():
     kpis_source = ast.unparse(kpis)
 
     assert "get_dashboard_data" in refresh_source
-    assert "revenue_by_method_month" in refresh_source
-    assert "expense_by_method_month" in refresh_source
+    assert "revenue_by_method_period" in refresh_source
+    assert "expense_by_method_period" in refresh_source
     assert "revenue_today" in kpis_source
-    assert "revenue_month" in kpis_source
+    assert "revenue_period" in kpis_source
     assert "expense_today" in kpis_source
-    assert "expense_month" in kpis_source
+    assert "expense_period" in kpis_source
     assert "net_cash_flow" in kpis_source
 
 
