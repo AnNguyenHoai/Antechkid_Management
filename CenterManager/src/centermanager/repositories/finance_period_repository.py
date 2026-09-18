@@ -29,22 +29,15 @@ class FinancePeriodRepository:
         )
 
     def get_active(self, on_date: date) -> Optional[FinancePeriod]:
-        return self._session.scalar(
-            select(FinancePeriod)
-            .where(
-                FinancePeriod.status == FinancePeriod.STATUS_ACTIVE,
-                FinancePeriod.effective_from <= on_date,
-                (FinancePeriod.effective_to.is_(None) | (FinancePeriod.effective_to >= on_date)),
-            )
-            .order_by(FinancePeriod.effective_from.desc())
-        )
+        """Compatibility API: return the configuration effective on on_date.
+
+        Lifecycle status describes whether a configuration has been superseded;
+        it must not make its historical date range disappear.
+        """
+        return self.get_effective(on_date)
 
     def get_effective(self, on_date: date) -> Optional[FinancePeriod]:
-        """Return the configuration whose inclusive date range covers on_date.
-
-        Historical configurations remain effective for their recorded range even
-        after their lifecycle status changes to INACTIVE.
-        """
+        """Return the configuration whose inclusive date range covers on_date."""
         return self._session.scalar(
             select(FinancePeriod)
             .where(
