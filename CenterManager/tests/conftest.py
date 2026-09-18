@@ -92,10 +92,23 @@ def temp_runtime(tmp_path, clean_paths):
         def backup_dir(self): return self.runtime_root / "Backup"
         @property
         def logs_dir(self): return self.runtime_root / "Logs"
+        @property
+        def reports_dir(self): return self.runtime_root / "Reports"
+        @property
+        def temp_dir(self): return self.runtime_root / "Temp"
+        @property
+        def metadata_dir(self): return self.runtime_root / "metadata"
+        @property
+        def collaboration_dir(self): return self.runtime_root / "collaboration"
+        @property
+        def snapshots_dir(self): return self.runtime_root / "snapshots"
         def ensure_directories(self):
-            for d in [self.database_dir, self.export_dir, self.student_profile_dir,
-                      self.excel_export_dir, self.attachment_dir, self.config_dir,
-                      self.backup_dir, self.logs_dir]:
+            for d in [
+                self.database_dir, self.export_dir, self.student_profile_dir,
+                self.excel_export_dir, self.attachment_dir, self.config_dir,
+                self.backup_dir, self.logs_dir, self.reports_dir, self.temp_dir,
+                self.metadata_dir, self.collaboration_dir, self.snapshots_dir,
+            ]:
                 d.mkdir(parents=True, exist_ok=True)
 
     temp_paths = TempPaths(tmp_path)
