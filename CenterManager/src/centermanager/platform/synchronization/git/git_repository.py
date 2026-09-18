@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any
 import logging
 
 from .git_credentials import GitCredentials
+from centermanager.platform.deployment.git_locator import locate_git
 from .git_exceptions import (
     GitError,
     GitRepositoryNotFound,
@@ -19,9 +20,10 @@ from .git_exceptions import (
 logger = logging.getLogger(__name__)
 
 class GitRepository:
-    def __init__(self, repo_path: Path, credentials: GitCredentials):
+    def __init__(self, repo_path: Path, credentials: GitCredentials, git_executable: Optional[str] = None):
         self._repo_path = repo_path
         self._credentials = credentials
+        self._git_executable = git_executable or str(locate_git() or "")
         self._ensure_repo()
 
     def _ensure_repo(self) -> None:
@@ -34,7 +36,7 @@ class GitRepository:
     def _clone_repo(self) -> None:
         """Clone repository from remote."""
         try:
-            cmd = ["git", "clone", self._credentials.repository_url, str(self._repo_path)]
+            cmd = [self._git_command(), "clone", self._credentials.repository_url, str(self._repo_path)]
             # Add token authentication if provided
             if self._credentials.token:
                 # Use token in URL (GitHub/GitLab style)
@@ -53,6 +55,11 @@ class GitRepository:
                 self._checkout_branch()
         except Exception as e:
             raise GitRepositoryNotFound(f"Failed to clone repository: {e}")
+
+    def _git_command(self) -> str:
+        if not self._git_executable:
+            raise GitError("Git executable not found. Configure portable Git or install Git.")
+        return self._git_executable
 
     def _run_cmd(self, cmd: list, cwd: Optional[Path] = None) -> str:
         """Run git command and return output."""
