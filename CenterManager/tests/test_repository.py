@@ -5,6 +5,8 @@ import pytest
 import json
 from pathlib import Path
 
+from centermanager.core.paths import RUNTIME_REQUIRED_DIRS
+
 from centermanager.platform.repository import (
     RepositoryState,
     RepositoryManager,
@@ -98,7 +100,7 @@ class TestRuntimeValidator:
     def test_validate_ready(self, tmp_path):
         validator = RuntimeValidator(tmp_path)
         # Create required directories
-        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
+        for d in RUNTIME_REQUIRED_DIRS:
             (tmp_path / d).mkdir(parents=True)
 
         assert validator.validate() is True
