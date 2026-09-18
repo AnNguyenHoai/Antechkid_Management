@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 import logging
 
 from .git_credentials import GitCredentials
-from centermanager.platform.deployment.git_locator import locate_git
+from centermanager.core.git_locator import locate_git
 from .git_exceptions import (
     GitError,
     GitRepositoryNotFound,
