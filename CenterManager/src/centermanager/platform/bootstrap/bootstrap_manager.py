@@ -114,9 +114,6 @@ class BootstrapManager:
     def _create_default_runtime(self, paths) -> None:
         """Create default runtime structure and manifest."""
         paths.ensure_directories()
-        required_dirs = ["database", "metadata", "reports", "attachments", "collaboration"]
-        for dir_name in required_dirs:
-            (paths.runtime_root / dir_name).mkdir(parents=True, exist_ok=True)
 
         manifest = RuntimeManifest(
             runtime_version=1,

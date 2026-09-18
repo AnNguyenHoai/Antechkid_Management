@@ -98,7 +98,7 @@ class TestRuntimeValidator:
     def test_validate_ready(self, tmp_path):
         validator = RuntimeValidator(tmp_path)
         # Create required directories
-        for d in ["database", "metadata", "reports", "attachments", "collaboration"]:
+        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
             (tmp_path / d).mkdir(parents=True)
 
         assert validator.validate() is True
@@ -106,13 +106,13 @@ class TestRuntimeValidator:
     def test_validate_missing_dir(self, tmp_path):
         validator = RuntimeValidator(tmp_path)
         # Create only some directories
-        (tmp_path / "database").mkdir(parents=True)
+        (tmp_path / "Database").mkdir(parents=True)
 
         assert validator.validate() is False
         missing = validator.get_missing_dirs()
         assert "metadata" in missing
-        assert "reports" in missing
-        assert "attachments" in missing
+        assert "Reports" in missing
+        assert "Attachment" in missing
         assert "collaboration" in missing
 
     def test_validate_no_exception(self, tmp_path):
@@ -217,7 +217,7 @@ class TestRepositoryManager:
             json.dump(data, f)
 
         # Create required directories
-        for d in ["database", "metadata", "reports", "attachments", "collaboration"]:
+        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
             (tmp_path / d).mkdir(parents=True)
 
         manager = RepositoryManager(runtime_root=tmp_path)
@@ -243,7 +243,7 @@ class TestRepositoryManager:
         }
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        for d in ["database", "metadata", "reports", "attachments", "collaboration"]:
+        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
             (tmp_path / d).mkdir(parents=True)
 
         # Refresh to clear cache
@@ -316,7 +316,7 @@ class TestRepositoryManager:
         }
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        for d in ["database", "metadata", "reports", "attachments", "collaboration"]:
+        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
             (non_existent / d).mkdir(parents=True)
 
         # Without refresh, cache still says NOT_FOUND

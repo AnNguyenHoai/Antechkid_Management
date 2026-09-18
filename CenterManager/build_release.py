@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Build the CenterManager Windows prototype release.
-
-The application is packaged as a one-file PyInstaller executable while the
-mutable ``runtime/`` directory stays beside the executable. Runtime data must
-never be embedded into the executable.
-"""
+"""Build the CenterManager Windows prototype release."""
 
 import os
 import shutil
@@ -26,6 +21,7 @@ RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "*.sqlite", "*.sqlite3",
     "logs", "Logs", "cache", "Cache", "temp", "Temp",
     "backup", "Backup", "repository", ".git", "__pycache__",
+    "attachments", "Attachments", "Attachment",
 )
 
 
@@ -37,7 +33,6 @@ def _remove_tree(path: Path) -> None:
             func(target)
         except OSError:
             raise
-
     shutil.rmtree(path, onerror=_on_rm_error)
 
 
@@ -57,12 +52,18 @@ def clean_outputs() -> None:
 
 
 def copy_runtime_template() -> None:
-    """Copy only the immutable runtime template; never ship live DB/backups."""
+    """Copy immutable runtime assets and materialize the canonical contract."""
     src_runtime = PROJECT_ROOT / "runtime"
     dst_runtime = PACKAGE_ROOT / "runtime"
     if not src_runtime.exists():
         raise FileNotFoundError(f"Runtime template not found: {src_runtime}")
     shutil.copytree(src_runtime, dst_runtime, ignore=RUNTIME_EXCLUDES)
+
+    for dir_name in (
+        "Database", "Export", "Attachment", "Config", "Backup", "Logs",
+        "Reports", "Temp", "metadata", "collaboration", "snapshots",
+    ):
+        (dst_runtime / dir_name).mkdir(parents=True, exist_ok=True)
 
 
 def copy_migration_assets() -> None:
@@ -83,13 +84,13 @@ def write_release_readme() -> None:
         f"# CenterManager {VERSION}\n\n"
         "Windows prototype release.\n\n"
         "## Start\n\n"
-        "Run `CenterManager.exe`. Mutable application data is stored in the `runtime/` folder beside the executable.\n\n"
+        "Run CenterManager.exe. Mutable application data is stored in the runtime folder beside the executable.\n\n"
         "## Important\n\n"
-        "- Do not delete or rename the `runtime/` folder.\n"
+        "- Do not delete or rename the runtime folder.\n"
         "- Configure Git synchronization on first launch when requested.\n"
         "- Use the application's backup flow for test data.\n"
         "- Alembic migration assets are shipped with the release and are required for startup.\n"
-        "- If startup fails, inspect `error.log` beside the executable and `runtime/Logs/`.\n",
+        "- If startup fails, inspect error.log beside the executable and runtime/Logs/.\n",
         encoding="utf-8",
     )
 
@@ -97,7 +98,7 @@ def write_release_readme() -> None:
 def write_uat_checklist() -> None:
     (PACKAGE_ROOT / "UAT_CHECKLIST.md").write_text(
         "# CenterManager Prototype UAT Checklist\n\n"
-        "- [ ] Launch `CenterManager.exe` from a clean Windows user directory.\n"
+        "- [ ] Launch CenterManager.exe from a clean Windows user directory.\n"
         "- [ ] Complete first-run configuration.\n"
         "- [ ] Login succeeds with the test account.\n"
         "- [ ] Student workspace and navigation work.\n"
@@ -128,14 +129,10 @@ def build_executable() -> Path:
         "centermanager.services", "centermanager.ui", "centermanager.export",
         "centermanager.platform", "centermanager.events", "alembic",
         "sqlalchemy", "openpyxl", "reportlab", "bcrypt", "git", "PySide6",
-        # Alembic's migrations/env.py imports this stdlib submodule explicitly.
-        # PyInstaller may not collect it transitively from the dynamic Alembic
-        # migration loader, so make the dependency explicit for frozen builds.
         "logging.config",
     ]
     for module in hidden_imports:
         args.extend(["--hidden-import", module])
-
     PyInstaller.__main__.run(args)
     executable = DIST_ROOT / f"{APP_NAME}.exe"
     if not executable.exists():

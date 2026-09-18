@@ -103,4 +103,4 @@ def test_ensure_directories_creates_all(temp_runtime):
     assert paths.attachment_dir.exists()
     assert paths.config_dir.exists()
     assert paths.backup_dir.exists()
-    assert paths.logs_dir.exists()
+    assert paths.logs_dir.exists()\n    assert all((paths.runtime_root / d).exists() for d in RUNTIME_REQUIRED_DIRS)
