@@ -13,7 +13,7 @@ EXPECTED_FACTORIES = {
     "employee_working_times", "employee_documents", "classes", "students",
     "assessments", "reports", "expenses", "expense_timeline", "incomes",
     "teachers", "teacher_assignments", "teacher_documents", "teacher_timeline", "notes", "parents",
-    "documents", "student_highlights", "finance_periods", "timeline",
+    "documents", "student_highlights", "finance_periods", "financial_settlements", "timeline",
 }
 
 
