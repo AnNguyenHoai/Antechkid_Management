@@ -219,7 +219,7 @@ class TestRepositoryManager:
             json.dump(data, f)
 
         # Create required directories
-        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
+        for d in RUNTIME_REQUIRED_DIRS:
             (tmp_path / d).mkdir(parents=True)
 
         manager = RepositoryManager(runtime_root=tmp_path)
@@ -245,7 +245,7 @@ class TestRepositoryManager:
         }
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
+        for d in RUNTIME_REQUIRED_DIRS:
             (tmp_path / d).mkdir(parents=True)
 
         # Refresh to clear cache
@@ -318,7 +318,7 @@ class TestRepositoryManager:
         }
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
+        for d in RUNTIME_REQUIRED_DIRS:
             (non_existent / d).mkdir(parents=True)
 
         # Without refresh, cache still says NOT_FOUND
