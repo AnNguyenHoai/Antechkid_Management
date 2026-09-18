@@ -161,7 +161,7 @@ def write_uat_checklist() -> None:
         "- [ ] Git synchronization works without a system Git installation.\n"
         "- [ ] With Git configured, startup uses the repository database rather than a stale local database.\n"
         "- [ ] If the authoritative repository database is unavailable, startup refuses to continue with a stale local database.\n"
-        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n,
+        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n",
         encoding="utf-8",
     )
 
