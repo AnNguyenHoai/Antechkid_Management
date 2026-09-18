@@ -33,6 +33,7 @@ from centermanager.repositories.parent_repository import ParentRepository
 from centermanager.repositories.document_repository import DocumentRepository
 from centermanager.repositories.student_highlight_repository import StudentHighlightRepository
 from centermanager.repositories.finance_period_repository import FinancePeriodRepository
+from centermanager.repositories.financial_settlement_repository import FinancialSettlementRepository
 from centermanager.repositories.timeline_repository import TimelineRepository
 
 class RepositoryProvider(Protocol):
@@ -68,6 +69,7 @@ class RepositoryProvider(Protocol):
     def documents(self, session: Session) -> DocumentRepository: ...
     def student_highlights(self, session: Session) -> StudentHighlightRepository: ...
     def finance_periods(self, session: Session) -> FinancePeriodRepository: ...
+    def financial_settlements(self, session: Session) -> FinancialSettlementRepository: ...
     def timeline(self, session: Session) -> TimelineRepository: ...
 
 class SqlAlchemyRepositoryProvider:
@@ -103,6 +105,7 @@ class SqlAlchemyRepositoryProvider:
     def documents(self, session: Session) -> DocumentRepository: return DocumentRepository(session)
     def student_highlights(self, session: Session) -> StudentHighlightRepository: return StudentHighlightRepository(session)
     def finance_periods(self, session: Session) -> FinancePeriodRepository: return FinancePeriodRepository(session)
+    def financial_settlements(self, session: Session) -> FinancialSettlementRepository: return FinancialSettlementRepository(session)
     def timeline(self, session: Session) -> TimelineRepository: return TimelineRepository(session)
 
 def create_default_repository_provider() -> RepositoryProvider:
