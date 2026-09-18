@@ -13,7 +13,8 @@ def locate_git() -> Optional[Path]:
     if getattr(sys, "frozen", False):
         base_dir = Path(sys.executable).resolve().parent
     else:
-        base_dir = Path(__file__).resolve().parents[2]
+        # Source layout: CenterManager/src/centermanager/core/git_locator.py
+        base_dir = Path(__file__).resolve().parents[3]
 
     candidates = [
         base_dir / "git" / "cmd" / "git.exe",
