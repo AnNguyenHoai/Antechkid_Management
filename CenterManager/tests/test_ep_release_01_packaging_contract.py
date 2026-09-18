@@ -54,3 +54,11 @@ def test_runtime_repository_is_not_a_gitlink():
         check=True,
     )
     assert "160000 " not in result.stdout
+
+
+def test_runtime_directory_contract_is_shared_with_release_builder():
+    from centermanager.core.paths import RUNTIME_REQUIRED_DIRS
+
+    source = (ROOT / "build_release.py").read_text(encoding="utf-8")
+    for directory in RUNTIME_REQUIRED_DIRS:
+        assert f'"{directory}"' in source
