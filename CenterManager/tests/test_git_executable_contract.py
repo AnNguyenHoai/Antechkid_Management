@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from centermanager.platform.deployment import git_locator
+from centermanager.core import git_locator
 from centermanager.platform.synchronization.git.git_provider import GitProvider
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
 from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
