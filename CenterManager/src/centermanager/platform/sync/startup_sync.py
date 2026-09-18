@@ -171,7 +171,7 @@ class StartupSynchronization:
         is only the local materialized copy used by the desktop UI.
         """
         repo_root = self._repo_path / "Attachments" / "Employees"
-        runtime_root = self._paths.runtime_root / "Attachments" / "Employees"
+        runtime_root = self._paths.attachment_dir / "Employees"
         try:
             if runtime_root.exists():
                 shutil.rmtree(runtime_root)
