@@ -97,10 +97,10 @@ class IncomeService:
 
     def _resolve_finance_period_start(self, session, payment_date: date) -> date:
         """Resolve the canonical period bucket for a payment date."""
-        config = self._repository_provider.finance_periods(session).get_active(payment_date)
+        config = self._repository_provider.finance_periods(session).get_effective(payment_date)
         if config is None:
             raise IncomeValidationError(
-                f"No active Finance period configuration covers payment date {payment_date.isoformat()}."
+                f"No Finance period configuration covers payment date {payment_date.isoformat()}."
             )
         period_start, _ = FinancePeriodDefinition.period_for_date(
             config.effective_from,
@@ -290,8 +290,8 @@ class IncomeService:
                 note = self._normalize_text(note)
                 old_note = income.note or "(none)"
                 new_note = note or "(none)"
-                if old_note != new_note:
-                    changed.append(f"note: {old_note} -> {new_note}")
+                if old_note != new_str:
+                    changed.append(f"note: {old_note} -> {new_str}")
                 income.note = note
 
             if not changed:
