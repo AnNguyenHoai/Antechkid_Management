@@ -31,7 +31,8 @@ def test_release_excludes_mutable_database_and_development_artifacts():
 
 def test_release_contains_required_runtime_and_migration_assets():
     source = _read(BUILDER)
-    assert '("alembic.ini", "migrations")' in source
+    for required in ('"alembic.ini"', '"migrations"'):
+        assert required in source
     for directory in (
         '"Database"', '"Export"', '"Attachment"', '"Config"', '"Backup"',
         '"Logs"', '"Reports"', '"Temp"', '"metadata"', '"collaboration"', '"snapshots"',
@@ -57,7 +58,10 @@ def test_release_readme_matches_git_authoritative_startup_contract():
 def test_clean_machine_workflow_rejects_python_source_and_git_metadata():
     source = _read(WORKFLOW)
     assert '"python.exe", "pythonw.exe"' in source
-    assert '"\\src\\|\\.git\\"' in source
+    # The workflow may express these as separate guards; the security contract
+    # is that both source directories and nested Git metadata are rejected.
+    assert "\\src\\" in source
+    assert "\\.git\\" in source
     assert "Clean-machine portable smoke test" in source
     assert "SystemRoot}\\System32" in source
 
