@@ -8,6 +8,7 @@ import traceback
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from centermanager.core.paths import get_paths
+from centermanager.core.git_locator import locate_git
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
 from centermanager.core.current_user import set_current_user
@@ -137,62 +138,40 @@ def main() -> int:
         session_factory = sessionmaker(bind=engine)
 
         # ============================================
-        # GIT CONFIGURATION (must load before sync)
+        # OPTIONAL GIT CONFIGURATION
         # ============================================
         git_config_service = GitConfigService()
+        git_executable = locate_git()
+        git_config = None
+        sync_provider = None
 
-        # Check if Git config exists, if not show first-run dialog
-        if not git_config_service.has_config():
-            logger.info("[STARTUP] Git configuration missing, showing first-run dialog")
-            from centermanager.ui.git_config_dialog import GitConfigDialog
-            dialog = GitConfigDialog(git_config_service)
-            if dialog.exec() == GitConfigDialog.DialogCode.Accepted:
-                logger.info("[STARTUP] Git configuration saved")
+        if not git_executable:
+            logger.warning("[STARTUP] Git executable unavailable; starting in local/offline mode")
+        elif git_config_service.has_config():
+            git_config = git_config_service.get_config()
+            if git_config is None:
+                logger.warning("[STARTUP] Git configuration is invalid; starting in local/offline mode")
             else:
-                logger.warning("[STARTUP] Git configuration skipped. Cannot continue without Git config.")
-                QMessageBox.critical(None, "Configuration Required",
-                                     "Git configuration is required to synchronize data.\n"
-                                     "Please provide the encrypted configuration bundle.")
-                return 1
+                repo_path = paths.runtime_root / "repository"
+                sync_provider = GitSynchronizationProvider(
+                    repo_path=repo_path,
+                    repository_url=git_config.repository_url,
+                    token=git_config.token,
+                    username=git_config.username,
+                    branch=git_config.branch,
+                    email=git_config.email or "",
+                    git_executable=str(git_executable),
+                )
 
-        # Load Git config
-        git_config = git_config_service.get_config()
-        if git_config is None:
-            logger.error("[STARTUP] Git configuration not available after dialog")
-            QMessageBox.critical(None, "Configuration Error",
-                                 "Could not load Git configuration. Please check the bundle format.")
-            return 1
-
-        # ============================================
-        # CREATE SYNCHRONIZATION PROVIDER
-        # ============================================
-        repo_path = paths.runtime_root / "repository"
-        sync_provider = GitSynchronizationProvider(
-            repo_path=repo_path,
-            repository_url=git_config.repository_url,
-            token=git_config.token,
-            username=git_config.username,
-            branch=git_config.branch,
-            email=git_config.email or "",
-        )
-
-        # ============================================
-        # STARTUP SYNCHRONIZATION (blocking gate)
-        # ============================================
-        logger.info("[STARTUP] Running startup synchronization...")
-        startup_sync = StartupSynchronization(sync_provider)
-        if not startup_sync.run():
-            logger.error("[STARTUP] Startup synchronization failed")
-            QMessageBox.critical(
-                None,
-                "Synchronization Error",
-                "Unable to synchronize application data.\n"
-                "Please check your network connection or Git configuration.\n\n"
-                "If the problem persists, contact your system administrator."
-            )
-            return 1
-
-        logger.info("[STARTUP] Startup synchronization completed")
+                logger.info("[STARTUP] Running optional startup synchronization...")
+                startup_sync = StartupSynchronization(sync_provider)
+                if not startup_sync.run():
+                    logger.warning("[STARTUP] Startup synchronization unavailable; continuing in local/offline mode")
+                    sync_provider = None
+                else:
+                    logger.info("[STARTUP] Startup synchronization completed")
+        else:
+            logger.info("[STARTUP] No Git configuration found; starting in local/offline mode")
 
         # ============================================
         # ENSURE DATABASE SCHEMA (after sync)
