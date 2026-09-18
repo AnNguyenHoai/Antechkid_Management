@@ -45,10 +45,55 @@ jobs:
           $zip = "release/CenterManager-v0.1.0-prototype-windows-x64.zip"
           $exe = "release/CenterManager-v0.1.0-prototype-windows-x64/CenterManager.exe"
           $runtime = "release/CenterManager-v0.1.0-prototype-windows-x64/runtime"
+          $git = "release/CenterManager-v0.1.0-prototype-windows-x64/git/cmd/git.exe"
           if (!(Test-Path $zip)) { throw "Release ZIP was not created: $zip" }
           if (!(Test-Path $exe)) { throw "Executable was not created: $exe" }
           if (!(Test-Path $runtime)) { throw "External runtime directory was not created: $runtime" }
+          if (!(Test-Path $git)) { throw "Bundled Git was not created: $git" }
           if ((Get-Item $exe).Length -le 0) { throw "Executable is empty" }
+
+          $package = Get-Item "release/CenterManager-v0.1.0-prototype-windows-x64"
+          $forbidden = Get-ChildItem -Path $package.FullName -Recurse -File |
+            Where-Object { $_.Name -in @("python.exe", "pythonw.exe") -or $_.FullName -match "\\src\\|\\.git\\" }
+          if ($forbidden) {
+            $forbidden | ForEach-Object { Write-Host "Forbidden release file: $($_.FullName)" }
+            throw "Release package contains Python/source checkout artifacts"
+          }
+
+      - name: Clean-machine portable smoke test
+        shell: pwsh
+        run: |
+          $zip = (Resolve-Path "release/CenterManager-v0.1.0-prototype-windows-x64.zip").Path
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "CenterManager-clean-machine"
+          if (Test-Path $smokeRoot) { Remove-Item $smokeRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $smokeRoot -Force
+          $package = Join-Path $smokeRoot "CenterManager-v0.1.0-prototype-windows-x64"
+          $exe = Join-Path $package "CenterManager.exe"
+          $git = Join-Path $package "git\cmd\git.exe"
+
+          if (!(Test-Path $exe)) { throw "Clean-machine EXE missing" }
+          if (!(Test-Path $git)) { throw "Clean-machine bundled Git missing" }
+
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32"
+            $gitResult = & $git --version
+            if ($LASTEXITCODE -ne 0) { throw "Bundled Git failed: $gitResult" }
+            Write-Host "Bundled Git: $gitResult"
+
+            $env:CENTERMANAGER_PORTABLE_SMOKE = "1"
+            $process = Start-Process -FilePath $exe -WorkingDirectory $package -Wait -PassThru -NoNewWindow
+            if ($process.ExitCode -ne 0) {
+              $errorLog = Join-Path $package "error.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog }
+              throw "Portable smoke test failed with exit code $($process.ExitCode)"
+            }
+          }
+          finally {
+            $env:PATH = $oldPath
+            Remove-Item Env:CENTERMANAGER_PORTABLE_SMOKE -ErrorAction SilentlyContinue
+          }
 
       - name: Upload prototype artifact
         uses: actions/upload-artifact@v4
