@@ -98,7 +98,7 @@ class TestRuntimeValidator:
     def test_validate_ready(self, tmp_path):
         validator = RuntimeValidator(tmp_path)
         # Create required directories
-        for d in ["Database", "metadata", "Reports", "Attachment", "collaboration"]:
+        for d in RUNTIME_REQUIRED_DIRS:
             (tmp_path / d).mkdir(parents=True)
 
         assert validator.validate() is True
