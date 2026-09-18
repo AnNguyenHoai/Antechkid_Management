@@ -33,10 +33,19 @@ def test_configured_startup_never_creates_engine_before_authoritative_sync():
 
 def test_startup_sync_requires_authoritative_database_before_success():
     source = _read(STARTUP_SYNC)
-    missing_marker = source.index("if not repo_db.exists():")
-    return_false = source.index("return False", missing_marker)
-    success_marker = source.index("Startup synchronization completed successfully")
-    assert missing_marker < return_false < success_marker
+
+    apply_start = source.index("    def _apply_runtime_database")
+    apply_end = source.index("    def ", apply_start + 8)
+    apply_block = source[apply_start:apply_end]
+    missing_marker = apply_block.index("if not repo_db.exists():")
+    return_false = apply_block.index("return False", missing_marker)
+    copy_marker = apply_block.index("with open(repo_db, 'rb')", return_false)
+    assert missing_marker < return_false < copy_marker
+
+    run_start = source.index("    def run(")
+    apply_call = source.index("if not self._apply_runtime_database():", run_start)
+    success_marker = source.index("Startup synchronization completed successfully", apply_call)
+    assert apply_call < success_marker
 
 
 def test_release_uat_is_explicit_about_two_machine_flow():

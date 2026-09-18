@@ -10,26 +10,39 @@ from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRe
 
 logger = logging.getLogger(__name__)
 
+
 class EmployeeDocumentService:
+    _RUNTIME_ATTACHMENT_ALIASES = {"attachment", "attachments"}
+
     def __init__(self, session_factory: sessionmaker, attachments_root: Path, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
-        self._attachments_root = Path(attachments_root)
-        self._root = self._attachments_root / 'Employees'
+
+        # Runtime contract A2/A4.6 uses singular ``Attachment``. Older call
+        # sites and persisted document metadata used ``Attachments``. Normalize
+        # the runtime root here so old binaries/configuration cannot recreate a
+        # second plural runtime tree.
+        requested_root = Path(attachments_root)
+        if requested_root.name.lower() == "attachments":
+            requested_root = requested_root.with_name("Attachment")
+        self._attachments_root = requested_root
+
+        self._root = self._attachments_root / "Employees"
         self._runtime_root = self._attachments_root.parent
         self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     def resolve_document_path(self, document: EmployeeDocument) -> Path:
-        """Resolve a stored document path against the runtime root safely.
+        """Resolve stored metadata into the canonical runtime Attachment tree.
 
-        Employee document metadata stores paths relative to the runtime directory,
-        while QFile/os.startfile resolves relative paths against the process CWD.
-        Always return an absolute, managed path and reject path traversal.
+        Both historical ``Attachments/...`` metadata and canonical
+        ``Attachment/...`` metadata are accepted. The returned path always
+        remains below the singular runtime ``Attachment`` directory.
         """
         raw = Path(document.relative_path)
         if raw.is_absolute():
             candidate = raw.resolve()
-        elif raw.parts and raw.parts[0].lower() == self._attachments_root.name.lower():
-            candidate = (self._runtime_root / raw).resolve()
+        elif raw.parts and raw.parts[0].lower() in self._RUNTIME_ATTACHMENT_ALIASES:
+            remainder = Path(*raw.parts[1:]) if len(raw.parts) > 1 else Path()
+            candidate = (self._attachments_root / remainder).resolve()
         else:
             candidate = (self._attachments_root / raw).resolve()
 
@@ -64,11 +77,20 @@ class EmployeeDocumentService:
         return self._runtime_root / "repository" / "Attachments" / "Employees" / employee_code
 
     def get_repository_relative_path(self, document: EmployeeDocument) -> Path:
-        """Return the path that publish will materialize inside the Git repository."""
+        """Map runtime document metadata to the repository Attachments tree.
+
+        Runtime naming is singular (``Attachment``), while the repository data
+        contract intentionally remains plural (``Attachments``). Historical
+        plural metadata is therefore normalized to the same repository path.
+        """
         relative = Path(document.relative_path)
         if relative.is_absolute():
             raise ValueError("Employee document paths must be relative.")
-        return relative
+
+        if relative.parts and relative.parts[0].lower() in self._RUNTIME_ATTACHMENT_ALIASES:
+            relative = Path(*relative.parts[1:]) if len(relative.parts) > 1 else Path()
+
+        return Path("Attachments") / relative
 
     def document_sync_locations(self, document: EmployeeDocument) -> dict:
         """Describe local and repository locations for diagnostics/UI."""
@@ -126,7 +148,7 @@ class EmployeeDocumentService:
         )
         return result
 
-    def upload(self, employee, source_path, document_type='CV', notes=None):
+    def upload(self, employee, source_path, document_type="CV", notes=None):
         src = Path(source_path).resolve()
         if not src.is_file():
             raise FileNotFoundError(src)
@@ -134,7 +156,7 @@ class EmployeeDocumentService:
         folder = self.get_runtime_employee_root(employee.employee_code) / document_type
         folder.mkdir(parents=True, exist_ok=True)
 
-        name = f'{uuid.uuid4().hex}_{src.name}'
+        name = f"{uuid.uuid4().hex}_{src.name}"
         dst = (folder / name).resolve()
 
         allowed = self._attachments_root.resolve()

@@ -11,8 +11,10 @@ class _FakePaths:
     def __init__(self, root: Path):
         self.runtime_root = root / "runtime"
         self.database_dir = self.runtime_root / "Database"
+        self.attachment_dir = self.runtime_root / "Attachment"
         self.metadata_dir = self.runtime_root / "metadata"
         self.database_dir.mkdir(parents=True)
+        self.attachment_dir.mkdir(parents=True)
         self.metadata_dir.mkdir(parents=True)
 
 
