@@ -17,12 +17,14 @@ from .git_exceptions import (
 )
 from .git_credentials import GitCredentials
 from .git_status import GitStatus
+from centermanager.platform.deployment.git_locator import locate_git
 
 
 class GitProvider:
-    def __init__(self, repo_path: Path, credentials: Optional[GitCredentials] = None):
+    def __init__(self, repo_path: Path, credentials: Optional[GitCredentials] = None, git_executable: Optional[str] = None):
         self._repo_path = repo_path
         self._credentials = credentials
+        self._git_executable = git_executable or str(locate_git() or "")
         self._status = GitStatus.OFFLINE
         self._last_error = None
 
@@ -141,7 +143,11 @@ class GitProvider:
         return self._status in (GitStatus.OFFLINE, GitStatus.ERROR)
 
     def _run_git_command(self, args: list) -> str:
-        cmd = ["git"] + args
+        if not self._git_executable:
+            self._status = GitStatus.ERROR
+            self._last_error = "Git executable not found"
+            raise GitException("Git executable not found. Configure portable Git or install Git.")
+        cmd = [self._git_executable] + args
         env = os.environ.copy()
         if self._credentials and self._credentials.token:
             env["GIT_ASKPASS"] = "echo"
