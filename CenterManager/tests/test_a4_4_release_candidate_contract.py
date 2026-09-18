@@ -63,7 +63,7 @@ def test_clean_machine_workflow_rejects_python_source_and_git_metadata():
     assert "\\src\\" in source
     assert "\\.git\\" in source
     assert "Clean-machine portable smoke test" in source
-    assert "SystemRoot}\\System32" in source
+    assert "SystemRoot\\System32" in source
 
 
 def test_clean_machine_workflow_verifies_executable_and_bundled_git():
