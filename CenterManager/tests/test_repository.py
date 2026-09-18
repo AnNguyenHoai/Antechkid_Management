@@ -5,6 +5,8 @@ import pytest
 import json
 from pathlib import Path
 
+from centermanager.core.paths import RUNTIME_REQUIRED_DIRS
+
 from centermanager.platform.repository import (
     RepositoryState,
     RepositoryManager,
