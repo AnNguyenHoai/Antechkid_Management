@@ -354,7 +354,7 @@ class RuntimeSyncService:
 
                 apply_success = self._apply_runtime_update()
                 if not apply_success:
-                    logger.error("Failed to apply runtime update after sync")
+                    raise RuntimeError("Authoritative repository database could not be materialized into runtime")
 
                 self._event_bus.publish(SynchronizationCompleted(
                     correlation_id=corr_id,
@@ -398,8 +398,8 @@ class RuntimeSyncService:
             runtime_db = paths.database_dir / "center.db"
 
             if not repo_db.exists():
-                logger.warning("Repository database not found, skipping runtime update")
-                return True
+                logger.error("Repository database not found; runtime database cannot be considered synchronized")
+                return False
 
             runtime_db.parent.mkdir(parents=True, exist_ok=True)
             with open(repo_db, 'rb') as fsrc:
