@@ -131,14 +131,12 @@ def main() -> int:
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
 
         # ============================================
-        # DATABASE LIFECYCLE
+        # DATABASE + GIT STARTUP ORDER
         # ============================================
-        # A portable first-run package has no user database yet. Create the
-        # SQLite container explicitly, then let Alembic build the schema.
+        # Git is the database source of truth. Do not create the production
+        # engine until the startup synchronization has materialized the Git
+        # database into runtime/Database/center.db.
         from sqlalchemy.orm import sessionmaker
-        initialize_runtime_database()
-        engine = create_production_engine(echo=False)
-        session_factory = sessionmaker(bind=engine)
 
         # ============================================
         # OPTIONAL GIT CONFIGURATION
@@ -166,18 +164,34 @@ def main() -> int:
                     git_executable=str(git_executable),
                 )
 
-                logger.info("[STARTUP] Running optional startup synchronization...")
+                logger.info("[STARTUP] Running startup synchronization...")
                 startup_sync = StartupSynchronization(sync_provider)
                 if not startup_sync.run():
-                    logger.warning("[STARTUP] Startup synchronization unavailable; continuing in local/offline mode")
-                    sync_provider = None
-                else:
-                    logger.info("[STARTUP] Startup synchronization completed")
+                    # A configured Git repository is authoritative for the
+                    # runtime database. Never fall back to a stale local DB.
+                    logger.error("[STARTUP] Startup synchronization failed; refusing to start with a non-authoritative database")
+                    QMessageBox.critical(
+                        None,
+                        "Synchronization Error",
+                        "Unable to synchronize the authoritative Git database.\\n"
+                        "CenterManager will not start with a stale local database.\\n\\n"
+                        "Please check the network connection and Git configuration.",
+                    )
+                    return 1
+                logger.info("[STARTUP] Startup synchronization completed")
         else:
             logger.info("[STARTUP] No Git configuration found; starting in local/offline mode")
 
+        # A4.2: create the local container only after Git synchronization has
+        # had the opportunity to materialize the authoritative database. In
+        # configured mode this is a no-op; in true local/offline mode it is the
+        # explicit first-run lifecycle transition from A4.1.
+        initialize_runtime_database()
+        engine = create_production_engine(echo=False)
+        session_factory = sessionmaker(bind=engine)
+
         # ============================================
-        # ENSURE DATABASE SCHEMA (after sync)
+        # ENSURE DATABASE SCHEMA (after Git DB materialization)
         # ============================================
         ensure_schema()
         logger.info("[STARTUP] Schema ensured")
