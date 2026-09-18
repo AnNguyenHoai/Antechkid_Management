@@ -19,6 +19,7 @@ from centermanager.core.paths import (
     config_file,
     backup_dir,
     logs_dir,
+    RUNTIME_REQUIRED_DIRS,
 )
 
 
