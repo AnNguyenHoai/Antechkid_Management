@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-import pytest
 import json
-from pathlib import Path
 from unittest.mock import patch
 
-from centermanager.services.git_config_service import GitConfigService, GitConfig, GitConfigValidationError
+import pytest
+
 from centermanager.core.crypto import encrypt_git_config
+from centermanager.services.git_config_service import GitConfig, GitConfigService
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def temp_config_path(tmp_path):
     return tmp_path / "config.json"
 
 
-@patch.object(GitConfigService, 'test_connection', return_value=True)
+@patch.object(GitConfigService, "test_connection", return_value=True)
 def test_save_load_config(mock_connection, temp_config_path):
     service = GitConfigService(temp_config_path)
     config = GitConfig(
@@ -21,7 +21,7 @@ def test_save_load_config(mock_connection, temp_config_path):
         username="testuser",
         token="testtoken",
         branch="main",
-        email="test@example.com"
+        email="test@example.com",
     )
 
     assert service.save_config(config) is True
@@ -36,7 +36,7 @@ def test_save_load_config(mock_connection, temp_config_path):
     assert loaded.email == config.email
 
 
-@patch.object(GitConfigService, 'test_connection', return_value=True)
+@patch.object(GitConfigService, "test_connection", return_value=True)
 def test_has_config(mock_connection, temp_config_path):
     service = GitConfigService(temp_config_path)
     assert service.has_config() is False
@@ -44,19 +44,19 @@ def test_has_config(mock_connection, temp_config_path):
     config = GitConfig(
         repository_url="https://github.com/test/repo.git",
         username="testuser",
-        token="testtoken"
+        token="testtoken",
     )
     service.save_config(config)
     assert service.has_config() is True
 
 
-@patch.object(GitConfigService, 'test_connection', return_value=True)
+@patch.object(GitConfigService, "test_connection", return_value=True)
 def test_validate_bundle_valid(mock_connection, temp_config_path):
     service = GitConfigService(temp_config_path)
     config = GitConfig(
         repository_url="https://github.com/test/repo.git",
         username="testuser",
-        token="testtoken"
+        token="testtoken",
     )
     bundle = encrypt_git_config(json.dumps(config.to_dict()))
     result = service.validate_bundle(bundle)
@@ -67,16 +67,16 @@ def test_validate_bundle_invalid(temp_config_path):
     service = GitConfigService(temp_config_path)
     result = service.validate_bundle("invalid")
     assert result.success is False
-    assert "Invalid bundle format. Must start with 'ENC:v1:'" in result.message
+    assert "Unsupported encrypted Git configuration format" in result.message
 
 
-@patch.object(GitConfigService, 'test_connection', return_value=True)
+@patch.object(GitConfigService, "test_connection", return_value=True)
 def test_clear_config(mock_connection, temp_config_path):
     service = GitConfigService(temp_config_path)
     config = GitConfig(
         repository_url="https://github.com/test/repo.git",
         username="testuser",
-        token="testtoken"
+        token="testtoken",
     )
     service.save_config(config)
     assert service.has_config() is True
