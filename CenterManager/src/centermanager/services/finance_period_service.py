@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
@@ -26,7 +26,7 @@ class FinancePeriodService:
     def get_active_period(self, on_date: Optional[date] = None) -> Optional[FinancePeriod]:
         target = on_date or date.today()
         with self._session_factory() as session:
-            return self._repository_provider.finance_periods(session).get_active(target)
+            return self._repository_provider.finance_periods(session).get_effective(target)
 
     @require_permission("finance.period.view")
     def list_period_configurations(self) -> List[FinancePeriod]:
@@ -52,16 +52,27 @@ class FinancePeriodService:
             if repo.exists_effective_from(effective_from):
                 raise ValueError("A finance period configuration already exists for this effective date.")
 
-            previous = repo.get_active(effective_from)
+            covering = repo.get_effective(effective_from)
+            next_period = repo.get_next(effective_from)
+            new_effective_to = (
+                next_period.effective_from - timedelta(days=1)
+                if next_period is not None
+                else None
+            )
             period = FinancePeriod(
                 duration_months=duration_months,
-                status=FinancePeriod.STATUS_ACTIVE,
+                status=(
+                    FinancePeriod.STATUS_INACTIVE
+                    if next_period is not None
+                    else FinancePeriod.STATUS_ACTIVE
+                ),
                 effective_from=effective_from,
-                effective_to=None,
+                effective_to=new_effective_to,
             )
-            if previous is not None and previous.effective_from < effective_from:
-                previous.effective_to = effective_from.fromordinal(effective_from.toordinal() - 1)
-                previous.status = FinancePeriod.STATUS_INACTIVE
+
+            if covering is not None and covering.effective_from < effective_from:
+                covering.effective_to = effective_from - timedelta(days=1)
+                covering.status = FinancePeriod.STATUS_INACTIVE
 
             repo.add(period)
             session.commit()
@@ -79,8 +90,19 @@ class FinancePeriodService:
             period = repo.get_by_id(period_id)
             if period is None:
                 raise ValueError(f"Finance period {period_id} not found.")
+
+            end_date = effective_to or date.today()
+            if end_date < period.effective_from:
+                raise ValueError("effective_to cannot be earlier than effective_from.")
+
+            next_period = repo.get_next(period.effective_from)
+            if next_period is not None and end_date >= next_period.effective_from:
+                raise ValueError(
+                    "effective_to must be earlier than the next Finance period effective date."
+                )
+
             period.status = FinancePeriod.STATUS_INACTIVE
-            period.effective_to = effective_to or date.today()
+            period.effective_to = end_date
             session.commit()
             repo.refresh(period)
             return period

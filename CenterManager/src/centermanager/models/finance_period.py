@@ -4,7 +4,7 @@ from calendar import monthrange
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import Date, Integer, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from centermanager.database.base import Base
@@ -24,6 +24,10 @@ class FinancePeriod(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("effective_from", name="uq_finance_period_effective_from"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_finance_period_effective_range",
+        ),
     )
 
     STATUS_ACTIVE = "ACTIVE"
