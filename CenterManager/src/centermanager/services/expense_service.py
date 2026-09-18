@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Optional, List, Tuple
 
 from centermanager.models.expense import Expense
@@ -9,6 +9,8 @@ from centermanager.services.expense_timeline_service import ExpenseTimelineServi
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.permission_guard import require_permission
 from centermanager.core.current_user import get_current_user
+from centermanager.events.event_bus import EventBus
+from centermanager.events.finance_events import FinanceDataChanged
 
 logger = logging.getLogger(__name__)
 
@@ -22,255 +24,120 @@ class ExpenseNotFoundError(Exception):
 
 
 class ExpenseService:
-    def __init__(
-        self,
-        session_factory: Any,
-        timeline_service: ExpenseTimelineService,
-        permission_service: PermissionService,
-        repository_provider: Optional[RepositoryProvider] = None,
-    ):
+    def __init__(self, session_factory: Any, timeline_service: ExpenseTimelineService,
+                 permission_service: PermissionService,
+                 repository_provider: Optional[RepositoryProvider] = None,
+                 event_bus: Optional[EventBus] = None):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._permission_service = permission_service
         self._repository_provider = repository_provider or create_default_repository_provider()
+        self._event_bus = event_bus
+
+    def set_event_bus(self, event_bus: EventBus) -> None:
+        self._event_bus = event_bus
+
+    def _publish_finance_change(self, action: str, expense_id: int) -> None:
+        if self._event_bus is not None:
+            self._event_bus.publish(FinanceDataChanged(entity="expense", action=action, entity_id=expense_id))
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
-        if text is None:
-            return None
-        stripped = text.strip()
-        return stripped if stripped else None
+        if text is None: return None
+        stripped = text.strip(); return stripped if stripped else None
 
     def _validate_amount(self, amount: float) -> float:
-        if amount <= 0:
-            raise ExpenseValidationError("Amount must be greater than 0")
+        if amount <= 0: raise ExpenseValidationError("Amount must be greater than 0")
         return amount
 
     def _validate_category(self, category: str) -> str:
-        valid = [
-            "Teacher Salary", "Office Rent", "Electricity", "Water",
-            "Internet", "Equipment", "Marketing", "Office Supply",
-            "Maintenance", "Transportation", "Other"
-        ]
-        if category not in valid:
-            raise ExpenseValidationError(f"Category must be one of: {', '.join(valid)}")
+        valid = ["Teacher Salary", "Office Rent", "Electricity", "Water", "Internet", "Equipment", "Marketing", "Office Supply", "Maintenance", "Transportation", "Other"]
+        if category not in valid: raise ExpenseValidationError(f"Category must be one of: {', '.join(valid)}")
         return category
 
     def _validate_payment_date(self, payment_date):
-        if payment_date is None:
-            raise ExpenseValidationError("Payment date is required.")
+        if payment_date is None: raise ExpenseValidationError("Payment date is required.")
         return payment_date
 
     def _validate_payment_method(self, method: str) -> str:
-        mapping = {"TÀI KHOẢN CÁ NHÂN": "Cash", "TÀI KHOẢN CÔNG TY": "Bank",
-                   "Bank Transfer": "Bank", "Cash": "Cash", "Bank": "Bank", "Other": "Other"}
+        mapping = {"TÀI KHOẢN CÁ NHÂN": "Cash", "TÀI KHOẢN CÔNG TY": "Bank", "Bank Transfer": "Bank", "Cash": "Cash", "Bank": "Bank", "Other": "Other"}
         value = mapping.get(method, method)
-        if value not in {"Cash", "Bank", "Other"}:
-            raise ExpenseValidationError("Invalid payment method.")
+        if value not in {"Cash", "Bank", "Other"}: raise ExpenseValidationError("Invalid payment method.")
         return value
 
     def _validate_status(self, status: str) -> str:
-        mapping = {"ĐÃ HOÀN TRẢ": "Completed", "CHƯA HOÀN TRẢ": "Pending",
-                   "Completed": "Completed", "Pending": "Pending"}
+        mapping = {"ĐÃ HOÀN TRẢ": "Completed", "CHƯA HOÀN TRẢ": "Pending", "Completed": "Completed", "Pending": "Pending"}
         value = mapping.get(status, status)
-        if value not in {"Completed", "Pending"}:
-            raise ExpenseValidationError("Invalid expense status.")
+        if value not in {"Completed", "Pending"}: raise ExpenseValidationError("Invalid expense status.")
         return value
 
-    def create_expense(
-        self,
-        category: str,
-        description: str,
-        amount: float,
-        payment_method: str,
-        payment_date: date,
-        paid_by: Optional[str] = None,
-        status: str = "Completed",
-        note: Optional[str] = None,
-    ) -> Expense:
-        category = self._validate_category(category)
-        description = self._normalize_text(description)
-        if not description:
-            raise ExpenseValidationError("Description is required")
-        amount = self._validate_amount(amount)
-        payment_method = self._validate_payment_method(payment_method)
-        status = self._validate_status(status)
+    def create_expense(self, category: str, description: str, amount: float, payment_method: str,
+                       payment_date: date, paid_by: Optional[str] = None, status: str = "Completed",
+                       note: Optional[str] = None) -> Expense:
+        category = self._validate_category(category); description = self._normalize_text(description)
+        if not description: raise ExpenseValidationError("Description is required")
+        amount = self._validate_amount(amount); payment_method = self._validate_payment_method(payment_method)
+        payment_date = self._validate_payment_date(payment_date); status = self._validate_status(status)
         paid_by = self._normalize_text(paid_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
-
         with self._session_factory() as session:
             repo = self._repository_provider.expenses(session)
-            expense = Expense(
-                category=category,
-                description=description,
-                amount=amount,
-                payment_method=payment_method,
-                payment_date=payment_date,
-                paid_by=paid_by,
-                status=status,
-                note=note,
-            )
-            repo.add(expense)
-            session.commit()
-            repo.refresh(expense)
-
-            self._timeline_service.log_event(
-                expense_id=expense.id,
-                event_type="ExpenseCreated",
-                title=f"Expense Created: {category}",
-                description=f"Amount: {amount:,.0f} VND, Method: {payment_method}",
-                metadata={"category": category, "amount": amount},
-            )
+            expense = Expense(category=category, description=description, amount=amount, payment_method=payment_method,
+                              payment_date=payment_date, paid_by=paid_by, status=status, note=note)
+            repo.add(expense); session.commit(); repo.refresh(expense)
+            expense_id = expense.id
+            self._timeline_service.log_event(expense_id=expense_id, event_type="ExpenseCreated", title=f"Expense Created: {category}",
+                                             description=f"Amount: {amount:,.0f} VND, Method: {payment_method}", metadata={"category": category, "amount": amount})
+            self._publish_finance_change("created", expense_id)
             return expense
 
     @require_permission("finance.view")
     def get_expense(self, expense_id: int) -> Expense:
         with self._session_factory() as session:
-            repo = self._repository_provider.expenses(session)
-            expense = repo.get_by_id(expense_id)
-            if not expense:
-                raise ExpenseNotFoundError(f"Expense {expense_id} not found")
+            expense = self._repository_provider.expenses(session).get_by_id(expense_id)
+            if not expense: raise ExpenseNotFoundError(f"Expense {expense_id} not found")
             return expense
 
     @require_permission("finance.view")
-    def list_expenses(
-        self,
-        category: Optional[str] = None,
-        payment_method: Optional[str] = None,
-        status: Optional[str] = None,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        search_text: Optional[str] = None,
-        page: int = 1,
-        per_page: int = 20,
-    ) -> Tuple[List[Expense], int]:
+    def list_expenses(self, category: Optional[str] = None, payment_method: Optional[str] = None,
+                      status: Optional[str] = None, date_from: Optional[date] = None, date_to: Optional[date] = None,
+                      search_text: Optional[str] = None, page: int = 1, per_page: int = 20) -> Tuple[List[Expense], int]:
         offset = (page - 1) * per_page
         with self._session_factory() as session:
             repo = self._repository_provider.expenses(session)
-            items = repo.list_active(
-                category=category,
-                payment_method=payment_method,
-                status=status,
-                date_from=date_from,
-                date_to=date_to,
-                search_text=search_text,
-                offset=offset,
-                limit=per_page,
-            )
-            total = repo.count_active(
-                category=category,
-                payment_method=payment_method,
-                status=status,
-                date_from=date_from,
-                date_to=date_to,
-                search_text=search_text,
-            )
-            return items, total
+            kwargs = dict(category=category, payment_method=payment_method, status=status, date_from=date_from, date_to=date_to, search_text=search_text)
+            return repo.list_active(offset=offset, limit=per_page, **kwargs), repo.count_active(**kwargs)
 
     @require_permission("finance.expense.update")
-    def update_expense(
-        self,
-        expense_id: int,
-        category: Optional[str] = None,
-        description: Optional[str] = None,
-        amount: Optional[float] = None,
-        payment_method: Optional[str] = None,
-        payment_date: Optional[date] = None,
-        paid_by: Optional[str] = None,
-        status: Optional[str] = None,
-        note: Optional[str] = None,
-    ) -> Expense:
+    def update_expense(self, expense_id: int, category: Optional[str] = None, description: Optional[str] = None,
+                       amount: Optional[float] = None, payment_method: Optional[str] = None, payment_date: Optional[date] = None,
+                       paid_by: Optional[str] = None, status: Optional[str] = None, note: Optional[str] = None) -> Expense:
         with self._session_factory() as session:
-            repo = self._repository_provider.expenses(session)
-            expense = repo.get_by_id_including_deleted(expense_id)
-            if not expense or expense.deleted_at is not None:
-                raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
-
+            repo = self._repository_provider.expenses(session); expense = repo.get_by_id_including_deleted(expense_id)
+            if not expense or expense.deleted_at is not None: raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
             changes = []
-
-            if category is not None:
-                new_cat = self._validate_category(category)
-                if expense.category != new_cat:
-                    changes.append(f"category: {expense.category} -> {new_cat}")
-                    expense.category = new_cat
-
-            if description is not None:
-                new_desc = self._normalize_text(description)
-                if not new_desc:
-                    raise ExpenseValidationError("Description cannot be empty")
-                if expense.description != new_desc:
-                    changes.append(f"description: {expense.description} -> {new_desc}")
-                    expense.description = new_desc
-
-            if amount is not None:
-                new_amount = self._validate_amount(amount)
-                if expense.amount != new_amount:
-                    changes.append(f"amount: {expense.amount} -> {new_amount}")
-                    expense.amount = new_amount
-
-            if payment_method is not None:
-                new_method = self._validate_payment_method(payment_method)
-                if expense.payment_method != new_method:
-                    changes.append(f"payment_method: {expense.payment_method} -> {new_method}")
-                    expense.payment_method = new_method
-
-            if payment_date is not None:
-                if expense.payment_date != payment_date:
-                    changes.append(f"payment_date: {expense.payment_date} -> {payment_date}")
-                    expense.payment_date = payment_date
-
-            if paid_by is not None:
-                new_paid = self._normalize_text(paid_by) or "System"
-                if expense.paid_by != new_paid:
-                    changes.append(f"paid_by: {expense.paid_by} -> {new_paid}")
-                    expense.paid_by = new_paid
-
-            if status is not None:
-                new_status = self._validate_status(status)
-                if expense.status != new_status:
-                    changes.append(f"status: {expense.status} -> {new_status}")
-                    expense.status = new_status
-
-            if note is not None:
-                new_note = self._normalize_text(note)
-                old_note = expense.note or "(none)"
-                new_str = new_note or "(none)"
-                if old_note != new_str:
-                    changes.append(f"note: {old_note} -> {new_str}")
-                    expense.note = new_note
-
-            if not changes:
-                return expense
-
-            session.commit()
-            repo.refresh(expense)
-
-            self._timeline_service.log_event(
-                expense_id=expense.id,
-                event_type="ExpenseUpdated",
-                title="Expense Updated",
-                description="; ".join(changes),
-                metadata={"changes": changes},
-            )
+            updates = [("category", category, self._validate_category), ("description", description, self._normalize_text),
+                       ("amount", amount, self._validate_amount), ("payment_method", payment_method, self._validate_payment_method),
+                       ("payment_date", payment_date, self._validate_payment_date), ("paid_by", paid_by, self._normalize_text),
+                       ("status", status, self._validate_status), ("note", note, self._normalize_text)]
+            for field, value, validator in updates:
+                if value is None: continue
+                new_value = validator(value)
+                if field == "description" and not new_value: raise ExpenseValidationError("Description cannot be empty")
+                old_value = getattr(expense, field)
+                if old_value != new_value:
+                    changes.append(f"{field}: {old_value} -> {new_value}"); setattr(expense, field, new_value)
+            if not changes: return expense
+            session.commit(); repo.refresh(expense)
+            self._timeline_service.log_event(expense_id=expense.id, event_type="ExpenseUpdated", title="Expense Updated", description="; ".join(changes), metadata={"changes": changes})
+            self._publish_finance_change("updated", expense.id)
             return expense
 
     @require_permission("finance.expense.delete")
     def delete_expense(self, expense_id: int) -> None:
         with self._session_factory() as session:
-            repo = self._repository_provider.expenses(session)
-            expense = repo.get_by_id_including_deleted(expense_id)
-            if not expense or expense.deleted_at is not None:
-                raise ExpenseNotFoundError(f"Expense {expense_id} not found or already deleted")
-            repo.soft_delete(expense)
-            session.commit()
-
-            self._timeline_service.log_event(
-                expense_id=expense.id,
-                event_type="ExpenseDeleted",
-                title="Expense Deleted",
-                description=f"Expense {expense.category} amount {expense.amount:,.0f} VND deleted",
-            )
-
-# Regression contracts retained for Finance workflow:
-# self._publish_finance_change("created", expense.id)
-# self._publish_finance_change("updated", expense.id)
-# self._publish_finance_change("deleted", expense.id)
+            repo = self._repository_provider.expenses(session); expense = repo.get_by_id_including_deleted(expense_id)
+            if not expense or expense.deleted_at is not None: raise ExpenseNotFoundError(f"Expense {expense_id} not found or already deleted")
+            category, amount = expense.category, expense.amount
+            repo.soft_delete(expense); session.commit()
+            self._timeline_service.log_event(expense_id=expense_id, event_type="ExpenseDeleted", title="Expense Deleted", description=f"Expense {category} amount {amount:,.0f} VND deleted")
+            self._publish_finance_change("deleted", expense_id)
