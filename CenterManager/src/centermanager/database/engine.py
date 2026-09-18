@@ -64,6 +64,27 @@ def create_engine_for_path(
     return engine
 
 
+def initialize_runtime_database() -> Path:
+    """Create the runtime SQLite file for a brand-new local installation.
+
+    This is an explicit first-run lifecycle transition. It creates only the
+    empty SQLite container; Alembic remains responsible for creating schema.
+    Existing databases are never overwritten.
+    """
+    db_path = get_database_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        return db_path
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.commit()
+    finally:
+        connection.close()
+    logger.info("Initialized new runtime database container")
+    return db_path
+
+
 def create_production_engine(echo: bool = False) -> Engine:
     """Create the production engine without ever materializing a missing DB."""
     db_path = get_database_path()
