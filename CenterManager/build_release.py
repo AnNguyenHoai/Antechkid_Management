@@ -2,8 +2,12 @@
 # -*- coding: utf-8 -*-
 """Build the CenterManager Windows prototype release."""
 
+import hashlib
 import os
 import shutil
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -15,6 +19,15 @@ RELEASE_NAME = f"{APP_NAME}-v{VERSION}-windows-x64"
 DIST_ROOT = PROJECT_ROOT / "dist"
 RELEASE_ROOT = PROJECT_ROOT / "release"
 PACKAGE_ROOT = RELEASE_ROOT / RELEASE_NAME
+
+PORTABLE_GIT_VERSION = "2.54.0"
+PORTABLE_GIT_URL = (
+    "https://github.com/git-for-windows/git/releases/download/"
+    "v2.54.0.windows.1/MinGit-2.54.0-64-bit.zip"
+)
+PORTABLE_GIT_SHA256 = (
+    "04f937e1f0918b17b9be6f2294cb2bb66e96e1d9832d1c298e2de088a1d0e668"
+)
 
 RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "*.db", "*.db-journal", "*.db-wal", "*.db-shm",
@@ -79,15 +92,48 @@ def copy_migration_assets() -> None:
             shutil.copy2(source, target)
 
 
+def bundle_portable_git() -> None:
+    """Download, verify, and extract the pinned official MinGit distribution."""
+    target = PACKAGE_ROOT / "git"
+    if target.exists():
+        _remove_tree(target)
+
+    with tempfile.TemporaryDirectory(prefix="centermanager-mingit-") as tmp:
+        archive = Path(tmp) / "MinGit.zip"
+        urllib.request.urlretrieve(PORTABLE_GIT_URL, archive)
+
+        digest = hashlib.sha256()
+        with archive.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        actual_sha256 = digest.hexdigest()
+        if actual_sha256.lower() != PORTABLE_GIT_SHA256.lower():
+            raise RuntimeError(
+                "Portable Git checksum mismatch: "
+                f"expected {PORTABLE_GIT_SHA256}, got {actual_sha256}"
+            )
+
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(target)
+
+    git_executable = target / "cmd" / "git.exe"
+    if not git_executable.exists():
+        raise FileNotFoundError(
+            f"Bundled MinGit {PORTABLE_GIT_VERSION} is missing {git_executable}"
+        )
+
+
 def write_release_readme() -> None:
     (PACKAGE_ROOT / "README_RELEASE.md").write_text(
         f"# CenterManager {VERSION}\n\n"
         "Windows prototype release.\n\n"
         "## Start\n\n"
         "Run CenterManager.exe. Mutable application data is stored in the runtime folder beside the executable.\n\n"
+        "## Git synchronization\n\n"
+        f"This package bundles Git for Windows MinGit {PORTABLE_GIT_VERSION}; no system Git installation is required.\n\n"
         "## Important\n\n"
-        "- Do not delete or rename the runtime folder.\n"
-        "- Configure Git synchronization on first launch when requested.\n"
+        "- Do not delete or rename the runtime or git folders.\n"
+        "- Git synchronization is optional; the application can start in local/offline mode when no Git configuration is available.\n"
         "- Use the application's backup flow for test data.\n"
         "- Alembic migration assets are shipped with the release and are required for startup.\n"
         "- If startup fails, inspect error.log beside the executable and runtime/Logs/.\n",
@@ -109,7 +155,8 @@ def write_uat_checklist() -> None:
         "- [ ] Export/report actions produce expected files.\n"
         "- [ ] Backup/restore can be exercised with test data.\n"
         "- [ ] Restarting the executable preserves expected runtime data.\n"
-        "- [ ] No source checkout or Python installation is required to launch.\n",
+        "- [ ] No source checkout or Python installation is required to launch.\n"
+        "- [ ] Git synchronization works without a system Git installation.\n",
         encoding="utf-8",
     )
 
@@ -146,6 +193,7 @@ def create_release_package(executable: Path) -> Path:
     shutil.copy2(executable, PACKAGE_ROOT / executable.name)
     copy_runtime_template()
     copy_migration_assets()
+    bundle_portable_git()
     write_release_readme()
     write_uat_checklist()
     archive = shutil.make_archive(
