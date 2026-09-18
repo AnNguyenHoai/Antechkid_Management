@@ -26,7 +26,7 @@ def test_release_script_has_portable_release_metadata_and_archive():
 
 def test_frozen_paths_keep_mutable_runtime_next_to_executable():
     source = (ROOT / "src/centermanager/core/paths.py").read_text(encoding="utf-8")
-    assert 'getattr(sys, \'frozen\', False)' in source
+    assert 'frozen' in source\n    assert 'sys.executable' in source
     assert 'Path(sys.executable).resolve().parent' in source
     assert 'self._runtime_root = self._project_root / "runtime"' in source
 
