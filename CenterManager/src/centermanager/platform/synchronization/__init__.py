@@ -5,6 +5,7 @@ from .synchronization_manager import SynchronizationManager
 from .synchronization_provider import SynchronizationProvider
 from .git_synchronization_provider import GitSynchronizationProvider   # <-- ĐỔI TỪ git_provider
 from .git_credential_safety import install_git_credential_safety
+from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
 from .git_provider_safety import install_git_command_serialization
 from .synchronization_policy import SynchronizationPolicy, SyncPolicy
@@ -39,6 +40,11 @@ from .exceptions import (
 # Credentials are supplied through GIT_ASKPASS. Never allow token-bearing URLs
 # to reach subprocess argv, including the active startup-clone path.
 install_git_credential_safety(GitSynchronizationProvider)
+
+# Commit creation must work on clean Windows machines with no global Git
+# identity configured. Inject author/committer identity only for commit and
+# commit-tree subprocesses; never mutate host-global Git configuration.
+install_portable_git_commit_identity(GitSynchronizationProvider)
 
 # Runtime clones can outlive configuration changes. Reconcile the Git origin
 # after the provider opens an existing repository so sync operations always
