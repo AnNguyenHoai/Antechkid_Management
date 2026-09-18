@@ -791,11 +791,10 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def publish(self, message: str, user: str) -> bool:
         self._ensure_repo()
         try:
-            # Pull latest before publishing
-            try:
-                self.pull()
-            except Exception as e:
-                logger.warning(f"Pull before publish failed: {e}")
+            # Pull latest before publishing. A publish must never continue
+            # against a stale repository working tree because Git is authoritative.
+            if not self.pull():
+                raise RemoteUnavailableError("Unable to synchronize repository before publish")
 
             # Materialize runtime Employee documents into the Git repository
             # before staging. The runtime copy is local UI state; the repository
@@ -852,19 +851,20 @@ class GitSynchronizationProvider(SynchronizationProvider):
         """
         self._ensure_repo()
         try:
-            if expected_main_commit:
-                # Observe the authoritative remote ref directly.  Do not use
-                # origin/main here because that would require a fetch and would
-                # violate the publish-only contract.
-                remote_out = self._run_git_command(
-                    ["ls-remote", "origin", f"refs/heads/{self._branch}"]
+            # Always establish a remote commit fence before staging. This
+            # prevents publish-only from ever falling back to an unconditional
+            # push when the caller did not provide a previously captured fence.
+            remote_out = self._run_git_command(
+                ["ls-remote", "origin", f"refs/heads/{self._branch}"]
+            )
+            remote_main = remote_out.split()[0] if remote_out.strip() else None
+            if expected_main_commit is None:
+                expected_main_commit = remote_main
+            elif remote_main != expected_main_commit:
+                raise RepositoryConflictError(
+                    f"MAIN changed before publish: expected {expected_main_commit[:8]}, "
+                    f"remote is {(remote_main or 'missing')[:8]}"
                 )
-                remote_main = remote_out.split()[0] if remote_out.strip() else None
-                if remote_main != expected_main_commit:
-                    raise RepositoryConflictError(
-                        f"MAIN changed before publish: expected {expected_main_commit[:8]}, "
-                        f"remote is {(remote_main or 'missing')[:8]}"
-                    )
 
             # Synchronize Employee documents into the repository before the
             # publish-only staging boundary.
