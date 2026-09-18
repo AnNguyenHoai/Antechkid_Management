@@ -12,7 +12,7 @@ from centermanager.core.git_locator import locate_git
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
 from centermanager.core.current_user import set_current_user
-from centermanager.database.engine import create_production_engine
+from centermanager.database.engine import create_production_engine, initialize_runtime_database
 from centermanager.database.seed import seed_roles_and_permissions
 from centermanager.events.event_bus import EventBus
 
@@ -131,9 +131,12 @@ def main() -> int:
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
 
         # ============================================
-        # DATABASE ENGINE (before sync, but no schema yet)
+        # DATABASE LIFECYCLE
         # ============================================
+        # A portable first-run package has no user database yet. Create the
+        # SQLite container explicitly, then let Alembic build the schema.
         from sqlalchemy.orm import sessionmaker
+        initialize_runtime_database()
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
 
