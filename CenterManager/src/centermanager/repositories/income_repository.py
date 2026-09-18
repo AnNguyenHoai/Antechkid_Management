@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, or_
 
 from centermanager.models.income import Income
+from centermanager.models.student import Student
+from centermanager.models.class_ import Class
 from centermanager.repositories.base import BaseRepository
 
 
@@ -35,6 +37,25 @@ class IncomeRepository(BaseRepository[Income]):
             joinedload(Income.student),
             joinedload(Income.class_)
         ).filter(Income.id == income_id).first()
+
+    def _apply_search(self, query, search_text: str):
+        """Search without excluding income rows whose student/class links are NULL."""
+        search = f"%{search_text}%"
+        return (
+            query.outerjoin(Income.student)
+            .outerjoin(Income.class_)
+            .filter(
+                or_(
+                    Income.note.ilike(search),
+                    Income.payment_period.ilike(search),
+                    Income.income_type.ilike(search),
+                    Income.received_by.ilike(search),
+                    Student.full_name.ilike(search),
+                    Student.student_code.ilike(search),
+                    Class.name.ilike(search),
+                )
+            )
+        )
 
     def list_active(
         self,
@@ -72,16 +93,7 @@ class IncomeRepository(BaseRepository[Income]):
         if date_to:
             query = query.filter(Income.payment_date <= date_to)
         if search_text:
-            search = f"%{search_text}%"
-            query = query.join(Income.student).join(Income.class_).filter(
-                or_(
-                    Income.note.ilike(search),
-                    Income.payment_period.ilike(search),
-                    Income.student.has(full_name.ilike(search)),
-                    Income.student.has(student_code.ilike(search)),
-                    Income.class_.has(name.ilike(search)),
-                )
-            )
+            query = self._apply_search(query, search_text)
 
         query = query.order_by(desc(Income.payment_date), desc(Income.created_at))
         return query.offset(offset).limit(limit).all()
@@ -116,18 +128,8 @@ class IncomeRepository(BaseRepository[Income]):
         if date_to:
             query = query.filter(Income.payment_date <= date_to)
         if search_text:
-            search = f"%{search_text}%"
-            query = query.join(Income.student).join(Income.class_).filter(
-                or_(
-                    Income.note.ilike(search),
-                    Income.payment_period.ilike(search),
-                    Income.student.has(full_name.ilike(search)),
-                    Income.student.has(student_code.ilike(search)),
-                    Income.class_.has(name.ilike(search)),
-                )
-            )
+            query = self._apply_search(query, search_text)
         return query.count()
 
     def delete(self, income: Income) -> None:
-        # Soft delete
         income.deleted_at = datetime.now()

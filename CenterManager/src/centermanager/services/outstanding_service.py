@@ -248,9 +248,11 @@ class OutstandingService:
         total_outstanding = sum(dto.outstanding for dto in all_dtos if dto.outstanding > 0)
         total_expected = sum(dto.expected_tuition for dto in all_dtos)
         total_paid = sum(dto.paid for dto in all_dtos)
+        total_unconfigured_tuition = sum(1 for dto in all_dtos if not dto.tuition_configured)
         return {
             "total_students_with_debt": total_students,
             "total_outstanding": total_outstanding,
             "total_expected": total_expected,
             "total_paid": total_paid,
+            "total_unconfigured_tuition": total_unconfigured_tuition,
         }
