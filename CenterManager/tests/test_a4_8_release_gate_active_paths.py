@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """A4.8 release-gate regressions for active runtime/Git composition paths."""
 
+import logging
 from pathlib import Path
+
+import pytest
 
 import centermanager.platform.synchronization.git_synchronization_provider as provider_module
 from centermanager.platform.synchronization import GitSynchronizationProvider
@@ -18,16 +21,20 @@ class _CompletedProcess:
     stderr = ""
 
 
-def test_active_git_provider_strips_credentials_before_subprocess_argv(tmp_path, monkeypatch):
-    secret = "release-gate-secret-token"
-    clean_url = "https://github.com/example/private-repo.git"
-    provider = GitSynchronizationProvider(
+def _provider(tmp_path: Path, secret: str) -> GitSynchronizationProvider:
+    return GitSynchronizationProvider(
         repo_path=tmp_path / "repository",
-        repository_url=clean_url,
+        repository_url="https://github.com/example/private-repo.git",
         token=secret,
         username="release-user",
         git_executable="git",
     )
+
+
+def test_active_git_provider_strips_credentials_before_subprocess_argv(tmp_path, monkeypatch):
+    secret = "release-gate-secret-token"
+    clean_url = "https://github.com/example/private-repo.git"
+    provider = _provider(tmp_path, secret)
 
     # clone() compatibility helper must never reconstruct a token-bearing URL.
     assert provider._build_authenticated_url() == clean_url
@@ -50,6 +57,42 @@ def test_active_git_provider_strips_credentials_before_subprocess_argv(tmp_path,
     assert secret not in argv
     assert clean_url in argv
     assert captured["env"].get("CENTERMANAGER_GIT_TOKEN") == secret
+
+    if provider._credential_helper is not None:
+        provider._credential_helper.cleanup()
+
+
+def test_active_git_provider_redacts_secret_from_stderr_exception_and_logs(
+    tmp_path, monkeypatch, caplog
+):
+    secret = "release-gate-secret-token"
+    provider = _provider(tmp_path, secret)
+
+    class _FailedProcess:
+        returncode = 1
+        stdout = ""
+        stderr = f"fatal: authentication failed for https://{secret}@github.com/example/private-repo.git"
+
+    monkeypatch.setattr(provider_module.subprocess, "run", lambda *args, **kwargs: _FailedProcess())
+    caplog.set_level(logging.DEBUG, logger=provider_module.__name__)
+
+    with pytest.raises(Exception) as exc_info:
+        provider._run_git_command(
+            ["fetch", f"https://{secret}@github.com/example/private-repo.git"],
+            cwd=tmp_path,
+        )
+
+    assert secret not in str(exc_info.value)
+    assert secret not in caplog.text
+
+    # Non-fatal stderr is logged by the base provider; the installed logging
+    # filter must redact it before it reaches handlers.
+    provider._run_git_command(
+        ["ls-remote", f"https://{secret}@github.com/example/private-repo.git"],
+        cwd=tmp_path,
+        check=False,
+    )
+    assert secret not in caplog.text
 
     if provider._credential_helper is not None:
         provider._credential_helper.cleanup()
