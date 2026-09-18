@@ -26,7 +26,7 @@ def test_release_workflow_has_syntax_gate_before_build():
 
 def test_configured_startup_never_creates_engine_before_authoritative_sync():
     source = _read(APP)
-    sync_marker = source.index("logger.info("[STARTUP] Running startup synchronization...")")
+    sync_marker = source.index('logger.info("[STARTUP] Running startup synchronization...")')
     engine_marker = source.index("engine = create_production_engine(echo=False)")
     assert sync_marker < engine_marker
 
