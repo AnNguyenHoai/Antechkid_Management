@@ -7,9 +7,11 @@ from centermanager.services.employee_document_service import EmployeeDocumentSer
 
 def test_employee_document_storage_has_runtime_and_repository_locations(tmp_path):
     runtime = tmp_path / "runtime"
-    attachments = runtime / "Attachments"
+    attachments = runtime / "Attachment"
     service = EmployeeDocumentService(sessionmaker(), attachments)
 
+    # Historical metadata may still use the plural repository-era prefix.
+    # Runtime materialization must canonicalize it to singular Attachment/.
     doc = EmployeeDocument(
         relative_path="Attachments/Employees/EMP-00001/CV/test.docx",
         original_filename="test.docx",
@@ -19,7 +21,7 @@ def test_employee_document_storage_has_runtime_and_repository_locations(tmp_path
     locations = service.document_sync_locations(doc)
 
     assert locations["runtime_path"] == (
-        runtime / "Attachments/Employees/EMP-00001/CV/test.docx"
+        runtime / "Attachment/Employees/EMP-00001/CV/test.docx"
     ).resolve()
     assert locations["repository_path"] == (
         runtime / "repository/Attachments/Employees/EMP-00001/CV/test.docx"
@@ -31,7 +33,7 @@ def test_employee_document_storage_has_runtime_and_repository_locations(tmp_path
 
 def test_employee_document_repository_path_cannot_be_absolute(tmp_path):
     runtime = tmp_path / "runtime"
-    service = EmployeeDocumentService(sessionmaker(), runtime / "Attachments")
+    service = EmployeeDocumentService(sessionmaker(), runtime / "Attachment")
     doc = EmployeeDocument(
         relative_path=str((tmp_path / "outside.docx").resolve()),
         original_filename="outside.docx",
@@ -47,7 +49,7 @@ def test_employee_document_repository_path_cannot_be_absolute(tmp_path):
 
 def test_employee_document_sync_requires_matching_file_contents(tmp_path):
     runtime = tmp_path / "runtime"
-    attachments = runtime / "Attachments"
+    attachments = runtime / "Attachment"
     service = EmployeeDocumentService(sessionmaker(), attachments)
     doc = EmployeeDocument(
         relative_path="Attachments/Employees/EMP-00001/CV/test.docx",
