@@ -111,6 +111,7 @@ class FinanceDashboardService:
     def get_dashboard_data(self) -> Dict[str, Any]:
         today = self._get_today_date()
         start_month = self._get_first_day_of_month()
+        stats = self._outstanding_service.get_outstanding_stats() if self._outstanding_service else {}
         return {
             "revenue_today": self.get_revenue_today(),
             "revenue_month": self.get_revenue_this_month(),
@@ -121,6 +122,9 @@ class FinanceDashboardService:
             "recent_expense": self.get_recent_expense(),
             "revenue_by_method_month": self.get_revenue_by_payment_method(start_month, today),
             "expense_by_method_month": self.get_expense_by_payment_method(start_month, today),
+            "total_outstanding": stats.get("total_outstanding", 0),
+            "students_with_debt": stats.get("total_students_with_debt", 0),
+            "unconfigured_tuition_count": stats.get("total_unconfigured_tuition", 0),
         }
 
     @staticmethod
