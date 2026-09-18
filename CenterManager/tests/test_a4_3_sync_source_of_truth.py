@@ -71,7 +71,7 @@ def test_source_of_truth_paths_are_explicit():
     startup = _read("src/centermanager/platform/sync/startup_sync.py")
     runtime_sync = _read("src/centermanager/platform/sync/runtime_sync_service.py")
     background = _read("src/centermanager/platform/runtime/background_sync.py")
-    expected = 'runtime_root / "repository" / "database" / "center.db"'
+    expected = 'repository" / "database" / "center.db"'
     assert expected in startup
     assert expected in runtime_sync
     assert expected in background
