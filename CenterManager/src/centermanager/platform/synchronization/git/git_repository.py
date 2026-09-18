@@ -75,11 +75,24 @@ class GitRepository:
             )
             if result.returncode != 0:
                 error_msg = result.stderr.strip()
-                logger.error(f"Git command failed: {' '.join(cmd)} - {error_msg}")
+                logger.error("Git command failed: %s - %s", self._redact_command(cmd), error_msg)
                 self._handle_error(cmd[0], error_msg)
             return result.stdout.strip()
         except subprocess.SubprocessError as e:
             raise GitNetworkError(f"Git command execution failed: {e}")
+
+    @staticmethod
+    def _redact_command(cmd: list) -> str:
+        """Redact embedded credentials before writing Git commands to logs."""
+        redacted = []
+        for item in cmd:
+            value = str(item)
+            if "://" in value and "@" in value:
+                protocol, rest = value.split("://", 1)
+                host_part = rest.split("@", 1)[-1]
+                value = f"{protocol}://***@{host_part}"
+            redacted.append(value)
+        return " ".join(redacted)
 
     def _handle_error(self, cmd: str, error_msg: str) -> None:
         if "Authentication" in error_msg or "authorization" in error_msg:
