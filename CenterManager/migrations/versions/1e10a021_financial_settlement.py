@@ -45,17 +45,7 @@ def upgrade():
             name="ck_financial_settlement_status",
         ),
     )
-    op.create_index(
-        "ix_financial_settlements_period_start",
-        "financial_settlements",
-        ["finance_period_start"],
-        unique=False,
-    )
 
 
 def downgrade():
-    op.drop_index(
-        "ix_financial_settlements_period_start",
-        table_name="financial_settlements",
-    )
     op.drop_table("financial_settlements")
