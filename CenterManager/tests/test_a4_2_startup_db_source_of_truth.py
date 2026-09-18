@@ -86,7 +86,7 @@ def test_app_materializes_git_database_before_creating_production_engine():
 
     assert source.index(sync_marker) < source.index(initialize_marker)
     assert source.index(initialize_marker) < source.index(engine_marker)
-    assert source.index(engine_marker) < source.index("ensure_schema()")
+    assert source.index(engine_marker) < source.index("        # ENSURE DATABASE SCHEMA (after Git DB materialization)")
 
 
 def test_app_refuses_configured_startup_sync_failure():
