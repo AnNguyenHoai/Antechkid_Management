@@ -4,24 +4,27 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Optional
 
-from sqlalchemy import func, or_, select
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.current_user import get_current_user
-from centermanager.models.expense import Expense
-from centermanager.models.finance_period import FinancePeriod, FinancePeriodDefinition
+from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
-from centermanager.models.income import Income
+from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 
 
 _MONEY_QUANTUM = Decimal("0.01")
 
 
 class FinancialSettlementService:
-    """Reconcile system Finance activity against actual cash and bank balances."""
+    """Reconcile Finance activity against actual cash and bank balances."""
 
-    def __init__(self, session_factory: sessionmaker) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _money(value: Any) -> Decimal:
@@ -42,18 +45,7 @@ class FinancialSettlementService:
             raise PermissionError("Only administrators can save or confirm financial settlements.")
 
     def _resolve_period(self, session, target_date: date) -> tuple[date, date]:
-        config = session.execute(
-            select(FinancePeriod)
-            .where(
-                FinancePeriod.effective_from <= target_date,
-                or_(
-                    FinancePeriod.effective_to.is_(None),
-                    FinancePeriod.effective_to >= target_date,
-                ),
-            )
-            .order_by(FinancePeriod.effective_from.desc())
-            .limit(1)
-        ).scalar_one_or_none()
+        config = self._repository_provider.finance_periods(session).get_effective(target_date)
         if config is None:
             raise ValueError("Finance period is not configured for the selected date.")
         return FinancePeriodDefinition.period_for_date(
@@ -79,34 +71,28 @@ class FinancialSettlementService:
             "expense_bank": Decimal("0.00"),
         }
 
-        income_rows = session.execute(
-            select(Income.payment_method, func.coalesce(func.sum(Income.amount), 0.0))
-            .where(
-                Income.deleted_at.is_(None),
-                Income.finance_period_start == period_start,
-                Income.payment_date >= period_start,
-                Income.payment_date <= period_end,
-            )
-            .group_by(Income.payment_method)
-        ).all()
-        for method, amount in income_rows:
-            bucket = self._method_bucket(method)
+        incomes = self._repository_provider.incomes(session).list_active(
+            finance_period_start=period_start,
+            date_from=period_start,
+            date_to=period_end,
+            offset=0,
+            limit=100000,
+        )
+        for income in incomes:
+            bucket = self._method_bucket(income.payment_method)
             if bucket is not None:
-                totals[f"income_{bucket}"] += self._money(amount)
+                totals[f"income_{bucket}"] += self._money(income.amount)
 
-        expense_rows = session.execute(
-            select(Expense.payment_method, func.coalesce(func.sum(Expense.amount), 0.0))
-            .where(
-                Expense.deleted_at.is_(None),
-                Expense.payment_date >= period_start,
-                Expense.payment_date <= period_end,
-            )
-            .group_by(Expense.payment_method)
-        ).all()
-        for method, amount in expense_rows:
-            bucket = self._method_bucket(method)
+        expenses = self._repository_provider.expenses(session).list_active(
+            date_from=period_start,
+            date_to=period_end,
+            offset=0,
+            limit=100000,
+        )
+        for expense in expenses:
+            bucket = self._method_bucket(expense.payment_method)
             if bucket is not None:
-                totals[f"expense_{bucket}"] += self._money(amount)
+                totals[f"expense_{bucket}"] += self._money(expense.amount)
 
         return {key: self._money(value) for key, value in totals.items()}
 
@@ -154,24 +140,13 @@ class FinancialSettlementService:
         target = target_date or date.today()
         with self._session_factory() as session:
             period_start, _ = self._resolve_period(session, target)
-            row = session.execute(
-                select(FinancialSettlement).where(
-                    FinancialSettlement.finance_period_start == period_start
-                )
-            ).scalar_one_or_none()
-            if row is not None:
-                session.expunge(row)
-            return row
+            return self._repository_provider.financial_settlements(session).get_by_period_start(period_start)
 
     def get_preview(self, target_date: Optional[date] = None) -> dict[str, Any]:
         target = target_date or date.today()
         with self._session_factory() as session:
             period_start, period_end = self._resolve_period(session, target)
-            row = session.execute(
-                select(FinancialSettlement).where(
-                    FinancialSettlement.finance_period_start == period_start
-                )
-            ).scalar_one_or_none()
+            row = self._repository_provider.financial_settlements(session).get_by_period_start(period_start)
 
             if row is not None and row.is_confirmed:
                 payload = self._row_payload(row)
@@ -213,12 +188,9 @@ class FinancialSettlementService:
     ) -> FinancialSettlement:
         self._require_admin()
         with self._session_factory() as session:
+            settlement_repo = self._repository_provider.financial_settlements(session)
             period_start, period_end = self._resolve_period(session, target_date)
-            row = session.execute(
-                select(FinancialSettlement).where(
-                    FinancialSettlement.finance_period_start == period_start
-                )
-            ).scalar_one_or_none()
+            row = settlement_repo.get_by_period_start(period_start)
             if row is not None and row.is_confirmed:
                 raise ValueError("Confirmed financial settlement is immutable.")
 
@@ -243,7 +215,7 @@ class FinancialSettlementService:
                     finance_period_start=period_start,
                     finance_period_end=period_end,
                 )
-                session.add(row)
+                settlement_repo.add(row)
 
             row.finance_period_end = period_end
             row.opening_cash = opening_cash_value
@@ -259,16 +231,11 @@ class FinancialSettlementService:
             row.difference_cash = calculated["difference_cash"]
             row.difference_bank = calculated["difference_bank"]
             row.comment = (comment or "").strip() or None
-            row.status = (
-                FinancialSettlement.STATUS_CONFIRMED
-                if confirm
-                else FinancialSettlement.STATUS_DRAFT
-            )
+            row.status = FinancialSettlement.STATUS_CONFIRMED if confirm else FinancialSettlement.STATUS_DRAFT
             row.confirmed_at = datetime.utcnow() if confirm else None
 
             session.commit()
-            session.refresh(row)
-            session.expunge(row)
+            settlement_repo.refresh(row)
             return row
 
     def save_draft(
