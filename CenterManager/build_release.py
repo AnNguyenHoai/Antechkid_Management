@@ -35,6 +35,8 @@ RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "logs", "Logs", "cache", "Cache", "temp", "Temp",
     "backup", "Backup", "repository", ".git", "__pycache__",
     "attachments", "Attachments", "Attachment",
+    "*.log", "*.tmp", "*.bak", "*.pyc",
+    ".DS_Store", "Thumbs.db",
 )
 
 
@@ -133,7 +135,7 @@ def write_release_readme() -> None:
         f"This package bundles Git for Windows MinGit {PORTABLE_GIT_VERSION}; no system Git installation is required.\n\n"
         "## Important\n\n"
         "- Do not delete or rename the runtime or git folders.\n"
-        "- Git synchronization is optional; the application can start in local/offline mode when no Git configuration is available.\n"
+        "- When Git synchronization is configured, the Git repository database is authoritative and startup refuses to use a stale local database if synchronization fails.\n"
         "- Use the application's backup flow for test data.\n"
         "- Alembic migration assets are shipped with the release and are required for startup.\n"
         "- If startup fails, inspect error.log beside the executable and runtime/Logs/.\n",
@@ -156,7 +158,10 @@ def write_uat_checklist() -> None:
         "- [ ] Backup/restore can be exercised with test data.\n"
         "- [ ] Restarting the executable preserves expected runtime data.\n"
         "- [ ] No source checkout or Python installation is required to launch.\n"
-        "- [ ] Git synchronization works without a system Git installation.\n",
+        "- [ ] Git synchronization works without a system Git installation.\n"
+        "- [ ] With Git configured, startup uses the repository database rather than a stale local database.\n"
+        "- [ ] If the authoritative repository database is unavailable, startup refuses to continue with a stale local database.\n"
+        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n,
         encoding="utf-8",
     )
 
