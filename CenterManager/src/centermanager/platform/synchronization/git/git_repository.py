@@ -1,23 +1,24 @@
+import logging
 import os
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any
-import logging
+from typing import Any, Dict, Optional
 
-from .git_credentials import GitCredentials
 from centermanager.core.git_locator import locate_git
+from .git_credential_helper import GitCredentialHelper
+from .git_credentials import GitCredentials
 from .git_exceptions import (
-    GitError,
-    GitRepositoryNotFound,
     GitAuthenticationError,
-    GitPullError,
-    GitPushError,
+    GitError,
     GitMergeRequiredError,
     GitNetworkError,
+    GitPullError,
+    GitPushError,
+    GitRepositoryNotFound,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class GitRepository:
     def __init__(self, repo_path: Path, credentials: GitCredentials, git_executable: Optional[str] = None):
@@ -30,41 +31,39 @@ class GitRepository:
         """Initialize or open repository."""
         git_dir = self._repo_path / ".git"
         if not git_dir.exists():
-            # Clone if not exists
             self._clone_repo()
 
     def _clone_repo(self) -> None:
-        """Clone repository from remote."""
+        """Clone repository from remote without embedding credentials in argv."""
         try:
             cmd = [self._git_command(), "clone", self._credentials.repository_url, str(self._repo_path)]
-            # Add token authentication if provided
-            if self._credentials.token:
-                # Use token in URL (GitHub/GitLab style)
-                url = self._credentials.repository_url
-                if "://" in url:
-                    protocol, rest = url.split("://", 1)
-                    if "@" in rest:
-                        # Already has auth? Replace
-                        rest = rest.split("@")[-1]
-                    url = f"{protocol}://{self._credentials.token}@{rest}"
-                    cmd = [self._git_command(), "clone", url, str(self._repo_path)]
             self._run_cmd(cmd)
-            # Set branch if not default
             if self._credentials.branch != "main":
-                # Try to checkout branch after clone
                 self._checkout_branch()
-        except Exception as e:
-            raise GitRepositoryNotFound(f"Failed to clone repository: {e}")
+        except Exception as exc:
+            safe_error = self._sanitize_text(str(exc))
+            raise GitRepositoryNotFound(f"Failed to clone repository: {safe_error}") from exc
 
     def _git_command(self) -> str:
         if not self._git_executable:
             raise GitError("Git executable not found. Configure portable Git or install Git.")
         return self._git_executable
 
+    def _git_environment(self) -> tuple[dict, Optional[GitCredentialHelper]]:
+        env = os.environ.copy()
+        helper = None
+        if self._credentials and self._credentials.token:
+            helper = GitCredentialHelper(self._credentials.username, self._credentials.token)
+            env.update(helper.setup_environment())
+        else:
+            env["GIT_TERMINAL_PROMPT"] = "0"
+        return env, helper
+
     def _run_cmd(self, cmd: list, cwd: Optional[Path] = None) -> str:
-        """Run git command and return output."""
+        """Run Git with secrets excluded from command-line arguments."""
         if cwd is None:
             cwd = self._repo_path
+        env, helper = self._git_environment()
         try:
             result = subprocess.run(
                 cmd,
@@ -72,14 +71,24 @@ class GitRepository:
                 capture_output=True,
                 text=True,
                 check=False,
+                env=env,
             )
             if result.returncode != 0:
-                error_msg = result.stderr.strip()
+                error_msg = self._sanitize_text(result.stderr.strip())
                 logger.error("Git command failed: %s - %s", self._redact_command(cmd), error_msg)
-                self._handle_error(cmd[0], error_msg)
+                self._handle_error(cmd[1] if len(cmd) > 1 else cmd[0], error_msg)
             return result.stdout.strip()
-        except subprocess.SubprocessError as e:
-            raise GitNetworkError(f"Git command execution failed: {e}")
+        except subprocess.SubprocessError as exc:
+            raise GitNetworkError(f"Git command execution failed: {self._sanitize_text(str(exc))}") from exc
+        finally:
+            if helper is not None:
+                helper.cleanup()
+
+    def _sanitize_text(self, value: str) -> str:
+        token = getattr(self._credentials, "token", "") or ""
+        if token:
+            value = value.replace(token, "***")
+        return value
 
     @staticmethod
     def _redact_command(cmd: list) -> str:
@@ -95,59 +104,53 @@ class GitRepository:
         return " ".join(redacted)
 
     def _handle_error(self, cmd: str, error_msg: str) -> None:
-        if "Authentication" in error_msg or "authorization" in error_msg:
-            raise GitAuthenticationError(error_msg)
-        elif "not found" in error_msg or "does not exist" in error_msg:
+        lower = error_msg.lower()
+        if "authentication" in lower or "authorization" in lower or "401" in lower or "403" in lower:
+            raise GitAuthenticationError("Git authentication failed")
+        if "not found" in lower or "does not exist" in lower:
             raise GitRepositoryNotFound(error_msg)
-        elif "merge conflict" in error_msg or "need to pull" in error_msg:
+        if "merge conflict" in lower or "need to pull" in lower:
             raise GitMergeRequiredError(error_msg)
-        elif "pull" in cmd and "failed" in error_msg:
+        if cmd == "pull" and "failed" in lower:
             raise GitPullError(error_msg)
-        elif "push" in cmd and "failed" in error_msg:
+        if cmd == "push" and "failed" in lower:
             raise GitPushError(error_msg)
-        else:
-            raise GitError(error_msg)
+        raise GitError(error_msg)
 
     def _checkout_branch(self) -> None:
-        cmd = [self._git_command(), "checkout", self._credentials.branch]
-        self._run_cmd(cmd)
+        self._run_cmd([self._git_command(), "checkout", self._credentials.branch])
 
     def fetch(self) -> bool:
         try:
-            cmd = [self._git_command(), "fetch", "origin"]
-            self._run_cmd(cmd)
+            self._run_cmd([self._git_command(), "fetch", "origin"])
             return True
-        except GitError as e:
-            logger.error(f"Fetch failed: {e}")
+        except GitError as exc:
+            logger.error("Fetch failed: %s", self._sanitize_text(str(exc)))
             return False
 
     def pull(self) -> bool:
         try:
-            cmd = [self._git_command(), "pull", "origin", self._credentials.branch]
-            self._run_cmd(cmd)
+            self._run_cmd([self._git_command(), "pull", "origin", self._credentials.branch])
             return True
-        except GitError as e:
-            logger.error(f"Pull failed: {e}")
+        except GitError as exc:
+            logger.error("Pull failed: %s", self._sanitize_text(str(exc)))
             return False
 
     def commit(self, message: str) -> bool:
         try:
-            # Add all changes
             self._run_cmd([self._git_command(), "add", "."])
-            # Commit
             self._run_cmd([self._git_command(), "commit", "-m", message])
             return True
-        except GitError as e:
-            logger.error(f"Commit failed: {e}")
+        except GitError as exc:
+            logger.error("Commit failed: %s", self._sanitize_text(str(exc)))
             return False
 
     def push(self) -> bool:
         try:
-            cmd = [self._git_command(), "push", "origin", self._credentials.branch]
-            self._run_cmd(cmd)
+            self._run_cmd([self._git_command(), "push", "origin", self._credentials.branch])
             return True
-        except GitError as e:
-            logger.error(f"Push failed: {e}")
+        except GitError as exc:
+            logger.error("Push failed: %s", self._sanitize_text(str(exc)))
             return False
 
     def current_commit(self) -> Optional[str]:
@@ -167,21 +170,17 @@ class GitRepository:
     def status(self) -> Dict[str, Any]:
         try:
             output = self._run_cmd([self._git_command(), "status", "--porcelain"])
-            changes = []
-            if output:
-                for line in output.split("\n"):
-                    if line.strip():
-                        changes.append(line)
+            changes = [line for line in output.split("\n") if line.strip()] if output else []
             return {
                 "is_clean": len(changes) == 0,
                 "changes": changes,
                 "commit": self.current_commit(),
                 "branch": self.current_branch(),
             }
-        except GitError as e:
+        except GitError:
             return {
                 "is_clean": False,
-                "error": str(e),
+                "error": "Git operation failed",
                 "commit": None,
                 "branch": None,
             }
