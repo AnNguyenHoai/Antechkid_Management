@@ -44,11 +44,6 @@ class RepositoryManager:
         )
         # Pass git executable to GitProvider
         provider = GitProvider(self._repo_path, creds, git_executable=self._git_executable)
-        if self._git_executable:
-            # GitProvider does not currently accept git_executable; we'll need to extend it.
-            # For now, we assume system git is available.
-            # TODO: extend GitProvider to accept git_executable.
-            pass
         return provider
 
     def clone_repository(self, progress_callback: Optional[callable] = None) -> bool:
@@ -59,7 +54,6 @@ class RepositoryManager:
         """
         try:
             url = self._config.get_repository_url()
-            print("Đây là url",url)
             if not url:
                 logger.error("Repository URL is not configured.")
                 return False
@@ -84,7 +78,12 @@ class RepositoryManager:
             # For now, implement a simple clone with subprocess.
 
             import subprocess
-            git_cmd = self._git_executable or "git"
+            if not self._git_executable:
+                logger.error("Git executable is unavailable; deployment clone cannot start.")
+                if progress_callback:
+                    progress_callback("clone_failed", "Git executable is unavailable on this machine.", 100)
+                return False
+            git_cmd = self._git_executable
             cmd = [git_cmd, "clone", url, str(self._repo_path)]
             # Add token authentication
             if token:
