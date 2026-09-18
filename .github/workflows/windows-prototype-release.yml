@@ -33,6 +33,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Validate release entrypoints
+        run: python -m py_compile build_release.py run.py
+
       - name: Run full test suite
         run: python -m pytest -q
 
