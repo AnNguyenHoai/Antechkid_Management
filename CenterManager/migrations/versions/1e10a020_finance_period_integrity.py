@@ -16,13 +16,21 @@ depends_on = None
 
 def upgrade():
     bind = op.get_bind()
+    finance_periods = sa.table(
+        "finance_periods",
+        sa.column("id", sa.Integer()),
+        sa.column("effective_from", sa.Date()),
+        sa.column("effective_to", sa.Date()),
+        sa.column("status", sa.String(20)),
+    )
 
     invalid_range = bind.execute(
-        sa.text(
-            "SELECT id FROM finance_periods "
-            "WHERE effective_to IS NOT NULL AND effective_to < effective_from "
-            "LIMIT 1"
+        sa.select(finance_periods.c.id)
+        .where(
+            finance_periods.c.effective_to.is_not(None),
+            finance_periods.c.effective_to < finance_periods.c.effective_from,
         )
+        .limit(1)
     ).scalar()
     if invalid_range is not None:
         raise RuntimeError(
@@ -30,10 +38,11 @@ def upgrade():
         )
 
     periods = bind.execute(
-        sa.text(
-            "SELECT id, effective_from, effective_to "
-            "FROM finance_periods ORDER BY effective_from ASC"
-        )
+        sa.select(
+            finance_periods.c.id,
+            finance_periods.c.effective_from,
+            finance_periods.c.effective_to,
+        ).order_by(finance_periods.c.effective_from.asc())
     ).mappings().all()
 
     # Normalize legacy overlap using the same latest-effective-from-wins timeline
@@ -44,12 +53,9 @@ def upgrade():
         max_end = next_period["effective_from"] - timedelta(days=1)
         if current["effective_to"] is None or current["effective_to"] > max_end:
             bind.execute(
-                sa.text(
-                    "UPDATE finance_periods "
-                    "SET effective_to = :effective_to, status = 'INACTIVE' "
-                    "WHERE id = :period_id"
-                ),
-                {"effective_to": max_end, "period_id": current["id"]},
+                sa.update(finance_periods)
+                .where(finance_periods.c.id == current["id"])
+                .values(effective_to=max_end, status="INACTIVE")
             )
 
     with op.batch_alter_table("finance_periods") as batch_op:
