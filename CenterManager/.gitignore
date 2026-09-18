@@ -28,7 +28,8 @@ htmlcov/
 *.swp
 *.swo
 
-# Runtime generated (logs, DB - keep placeholders if needed)
+# Runtime generated / secrets
+runtime/Config/
 runtime/Logs/
 runtime/Database/*.db
 runtime/Database/*.db-journal
@@ -38,6 +39,11 @@ runtime/Backup/
 runtime/cache/
 runtime/temp/
 runtime/reports/
+runtime/repository/.git/
+
+# Never commit local credential/config bundles
+**/runtime/Config/config.json
+**/runtime/Config/*.json
 
 # OS
 .DS_Store
