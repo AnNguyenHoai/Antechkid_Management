@@ -124,16 +124,19 @@ class FinanceDashboardPage(QWidget):
             self.loading.setVisible(False)
 
     def _update_kpis(self, data: dict) -> None:
-        def fmt(value):
+        def fmt_money(value):
             return f"{value:,.0f} VND"
 
         self.stats_grid.set_metrics([
-            {"icon": "📈", "label": "Revenue Today", "value": fmt(data.get("revenue_today", 0))},
-            {"icon": "📊", "label": "Revenue This Month", "value": fmt(data.get("revenue_month", 0))},
-            {"icon": "📉", "label": "Expense Today", "value": fmt(data.get("expense_today", 0))},
-            {"icon": "📉", "label": "Expense This Month", "value": fmt(data.get("expense_month", 0))},
-            {"icon": "💰", "label": "Net Cash Flow (Month)", "value": fmt(data.get("net_cash_flow", 0))},
-        ], columns=5)
+            {"icon": "📈", "label": "Revenue Today", "value": fmt_money(data.get("revenue_today", 0))},
+            {"icon": "📊", "label": "Revenue This Month", "value": fmt_money(data.get("revenue_month", 0))},
+            {"icon": "📉", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0))},
+            {"icon": "📉", "label": "Expense This Month", "value": fmt_money(data.get("expense_month", 0))},
+            {"icon": "💰", "label": "Net Cash Flow (Month)", "value": fmt_money(data.get("net_cash_flow", 0))},
+            {"icon": "🧾", "label": "Outstanding Tuition", "value": fmt_money(data.get("total_outstanding", 0))},
+            {"icon": "👥", "label": "Students With Debt", "value": str(data.get("students_with_debt", 0))},
+            {"icon": "⚠️", "label": "Tuition Not Configured", "value": str(data.get("unconfigured_tuition_count", 0))},
+        ], columns=4)
 
     def _update_income_table(self, incomes: list) -> None:
         self._income_ids = [income.id for income in incomes]
@@ -171,10 +174,13 @@ class FinanceDashboardPage(QWidget):
         self._expense_ids = []
         self.stats_grid.set_metrics([
             {"icon": "⚠️", "label": "Revenue Today", "value": "Error"},
-            {"icon": "⚠️", "label": "Revenue Month", "value": "Error"},
+            {"icon": "⚠️", "label": "Revenue This Month", "value": "Error"},
             {"icon": "⚠️", "label": "Expense Today", "value": "Error"},
-            {"icon": "⚠️", "label": "Expense Month", "value": "Error"},
-            {"icon": "⚠️", "label": "Net Cash Flow", "value": "Error"},
-        ], columns=5)
+            {"icon": "⚠️", "label": "Expense This Month", "value": "Error"},
+            {"icon": "⚠️", "label": "Net Cash Flow (Month)", "value": "Error"},
+            {"icon": "⚠️", "label": "Outstanding Tuition", "value": "Error"},
+            {"icon": "⚠️", "label": "Students With Debt", "value": "Error"},
+            {"icon": "⚠️", "label": "Tuition Not Configured", "value": "Error"},
+        ], columns=4)
         self.income_table.set_data([], 0)
         self.expense_table.set_data([], 0)
