@@ -70,6 +70,7 @@ class ExpenseService:
         if value not in {"Completed", "Pending"}: raise ExpenseValidationError("Invalid expense status.")
         return value
 
+    @require_permission("finance.expense.create")
     def create_expense(self, category: str, description: str, amount: float, payment_method: str,
                        payment_date: date, paid_by: Optional[str] = None, status: str = "Completed",
                        note: Optional[str] = None) -> Expense:
