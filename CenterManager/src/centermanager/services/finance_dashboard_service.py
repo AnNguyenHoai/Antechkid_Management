@@ -27,6 +27,16 @@ class FinanceDashboardService:
         self._income_service = income_service
         self._expense_service = expense_service
         self._outstanding_service = outstanding_service
+
+        # Production composition historically constructs this service with only
+        # Income/Expense/Outstanding. Preserve that public constructor while
+        # adopting FinancePeriod as the dashboard source of truth. Explicit DI
+        # still wins for tests and future composition-root cleanup.
+        if finance_period_service is None:
+            session_factory = getattr(income_service, "_session_factory", None)
+            if session_factory is not None:
+                from centermanager.services.finance_period_service import FinancePeriodService
+                finance_period_service = FinancePeriodService(session_factory)
         self._finance_period_service = finance_period_service
 
     def _get_today_date(self) -> date:
@@ -44,8 +54,8 @@ class FinanceDashboardService:
 
         The current Finance period is capped at today so current-period KPIs do not
         imply future activity. Historical periods use their complete canonical range.
-        When no FinancePeriodService is injected, preserve the legacy current-month
-        contract used by older callers and tests.
+        When no FinancePeriodService is available, preserve the legacy current-month
+        contract used by lightweight callers and older tests.
         """
         today = self._get_today_date()
         target = target_date or today
@@ -260,17 +270,17 @@ class FinanceDashboardService:
             "selected_target_date": target,
             "revenue_today": self.get_revenue_today(),
             "revenue_period": revenue_period,
-            "revenue_month": revenue_period,  # backward-compatible key
+            "revenue_month": revenue_period,
             "expense_today": self.get_expense_today(),
             "expense_period": expense_period,
-            "expense_month": expense_period,  # backward-compatible key
+            "expense_month": expense_period,
             "net_cash_flow": revenue_period - expense_period,
             "recent_income": recent_income,
             "recent_expense": recent_expense,
             "revenue_by_method_period": revenue_by_method,
             "expense_by_method_period": expense_by_method,
-            "revenue_by_method_month": revenue_by_method,  # backward-compatible key
-            "expense_by_method_month": expense_by_method,  # backward-compatible key
+            "revenue_by_method_month": revenue_by_method,
+            "expense_by_method_month": expense_by_method,
             "total_outstanding": stats.get("total_outstanding", 0),
             "students_with_debt": stats.get("total_students_with_debt", 0),
             "unconfigured_tuition_count": stats.get("total_unconfigured_tuition", 0),
