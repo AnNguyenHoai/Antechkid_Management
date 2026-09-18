@@ -2,8 +2,8 @@
 """Portable Git commit identity boundary for CenterManager.
 
 CenterManager must be able to create Git commits on a clean Windows machine
-without relying on machine-global ``git config user.name/user.email``.  This
-installer injects author/committer identity only into commit subprocesses.
+without relying on machine-global Git user identity. This installer injects
+author/committer identity only into commit subprocesses.
 """
 
 from typing import Any
@@ -17,10 +17,9 @@ def install_portable_git_commit_identity(provider_cls: Any) -> None:
 
     The identity comes from the provider's configured ``username``/``email``
     values, which already default to ``CenterManager`` and
-    ``centermanager@local``.  Environment variables are used instead of
-    ``git config --global`` so no host-machine Git configuration is required or
-    mutated.  Existing command-specific environment such as ``GIT_INDEX_FILE``
-    is preserved.
+    ``centermanager@local``. Environment variables are used so no host-machine
+    Git configuration is required or mutated. Existing command-specific
+    environment such as ``GIT_INDEX_FILE`` is preserved.
     """
     if getattr(provider_cls, "_portable_git_commit_identity_installed", False):
         return
