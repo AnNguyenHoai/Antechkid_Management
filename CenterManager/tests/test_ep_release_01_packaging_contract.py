@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,3 +35,22 @@ def test_release_entrypoint_remains_run_py():
     source = (ROOT / "run.py").read_text(encoding="utf-8")
     assert 'from centermanager.app import main' in source
     assert 'sys.exit(main())' in source
+
+
+def test_runtime_repository_is_not_a_gitlink():
+    """The runtime template must not contain a stale nested-repository gitlink.
+
+    A gitlink without a matching .gitmodules entry breaks clean checkouts and
+    can trigger fatal submodule cleanup errors in CI. The application creates
+    the runtime repository when Git collaboration is configured, so the source
+    tree must not carry a nested repository pointer.
+    """
+    repo_root = ROOT.parent
+    result = subprocess.run(
+        ["git", "ls-files", "--stage", "--", "runtime/repository"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "160000 " not in result.stdout
