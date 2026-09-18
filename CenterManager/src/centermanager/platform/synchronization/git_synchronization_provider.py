@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
 
 from .git.git_credential_helper import GitCredentialHelper
-from centermanager.platform.deployment.git_locator import locate_git
+from centermanager.core.git_locator import locate_git
 from .synchronization_provider import SynchronizationProvider
 from .exceptions import (
     AuthenticationFailedError,
