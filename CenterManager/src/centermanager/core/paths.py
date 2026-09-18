@@ -1,14 +1,31 @@
 import sys
 from pathlib import Path
-from typing import Optional  # <--- THÊM DÒNG NÀY
+from typing import Optional
+
+# Canonical top-level runtime contract. Names are case-sensitive in the
+# repository contract even though Windows file systems commonly are not.
+RUNTIME_REQUIRED_DIRS = (
+    "Database",
+    "Export",
+    "Attachment",
+    "Config",
+    "Backup",
+    "Logs",
+    "Reports",
+    "Temp",
+    "metadata",
+    "collaboration",
+    "snapshots",
+)
 
 class Paths:
     def __init__(self) -> None:
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             self._project_root = Path(sys.executable).resolve().parent
         else:
             self._project_root = Path(__file__).resolve().parent.parent.parent.parent
         self._runtime_root = self._project_root / "runtime"
+
     @property
     def project_root(self) -> Path:
         return self._project_root
@@ -69,6 +86,14 @@ class Paths:
     def metadata_dir(self) -> Path:
         return self._runtime_root / "metadata"
 
+    @property
+    def collaboration_dir(self) -> Path:
+        return self._runtime_root / "collaboration"
+
+    @property
+    def snapshots_dir(self) -> Path:
+        return self._runtime_root / "snapshots"
+
     def ensure_directories(self) -> None:
         dirs = [
             self.database_dir,
@@ -83,10 +108,11 @@ class Paths:
             self.reports_dir,
             self.temp_dir,
             self.metadata_dir,
+            self.collaboration_dir,
+            self.snapshots_dir,
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
-
 
 _paths: Optional[Paths] = None
 
@@ -96,48 +122,33 @@ def get_paths() -> Paths:
         _paths = Paths()
     return _paths
 
-
 def project_root() -> Path:
     return get_paths().project_root
-
 def runtime_root() -> Path:
     return get_paths().runtime_root
-
 def database_dir() -> Path:
     return get_paths().database_dir
-
 def export_dir() -> Path:
     return get_paths().export_dir
-
 def student_profile_dir() -> Path:
     return get_paths().student_profile_dir
-
 def excel_export_dir() -> Path:
     return get_paths().excel_export_dir
-
 def attachment_dir() -> Path:
     return get_paths().attachment_dir
-
 def config_dir() -> Path:
     return get_paths().config_dir
-
 def config_file() -> Path:
     return get_paths().config_file
-
 def backup_dir() -> Path:
     return get_paths().backup_dir
-
 def logs_dir() -> Path:
     return get_paths().logs_dir
-
 def reports_dir() -> Path:
     return get_paths().reports_dir
-
 def temp_dir() -> Path:
     return get_paths().temp_dir
-
 def metadata_dir() -> Path:
     return get_paths().metadata_dir
-
 def session_report_dir() -> Path:
     return get_paths().session_report_dir
