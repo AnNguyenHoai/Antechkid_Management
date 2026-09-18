@@ -10,6 +10,7 @@ from centermanager.ui.finance_workspace.finance_dashboard_page import FinanceDas
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
+from centermanager.ui.finance_workspace.financial_settlement_page import FinancialSettlementPage
 from centermanager.core.current_user import get_current_user
 from centermanager.events.event_bus import EventBus
 from centermanager.events.finance_events import FinanceDataChanged
@@ -32,6 +33,7 @@ class FinanceWorkspaceShell(QWidget):
         notification_service=None,
         event_bus: Optional[EventBus] = None,
         parent: Optional[QWidget] = None,
+        settlement_service=None,
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
@@ -40,11 +42,21 @@ class FinanceWorkspaceShell(QWidget):
         self._expense_service = expense_service
         self._dashboard_service = dashboard_service
         self._outstanding_service = outstanding_service
+        self._settlement_service = settlement_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._event_bus = event_bus or EventBus()
         self._authorized = False
+
+        # Compatibility construction keeps existing MainWindow/app call sites stable
+        # while the service remains independently injectable for tests/new callers.
+        if self._settlement_service is None:
+            session_factory = getattr(self._income_service, "_session_factory", None)
+            if session_factory is not None:
+                from centermanager.services.financial_settlement_service import FinancialSettlementService
+
+                self._settlement_service = FinancialSettlementService(session_factory)
 
         # Finance events must be active even while MainWindow wiring is being
         # migrated. When a shared app bus is supplied, this uses that bus.
@@ -85,6 +97,7 @@ class FinanceWorkspaceShell(QWidget):
             {"id": "income", "icon": "📈", "label": "Income"},
             {"id": "expense", "icon": "📉", "label": "Expense"},
             {"id": "outstanding", "icon": "📋", "label": "Outstanding"},
+            {"id": "settlement", "icon": "🧾", "label": "Settlement"},
         ]
         self.nav = WorkspaceNavigation("Finance Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -98,6 +111,10 @@ class FinanceWorkspaceShell(QWidget):
                                             self._notification_service); self.content_stack.addWidget(self.expense_page)
         self.outstanding_page = OutstandingListPage(self._outstanding_service, self._collaboration_manager,
                                                     self._notification_service); self.content_stack.addWidget(self.outstanding_page)
+        self.settlement_page = FinancialSettlementPage(
+            self._settlement_service,
+            self._notification_service,
+        ); self.content_stack.addWidget(self.settlement_page)
         body.addWidget(self.content_stack, 1); layout.addLayout(body)
 
     def _connect_signals(self) -> None:
@@ -108,12 +125,13 @@ class FinanceWorkspaceShell(QWidget):
     def _on_finance_data_changed(self, _event: FinanceDataChanged) -> None:
         if not self._has_finance_access():
             return
-        # Finance totals, transaction lists and outstanding balances are
-        # mutually dependent, so refresh all four projections after mutation.
+        # Finance totals, transaction lists, outstanding balances and draft
+        # settlement previews depend on the same underlying Finance activity.
         self.dashboard_page.refresh()
         self.income_page.refresh()
         self.expense_page.refresh()
         self.outstanding_page.refresh()
+        self.settlement_page.refresh()
 
     def _open_income_from_dashboard(self, income_id: int) -> None:
         self.navigate_to("income")
@@ -132,6 +150,7 @@ class FinanceWorkspaceShell(QWidget):
             "income": (self.income_page, "Income"),
             "expense": (self.expense_page, "Expense"),
             "outstanding": (self.outstanding_page, "Outstanding"),
+            "settlement": (self.settlement_page, "Settlement"),
         }
         target = pages.get(page_id)
         if target is None:
@@ -152,3 +171,4 @@ class FinanceWorkspaceShell(QWidget):
     def set_write_enabled(self, enabled: bool) -> None:
         self.income_page.set_write_enabled(enabled)
         self.expense_page.set_write_enabled(enabled)
+        self.settlement_page.set_write_enabled(enabled)
