@@ -13,6 +13,7 @@ from centermanager.core.paths import get_paths
 from centermanager.core.crypto import encrypt_git_config, decrypt_git_config
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
 from centermanager.platform.synchronization.git.git_provider import GitProvider
+from centermanager.core.git_locator import locate_git
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,11 @@ class GitConfigService:
             else:
                 auth_url = url
 
-            cmd = ["git", "ls-remote", auth_url, "HEAD"]
+            git_executable = locate_git()
+            if not git_executable:
+                logger.warning("Git executable unavailable; connection test failed safely.")
+                return False
+            cmd = [str(git_executable), "ls-remote", auth_url, "HEAD"]
             result = subprocess.run(
                 cmd,
                 capture_output=True,

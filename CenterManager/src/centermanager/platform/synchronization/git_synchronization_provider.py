@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
 
 from .git.git_credential_helper import GitCredentialHelper
+from centermanager.core.git_locator import locate_git
 from .synchronization_provider import SynchronizationProvider
 from .exceptions import (
     AuthenticationFailedError,
@@ -51,6 +52,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         branch: str = "main",
         username: str = "",
         email: str = "",
+        git_executable: Optional[str] = None,
     ):
         self._repo_path = Path(repo_path)
         self._repository_url = repository_url
@@ -66,6 +68,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._credential_helper: Optional[GitCredentialHelper] = None
         self._askpass_env: dict = {}
         self._lease_duration_seconds = 60
+        self._git_executable = git_executable or str(locate_git() or "")
 
         # Serialize Git subprocesses for this provider. The CollaborationPoller
         # runs in a QThread while the application thread may access the same
@@ -100,10 +103,13 @@ class GitSynchronizationProvider(SynchronizationProvider):
             env = self._get_env()
 
         logger.debug(f"Running git: {' '.join(args)}")
+        if not self._git_executable:
+            self._offline = True
+            raise GitNotInstalledError("Git executable not found. Configure portable Git or install Git.")
 
         with self._git_command_lock:
             result = subprocess.run(
-                ["git"] + args,
+                [self._git_executable] + args,
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
