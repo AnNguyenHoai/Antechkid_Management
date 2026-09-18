@@ -1,67 +1,79 @@
 # -*- coding: utf-8 -*-
 """GitCredentialHelper - Non-interactive Git authentication using GIT_ASKPASS."""
 
+import logging
 import os
 import sys
 import tempfile
-import logging
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_USERNAME_ENV = "CENTERMANAGER_GIT_USERNAME"
+_TOKEN_ENV = "CENTERMANAGER_GIT_TOKEN"
+
 
 class GitCredentialHelper:
-    """
-    Provides non-interactive Git authentication via GIT_ASKPASS script.
-    Token is supplied to Git without user interaction.
-    """
+    """Provide Git credentials without placing secrets in process argv or scripts."""
 
     def __init__(self, username: str, token: str):
-        self._username = username
+        self._username = username or "git"
         self._token = token
         self._askpass_path: Optional[Path] = None
 
     def setup_environment(self) -> dict:
-        """Return environment variables for Git authentication."""
+        """Return environment variables for a non-interactive Git child process."""
         if self._askpass_path is None:
             self._askpass_path = self._create_askpass_script()
         return {
             "GIT_ASKPASS": str(self._askpass_path),
+            "GIT_TERMINAL_PROMPT": "0",
+            _USERNAME_ENV: self._username,
+            _TOKEN_ENV: self._token,
         }
 
     def _create_askpass_script(self) -> Path:
-        """Create temporary askpass script that returns the token for any prompt."""
+        """Create a secret-free helper that reads credentials from child env vars."""
         if sys.platform == "win32":
-            # On Windows, use a batch script
-            content = f'''@echo off
-echo {self._token}
+            content = r'''@echo off
+set "prompt=%~1"
+echo %prompt% | %SystemRoot%\System32\findstr.exe /I "username" >nul
+if %errorlevel%==0 (
+  echo %CENTERMANAGER_GIT_USERNAME%
+) else (
+  echo %CENTERMANAGER_GIT_TOKEN%
+)
 '''
-            suffix = '.bat'
+            suffix = ".bat"
         else:
-            content = f'''#!/bin/sh
-echo "{self._token}"
+            content = '''#!/bin/sh
+case "$1" in
+  *Username*|*username*) printf '%s\\n' "$CENTERMANAGER_GIT_USERNAME" ;;
+  *) printf '%s\\n' "$CENTERMANAGER_GIT_TOKEN" ;;
+esac
 '''
-            suffix = '.sh'
+            suffix = ".sh"
 
-        fd, path = tempfile.mkstemp(suffix=suffix, prefix='git-askpass-', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(content)
+        fd, path = tempfile.mkstemp(suffix=suffix, prefix="git-askpass-", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
 
         if sys.platform != "win32":
             os.chmod(path, 0o700)
 
-        logger.debug(f"Created askpass script: {path}")
+        logger.debug("Created secret-free askpass helper")
         return Path(path)
 
     def cleanup(self) -> None:
-        """Remove temporary askpass script."""
+        """Remove the temporary askpass helper."""
         if self._askpass_path and self._askpass_path.exists():
             try:
                 self._askpass_path.unlink()
-                logger.debug(f"Removed askpass script: {self._askpass_path}")
-            except Exception as e:
-                logger.warning(f"Failed to remove askpass script: {e}")
+                logger.debug("Removed askpass helper")
+            except Exception as exc:
+                logger.warning("Failed to remove askpass helper: %s", exc)
+        self._askpass_path = None
 
     def __del__(self):
         self.cleanup()
