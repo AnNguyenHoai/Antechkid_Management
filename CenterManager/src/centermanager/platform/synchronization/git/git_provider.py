@@ -17,7 +17,7 @@ from .git_exceptions import (
 )
 from .git_credentials import GitCredentials
 from .git_status import GitStatus
-from centermanager.platform.deployment.git_locator import locate_git
+from centermanager.core.git_locator import locate_git
 
 
 class GitProvider:
