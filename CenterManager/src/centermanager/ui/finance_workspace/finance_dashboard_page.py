@@ -8,8 +8,10 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QScrollArea,
     QFrame,
+    QPushButton,
 )
 
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
@@ -25,6 +27,7 @@ class FinanceDashboardPage(QWidget):
 
     income_selected = Signal(int)
     expense_selected = Signal(int)
+    drilldown_requested = Signal(str)
 
     def __init__(
         self,
@@ -36,6 +39,9 @@ class FinanceDashboardPage(QWidget):
         self._income_ids: list[int] = []
         self._expense_ids: list[int] = []
         self._target_date = date.today()
+        self._period_start: Optional[date] = None
+        self._period_end: Optional[date] = None
+        self._period_configured: Optional[bool] = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -59,6 +65,26 @@ class FinanceDashboardPage(QWidget):
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
 
+        drilldown_row = QHBoxLayout()
+        drilldown_row.setSpacing(SPACING['sm'])
+        for label, page_id in (
+            ("View Income", "income"),
+            ("View Expense", "expense"),
+            ("View Outstanding", "outstanding"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, target=page_id: self.drilldown_requested.emit(target)
+            )
+            drilldown_row.addWidget(button)
+        drilldown_row.addStretch()
+        container_layout.addLayout(drilldown_row)
+
+        self.cash_vs_bank_chart = ChartCard(
+            "Cash vs Bank - Inflow / Outflow (Selected Period)", "bar"
+        )
+        container_layout.addWidget(self.cash_vs_bank_chart)
+
         income_section = QWidget()
         income_layout = QVBoxLayout(income_section)
         income_layout.setContentsMargins(0, 0, 0, 0)
@@ -77,10 +103,14 @@ class FinanceDashboardPage(QWidget):
         income_layout.addWidget(self.income_table)
         container_layout.addWidget(income_section)
 
-        self.revenue_method_chart = ChartCard("Revenue by Payment Method (Selected Period)", "pie")
+        self.revenue_method_chart = ChartCard(
+            "Revenue by Payment Method (Selected Period)", "pie"
+        )
         container_layout.addWidget(self.revenue_method_chart)
 
-        self.expense_method_chart = ChartCard("Expense by Payment Method (Selected Period)", "pie")
+        self.expense_method_chart = ChartCard(
+            "Expense by Payment Method (Selected Period)", "pie"
+        )
         container_layout.addWidget(self.expense_method_chart)
 
         expense_section = QWidget()
@@ -116,15 +146,33 @@ class FinanceDashboardPage(QWidget):
         period_configured=None,
         **_kwargs,
     ) -> None:
-        del period_start, period_end, period_configured
         if target_date is not None:
             self._target_date = target_date
+        self._period_start = period_start
+        self._period_end = period_end
+        self._period_configured = period_configured
+
         self.loading.setVisible(True)
         try:
-            data = self._service.get_dashboard_data(target_date=self._target_date)
+            data = self._service.get_dashboard_data(
+                target_date=self._target_date,
+                period_start=self._period_start,
+                period_end=self._period_end,
+                period_configured=self._period_configured,
+            )
             self._update_kpis(data)
             self._update_income_table(data.get("recent_income", []))
             self._update_expense_table(data.get("recent_expense", []))
+
+            cash_vs_bank = data.get("cash_vs_bank", {})
+            cash = cash_vs_bank.get("Cash", {})
+            bank = cash_vs_bank.get("Bank", {})
+            self.cash_vs_bank_chart.set_data([
+                ("Cash In", cash.get("income", 0)),
+                ("Cash Out", cash.get("expense", 0)),
+                ("Bank In", bank.get("income", 0)),
+                ("Bank Out", bank.get("expense", 0)),
+            ])
 
             revenue_method = data.get("revenue_by_method_period", {})
             self.revenue_method_chart.set_data(
@@ -145,12 +193,12 @@ class FinanceDashboardPage(QWidget):
             return f"{value:,.0f} VND"
 
         self.stats_grid.set_metrics([
-            {"icon": "📈", "label": "Revenue Today", "value": fmt_money(data.get("revenue_today", 0))},
-            {"icon": "📊", "label": "Revenue Selected Period", "value": fmt_money(data.get("revenue_period", 0))},
-            {"icon": "📉", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0))},
+            {"icon": "📊", "label": "Income Selected Period", "value": fmt_money(data.get("revenue_period", 0))},
             {"icon": "📉", "label": "Expense Selected Period", "value": fmt_money(data.get("expense_period", 0))},
-            {"icon": "💰", "label": "Net Cash Flow (Period)", "value": fmt_money(data.get("net_cash_flow", 0))},
+            {"icon": "💰", "label": "Net Selected Period", "value": fmt_money(data.get("net_cash_flow", 0))},
             {"icon": "🧾", "label": "Outstanding Tuition", "value": fmt_money(data.get("total_outstanding", 0))},
+            {"icon": "📈", "label": "Income Today", "value": fmt_money(data.get("revenue_today", 0))},
+            {"icon": "📉", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0))},
             {"icon": "👥", "label": "Students With Debt", "value": str(data.get("students_with_debt", 0))},
             {"icon": "⚠️", "label": "Tuition Not Configured", "value": str(data.get("unconfigured_tuition_count", 0))},
         ], columns=4)
@@ -190,14 +238,17 @@ class FinanceDashboardPage(QWidget):
         self._income_ids = []
         self._expense_ids = []
         self.stats_grid.set_metrics([
-            {"icon": "⚠️", "label": "Revenue Today", "value": "Error"},
-            {"icon": "⚠️", "label": "Revenue Selected Period", "value": "Error"},
-            {"icon": "⚠️", "label": "Expense Today", "value": "Error"},
+            {"icon": "⚠️", "label": "Income Selected Period", "value": "Error"},
             {"icon": "⚠️", "label": "Expense Selected Period", "value": "Error"},
-            {"icon": "⚠️", "label": "Net Cash Flow (Period)", "value": "Error"},
+            {"icon": "⚠️", "label": "Net Selected Period", "value": "Error"},
             {"icon": "⚠️", "label": "Outstanding Tuition", "value": "Error"},
+            {"icon": "⚠️", "label": "Income Today", "value": "Error"},
+            {"icon": "⚠️", "label": "Expense Today", "value": "Error"},
             {"icon": "⚠️", "label": "Students With Debt", "value": "Error"},
             {"icon": "⚠️", "label": "Tuition Not Configured", "value": "Error"},
         ], columns=4)
+        self.cash_vs_bank_chart.set_data([])
+        self.revenue_method_chart.set_data([])
+        self.expense_method_chart.set_data([])
         self.income_table.set_data([], 0)
         self.expense_table.set_data([], 0)
