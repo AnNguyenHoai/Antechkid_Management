@@ -89,10 +89,15 @@ class FinanceDashboardService:
         self,
         period_start: Optional[date] = None,
         target_date: Optional[date] = None,
+        force_period: bool = False,
     ) -> Dict[str, int]:
         if self._outstanding_service is None:
             return {}
-        if period_start is None:
+        # Older/lightweight dashboard callers have no FinancePeriodService and
+        # historically expose a no-argument Outstanding API. Preserve that path.
+        if period_start is None or (
+            self._finance_period_service is None and not force_period
+        ):
             return self._outstanding_service.get_outstanding_stats()
         return self._outstanding_service.get_outstanding_stats(
             period_start=period_start,
@@ -297,7 +302,11 @@ class FinanceDashboardService:
         )
         revenue_period = sum(revenue_by_method.values())
         expense_period = sum(expense_by_method.values())
-        stats = self._get_outstanding_stats(resolved_period_start, target)
+        stats = self._get_outstanding_stats(
+            resolved_period_start,
+            target,
+            force_period=period_start is not None,
+        )
 
         # When an explicit shared period is supplied it is authoritative even if
         # this service was constructed without FinancePeriodService.
