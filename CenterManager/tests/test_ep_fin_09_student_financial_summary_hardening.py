@@ -63,6 +63,15 @@ def test_per_class_financial_status_is_rendered_not_documented_only():
     assert "self.detail_table.setItem(row, 4, QTableWidgetItem(status_text))" in source
 
 
+def test_unconfigured_tuition_is_not_presented_as_paid_or_zero_debt():
+    source = _widget_source()
+    assert "self._summary.has_unconfigured_tuition" in source
+    assert 'self.total_expected_label._value_widget.setText("Chưa xác định")' in source
+    assert 'self.outstanding_label._value_widget.setText("Chưa xác định")' in source
+    assert 'self.status_label._value_widget.setText("Chưa cấu hình học phí")' in source
+    assert "self._summary.details" in source
+
+
 def test_student_financial_period_can_be_supplied_by_composition_root():
     source = _widget_source()
     assert "def set_finance_period(" in source
