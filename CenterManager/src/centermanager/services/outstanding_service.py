@@ -51,9 +51,7 @@ class OutstandingService:
         repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
-        self._repository_provider = (
-            repository_provider or create_default_repository_provider()
-        )
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def _resolve_period(
         self,
@@ -121,8 +119,8 @@ class OutstandingService:
     ) -> Dict[Tuple[int, int], int]:
         """Load all valid Tuition income once and group by student/class.
 
-        IncomeRepository.list_active() is the canonical live-money boundary, so
-        VOIDED and soft-deleted Income are excluded automatically.
+        The income repository active-list boundary is the canonical live-money
+        source, so VOIDED and soft-deleted Income are excluded automatically.
         """
         repo = self._repository_provider.incomes(session)
         total = repo.count_active(
@@ -166,18 +164,16 @@ class OutstandingService:
 
         class_obj = enrollment.class_
         if class_obj is None:
-            class_obj = self._repository_provider.classes(session).get_by_id(
-                enrollment.class_id
-            )
+            class_repo = self._repository_provider.classes(session)
+            class_obj = class_repo.get_by_id(enrollment.class_id)
         if class_obj is None:
             logger.warning("Class %s not found", enrollment.class_id)
             return None
 
         student = enrollment.student
         if student is None:
-            student = self._repository_provider.students(session).get_by_id(
-                enrollment.student_id
-            )
+            student_repo = self._repository_provider.students(session)
+            student = student_repo.get_by_id(enrollment.student_id)
         if student is None:
             logger.warning("Student %s not found", enrollment.student_id)
             return None
@@ -231,9 +227,8 @@ class OutstandingService:
             resolved_period_start, resolved_period_end = period
 
             if enrollment is None:
-                matches = self._repository_provider.enrollments(
-                    session
-                ).get_by_student_and_class(student_id, class_id)
+                enrollment_repo = self._repository_provider.enrollments(session)
+                matches = enrollment_repo.get_by_student_and_class(student_id, class_id)
                 enrollment = matches[0] if matches else None
                 if enrollment is None:
                     logger.warning(
@@ -264,9 +259,8 @@ class OutstandingService:
         sort_by: str,
         ascending: bool,
     ) -> List[OutstandingDTO]:
-        enrollments, _ = self._repository_provider.enrollments(
-            session
-        ).list_for_outstanding(
+        enrollment_repo = self._repository_provider.enrollments(session)
+        enrollments, _ = enrollment_repo.list_for_outstanding(
             class_id=class_id,
             course_name=course_name,
             student_id=student_id,
@@ -308,20 +302,20 @@ class OutstandingService:
 
     @staticmethod
     def _stats_for_rows(rows: List[OutstandingDTO]) -> Dict[str, int]:
-        configured = [row for row in rows if row.tuition_configured]
+        all_dtos = rows
+        configured = [dto for dto in all_dtos if dto.tuition_configured]
+        total_unconfigured_tuition = sum(1 for dto in all_dtos if not dto.tuition_configured)
         return {
-            "total_rows": len(rows),
+            "total_rows": len(all_dtos),
             "total_students_with_debt": len(
-                {row.student_id for row in configured if row.outstanding > 0}
+                {dto.student_id for dto in configured if dto.outstanding > 0}
             ),
             "total_outstanding": sum(
-                max(row.outstanding, 0) for row in configured
+                max(dto.outstanding, 0) for dto in configured
             ),
-            "total_expected": sum(row.expected_tuition for row in configured),
-            "total_paid": sum(row.paid for row in rows),
-            "total_unconfigured_tuition": sum(
-                1 for row in rows if not row.tuition_configured
-            ),
+            "total_expected": sum(dto.expected_tuition for dto in configured),
+            "total_paid": sum(dto.paid for dto in all_dtos),
+            "total_unconfigured_tuition": total_unconfigured_tuition,
         }
 
     def get_outstanding_page(
@@ -412,9 +406,8 @@ class OutstandingService:
             if period is None:
                 return []
             resolved_period_start, resolved_period_end = period
-            enrollments, _ = self._repository_provider.enrollments(
-                session
-            ).list_for_outstanding(
+            enrollment_repo = self._repository_provider.enrollments(session)
+            enrollments, _ = enrollment_repo.list_for_outstanding(
                 period_start=resolved_period_start,
                 period_end=resolved_period_end,
                 offset=0,
@@ -452,9 +445,8 @@ class OutstandingService:
             # Preserve the previous distinction between unknown student and an
             # enrolled student with no row by checking the student repository.
             with self._session_factory() as session:
-                student = self._repository_provider.students(session).get_by_id(
-                    student_id
-                )
+                student_repo = self._repository_provider.students(session)
+                student = student_repo.get_by_id(student_id)
                 if student is None:
                     return None
                 student_name = student.full_name
@@ -463,9 +455,24 @@ class OutstandingService:
             student_name = rows[0].student_name
             student_code = rows[0].student_code
 
-        configured = [row for row in rows if row.tuition_configured]
-        total_expected = sum(row.expected_tuition for row in configured)
-        total_paid = sum(row.paid for row in rows)
+        total_expected = 0
+        total_paid = 0
+        has_unconfigured_tuition = False
+        details: List[OutstandingDTO] = []
+        seen_class_ids = set()
+        for dto in rows:
+            # _collect_outstanding already deduplicates (student, class) pairs;
+            # keep this guard as a compatibility/safety boundary for summaries.
+            if dto.class_id in seen_class_ids:
+                continue
+            seen_class_ids.add(dto.class_id)
+            total_paid += dto.paid
+            if dto.tuition_configured:
+                total_expected += dto.expected_tuition
+            else:
+                has_unconfigured_tuition = True
+            details.append(dto)
+
         total_outstanding = total_expected - total_paid
         if total_outstanding == 0:
             status = "Paid"
@@ -484,10 +491,8 @@ class OutstandingService:
             total_paid=total_paid,
             total_outstanding=total_outstanding,
             status=status,
-            details=rows,
-            has_unconfigured_tuition=any(
-                not row.tuition_configured for row in rows
-            ),
+            details=details,
+            has_unconfigured_tuition=has_unconfigured_tuition,
         )
 
     def get_outstanding_stats(
