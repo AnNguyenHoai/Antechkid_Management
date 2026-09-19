@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
 """
 OutstandingListPage - Display outstanding tuition for all students.
-Read-only. No write actions needed.
+Read-only and scoped to the Finance workspace shared period.
 """
 import logging
+from datetime import date
 from typing import Optional, List
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QComboBox, QLineEdit, QSizePolicy
+    QMessageBox, QComboBox
 )
 
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.dto.outstanding_dto import OutstandingDTO
-from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system import SearchBar, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget, EmptyState
+from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 
@@ -39,6 +40,9 @@ class OutstandingListPage(QWidget):
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._items: List[OutstandingDTO] = []
+        self._target_date = date.today()
+        self._period_start: Optional[date] = None
+        self._period_configured = None
         self._setup_ui()
         # Do not load protected Finance data during construction. The shell
         # refreshes this page only after finance.view authorization succeeds.
@@ -48,7 +52,6 @@ class OutstandingListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -74,7 +77,6 @@ class OutstandingListPage(QWidget):
         top_row.addStretch()
         toolbar_layout.addLayout(top_row)
 
-        # Filter row
         filter_row = QHBoxLayout()
         filter_row.setSpacing(SPACING['sm'])
 
@@ -92,7 +94,6 @@ class OutstandingListPage(QWidget):
         toolbar_layout.addLayout(filter_row)
         layout.addWidget(toolbar)
 
-        # Data Table
         columns = [
             {"key": "student_code", "label": "Mã HS", "sortable": True},
             {"key": "student_name", "label": "Học sinh", "sortable": True},
@@ -111,35 +112,60 @@ class OutstandingListPage(QWidget):
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
 
-    def refresh(self) -> None:
+    def refresh(
+        self,
+        *_args,
+        target_date: Optional[date] = None,
+        period_start=None,
+        period_end=None,
+        period_configured=None,
+        **_kwargs,
+    ) -> None:
+        del period_end
+        if target_date is not None:
+            self._target_date = target_date
+        if period_configured is not None:
+            self._period_configured = period_configured
+        if period_start is not None:
+            self._period_start = period_start
+        elif period_configured is False:
+            self._period_start = None
+
         self.loading.setVisible(True)
         try:
             self._apply_filters()
-        except Exception as e:
+        except Exception:
             logger.exception("Refresh failed")
             QMessageBox.critical(self, "Lỗi", "Không thể tải dữ liệu công nợ.")
         finally:
             self.loading.setVisible(False)
 
     def _apply_filters(self) -> None:
+        if self._period_configured is False:
+            self._items = []
+            self._populate_table()
+            return
+
         search = self.search_bar.text().strip() or None
         status = self.status_combo.currentText()
         if status == "Tất cả trạng thái":
             status = None
 
         try:
-            items, total = self._service.get_all_outstanding(
+            items, _ = self._service.get_all_outstanding(
                 search_text=search,
                 status_filter=status,
                 offset=0,
-                limit=1000
+                limit=1000,
+                period_start=self._period_start,
+                on_date=self._target_date,
             )
             self._items = items
             self._populate_table()
-            logger.info(f"Loaded {len(items)} outstanding items")
-        except Exception as e:
+            logger.info("Loaded %s outstanding items", len(items))
+        except Exception as exc:
             logger.exception("Filter error")
-            QMessageBox.critical(self, "Lỗi", str(e))
+            QMessageBox.critical(self, "Lỗi", str(exc))
 
     def _populate_table(self) -> None:
         data = []
@@ -156,7 +182,7 @@ class OutstandingListPage(QWidget):
             })
         self.data_table.set_data(data, len(data))
 
-    def _on_search(self, text) -> None:
+    def _on_search(self, _text) -> None:
         self._apply_filters()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
@@ -187,7 +213,5 @@ class OutstandingListPage(QWidget):
         self._apply_filters()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        # Outstanding is read-only, no actions to enable/disable
-        pass
-# "Chưa xác định"
-# "Chưa cấu hình"
+        del enabled
+        # Outstanding is read-only, no actions to enable/disable.
