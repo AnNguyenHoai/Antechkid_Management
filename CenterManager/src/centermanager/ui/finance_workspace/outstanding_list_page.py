@@ -17,10 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from centermanager.dto.outstanding_dto import (
-    OutstandingDTO,
-    OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
-)
+from centermanager.dto.outstanding_dto import OutstandingDTO
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 from centermanager.services.outstanding_service import OutstandingService
@@ -32,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingListPage(QWidget):
-    STATUS_NO_TUITION_CONFIGURED = OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
+    # Keep the canonical status value explicit at the UI filter boundary. This
+    # value is persisted nowhere; it is passed back to OutstandingService only.
+    STATUS_NO_TUITION_CONFIGURED = "No Tuition Configured"
     student_selected = Signal(int)
 
     def __init__(
