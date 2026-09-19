@@ -44,6 +44,22 @@ class FinancialSettlementService:
         if user is None or not getattr(user, "is_admin", False):
             raise PermissionError("Only administrators can save or confirm financial settlements.")
 
+    @staticmethod
+    def _require_difference_comment(
+        difference_cash: Optional[Decimal],
+        difference_bank: Optional[Decimal],
+        comment: Optional[str],
+    ) -> None:
+        """Enforce the reconciliation invariant at the service boundary."""
+        has_difference = any(
+            difference is not None and difference != Decimal("0.00")
+            for difference in (difference_cash, difference_bank)
+        )
+        if has_difference and not (comment or "").strip():
+            raise ValueError(
+                "Comment is required when actual balances differ from expected balances."
+            )
+
     def _resolve_period(self, session, target_date: date) -> tuple[date, date]:
         config = self._repository_provider.finance_periods(session).get_effective(target_date)
         if config is None:
@@ -209,6 +225,12 @@ class FinancialSettlementService:
                 actual_cash_value,
                 actual_bank_value,
             )
+            if confirm:
+                self._require_difference_comment(
+                    calculated["difference_cash"],
+                    calculated["difference_bank"],
+                    comment,
+                )
 
             if row is None:
                 row = FinancialSettlement(
