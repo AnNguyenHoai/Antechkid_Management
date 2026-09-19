@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Expense list with filters, sorting, collaboration write guard, and CRUD."""
 import logging
+from datetime import date
 from typing import Optional
 from PySide6.QtCore import Signal, QDate
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox, QMenu, QComboBox, QDateEdit
@@ -27,6 +28,9 @@ class ExpenseListPage(QWidget):
         self._notification_service = notification_service
         self._expenses = []
         self._write_enabled = False
+        self._period_start: Optional[date] = None
+        self._period_end: Optional[date] = None
+        self._period_configured = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -72,18 +76,77 @@ class ExpenseListPage(QWidget):
         else:
             logger.warning("Finance notification fallback: %s", message)
 
-    def refresh(self) -> None:
+    @staticmethod
+    def _to_qdate(value: date) -> QDate:
+        return QDate(value.year, value.month, value.day)
+
+    def _reset_date_filters_to_period(self) -> None:
+        if self._period_start is None or self._period_end is None:
+            return
+        for widget, value in ((self.date_from, self._period_start), (self.date_to, self._period_end)):
+            previous = widget.blockSignals(True)
+            widget.setDate(self._to_qdate(value))
+            widget.blockSignals(previous)
+
+    def refresh(
+        self,
+        *_args,
+        target_date=None,
+        period_start=None,
+        period_end=None,
+        period_configured=None,
+        **_kwargs,
+    ) -> None:
+        del target_date
+        period_changed = (
+            period_start is not None
+            and period_end is not None
+            and (period_start != self._period_start or period_end != self._period_end)
+        )
+        if period_configured is not None:
+            self._period_configured = period_configured
+        if period_start is not None and period_end is not None:
+            self._period_start = period_start
+            self._period_end = period_end
+            if period_changed:
+                self._reset_date_filters_to_period()
+        elif period_configured is False:
+            self._period_start = None
+            self._period_end = None
+
         self.loading.setVisible(True)
-        try: self._apply_filters()
-        finally: self.loading.setVisible(False)
+        try:
+            self._apply_filters()
+        finally:
+            self.loading.setVisible(False)
+
+    def _effective_date_bounds(self):
+        user_from = self.date_from.date().toPython()
+        user_to = self.date_to.date().toPython()
+        if self._period_start is None or self._period_end is None:
+            return user_from, user_to
+        return max(user_from, self._period_start), min(user_to, self._period_end)
 
     def _apply_filters(self) -> None:
+        if self._period_configured is False:
+            self._expenses = []
+            self._populate_table()
+            return
+        date_from, date_to = self._effective_date_bounds()
+        if date_from > date_to:
+            self._expenses = []
+            self._populate_table()
+            return
         items, _ = self._service.list_expenses(
             category=self.category_combo.currentText() or None,
             payment_method=self.method_combo.currentText() or None,
             status=self.status_combo.currentText() or None,
-            date_from=self.date_from.date().toPython(), date_to=self.date_to.date().toPython(),
-            search_text=self.search_bar.text().strip() or None, page=1, per_page=1000)
+            date_from=date_from,
+            date_to=date_to,
+            search_text=self.search_bar.text().strip() or None,
+            page=1,
+            per_page=1000,
+        )
         self._expenses = items; self._populate_table()
 
     def _populate_table(self) -> None:
@@ -131,7 +194,11 @@ class ExpenseListPage(QWidget):
 
     def _clear_filters(self) -> None:
         self.search_bar.clear(); self.category_combo.setCurrentIndex(0); self.method_combo.setCurrentIndex(0); self.status_combo.setCurrentIndex(0)
-        self.date_from.setDate(QDate.currentDate().addDays(-30)); self.date_to.setDate(QDate.currentDate()); self._apply_filters()
+        if self._period_start is not None and self._period_end is not None:
+            self._reset_date_filters_to_period()
+        else:
+            self.date_from.setDate(QDate.currentDate().addDays(-30)); self.date_to.setDate(QDate.currentDate())
+        self._apply_filters()
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled); self.add_btn.setEnabled(self._write_enabled)
