@@ -196,6 +196,7 @@ class FinanceWorkspaceShell(QWidget):
     def _connect_signals(self) -> None:
         self.dashboard_page.income_selected.connect(self._open_income_from_dashboard)
         self.dashboard_page.expense_selected.connect(self._open_expense_from_dashboard)
+        self.dashboard_page.drilldown_requested.connect(self.navigate_to)
         self.outstanding_page.student_selected.connect(self.student_selected.emit)
         self.month_combo.currentIndexChanged.connect(self._on_period_selection_changed)
         self.year_combo.currentIndexChanged.connect(self._on_period_selection_changed)
