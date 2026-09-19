@@ -297,7 +297,7 @@ class StudentFinancialWidget(QWidget):
             return
         try:
             # Ask for one row first to obtain the exact server count, then fetch
-            # that count. This removes the old magic per_page=1000 truncation.
+            # that count so payment history is never capped by a fixed page size.
             first_page, total = self._income_service.list_incomes(
                 student_id=self._student_id,
                 page=1,
