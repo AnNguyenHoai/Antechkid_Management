@@ -173,15 +173,16 @@ def test_missing_finance_period_is_explicit_not_calendar_month_fallback():
     assert data["period_label"] == "Finance period not configured"
 
 
-def test_dashboard_ui_has_month_year_selector_and_uses_selected_period_keys():
+def test_dashboard_ui_consumes_workspace_period_and_uses_period_keys():
     source = Path(
         "src/centermanager/ui/finance_workspace/finance_dashboard_page.py"
     ).read_text(encoding="utf-8")
 
-    assert "QComboBox" in source
-    assert "self.month_combo" in source
-    assert "self.year_combo" in source
-    assert "target_date=self._selected_target_date()" in source
+    assert "QComboBox" not in source
+    assert "self.month_combo" not in source
+    assert "self.year_combo" not in source
+    assert "self._target_date" in source
+    assert "target_date=self._target_date" in source
     assert 'data.get("revenue_period", 0)' in source
     assert 'data.get("expense_period", 0)' in source
     assert 'data.get("revenue_by_method_period", {})' in source

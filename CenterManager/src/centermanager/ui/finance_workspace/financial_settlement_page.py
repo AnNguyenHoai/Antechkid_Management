@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from calendar import month_name
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -12,7 +11,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QLabel,
-    QComboBox,
     QDoubleSpinBox,
     QLineEdit,
     QPlainTextEdit,
@@ -23,7 +21,7 @@ from PySide6.QtWidgets import (
 
 
 class FinancialSettlementPage(QWidget):
-    """FinancePeriod reconciliation UI for cash and bank balances."""
+    """FinancePeriod reconciliation UI driven by the workspace shared period."""
 
     def __init__(self, settlement_service, notification_service=None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -31,6 +29,7 @@ class FinancialSettlementPage(QWidget):
         self._notification_service = notification_service
         self._write_enabled = False
         self._loaded_status = "DRAFT"
+        self._target_date = date.today()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -38,29 +37,18 @@ class FinancialSettlementPage(QWidget):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(14)
 
-        selector = QHBoxLayout()
-        selector.addWidget(QLabel("Finance period:"))
-        self.month_combo = QComboBox()
-        for month in range(1, 13):
-            self.month_combo.addItem(month_name[month], month)
-        self.year_combo = QComboBox()
-        current_year = date.today().year
-        for year in range(current_year - 5, current_year + 2):
-            self.year_combo.addItem(str(year), year)
-        self.month_combo.setCurrentIndex(date.today().month - 1)
-        self.year_combo.setCurrentText(str(current_year))
-        self.month_combo.currentIndexChanged.connect(self.refresh)
-        self.year_combo.currentIndexChanged.connect(self.refresh)
-        selector.addWidget(self.month_combo)
-        selector.addWidget(self.year_combo)
+        # The FinanceWorkspaceShell owns period navigation. This row only shows
+        # the exact canonical period resolved by the Settlement service.
+        period_row = QHBoxLayout()
+        period_row.addWidget(QLabel("Settlement period:"))
         self.period_label = QLabel("")
         self.period_label.setStyleSheet("font-weight: 600;")
-        selector.addWidget(self.period_label)
-        selector.addStretch()
+        period_row.addWidget(self.period_label)
+        period_row.addStretch()
         self.status_label = QLabel("DRAFT")
         self.status_label.setStyleSheet("font-weight: 700;")
-        selector.addWidget(self.status_label)
-        layout.addLayout(selector)
+        period_row.addWidget(self.status_label)
+        layout.addLayout(period_row)
 
         group = QGroupBox("Financial Settlement")
         grid = QGridLayout(group)
@@ -133,9 +121,6 @@ class FinancialSettlementPage(QWidget):
         spin.setSuffix(" VND")
         return spin
 
-    def _selected_target_date(self) -> date:
-        return date(int(self.year_combo.currentData()), int(self.month_combo.currentData()), 1)
-
     @staticmethod
     def _format_money(value) -> str:
         if value is None:
@@ -162,17 +147,36 @@ class FinancialSettlementPage(QWidget):
         else:
             QMessageBox.warning(self, "Financial Settlement", message)
 
-    def refresh(self, *_args) -> None:
+    def refresh(
+        self,
+        *_args,
+        target_date: Optional[date] = None,
+        period_start=None,
+        period_end=None,
+        period_configured=None,
+        **_kwargs,
+    ) -> None:
+        del period_start, period_end
+        if target_date is not None:
+            self._target_date = target_date
+        if period_configured is False:
+            self.period_label.setText("Finance period not configured")
+            self._loaded_status = "UNAVAILABLE"
+            self.status_label.setText("UNAVAILABLE")
+            self._apply_write_state()
+            return
         if self._settlement_service is None:
             self.period_label.setText("Settlement service unavailable")
             self._loaded_status = "UNAVAILABLE"
+            self.status_label.setText("UNAVAILABLE")
             self._apply_write_state()
             return
         try:
-            data = self._settlement_service.get_preview(target_date=self._selected_target_date())
+            data = self._settlement_service.get_preview(target_date=self._target_date)
         except Exception as exc:
             self.period_label.setText(str(exc))
             self._loaded_status = "UNAVAILABLE"
+            self.status_label.setText("UNAVAILABLE")
             self._apply_write_state()
             return
 
@@ -181,6 +185,8 @@ class FinancialSettlementPage(QWidget):
         self.status_label.setText(data["status"])
         if data.get("confirmed_at") is not None:
             self.status_label.setToolTip(f"Confirmed: {data['confirmed_at']}")
+        else:
+            self.status_label.setToolTip("")
 
         self.opening_cash.setValue(float(data["opening_cash"]))
         self.opening_bank.setValue(float(data["opening_bank"]))
@@ -199,7 +205,7 @@ class FinancialSettlementPage(QWidget):
 
     def _request_payload(self) -> dict:
         return {
-            "target_date": self._selected_target_date(),
+            "target_date": self._target_date,
             "opening_cash": Decimal(str(self.opening_cash.value())),
             "opening_bank": Decimal(str(self.opening_bank.value())),
             "actual_closing_cash": self._optional_text_money(self.actual_cash),

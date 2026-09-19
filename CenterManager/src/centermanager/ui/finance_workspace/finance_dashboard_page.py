@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Finance dashboard with FinancePeriod-aware KPIs and transaction drill-down."""
 import logging
-from calendar import month_name
 from datetime import date
 from typing import Optional
 
@@ -9,11 +8,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QScrollArea,
     QFrame,
-    QLabel,
-    QComboBox,
 )
 
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
@@ -25,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class FinanceDashboardPage(QWidget):
-    """Read-only Finance overview with selectable month/year Finance period context."""
+    """Read-only Finance overview driven by the workspace shared period."""
 
     income_selected = Signal(int)
     expense_selected = Signal(int)
@@ -39,9 +35,8 @@ class FinanceDashboardPage(QWidget):
         self._service = dashboard_service
         self._income_ids: list[int] = []
         self._expense_ids: list[int] = []
-        self._selector_ready = False
+        self._target_date = date.today()
         self._setup_ui()
-        self._selector_ready = True
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -60,35 +55,6 @@ class FinanceDashboardPage(QWidget):
             SPACING['lg'], SPACING['lg'], SPACING['lg'], SPACING['lg']
         )
         container_layout.setSpacing(SPACING['xl'])
-
-        selector_row = QHBoxLayout()
-        selector_row.setSpacing(SPACING['sm'])
-        selector_row.addWidget(QLabel("Finance period:"))
-
-        self.month_combo = QComboBox()
-        for month in range(1, 13):
-            self.month_combo.addItem(month_name[month], month)
-        selector_row.addWidget(self.month_combo)
-
-        self.year_combo = QComboBox()
-        current_year = date.today().year
-        for year in range(current_year - 5, current_year + 2):
-            self.year_combo.addItem(str(year), year)
-        selector_row.addWidget(self.year_combo)
-
-        self.period_label = QLabel("")
-        self.period_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
-        selector_row.addWidget(self.period_label)
-        selector_row.addStretch()
-        container_layout.addLayout(selector_row)
-
-        today = date.today()
-        self.month_combo.setCurrentIndex(today.month - 1)
-        year_index = self.year_combo.findData(today.year)
-        if year_index >= 0:
-            self.year_combo.setCurrentIndex(year_index)
-        self.month_combo.currentIndexChanged.connect(self._on_period_selection_changed)
-        self.year_combo.currentIndexChanged.connect(self._on_period_selection_changed)
 
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
@@ -142,24 +108,20 @@ class FinanceDashboardPage(QWidget):
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
 
-    def _selected_target_date(self) -> date:
-        month = self.month_combo.currentData() or date.today().month
-        year = self.year_combo.currentData() or date.today().year
-        # Month/year is only a navigation hint. The service resolves this date to
-        # the canonical FinancePeriod bucket and returns the exact boundaries.
-        return date(int(year), int(month), 1)
-
-    def _on_period_selection_changed(self, _index: int) -> None:
-        if self._selector_ready:
-            self.refresh()
-
-    def refresh(self) -> None:
+    def refresh(
+        self,
+        target_date: Optional[date] = None,
+        period_start=None,
+        period_end=None,
+        period_configured=None,
+        **_kwargs,
+    ) -> None:
+        del period_start, period_end, period_configured
+        if target_date is not None:
+            self._target_date = target_date
         self.loading.setVisible(True)
         try:
-            data = self._service.get_dashboard_data(
-                target_date=self._selected_target_date()
-            )
-            self.period_label.setText(data.get("period_label", ""))
+            data = self._service.get_dashboard_data(target_date=self._target_date)
             self._update_kpis(data)
             self._update_income_table(data.get("recent_income", []))
             self._update_expense_table(data.get("recent_expense", []))
@@ -227,7 +189,6 @@ class FinanceDashboardPage(QWidget):
     def _show_error(self) -> None:
         self._income_ids = []
         self._expense_ids = []
-        self.period_label.setText("Unable to resolve Finance period")
         self.stats_grid.set_metrics([
             {"icon": "⚠️", "label": "Revenue Today", "value": "Error"},
             {"icon": "⚠️", "label": "Revenue Selected Period", "value": "Error"},
