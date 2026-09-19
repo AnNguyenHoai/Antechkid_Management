@@ -1,20 +1,28 @@
 # -*- coding: utf-8 -*-
-"""
-Income repository - data access for Income entity.
-"""
-from typing import List, Optional
+"""Income repository - data access for Income entity."""
 from datetime import date, datetime
+from typing import List, Optional
 
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, or_
 
+from centermanager.models.class_ import Class
 from centermanager.models.income import Income
 from centermanager.models.student import Student
-from centermanager.models.class_ import Class
 from centermanager.repositories.base import BaseRepository
 
 
 class IncomeRepository(BaseRepository[Income]):
+    _SORT_COLUMNS = {
+        "payment_date": Income.payment_date,
+        "amount": Income.amount,
+        "income_type": Income.income_type,
+        "payment_method": Income.payment_method,
+        "payment_period": Income.payment_period,
+        "received_by": Income.received_by,
+        "created_at": Income.created_at,
+    }
+
     def __init__(self, session: Session) -> None:
         super().__init__(session, Income)
 
@@ -27,19 +35,23 @@ class IncomeRepository(BaseRepository[Income]):
         return income
 
     def get_by_id(self, income_id: int) -> Optional[Income]:
-        return self._session.query(Income).options(
-            joinedload(Income.student),
-            joinedload(Income.class_)
-        ).filter(Income.id == income_id, Income.deleted_at.is_(None)).first()
+        """Return any non-deleted transaction, including VOIDED records."""
+        return (
+            self._session.query(Income)
+            .options(joinedload(Income.student), joinedload(Income.class_))
+            .filter(Income.id == income_id, Income.deleted_at.is_(None))
+            .first()
+        )
 
     def get_by_id_including_deleted(self, income_id: int) -> Optional[Income]:
-        return self._session.query(Income).options(
-            joinedload(Income.student),
-            joinedload(Income.class_)
-        ).filter(Income.id == income_id).first()
+        return (
+            self._session.query(Income)
+            .options(joinedload(Income.student), joinedload(Income.class_))
+            .filter(Income.id == income_id)
+            .first()
+        )
 
     def _apply_search(self, query, search_text: str):
-        """Search without excluding income rows whose student/class links are NULL."""
         search = f"%{search_text}%"
         return (
             query.outerjoin(Income.student)
@@ -49,13 +61,125 @@ class IncomeRepository(BaseRepository[Income]):
                     Income.note.ilike(search),
                     Income.payment_period.ilike(search),
                     Income.income_type.ilike(search),
+                    Income.payment_method.ilike(search),
                     Income.received_by.ilike(search),
+                    Income.status.ilike(search),
                     Student.full_name.ilike(search),
                     Student.student_code.ilike(search),
                     Class.name.ilike(search),
                 )
             )
         )
+
+    def _apply_filters(
+        self,
+        query,
+        *,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+        income_type: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        payment_period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
+        status: Optional[str] = Income.STATUS_ACTIVE,
+    ):
+        query = query.filter(Income.deleted_at.is_(None))
+
+        if status:
+            query = query.filter(Income.status == status)
+        if student_id is not None:
+            query = query.filter(Income.student_id == student_id)
+        if class_id is not None:
+            query = query.filter(Income.class_id == class_id)
+        if income_type:
+            query = query.filter(Income.income_type == income_type)
+        if payment_method:
+            query = query.filter(Income.payment_method == payment_method)
+        if payment_period:
+            query = query.filter(Income.payment_period == payment_period)
+        if finance_period_start:
+            query = query.filter(Income.finance_period_start == finance_period_start)
+        if date_from:
+            query = query.filter(Income.payment_date >= date_from)
+        if date_to:
+            query = query.filter(Income.payment_date <= date_to)
+        if search_text:
+            query = self._apply_search(query, search_text)
+        return query
+
+    def list_records(
+        self,
+        *,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+        income_type: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        payment_period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 20,
+        finance_period_start: Optional[date] = None,
+        status: Optional[str] = Income.STATUS_ACTIVE,
+        sort_by: str = "payment_date",
+        ascending: bool = False,
+    ) -> List[Income]:
+        query = self._session.query(Income).options(
+            joinedload(Income.student),
+            joinedload(Income.class_),
+        )
+        query = self._apply_filters(
+            query,
+            student_id=student_id,
+            class_id=class_id,
+            income_type=income_type,
+            payment_method=payment_method,
+            payment_period=payment_period,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            finance_period_start=finance_period_start,
+            status=status,
+        )
+
+        sort_column = self._SORT_COLUMNS.get(sort_by, Income.payment_date)
+        primary_order = asc(sort_column) if ascending else desc(sort_column)
+        query = query.order_by(primary_order, desc(Income.created_at), desc(Income.id))
+        return query.offset(max(0, offset)).limit(max(1, limit)).all()
+
+    def count_records(
+        self,
+        *,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+        income_type: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        payment_period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
+        status: Optional[str] = Income.STATUS_ACTIVE,
+    ) -> int:
+        query = self._session.query(Income)
+        query = self._apply_filters(
+            query,
+            student_id=student_id,
+            class_id=class_id,
+            income_type=income_type,
+            payment_method=payment_method,
+            payment_period=payment_period,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            finance_period_start=finance_period_start,
+            status=status,
+        )
+        return query.count()
 
     def list_active(
         self,
@@ -70,33 +194,29 @@ class IncomeRepository(BaseRepository[Income]):
         offset: int = 0,
         limit: int = 20,
         finance_period_start: Optional[date] = None,
+        sort_by: str = "payment_date",
+        ascending: bool = False,
     ) -> List[Income]:
-        query = self._session.query(Income).options(
-            joinedload(Income.student),
-            joinedload(Income.class_)
-        ).filter(Income.deleted_at.is_(None))
+        """Compatibility API used by live Finance calculations.
 
-        if student_id is not None:
-            query = query.filter(Income.student_id == student_id)
-        if class_id is not None:
-            query = query.filter(Income.class_id == class_id)
-        if income_type:
-            query = query.filter(Income.income_type == income_type)
-        if payment_method:
-            query = query.filter(Income.payment_method == payment_method)
-        if payment_period:
-            query = query.filter(Income.payment_period == payment_period)
-        if finance_period_start:
-            query = query.filter(Income.finance_period_start == finance_period_start)
-        if date_from:
-            query = query.filter(Income.payment_date >= date_from)
-        if date_to:
-            query = query.filter(Income.payment_date <= date_to)
-        if search_text:
-            query = self._apply_search(query, search_text)
-
-        query = query.order_by(desc(Income.payment_date), desc(Income.created_at))
-        return query.offset(offset).limit(limit).all()
+        ACTIVE means both not deleted and not voided.
+        """
+        return self.list_records(
+            student_id=student_id,
+            class_id=class_id,
+            income_type=income_type,
+            payment_method=payment_method,
+            payment_period=payment_period,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            offset=offset,
+            limit=limit,
+            finance_period_start=finance_period_start,
+            status=Income.STATUS_ACTIVE,
+            sort_by=sort_by,
+            ascending=ascending,
+        )
 
     def count_active(
         self,
@@ -110,26 +230,18 @@ class IncomeRepository(BaseRepository[Income]):
         search_text: Optional[str] = None,
         finance_period_start: Optional[date] = None,
     ) -> int:
-        query = self._session.query(Income).filter(Income.deleted_at.is_(None))
-        if student_id is not None:
-            query = query.filter(Income.student_id == student_id)
-        if class_id is not None:
-            query = query.filter(Income.class_id == class_id)
-        if income_type:
-            query = query.filter(Income.income_type == income_type)
-        if payment_method:
-            query = query.filter(Income.payment_method == payment_method)
-        if payment_period:
-            query = query.filter(Income.payment_period == payment_period)
-        if finance_period_start:
-            query = query.filter(Income.finance_period_start == finance_period_start)
-        if date_from:
-            query = query.filter(Income.payment_date >= date_from)
-        if date_to:
-            query = query.filter(Income.payment_date <= date_to)
-        if search_text:
-            query = self._apply_search(query, search_text)
-        return query.count()
+        return self.count_records(
+            student_id=student_id,
+            class_id=class_id,
+            income_type=income_type,
+            payment_method=payment_method,
+            payment_period=payment_period,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            finance_period_start=finance_period_start,
+            status=Income.STATUS_ACTIVE,
+        )
 
     def delete(self, income: Income) -> None:
         income.deleted_at = datetime.now()

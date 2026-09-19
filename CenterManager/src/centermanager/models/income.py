@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Income model - records income transactions.
-Now supports income not linked to student/class (nullable foreign keys).
+
+EP-FIN-06 adds an explicit lifecycle so voiding a financial transaction is
+separate from soft deletion. Transaction identity (student/class/type) remains
+stable after creation.
 """
 from __future__ import annotations
 
@@ -22,30 +25,54 @@ if TYPE_CHECKING:
 class Income(Base, TimestampMixin):
     __tablename__ = "incomes"
 
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_VOIDED = "VOIDED"
+
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    # For student-related income: student_id and class_id can be NULL for other income sources
-    student_id: Mapped[Optional[int]] = mapped_column(ForeignKey("students.id"), nullable=True)
-    class_id: Mapped[Optional[int]] = mapped_column(ForeignKey("classes.id"), nullable=True)
+    student_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("students.id"), nullable=True
+    )
+    class_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("classes.id"), nullable=True
+    )
 
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     income_type: Mapped[str] = mapped_column(String(50), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(50), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
     payment_period: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    # Canonical Finance period bucket derived from payment_date and the active
-    # FinancePeriod configuration effective on that date. Legacy payment_period
-    # remains as display/user-entered metadata for compatibility.
     finance_period_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     received_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Soft delete
+    # Financial lifecycle.
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=STATUS_ACTIVE,
+        server_default=STATUS_ACTIVE,
+    )
+    voided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    void_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Audit-safe tombstone. Rows are never hard-deleted by IncomeService.
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # Relationships (optional)
     student: Mapped[Optional[Student]] = relationship("Student", lazy="selectin")
     class_: Mapped[Optional[Class]] = relationship("Class", lazy="selectin")
 
+    @property
+    def is_active(self) -> bool:
+        return self.deleted_at is None and self.status == self.STATUS_ACTIVE
+
+    @property
+    def is_voided(self) -> bool:
+        return self.deleted_at is None and self.status == self.STATUS_VOIDED
+
     def __repr__(self) -> str:
-        return f"<Income(id={self.id}, student_id={self.student_id}, amount={self.amount})>"
+        return (
+            f"<Income(id={self.id}, student_id={self.student_id}, "
+            f"amount={self.amount}, status={self.status})>"
+        )
