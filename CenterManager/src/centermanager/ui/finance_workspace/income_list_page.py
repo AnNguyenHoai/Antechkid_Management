@@ -275,7 +275,6 @@ class IncomeListPage(QWidget):
         return {
             "income_type": self.type_combo.currentData() or None,
             "payment_method": self.method_combo.currentData() or None,
-            "finance_period_start": self._period_start,
             "date_from": date_from,
             "date_to": date_to,
             "search_text": self.search_bar.text().strip() or None,
@@ -302,6 +301,7 @@ class IncomeListPage(QWidget):
 
         items, total = self._income_service.list_incomes(
             **kwargs,
+            finance_period_start=self._period_start,
             page=self._current_page,
             per_page=self._page_size,
             sort_by=self._sort_by,
@@ -315,6 +315,7 @@ class IncomeListPage(QWidget):
             self._current_page = max_page
             items, total = self._income_service.list_incomes(
                 **kwargs,
+                finance_period_start=self._period_start,
                 page=self._current_page,
                 per_page=self._page_size,
                 sort_by=self._sort_by,
@@ -367,20 +368,26 @@ class IncomeListPage(QWidget):
         self._load_page()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
-        allowed = {
-            "payment_date",
-            "income_type",
-            "amount",
-            "payment_method",
-            "payment_period",
-            "received_by",
+        getters = {
+            "payment_date": lambda item: item.payment_date,
+            "income_type": lambda item: item.income_type or "",
+            "amount": lambda item: item.amount,
+            "payment_method": lambda item: item.payment_method or "",
+            "payment_period": lambda item: item.payment_period or "",
+            "received_by": lambda item: item.received_by or "",
         }
-        if key not in allowed:
+        getter = getters.get(key)
+        if getter is None:
             return
         self._sort_by = key
         self._sort_ascending = ascending
         self._current_page = 1
         self._load_page()
+        # Server-side sorting establishes the global order. This stable local
+        # sort preserves the legacy IncomeList contract for the loaded page
+        # without changing the server-side pagination semantics.
+        self._incomes.sort(key=getter, reverse=not ascending)
+        self._populate_table()
 
     def _on_row_double_clicked(self, row: int) -> None:
         if 0 <= row < len(self._incomes):
@@ -520,6 +527,7 @@ class IncomeListPage(QWidget):
         try:
             csv_text = self._income_service.export_incomes_csv(
                 **kwargs,
+                finance_period_start=self._period_start,
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
             )

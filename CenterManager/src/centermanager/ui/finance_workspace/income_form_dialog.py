@@ -87,6 +87,7 @@ class IncomeFormDialog(QDialog):
         self.type_combo = QComboBox()
         for value in ["Tuition", "Book", "Robot Kit", "Material", "Other"]:
             self.type_combo.addItem(value)
+        self.type_combo.currentTextChanged.connect(self._on_income_type_changed)
         form.addRow("Loại thu *", self.type_combo)
 
         self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
@@ -156,6 +157,16 @@ class IncomeFormDialog(QDialog):
         else:
             self.type_combo.setCurrentText("Other")
             self.type_combo.setEnabled(False)
+
+    def _on_income_type_changed(self, income_type: str) -> None:
+        """Keep the source selector consistent with Income ownership rules."""
+        if self._is_edit:
+            return
+        if income_type == "Other":
+            if self.source_combo.currentIndex() != 1:
+                self.source_combo.setCurrentIndex(1)
+        elif self.source_combo.currentIndex() != 0:
+            self.source_combo.setCurrentIndex(0)
 
     def _load_students(self) -> None:
         try:

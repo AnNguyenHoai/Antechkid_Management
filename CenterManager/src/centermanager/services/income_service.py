@@ -254,7 +254,7 @@ class IncomeService:
                 status=Income.STATUS_ACTIVE,
             )
             repo.add(income)
-            session.flush()
+            repo.flush()
             self._record_audit(
                 session,
                 income,
