@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-StudentFinancialWidget - displays financial summary and payment history for a student.
-Now uses real data from OutstandingService, supports multi-class, and is read-only.
+StudentFinancialWidget - read-only student finance summary and payment history.
+
+Finance owns money. This widget consumes canonical Finance read APIs only:
+OutstandingService for tuition totals and IncomeService for payment history.
+Both reads are constrained to the same canonical Finance period.
 """
 import logging
-from typing import Optional, List
 from datetime import date
+from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QSizePolicy, QScrollArea
 )
 
 from centermanager.services.income_service import IncomeService
@@ -19,8 +21,9 @@ from centermanager.services.student_service import StudentService
 from centermanager.services.class_service import ClassService
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.outstanding_service import OutstandingService
+from centermanager.services.finance_period_service import FinancePeriodService
 from centermanager.models.income import Income
-from centermanager.dto.outstanding_dto import StudentOutstandingSummary, OutstandingDTO
+from centermanager.dto.outstanding_dto import StudentOutstandingSummary
 from centermanager.ui.design_system.tokens import COLORS, SPACING, TYPOGRAPHY
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,8 @@ class StudentFinancialWidget(QWidget):
         class_service: ClassService,
         permission_service: PermissionService,
         outstanding_service: OutstandingService,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
+        finance_period_service: Optional[FinancePeriodService] = None,
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
@@ -48,6 +52,18 @@ class StudentFinancialWidget(QWidget):
         self._student_id: Optional[int] = None
         self._incomes: List[Income] = []
         self._summary: Optional[StudentOutstandingSummary] = None
+        self._requested_period_start: Optional[date] = None
+        self._requested_on_date: Optional[date] = None
+        self._resolved_period_start: Optional[date] = None
+        self._resolved_period_end: Optional[date] = None
+
+        # Keep existing composition roots stable while allowing the canonical
+        # period service to be injected explicitly by newer callers/tests.
+        self._finance_period_service = finance_period_service
+        if self._finance_period_service is None:
+            session_factory = getattr(self._income_service, "_session_factory", None)
+            if session_factory is not None:
+                self._finance_period_service = FinancePeriodService(session_factory)
 
         self._setup_ui()
         self._show_empty()
@@ -56,6 +72,12 @@ class StudentFinancialWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING['md'])
+
+        self.period_label = QLabel("Kỳ tài chính: --")
+        self.period_label.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 12px;"
+        )
+        layout.addWidget(self.period_label)
 
         # Summary cards
         summary_layout = QHBoxLayout()
@@ -78,8 +100,10 @@ class StudentFinancialWidget(QWidget):
 
         # Detail table for each class (multi-class)
         self.detail_table = QTableWidget()
-        self.detail_table.setColumnCount(4)
-        self.detail_table.setHorizontalHeaderLabels(["Lớp", "Học phí dự kiến", "Đã đóng", "Còn nợ"])
+        self.detail_table.setColumnCount(5)
+        self.detail_table.setHorizontalHeaderLabels([
+            "Lớp", "Học phí dự kiến", "Đã đóng", "Còn nợ", "Trạng thái"
+        ])
         self.detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.detail_table.verticalHeader().setVisible(False)
         self.detail_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -87,7 +111,7 @@ class StudentFinancialWidget(QWidget):
         self.detail_table.setMaximumHeight(150)
         layout.addWidget(self.detail_table)
 
-        # Open Finance button (replaces Collect Tuition)
+        # Open Finance button: navigation only; Student never mutates payments.
         btn_layout = QHBoxLayout()
         self.open_finance_btn = QPushButton("💰 Mở Finance Workspace")
         self.open_finance_btn.setStyleSheet(f"""
@@ -109,8 +133,6 @@ class StudentFinancialWidget(QWidget):
         """)
         self.open_finance_btn.setFixedHeight(40)
         self.open_finance_btn.clicked.connect(self.open_finance_clicked.emit)
-        # This is a navigation shortcut, not a permission boundary. Hide it for
-        # users who cannot enter Finance so they never hit a misleading popup.
         try:
             can_open_finance = self._permission_service.has_permission("finance.view")
             self.open_finance_btn.setVisible(bool(can_open_finance))
@@ -142,9 +164,6 @@ class StudentFinancialWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
-        # Check permission (only to show/hide button? But we keep button always visible)
-        # No need to disable because we removed collect tuition.
-
     def _create_summary_card(self, label: str, value: str) -> QFrame:
         card = QFrame()
         card.setStyleSheet(f"""
@@ -167,12 +186,16 @@ class StudentFinancialWidget(QWidget):
         return card
 
     def _show_empty(self) -> None:
+        self.table.clearSpans()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No payment records"))
         self.table.setSpan(0, 0, 1, 6)
+        self.table.setVisible(True)
+        self.detail_table.clearSpans()
         self.detail_table.setRowCount(1)
         self.detail_table.setItem(0, 0, QTableWidgetItem("No class enrollment"))
-        self.detail_table.setSpan(0, 0, 1, 4)
+        self.detail_table.setSpan(0, 0, 1, 5)
+        self.detail_table.setVisible(True)
         self.total_expected_label.setVisible(False)
         self.total_paid_label.setVisible(False)
         self.outstanding_label.setVisible(False)
@@ -184,19 +207,35 @@ class StudentFinancialWidget(QWidget):
         self.outstanding_label.setVisible(True)
         self.status_label.setVisible(True)
 
+    def set_finance_period(
+        self,
+        period_start: Optional[date] = None,
+        on_date: Optional[date] = None,
+    ) -> None:
+        """Set an optional canonical Finance-period context for this read view."""
+        self._requested_period_start = period_start
+        self._requested_on_date = on_date
+        if self._student_id is not None:
+            self.set_student(self._student_id)
+
     def set_student(self, student_id: int) -> None:
         self._student_id = student_id
         # Finance data is protected independently from the Student Workspace.
-        # Non-finance roles may still open student records, but must never invoke
-        # finance.view-protected services.  Permission denial is an expected
-        # authorization outcome, not an application error to log.
         if not self._can_view_finance():
             self._incomes = []
             self._summary = None
+            self._resolved_period_start = None
+            self._resolved_period_end = None
+            self._update_period_label()
             self._show_empty()
             return
-        self._load_incomes()
-        self._load_outstanding_summary()
+
+        target_date, period_start, period_end = self._resolve_finance_period_context()
+        self._resolved_period_start = period_start
+        self._resolved_period_end = period_end
+        self._update_period_label()
+        self._load_outstanding_summary(period_start, target_date)
+        self._load_incomes(period_start, period_end)
         self._update_ui()
 
     def _can_view_finance(self) -> bool:
@@ -206,31 +245,111 @@ class StudentFinancialWidget(QWidget):
             logger.exception("Failed to evaluate finance data permission")
             return False
 
-    def _load_incomes(self) -> None:
-        if self._student_id is None or not self._can_view_finance():
+    def _resolve_finance_period_context(
+        self,
+    ) -> Tuple[date, Optional[date], Optional[date]]:
+        """Resolve one canonical period shared by summary and payment history."""
+        target_date = self._requested_on_date or self._requested_period_start or date.today()
+        if self._finance_period_service is None:
+            return target_date, self._requested_period_start, None
+
+        try:
+            lookup_date = self._requested_period_start or target_date
+            config = self._finance_period_service.get_active_period(lookup_date)
+            if config is None:
+                return target_date, None, None
+            period_start, period_end = self._finance_period_service.get_period_bounds(
+                config.effective_from,
+                lookup_date,
+                config.duration_months,
+            )
+            return target_date, period_start, period_end
+        except Exception:
+            logger.exception("Failed to resolve Finance period for student financial view")
+            return target_date, self._requested_period_start, None
+
+    def _update_period_label(self) -> None:
+        if self._resolved_period_start is None:
+            self.period_label.setText("Kỳ tài chính: Chưa cấu hình")
+            return
+        if self._resolved_period_end is None:
+            self.period_label.setText(
+                f"Kỳ tài chính: từ {self._resolved_period_start:%d/%m/%Y}"
+            )
+            return
+        self.period_label.setText(
+            "Kỳ tài chính: "
+            f"{self._resolved_period_start:%d/%m/%Y} - "
+            f"{self._resolved_period_end:%d/%m/%Y}"
+        )
+
+    def _load_incomes(
+        self,
+        period_start: Optional[date],
+        period_end: Optional[date],
+    ) -> None:
+        if (
+            self._student_id is None
+            or not self._can_view_finance()
+            or period_start is None
+        ):
             self._incomes = []
             return
         try:
-            items, total = self._income_service.list_incomes(
+            # Ask for one row first to obtain the exact server count, then fetch
+            # that count. This removes the old magic per_page=1000 truncation.
+            first_page, total = self._income_service.list_incomes(
                 student_id=self._student_id,
                 page=1,
-                per_page=1000
+                per_page=1,
+                finance_period_start=period_start,
+                date_from=period_start,
+                date_to=period_end,
+                status=Income.STATUS_ACTIVE,
+                sort_by="payment_date",
+                ascending=False,
+            )
+            if total <= 1:
+                self._incomes = first_page
+                return
+            items, _ = self._income_service.list_incomes(
+                student_id=self._student_id,
+                page=1,
+                per_page=total,
+                finance_period_start=period_start,
+                date_from=period_start,
+                date_to=period_end,
+                status=Income.STATUS_ACTIVE,
+                sort_by="payment_date",
+                ascending=False,
             )
             self._incomes = items
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load incomes for student")
             self._incomes = []
 
-    def _load_outstanding_summary(self) -> None:
+    def _load_outstanding_summary(
+        self,
+        period_start: Optional[date],
+        target_date: date,
+    ) -> None:
         if self._student_id is None or not self._can_view_finance():
             self._summary = None
             return
         try:
-            self._summary = self._outstanding_service.get_student_summary(self._student_id)
+            self._summary = self._outstanding_service.get_student_summary(
+                self._student_id,
+                period_start=period_start,
+                on_date=target_date,
+            )
             if self._summary:
-                logger.info(f"Loaded outstanding summary for student {self._student_id}: "
-                            f"expected={self._summary.total_expected}, paid={self._summary.total_paid}")
-        except Exception as e:
+                logger.info(
+                    "Loaded outstanding summary for student %s: expected=%s, paid=%s",
+                    self._student_id,
+                    self._summary.total_expected,
+                    self._summary.total_paid,
+                )
+        except Exception:
             logger.exception("Failed to load outstanding summary")
             self._summary = None
 
@@ -262,7 +381,6 @@ class StudentFinancialWidget(QWidget):
             self.outstanding_label._value_widget.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.status_label._value_widget.setText(status_text)
         else:
-            # Hiển thị thông báo không có dữ liệu
             self.total_expected_label._value_widget.setText("Chưa có dữ liệu")
             self.total_expected_label._value_widget.setStyleSheet("color: #999;")
             self.total_paid_label._value_widget.setText("Chưa có dữ liệu")
@@ -279,20 +397,36 @@ class StudentFinancialWidget(QWidget):
             self.detail_table.setRowCount(len(self._summary.details))
             for row, detail in enumerate(self._summary.details):
                 self.detail_table.setItem(row, 0, QTableWidgetItem(detail.class_name))
-                self.detail_table.setItem(row, 1, QTableWidgetItem(f"{detail.expected_tuition:,.0f}"))
+                if detail.tuition_configured:
+                    expected_text = f"{detail.expected_tuition:,.0f}"
+                    outstanding_text = f"{detail.outstanding:,.0f}"
+                    status_text = detail.status
+                else:
+                    expected_text = "Chưa cấu hình"
+                    outstanding_text = "Chưa xác định"
+                    status_text = "Chưa cấu hình"
+                self.detail_table.setItem(row, 1, QTableWidgetItem(expected_text))
                 self.detail_table.setItem(row, 2, QTableWidgetItem(f"{detail.paid:,.0f}"))
-                self.detail_table.setItem(row, 3, QTableWidgetItem(f"{detail.outstanding:,.0f}"))
+                self.detail_table.setItem(row, 3, QTableWidgetItem(outstanding_text))
+                self.detail_table.setItem(row, 4, QTableWidgetItem(status_text))
             self.detail_table.setVisible(True)
         else:
             self.detail_table.setRowCount(1)
             self.detail_table.setItem(0, 0, QTableWidgetItem("Không có lớp học"))
-            self.detail_table.setSpan(0, 0, 1, 4)
+            self.detail_table.setSpan(0, 0, 1, 5)
+            self.detail_table.setVisible(True)
 
     def _update_payment_history(self) -> None:
         self.table.clearSpans()
-        self.table.setRowCount(len(self._incomes))
-        self.table.setVisible(len(self._incomes) > 0)
+        if not self._incomes:
+            self.table.setRowCount(1)
+            self.table.setItem(0, 0, QTableWidgetItem("No payment records"))
+            self.table.setSpan(0, 0, 1, 6)
+            self.table.setVisible(True)
+            return
 
+        self.table.setRowCount(len(self._incomes))
+        self.table.setVisible(True)
         for row, income in enumerate(self._incomes):
             self.table.setItem(row, 0, QTableWidgetItem(income.payment_date.strftime("%d/%m/%Y")))
             class_name = income.class_.name if income.class_ else "-"
@@ -305,5 +439,3 @@ class StudentFinancialWidget(QWidget):
     def refresh(self) -> None:
         if self._student_id is not None:
             self.set_student(self._student_id)
-# detail.status
-#  "Chưa cấu hình"
