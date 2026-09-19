@@ -3,7 +3,7 @@ Enrollment repository - data access for Enrollment entity.
 """
 from typing import List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, or_
 
 from centermanager.models.enrollment import Enrollment
@@ -55,15 +55,27 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         class_id: Optional[int] = None,
         search_text: Optional[str] = None,
         offset: int = 0,
-        limit: int = 100,
+        limit: Optional[int] = 100,
         course_name: Optional[str] = None,
         student_id: Optional[int] = None,
         period_start=None,
         period_end=None,
     ) -> Tuple[List[Enrollment], int]:
-        """List enrollments used by the Finance outstanding read model."""
-        query = self._session.query(Enrollment).join(Enrollment.student).filter(
-            Enrollment.class_id.isnot(None)
+        """List enrollments used by the Finance outstanding read model.
+
+        Student and class relationships are eagerly loaded because Outstanding is a
+        read model that needs both for every row. ``limit=None`` is reserved for
+        service-side derived filtering/pagination, where status is only known after
+        tuition and payment values have been calculated.
+        """
+        query = (
+            self._session.query(Enrollment)
+            .options(
+                joinedload(Enrollment.student),
+                joinedload(Enrollment.class_),
+            )
+            .join(Enrollment.student)
+            .filter(Enrollment.class_id.isnot(None))
         )
         if class_id is not None:
             query = query.filter(Enrollment.class_id == class_id)
@@ -86,7 +98,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
                 or_(Enrollment.start_date.is_(None), Enrollment.start_date <= period_end)
             )
         if search_text:
-            search = f"%{search_text}%"
+            search = f"%{search_text.strip()}%"
             query = query.filter(
                 or_(
                     Student.full_name.ilike(search),
@@ -95,8 +107,13 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
                     Enrollment.class_name.ilike(search),
                 )
             )
+
         total = query.count()
-        return query.offset(offset).limit(limit).all(), total
+        query = query.order_by(desc(Enrollment.created_at), desc(Enrollment.id))
+        query = query.offset(max(0, offset))
+        if limit is not None:
+            query = query.limit(max(1, limit))
+        return query.all(), total
 
     def get_by_class(self, class_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).filter(
@@ -104,7 +121,6 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         ).order_by(Enrollment.id).all()
 
     def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
-        from sqlalchemy.orm import joinedload
         return self._session.query(Enrollment).options(
             joinedload(Enrollment.student)
         ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
