@@ -170,14 +170,25 @@ class OutstandingListPage(QWidget):
     def _populate_table(self) -> None:
         data = []
         for item in self._items:
+            if item.tuition_configured:
+                expected_tuition = f"{item.expected_tuition:,.0f}"
+                outstanding = f"{item.outstanding:,.0f}"
+                status = item.status
+            else:
+                # A missing tuition configuration is unknown debt, not zero debt.
+                # Keep actual payments visible while refusing to invent an amount owed.
+                expected_tuition = "Chưa cấu hình"
+                outstanding = "Chưa xác định"
+                status = "Chưa cấu hình"
+
             data.append({
                 "student_code": item.student_code,
                 "student_name": item.student_name,
                 "class_name": item.class_name,
-                "expected_tuition": f"{item.expected_tuition:,.0f}",
+                "expected_tuition": expected_tuition,
                 "paid": f"{item.paid:,.0f}",
-                "outstanding": f"{item.outstanding:,.0f}",
-                "status": item.status,
+                "outstanding": outstanding,
+                "status": status,
                 "_id": item.student_id,
             })
         self.data_table.set_data(data, len(data))
