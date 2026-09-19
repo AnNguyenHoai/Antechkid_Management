@@ -34,6 +34,9 @@ class IncomeListPage(QWidget):
         self._notification_service = notification_service
         self._incomes = []
         self._write_enabled = False
+        self._period_start: Optional[date] = None
+        self._period_end: Optional[date] = None
+        self._period_configured = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -71,7 +74,7 @@ class IncomeListPage(QWidget):
             for month in range(1, 13):
                 period = f"Tháng {month}/{year}"; self.period_combo.addItem(period, period)
         self.period_combo.currentIndexChanged.connect(self._apply_filters)
-        filters.addWidget(QLabel("Kỳ:")); filters.addWidget(self.period_combo)
+        filters.addWidget(QLabel("Kỳ thu:")); filters.addWidget(self.period_combo)
         self.date_from_edit = QDateEdit(); self.date_from_edit.setCalendarPopup(True); self.date_from_edit.setDisplayFormat("dd/MM/yyyy"); self.date_from_edit.setDate(QDate.currentDate().addDays(-30)); self.date_from_edit.dateChanged.connect(self._apply_filters)
         filters.addWidget(QLabel("Từ:")); filters.addWidget(self.date_from_edit)
         self.date_to_edit = QDateEdit(); self.date_to_edit.setCalendarPopup(True); self.date_to_edit.setDisplayFormat("dd/MM/yyyy"); self.date_to_edit.setDate(QDate.currentDate()); self.date_to_edit.dateChanged.connect(self._apply_filters)
@@ -101,18 +104,81 @@ class IncomeListPage(QWidget):
         else:
             logger.warning("Finance notification fallback: %s", message)
 
-    def refresh(self) -> None:
+    @staticmethod
+    def _to_qdate(value: date) -> QDate:
+        return QDate(value.year, value.month, value.day)
+
+    def _reset_date_filters_to_period(self) -> None:
+        if self._period_start is None or self._period_end is None:
+            return
+        for widget, value in (
+            (self.date_from_edit, self._period_start),
+            (self.date_to_edit, self._period_end),
+        ):
+            previous = widget.blockSignals(True)
+            widget.setDate(self._to_qdate(value))
+            widget.blockSignals(previous)
+
+    def refresh(
+        self,
+        *_args,
+        target_date=None,
+        period_start=None,
+        period_end=None,
+        period_configured=None,
+        **_kwargs,
+    ) -> None:
+        del target_date
+        period_changed = (
+            period_start is not None
+            and period_end is not None
+            and (period_start != self._period_start or period_end != self._period_end)
+        )
+        if period_configured is not None:
+            self._period_configured = period_configured
+        if period_start is not None and period_end is not None:
+            self._period_start = period_start
+            self._period_end = period_end
+            if period_changed:
+                self._reset_date_filters_to_period()
+        elif period_configured is False:
+            self._period_start = None
+            self._period_end = None
+
         self.loading.setVisible(True)
-        try: self._apply_filters()
-        finally: self.loading.setVisible(False)
+        try:
+            self._apply_filters()
+        finally:
+            self.loading.setVisible(False)
+
+    def _effective_date_bounds(self):
+        user_from = self.date_from_edit.date().toPython()
+        user_to = self.date_to_edit.date().toPython()
+        if self._period_start is None or self._period_end is None:
+            return user_from, user_to
+        return max(user_from, self._period_start), min(user_to, self._period_end)
 
     def _apply_filters(self) -> None:
+        if self._period_configured is False:
+            self._incomes = []
+            self._populate_table()
+            return
+        date_from, date_to = self._effective_date_bounds()
+        if date_from > date_to:
+            self._incomes = []
+            self._populate_table()
+            return
         items, _ = self._income_service.list_incomes(
             income_type=self.type_combo.currentData() or None,
             payment_method=self.method_combo.currentData() or None,
             payment_period=self.period_combo.currentData() or None,
-            date_from=self.date_from_edit.date().toPython(), date_to=self.date_to_edit.date().toPython(),
-            search_text=self.search_bar.text().strip() or None, page=1, per_page=1000)
+            finance_period_start=self._period_start,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=self.search_bar.text().strip() or None,
+            page=1,
+            per_page=1000,
+        )
         self._incomes = items
         self._populate_table()
 
@@ -167,7 +233,11 @@ class IncomeListPage(QWidget):
 
     def _clear_filters(self) -> None:
         self.search_bar.clear(); self.type_combo.setCurrentIndex(0); self.method_combo.setCurrentIndex(0); self.period_combo.setCurrentIndex(0)
-        self.date_from_edit.setDate(QDate.currentDate().addDays(-30)); self.date_to_edit.setDate(QDate.currentDate()); self._apply_filters()
+        if self._period_start is not None and self._period_end is not None:
+            self._reset_date_filters_to_period()
+        else:
+            self.date_from_edit.setDate(QDate.currentDate().addDays(-30)); self.date_to_edit.setDate(QDate.currentDate())
+        self._apply_filters()
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
