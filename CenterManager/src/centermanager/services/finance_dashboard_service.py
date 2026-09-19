@@ -49,16 +49,25 @@ class FinanceDashboardService:
     def _resolve_dashboard_period(
         self,
         target_date: Optional[date] = None,
+        period_start: Optional[date] = None,
+        period_end: Optional[date] = None,
+        period_configured: Optional[bool] = None,
     ) -> Optional[Tuple[date, date, date]]:
-        """Resolve canonical period bounds and the last date used for actual cash data.
+        """Resolve canonical period bounds and the last date used for live cash data.
 
-        The current Finance period is capped at today so current-period KPIs do not
-        imply future activity. Historical periods use their complete canonical range.
-        When no FinancePeriodService is available, preserve the legacy current-month
-        contract used by lightweight callers and older tests.
+        FinanceWorkspaceShell owns the shared period. Explicit bounds supplied by
+        the shell always win, preventing Dashboard from independently resolving a
+        different period. The legacy resolver remains for older/lightweight callers.
         """
         today = self._get_today_date()
         target = target_date or today
+
+        if period_configured is False:
+            return None
+
+        if period_start is not None and period_end is not None:
+            query_end = today if period_start <= today <= period_end else period_end
+            return period_start, period_end, query_end
 
         if self._finance_period_service is None:
             start = date(today.year, today.month, 1)
@@ -83,7 +92,7 @@ class FinanceDashboardService:
     ) -> Dict[str, int]:
         if self._outstanding_service is None:
             return {}
-        if self._finance_period_service is None or period_start is None:
+        if period_start is None:
             return self._outstanding_service.get_outstanding_stats()
         return self._outstanding_service.get_outstanding_stats(
             period_start=period_start,
@@ -97,6 +106,29 @@ class FinanceDashboardService:
     @staticmethod
     def _period_label(period_start: date, period_end: date) -> str:
         return f"{period_start:%d/%m/%Y} - {period_end:%d/%m/%Y}"
+
+    @staticmethod
+    def _build_cash_vs_bank(
+        revenue_by_method: Dict[str, float],
+        expense_by_method: Dict[str, float],
+    ) -> Dict[str, Dict[str, float]]:
+        """Return service-owned Cash/Bank inflow, outflow and net comparison."""
+        cash_income = float(revenue_by_method.get("Cash", 0.0))
+        cash_expense = float(expense_by_method.get("Cash", 0.0))
+        bank_income = float(revenue_by_method.get("Bank", 0.0))
+        bank_expense = float(expense_by_method.get("Bank", 0.0))
+        return {
+            "Cash": {
+                "income": cash_income,
+                "expense": cash_expense,
+                "net": cash_income - cash_expense,
+            },
+            "Bank": {
+                "income": bank_income,
+                "expense": bank_expense,
+                "net": bank_income - bank_expense,
+            },
+        }
 
     # ---- Revenue ----
 
@@ -211,10 +243,21 @@ class FinanceDashboardService:
             "Other": result.get("Other", 0.0),
         }
 
-    def get_dashboard_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
+    def get_dashboard_data(
+        self,
+        target_date: Optional[date] = None,
+        period_start: Optional[date] = None,
+        period_end: Optional[date] = None,
+        period_configured: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         today = self._get_today_date()
         target = target_date or today
-        period = self._resolve_dashboard_period(target)
+        period = self._resolve_dashboard_period(
+            target,
+            period_start=period_start,
+            period_end=period_end,
+            period_configured=period_configured,
+        )
 
         if period is None:
             empty_methods = self._empty_payment_methods()
@@ -237,36 +280,45 @@ class FinanceDashboardService:
                 "expense_by_method_period": dict(empty_methods),
                 "revenue_by_method_month": dict(empty_methods),
                 "expense_by_method_month": dict(empty_methods),
+                "cash_vs_bank": self._build_cash_vs_bank(empty_methods, empty_methods),
                 "total_outstanding": 0,
                 "students_with_debt": 0,
                 "unconfigured_tuition_count": 0,
             }
 
-        period_start, period_end, query_end = period
+        resolved_period_start, resolved_period_end, query_end = period
         revenue_by_method = self.get_revenue_by_payment_method(
-            period_start,
+            resolved_period_start,
             query_end,
-            finance_period_start=(
-                period_start if self._finance_period_service is not None else None
-            ),
+            finance_period_start=resolved_period_start,
         )
-        expense_by_method = self.get_expense_by_payment_method(period_start, query_end)
+        expense_by_method = self.get_expense_by_payment_method(
+            resolved_period_start, query_end
+        )
         revenue_period = sum(revenue_by_method.values())
         expense_period = sum(expense_by_method.values())
-        stats = self._get_outstanding_stats(period_start, target)
+        stats = self._get_outstanding_stats(resolved_period_start, target)
 
-        if self._finance_period_service is None:
+        # When an explicit shared period is supplied it is authoritative even if
+        # this service was constructed without FinancePeriodService.
+        if self._finance_period_service is None and period_start is None:
             recent_income = self.get_recent_income()
             recent_expense = self.get_recent_expense()
         else:
-            recent_income = self._get_recent_income_for_period(period_start, query_end)
-            recent_expense = self._get_recent_expense_for_period(period_start, query_end)
+            recent_income = self._get_recent_income_for_period(
+                resolved_period_start, query_end
+            )
+            recent_expense = self._get_recent_expense_for_period(
+                resolved_period_start, query_end
+            )
 
         return {
             "period_configured": True,
-            "period_start": period_start,
-            "period_end": period_end,
-            "period_label": self._period_label(period_start, period_end),
+            "period_start": resolved_period_start,
+            "period_end": resolved_period_end,
+            "period_label": self._period_label(
+                resolved_period_start, resolved_period_end
+            ),
             "selected_target_date": target,
             "revenue_today": self.get_revenue_today(),
             "revenue_period": revenue_period,
@@ -281,6 +333,9 @@ class FinanceDashboardService:
             "expense_by_method_period": expense_by_method,
             "revenue_by_method_month": revenue_by_method,
             "expense_by_method_month": expense_by_method,
+            "cash_vs_bank": self._build_cash_vs_bank(
+                revenue_by_method, expense_by_method
+            ),
             "total_outstanding": stats.get("total_outstanding", 0),
             "students_with_debt": stats.get("total_students_with_debt", 0),
             "unconfigured_tuition_count": stats.get("total_unconfigured_tuition", 0),
@@ -299,6 +354,7 @@ class FinanceDashboardService:
         return mapping.get(value, "Other")
 
     def get_dashboard_snapshot(self, target_date: Optional[date] = None):
+        """Backward-compatible snapshot API used by older dashboard callers/tests."""
         from types import SimpleNamespace
 
         target = target_date or self._get_today_date()
@@ -319,16 +375,20 @@ class FinanceDashboardService:
                 period_configured=False,
             )
 
-        period_start, period_end, query_end = period
+        resolved_period_start, resolved_period_end, query_end = period
         revenue = self.get_revenue_by_payment_method(
-            period_start,
+            resolved_period_start,
             query_end,
             finance_period_start=(
-                period_start if self._finance_period_service is not None else None
+                resolved_period_start
+                if self._finance_period_service is not None
+                else None
             ),
         )
-        expense = self.get_expense_by_payment_method(period_start, query_end)
-        stats = self._get_outstanding_stats(period_start, target)
+        expense = self.get_expense_by_payment_method(
+            resolved_period_start, query_end
+        )
+        stats = self._get_outstanding_stats(resolved_period_start, target)
         return SimpleNamespace(
             cash_in_month=revenue.get("Cash", 0),
             bank_in_month=revenue.get("Bank", 0),
@@ -339,7 +399,7 @@ class FinanceDashboardService:
             total_outstanding=stats.get("total_outstanding", 0),
             students_with_debt=stats.get("total_students_with_debt", 0),
             unconfigured_tuition_count=stats.get("total_unconfigured_tuition", 0),
-            period_start=period_start,
-            period_end=period_end,
+            period_start=resolved_period_start,
+            period_end=resolved_period_end,
             period_configured=True,
         )
