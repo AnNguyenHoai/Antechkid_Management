@@ -1,24 +1,32 @@
 # -*- coding: utf-8 -*-
-"""
-IncomeFormDialog - create or edit income, supporting both student and other sources.
-Now with improved amount input UX (clear on focus, restore on blur if empty).
-"""
+"""Create/edit Income dialog with immutable transaction identity in edit mode."""
 import logging
 from datetime import date
 from typing import Optional
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
-    QComboBox, QDoubleSpinBox, QPushButton, QHBoxLayout,
-    QMessageBox, QWidget, QLabel
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from centermanager.services.income_service import IncomeService, IncomeValidationError
-from centermanager.services.student_service import StudentService
-from centermanager.services.class_service import ClassService
 from centermanager.core.current_user import get_current_user
+from centermanager.services.class_service import ClassService
+from centermanager.services.income_service import (
+    IncomeService,
+    IncomeValidationError,
+)
+from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +37,7 @@ class IncomeFormDialog(QDialog):
         student_service: StudentService,
         class_service: ClassService,
         income_id: Optional[int] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
@@ -38,7 +46,7 @@ class IncomeFormDialog(QDialog):
         self._income_id = income_id
         self._is_edit = income_id is not None
 
-        self.setWindowTitle("Edit Income" if self._is_edit else "Add Income")
+        self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(550)
         self.setModal(True)
 
@@ -52,15 +60,15 @@ class IncomeFormDialog(QDialog):
 
         form = QFormLayout()
         form.setSpacing(8)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
 
-        # ---- Source selection ----
         self.source_combo = QComboBox()
         self.source_combo.addItems(["Từ học sinh", "Nguồn khác"])
         self.source_combo.currentIndexChanged.connect(self._on_source_changed)
         form.addRow("Nguồn thu *", self.source_combo)
 
-        # ---- Student and Class ----
         self.student_combo = QComboBox()
         self._load_students()
         form.addRow("Học sinh *", self.student_combo)
@@ -69,19 +77,18 @@ class IncomeFormDialog(QDialog):
         self._load_classes()
         form.addRow("Lớp học *", self.class_combo)
 
-        # ---- Other source description ----
         self.other_source_edit = QLineEdit()
-        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng...")
+        self.other_source_edit.setPlaceholderText(
+            "Ví dụ: Tiền quyên góp, Lãi ngân hàng..."
+        )
         self.other_source_edit.setVisible(False)
         form.addRow("Mô tả nguồn khác", self.other_source_edit)
 
-        # ---- Income fields (common) ----
         self.type_combo = QComboBox()
-        for t in ["Tuition", "Book", "Robot Kit", "Material", "Other"]:
-            self.type_combo.addItem(t)
+        for value in ["Tuition", "Book", "Robot Kit", "Material", "Other"]:
+            self.type_combo.addItem(value)
         form.addRow("Loại thu *", self.type_combo)
 
-        # Amount with improved UX
         self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
         form.addRow("Số tiền *", self.amount_spin)
@@ -96,14 +103,16 @@ class IncomeFormDialog(QDialog):
         self.date_edit.setDate(QDate.currentDate())
         form.addRow("Ngày thu *", self.date_edit)
 
+        # Legacy display metadata only. Canonical Finance period is always
+        # resolved by IncomeService from payment_date.
         self.period_combo = QComboBox()
-        self.period_combo.addItem("", "")  # empty
+        self.period_combo.addItem("", "")
         current_year = date.today().year
         for year in range(current_year - 1, current_year + 1):
             for month in range(1, 13):
                 period = f"Tháng {month}/{year}"
                 self.period_combo.addItem(period, period)
-        form.addRow("Kỳ thanh toán", self.period_combo)
+        form.addRow("Kỳ thanh toán (ghi chú)", self.period_combo)
 
         self.received_by_edit = QLineEdit()
         current_user = get_current_user()
@@ -118,12 +127,11 @@ class IncomeFormDialog(QDialog):
 
         layout.addLayout(form)
 
-        # ---- Buttons ----
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("Lưu")
         self.save_btn.setFixedWidth(100)
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Hủy")
         self.cancel_btn.setFixedWidth(100)
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
@@ -131,126 +139,136 @@ class IncomeFormDialog(QDialog):
 
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
-
-        # Initial state
         self._on_source_changed(0)
 
-    def _on_amount_focus_in(self, event):
-        """Clear amount field when focused."""
-        spin = self.amount_spin
-        if spin.value() == 0:
-            spin.lineEdit().clear()
-        super(spin.lineEdit().__class__, spin.lineEdit()).focusInEvent(event)
-
-    def _on_amount_focus_out(self, event):
-        """Restore 0 if amount is empty or blank."""
-        spin = self.amount_spin
-        text = spin.lineEdit().text().strip()
-        if text == "":
-            spin.setValue(0)
-        super(spin.lineEdit().__class__, spin.lineEdit()).focusOutEvent(event)
-
     def _on_source_changed(self, index: int) -> None:
-        is_student = (index == 0)
+        is_student = index == 0
         self.student_combo.setVisible(is_student)
         self.class_combo.setVisible(is_student)
         self.other_source_edit.setVisible(not is_student)
-        if not is_student:
-            self.student_combo.setCurrentIndex(-1)
-            self.class_combo.setCurrentIndex(-1)
-            self.other_source_edit.clear()
+
+        if self._is_edit:
+            return
+        if is_student:
+            self.type_combo.setEnabled(True)
+            if self.type_combo.currentText() == "Other":
+                self.type_combo.setCurrentText("Tuition")
         else:
-            self.other_source_edit.clear()
+            self.type_combo.setCurrentText("Other")
+            self.type_combo.setEnabled(False)
 
     def _load_students(self) -> None:
         try:
             students = self._student_service.list_students()
             self.student_combo.clear()
-            for s in students:
-                self.student_combo.addItem(f"{s.full_name} ({s.student_code})", s.id)
-        except Exception as e:
+            for student in students:
+                self.student_combo.addItem(
+                    f"{student.full_name} ({student.student_code})",
+                    student.id,
+                )
+        except Exception:
             logger.exception("Error loading students")
 
     def _load_classes(self) -> None:
         try:
             classes = self._class_service.list_classes()
             self.class_combo.clear()
-            for c in classes:
-                self.class_combo.addItem(c.name, c.id)
-        except Exception as e:
+            for class_obj in classes:
+                self.class_combo.addItem(class_obj.name, class_obj.id)
+        except Exception:
             logger.exception("Error loading classes")
+
+    def _lock_identity_fields(self) -> None:
+        # Source/student/class/type are transaction identity. EP-FIN-06 keeps
+        # them immutable after creation.
+        self.source_combo.setEnabled(False)
+        self.student_combo.setEnabled(False)
+        self.class_combo.setEnabled(False)
+        self.type_combo.setEnabled(False)
+        self.other_source_edit.setEnabled(False)
 
     def _load_income(self) -> None:
         try:
             income = self._income_service.get_income(self._income_id)
-            # Source
             if income.student_id is not None:
                 self.source_combo.setCurrentIndex(0)
-                idx = self.student_combo.findData(income.student_id)
-                if idx >= 0:
-                    self.student_combo.setCurrentIndex(idx)
-                idx2 = self.class_combo.findData(income.class_id)
-                if idx2 >= 0:
-                    self.class_combo.setCurrentIndex(idx2)
+                student_index = self.student_combo.findData(income.student_id)
+                if student_index >= 0:
+                    self.student_combo.setCurrentIndex(student_index)
+                class_index = self.class_combo.findData(income.class_id)
+                if class_index >= 0:
+                    self.class_combo.setCurrentIndex(class_index)
             else:
                 self.source_combo.setCurrentIndex(1)
                 self.other_source_edit.setText(income.note or "")
-            self._on_source_changed(self.source_combo.currentIndex())
 
-            # Common fields
-            idx3 = self.type_combo.findText(income.income_type)
-            if idx3 >= 0:
-                self.type_combo.setCurrentIndex(idx3)
+            type_index = self.type_combo.findText(income.income_type)
+            if type_index >= 0:
+                self.type_combo.setCurrentIndex(type_index)
             self.amount_spin.setValue(income.amount)
-            idx4 = self.method_combo.findText(income.payment_method)
-            if idx4 >= 0:
-                self.method_combo.setCurrentIndex(idx4)
-            qdate = QDate(income.payment_date.year, income.payment_date.month, income.payment_date.day)
-            self.date_edit.setDate(qdate)
+
+            method_index = self.method_combo.findText(income.payment_method)
+            if method_index >= 0:
+                self.method_combo.setCurrentIndex(method_index)
+
+            self.date_edit.setDate(
+                QDate(
+                    income.payment_date.year,
+                    income.payment_date.month,
+                    income.payment_date.day,
+                )
+            )
             if income.payment_period:
-                idx5 = self.period_combo.findData(income.payment_period)
-                if idx5 >= 0:
-                    self.period_combo.setCurrentIndex(idx5)
-                else:
-                    self.period_combo.addItem(income.payment_period, income.payment_period)
-                    self.period_combo.setCurrentIndex(self.period_combo.count() - 1)
+                period_index = self.period_combo.findData(income.payment_period)
+                if period_index < 0:
+                    self.period_combo.addItem(
+                        income.payment_period, income.payment_period
+                    )
+                    period_index = self.period_combo.count() - 1
+                self.period_combo.setCurrentIndex(period_index)
+
             self.received_by_edit.setText(income.received_by or "")
-            # Note
-            if income.student_id is None:
-                self.note_edit.setText("")  # note will be saved as description
-            else:
-                self.note_edit.setText(income.note or "")
-        except Exception as e:
-            logger.exception(f"Error loading income {self._income_id} for edit")
-            QMessageBox.critical(self, "Lỗi", f"Không thể tải dữ liệu thu nhập: {str(e)}")
+            self.note_edit.setText(income.note or "")
+            self._on_source_changed(self.source_combo.currentIndex())
+            self._lock_identity_fields()
+        except Exception as exc:
+            logger.exception("Error loading income %s for edit", self._income_id)
+            QMessageBox.critical(
+                self,
+                "Lỗi",
+                f"Không thể tải dữ liệu thu nhập: {exc}",
+            )
             self.reject()
 
-    def _save(self) -> None:
+    def _create_identity_payload(self):
         source_type = self.source_combo.currentText()
         if source_type == "Từ học sinh":
             student_id = self.student_combo.currentData()
             class_id = self.class_combo.currentData()
-            note = self.note_edit.text().strip() or None
             if not student_id or not class_id:
-                QMessageBox.warning(self, "Lỗi", "Vui lòng chọn học sinh và lớp học.")
-                return
-        else:
-            student_id = None
-            class_id = None
-            description = self.other_source_edit.text().strip()
-            if not description:
-                QMessageBox.warning(self, "Lỗi", "Vui lòng nhập mô tả nguồn thu.")
-                return
-            note = f"Nguồn khác: {description}"
-            extra_note = self.note_edit.text().strip()
-            if extra_note:
-                note += f" ({extra_note})"
+                raise IncomeValidationError(
+                    "Vui lòng chọn học sinh và lớp học."
+                )
+            note = self.note_edit.text().strip() or None
+            return student_id, class_id, self.type_combo.currentText(), note
 
-        income_type = self.type_combo.currentText()
+        description = self.other_source_edit.text().strip()
+        if not description:
+            raise IncomeValidationError("Vui lòng nhập mô tả nguồn thu.")
+        note = f"Nguồn khác: {description}"
+        extra_note = self.note_edit.text().strip()
+        if extra_note:
+            note += f" ({extra_note})"
+        return None, None, "Other", note
+
+    def _save(self) -> None:
         amount = self.amount_spin.value()
         if amount <= 0:
-            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
+            QMessageBox.warning(
+                self, "Lỗi", "Số tiền phải lớn hơn 0."
+            )
             return
+
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
         payment_period = self.period_combo.currentData() or None
@@ -258,15 +276,20 @@ class IncomeFormDialog(QDialog):
 
         try:
             if self._is_edit:
+                # Identity fields are intentionally not passed to update_income.
                 self._income_service.update_income(
                     income_id=self._income_id,
                     amount=amount,
                     payment_method=payment_method,
                     payment_date=payment_date,
                     payment_period=payment_period,
-                    note=note,
+                    received_by=received_by,
+                    note=self.note_edit.text().strip() or None,
                 )
             else:
+                student_id, class_id, income_type, note = (
+                    self._create_identity_payload()
+                )
                 self._income_service.create_income(
                     student_id=student_id,
                     class_id=class_id,
@@ -279,10 +302,10 @@ class IncomeFormDialog(QDialog):
                     note=note,
                 )
             self.accept()
-        except IncomeValidationError as e:
-            QMessageBox.warning(self, "Lỗi xác thực", str(e))
-        except Exception as e:
+        except IncomeValidationError as exc:
+            QMessageBox.warning(self, "Lỗi xác thực", str(exc))
+        except Exception:
             logger.exception("Error saving income")
-            QMessageBox.critical(self, "Lỗi", "Đã xảy ra lỗi không mong muốn.")
-# def _on_income_type_changed
-# if income_type == "Other"
+            QMessageBox.critical(
+                self, "Lỗi", "Đã xảy ra lỗi không mong muốn."
+            )
