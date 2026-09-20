@@ -74,6 +74,27 @@ class AttendanceService:
             return False
         return True
 
+    def _is_student_eligible_for_session(
+        self,
+        enrollment_repo: Any,
+        student_id: int,
+        class_id: int,
+        scheduled_date: Any,
+    ) -> bool:
+        """Use historical Enrollment dates when available, with legacy provider compatibility."""
+        history_getter = getattr(enrollment_repo, "get_by_student_and_class", None)
+        if scheduled_date is not None and callable(history_getter):
+            enrollments = history_getter(student_id, class_id)
+            return any(
+                self._enrollment_covers_session_date(enrollment, scheduled_date)
+                for enrollment in enrollments
+            )
+
+        # Compatibility for lightweight injected providers that expose the older
+        # ``exists`` seam only. Production repositories take the historical path.
+        exists = getattr(enrollment_repo, "exists", None)
+        return bool(callable(exists) and exists(student_id, class_id))
+
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
         with self._session_factory() as session:
             session_repo = self._repository_provider.sessions(session)
@@ -81,10 +102,11 @@ class AttendanceService:
             if not session_obj:
                 return False
             enroll_repo = self._repository_provider.enrollments(session)
-            enrollments = enroll_repo.get_by_student_and_class(student_id, session_obj.class_id)
-            return any(
-                self._enrollment_covers_session_date(enrollment, session_obj.scheduled_date)
-                for enrollment in enrollments
+            return self._is_student_eligible_for_session(
+                enroll_repo,
+                student_id,
+                session_obj.class_id,
+                getattr(session_obj, "scheduled_date", None),
             )
 
     @require_permission("attendance.create")
@@ -236,16 +258,11 @@ class AttendanceService:
                 # Validate the complete sheet against the roster that belonged to
                 # this class on the Session date, not only today's ACTIVE roster.
                 for student_id in normalized_rows:
-                    enrollments = enrollment_repo.get_by_student_and_class(
+                    if not self._is_student_eligible_for_session(
+                        enrollment_repo,
                         student_id,
                         session_obj.class_id,
-                    )
-                    if not any(
-                        self._enrollment_covers_session_date(
-                            enrollment,
-                            session_obj.scheduled_date,
-                        )
-                        for enrollment in enrollments
+                        getattr(session_obj, "scheduled_date", None),
                     ):
                         raise ValueError(
                             f"Student {student_id} is not enrolled in this class for this session date."
@@ -329,14 +346,19 @@ class AttendanceService:
             enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(
                 session_obj.class_id
             )
+            scheduled_date = getattr(session_obj, "scheduled_date", None)
+            if scheduled_date is None:
+                return [
+                    enrollment.student
+                    for enrollment in enrollments
+                    if enrollment.student is not None
+                    and getattr(enrollment, "status", None) == "ACTIVE"
+                ]
             return [
                 enrollment.student
                 for enrollment in enrollments
                 if enrollment.student is not None
-                and self._enrollment_covers_session_date(
-                    enrollment,
-                    session_obj.scheduled_date,
-                )
+                and self._enrollment_covers_session_date(enrollment, scheduled_date)
             ]
 
     @require_permission("attendance.view")
