@@ -3,7 +3,7 @@
 SessionAttendanceWidget - Attendance management for a specific session.
 """
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -32,6 +32,7 @@ class SessionAttendanceWidget(QWidget):
     ) -> None:
         super().__init__(parent)
         self._attendance_service = attendance_service
+        # Kept for constructor compatibility with the existing Session composition.
         self._class_service = class_service
         self._session_id: Optional[int] = None
         self._class_id: Optional[int] = None
@@ -39,8 +40,11 @@ class SessionAttendanceWidget(QWidget):
         self._status_combos: Dict[int, QComboBox] = {}
         self._time_edits: Dict[int, QLineEdit] = {}
         self._note_edits: Dict[int, QLineEdit] = {}
+        self._write_guard: Optional[Callable[[], bool]] = None
+        self._notification_service: Optional[Any] = None
 
         self._setup_ui()
+        self._apply_write_state()
         self._show_empty()
 
     def _setup_ui(self) -> None:
@@ -100,6 +104,49 @@ class SessionAttendanceWidget(QWidget):
         # Spacer
         layout.addStretch()
 
+    def set_write_guard(
+        self,
+        write_guard: Callable[[], bool],
+        notification_service: Optional[Any] = None,
+    ) -> None:
+        """Bind the live collaboration WRITE check owned by the parent workspace."""
+        self._write_guard = write_guard
+        self._notification_service = notification_service
+        self._apply_write_state()
+
+    def _can_write(self) -> bool:
+        if self._write_guard is None:
+            return False
+        try:
+            return bool(self._write_guard())
+        except Exception:
+            logger.exception("Attendance WRITE guard failed")
+            return False
+
+    def _apply_write_state(self) -> None:
+        enabled = self._can_write()
+        self.mark_all_btn.setEnabled(enabled)
+        self.save_btn.setEnabled(enabled)
+        for combo in self._status_combos.values():
+            combo.setEnabled(enabled)
+        for line_edit in self._time_edits.values():
+            line_edit.setEnabled(enabled)
+        for line_edit in self._note_edits.values():
+            line_edit.setEnabled(enabled)
+
+    def refresh_write_state(self) -> None:
+        self._apply_write_state()
+
+    def _notify_write_required(self) -> None:
+        message = "You must be in WRITE mode to save attendance."
+        if self._notification_service is not None:
+            try:
+                self._notification_service.notify(message, "warning")
+                return
+            except Exception:
+                logger.exception("Attendance WRITE warning notification failed")
+        QMessageBox.warning(self, "Read-only", message)
+
     def _show_empty(self) -> None:
         self.table.clearSpans()
         self.table.setRowCount(1)
@@ -109,6 +156,7 @@ class SessionAttendanceWidget(QWidget):
         self._status_combos.clear()
         self._time_edits.clear()
         self._note_edits.clear()
+        self._apply_write_state()
 
     def set_session(self, session_id: int, class_id: int) -> None:
         """Set the session and load attendance data."""
@@ -122,13 +170,9 @@ class SessionAttendanceWidget(QWidget):
             return
 
         try:
-            # Get students enrolled in the class
-            class_obj = self._class_service.get_class_with_details(self._class_id)
-            if not class_obj or not class_obj.enrollments:
-                self._show_no_students()
-                return
-
-            self._students = [e.student for e in class_obj.enrollments if e.student]
+            # Session owns Attendance. Roster eligibility is resolved by the
+            # Attendance service for the Session date, not by today's class roster.
+            self._students = self._attendance_service.get_roster_for_session(self._session_id)
             if not self._students:
                 self._show_no_students()
                 return
@@ -147,14 +191,15 @@ class SessionAttendanceWidget(QWidget):
     def _show_no_students(self) -> None:
         self.table.clearSpans()
         self.table.setRowCount(1)
-        self.table.setItem(0, 0, QTableWidgetItem("No students enrolled in this class"))
+        self.table.setItem(0, 0, QTableWidgetItem("No students enrolled for this session date"))
         self.table.setSpan(0, 0, 1, 4)
         self.summary_label.setText("")
         self._status_combos.clear()
         self._time_edits.clear()
         self._note_edits.clear()
+        self._apply_write_state()
 
-    def _populate_table(self, att_map: Dict[int, any]) -> None:
+    def _populate_table(self, att_map: Dict[int, Any]) -> None:
         self.table.clearSpans()
         self.table.setRowCount(len(self._students))
         self._status_combos.clear()
@@ -198,6 +243,8 @@ class SessionAttendanceWidget(QWidget):
             self.table.setCellWidget(row, 3, note_edit)
             self._note_edits[row] = note_edit
 
+        self._apply_write_state()
+
     def _update_summary(self, attendances: List) -> None:
         try:
             summary = self._attendance_service.get_summary_for_session(self._session_id)
@@ -222,6 +269,12 @@ class SessionAttendanceWidget(QWidget):
                 combo.setCurrentIndex(idx)
 
     def _save_attendance(self) -> None:
+        # Runtime guard is authoritative even if the visual WRITE projection became stale.
+        if not self._can_write():
+            self._apply_write_state()
+            self._notify_write_required()
+            return
+
         if self._session_id is None or not self._students:
             QMessageBox.warning(self, "Error", "No session or students to save.")
             return
@@ -256,3 +309,5 @@ class SessionAttendanceWidget(QWidget):
     def refresh(self) -> None:
         if self._session_id is not None and self._class_id is not None:
             self._load_data()
+        else:
+            self._apply_write_state()
