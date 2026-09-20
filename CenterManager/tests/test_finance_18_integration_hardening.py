@@ -39,7 +39,16 @@ def test_finance_lists_have_real_sort_handlers_and_safe_notification_fallback():
     income = (ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "income_list_page.py").read_text(encoding="utf-8")
     expense = (ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "expense_list_page.py").read_text(encoding="utf-8")
     assert "def _on_sort" in income and "self._incomes.sort" in income
-    assert "def _on_sort" in expense and "self._expenses.sort" in expense
+
+    # Income still sorts the already-loaded list locally. EP-FIN-11 moved
+    # Expense to server-side sorting so the handler must update the requested
+    # sort and reload the page instead of sorting the current page in memory.
+    assert "def _on_sort" in expense
+    assert "self._sort_by, self._sort_ascending, self._current_page = key, ascending, 1" in expense
+    assert "sort_by=self._sort_by" in expense
+    assert "ascending=self._sort_ascending" in expense
+    assert "self._expenses.sort" not in expense
+
     assert "def _notify" in income and "def _notify" in expense
 
 
