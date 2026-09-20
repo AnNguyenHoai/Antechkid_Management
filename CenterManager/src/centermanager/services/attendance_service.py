@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Optional, TYPE_CHECKING, Any
+from datetime import datetime, time
+from typing import List, Dict, Optional, TYPE_CHECKING, Any, Tuple
 
 if TYPE_CHECKING:
     from centermanager.services.report_policy import ReportPolicy
@@ -42,6 +43,24 @@ class AttendanceService:
         if status not in valid:
             raise ValueError(f"Invalid status. Must be one of: {', '.join(valid)}")
         return status
+
+    @staticmethod
+    def _normalize_arrival_time(value: Any) -> Optional[time]:
+        """Normalize UI/service input to the model's canonical ``datetime.time`` type."""
+        if value is None:
+            return None
+        if isinstance(value, time):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            for fmt in ("%H:%M", "%H:%M:%S"):
+                try:
+                    return datetime.strptime(text, fmt).time()
+                except ValueError:
+                    continue
+        raise ValueError("Arrival time must use HH:MM or HH:MM:SS.")
 
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
         with self._session_factory() as session:
@@ -115,6 +134,144 @@ class AttendanceService:
     def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
         return None
 
+    def _normalize_session_rows(
+        self,
+        attendance_rows: Dict[int, Dict[str, Any]],
+    ) -> Dict[int, Dict[str, Any]]:
+        normalized: Dict[int, Dict[str, Any]] = {}
+        for raw_student_id, raw in attendance_rows.items():
+            student_id = int(raw_student_id)
+            if not isinstance(raw, dict):
+                raise ValueError(f"Attendance row for student {student_id} must be a mapping.")
+            status = self._validate_status(str(raw.get("status", "")))
+            note = raw.get("teacher_note")
+            if note is not None:
+                note = str(note).strip() or None
+            normalized[student_id] = {
+                "status": status,
+                "arrival_time": self._normalize_arrival_time(raw.get("arrival_time")),
+                "teacher_note": note,
+            }
+        return normalized
+
+    def _publish_session_save_side_effects(
+        self,
+        session_id: int,
+        changes: List[Tuple[int, Optional[str], str]],
+    ) -> None:
+        """Preserve legacy timeline/report/event behavior after the atomic commit."""
+        for student_id, old_status, new_status in changes:
+            if old_status is None:
+                self._timeline_service.log_event(
+                    student_id=student_id,
+                    event_type=TimelineEventType.ATTENDANCE_CREATED,
+                    title="Attendance Recorded",
+                    description=f"Session {session_id}: {new_status}",
+                    metadata={"session_id": session_id, "status": new_status},
+                )
+                if self._event_bus is not None:
+                    self._event_bus.publish(
+                        StudentUpdated(
+                            student_id=student_id,
+                            student_code="",
+                            student_name="",
+                            changes=["attendance"],
+                        )
+                    )
+                continue
+
+            if old_status != new_status:
+                self._timeline_service.log_event(
+                    student_id=student_id,
+                    event_type=TimelineEventType.ATTENDANCE_UPDATED,
+                    title="Attendance Updated",
+                    description=f"Session {session_id}: status changed from {old_status} to {new_status}",
+                    metadata={
+                        "session_id": session_id,
+                        "old_status": old_status,
+                        "new_status": new_status,
+                    },
+                )
+            self._trigger_report_policy(student_id, session_id, new_status)
+
+    def _save_session_attendance_atomic(
+        self,
+        session_id: int,
+        attendance_rows: Dict[int, Dict[str, Any]],
+    ) -> List[Attendance]:
+        """Persist one Session attendance sheet with exactly one database commit."""
+        normalized_rows = self._normalize_session_rows(attendance_rows)
+        if not normalized_rows:
+            return []
+
+        side_effects: List[Tuple[int, Optional[str], str]] = []
+        results: List[Attendance] = []
+
+        with self._session_factory() as session:
+            session_repo = self._repository_provider.sessions(session)
+            enrollment_repo = self._repository_provider.enrollments(session)
+            attendance_repo = self._repository_provider.attendance(session)
+
+            try:
+                session_obj = session_repo.get_by_id(session_id)
+                if not session_obj:
+                    raise ValueError("Session not found.")
+
+                # Validate the complete sheet before mutating any attendance row.
+                for student_id in normalized_rows:
+                    if not enrollment_repo.exists(student_id, session_obj.class_id):
+                        raise ValueError(
+                            f"Student {student_id} is not actively enrolled in this class."
+                        )
+
+                existing_by_student = {
+                    attendance.student_id: attendance
+                    for attendance in attendance_repo.get_by_session(session_id)
+                }
+
+                for student_id, row in normalized_rows.items():
+                    existing = existing_by_student.get(student_id)
+                    if existing is not None:
+                        old_status = existing.status
+                        existing.status = row["status"]
+                        # The session sheet is authoritative: blank UI values clear old values.
+                        existing.arrival_time = row["arrival_time"]
+                        existing.teacher_note = row["teacher_note"]
+                        results.append(existing)
+                        side_effects.append((student_id, old_status, row["status"]))
+                        continue
+
+                    attendance = Attendance(
+                        session_id=session_id,
+                        student_id=student_id,
+                        status=row["status"],
+                        arrival_time=row["arrival_time"],
+                        teacher_note=row["teacher_note"],
+                    )
+                    attendance_repo.add(attendance)
+                    results.append(attendance)
+                    side_effects.append((student_id, None, row["status"]))
+
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+            for attendance in results:
+                attendance_repo.refresh(attendance)
+
+        self._publish_session_save_side_effects(session_id, side_effects)
+        return results
+
+    @require_permission("attendance.create")
+    def save_session_attendance(
+        self,
+        session_id: int,
+        attendance_rows: Dict[int, Dict[str, Any]],
+    ) -> List[Attendance]:
+        """Save all rows from the Session attendance UI as one atomic unit."""
+        return self._save_session_attendance_atomic(session_id, attendance_rows)
+
     @require_permission("attendance.create")
     def batch_update_attendance(
         self,
@@ -123,10 +280,17 @@ class AttendanceService:
         arrival_time: Optional[str] = None,
         teacher_note: Optional[str] = None,
     ) -> List[Attendance]:
-        results = []
-        for student_id, status in student_statuses.items():
-            results.append(self.create_or_update_attendance(session_id, student_id, status, arrival_time, teacher_note))
-        return results
+        # Backward-compatible API: translate the legacy shared values into the
+        # canonical per-student sheet and use the same atomic transaction.
+        attendance_rows = {
+            student_id: {
+                "status": status,
+                "arrival_time": arrival_time,
+                "teacher_note": teacher_note,
+            }
+            for student_id, status in student_statuses.items()
+        }
+        return self._save_session_attendance_atomic(session_id, attendance_rows)
 
     @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
