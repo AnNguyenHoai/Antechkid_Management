@@ -53,8 +53,13 @@ def test_income_expense_and_outstanding_are_scoped_to_shared_period():
 
     assert "max(user_from, self._period_start)" in expense
     assert "min(user_to, self._period_end)" in expense
-    assert "date_from=date_from" in expense
-    assert "date_to=date_to" in expense
+    # EP-FIN-11 builds one server-filter dictionary and forwards it to the
+    # paged Expense query. Keep this contract instead of requiring the old
+    # explicit date_from=/date_to= call-site spelling.
+    assert '"date_from": date_from' in expense
+    assert '"date_to": date_to' in expense
+    assert "kwargs = self._filter_kwargs()" in expense
+    assert "**kwargs," in expense
 
     assert "period_start=self._period_start" in outstanding
     assert "on_date=self._target_date" in outstanding
