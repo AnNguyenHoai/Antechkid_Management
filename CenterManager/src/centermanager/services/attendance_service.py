@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.attendance import Attendance, AttendanceStatus
+from centermanager.models.student import Student
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.permission_service import PermissionService
@@ -62,6 +63,17 @@ class AttendanceService:
                     continue
         raise ValueError("Arrival time must use HH:MM or HH:MM:SS.")
 
+    @staticmethod
+    def _enrollment_covers_session_date(enrollment: Any, scheduled_date: Any) -> bool:
+        """Return whether an enrollment owned the student/class relationship on a Session date."""
+        if scheduled_date is None:
+            return False
+        if enrollment.start_date is not None and enrollment.start_date > scheduled_date:
+            return False
+        if enrollment.end_date is not None and enrollment.end_date < scheduled_date:
+            return False
+        return True
+
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
         with self._session_factory() as session:
             session_repo = self._repository_provider.sessions(session)
@@ -69,7 +81,11 @@ class AttendanceService:
             if not session_obj:
                 return False
             enroll_repo = self._repository_provider.enrollments(session)
-            return enroll_repo.exists(student_id, session_obj.class_id)
+            enrollments = enroll_repo.get_by_student_and_class(student_id, session_obj.class_id)
+            return any(
+                self._enrollment_covers_session_date(enrollment, session_obj.scheduled_date)
+                for enrollment in enrollments
+            )
 
     @require_permission("attendance.create")
     def create_or_update_attendance(
@@ -81,7 +97,7 @@ class AttendanceService:
         teacher_note: Optional[str] = None,
     ) -> Attendance:
         if not self._check_student_enrolled(student_id, session_id):
-            raise ValueError("Student is not enrolled in this class.")
+            raise ValueError("Student is not enrolled in this class for this session date.")
         status = self._validate_status(status)
 
         with self._session_factory() as session:
@@ -217,11 +233,22 @@ class AttendanceService:
                 if not session_obj:
                     raise ValueError("Session not found.")
 
-                # Validate the complete sheet before mutating any attendance row.
+                # Validate the complete sheet against the roster that belonged to
+                # this class on the Session date, not only today's ACTIVE roster.
                 for student_id in normalized_rows:
-                    if not enrollment_repo.exists(student_id, session_obj.class_id):
+                    enrollments = enrollment_repo.get_by_student_and_class(
+                        student_id,
+                        session_obj.class_id,
+                    )
+                    if not any(
+                        self._enrollment_covers_session_date(
+                            enrollment,
+                            session_obj.scheduled_date,
+                        )
+                        for enrollment in enrollments
+                    ):
                         raise ValueError(
-                            f"Student {student_id} is not actively enrolled in this class."
+                            f"Student {student_id} is not enrolled in this class for this session date."
                         )
 
                 existing_by_student = {
@@ -291,6 +318,26 @@ class AttendanceService:
             for student_id, status in student_statuses.items()
         }
         return self._save_session_attendance_atomic(session_id, attendance_rows)
+
+    @require_permission("attendance.view")
+    def get_roster_for_session(self, session_id: int) -> List[Student]:
+        """Return students whose Enrollment covered the Session scheduled date."""
+        with self._session_factory() as session:
+            session_obj = self._repository_provider.sessions(session).get_by_id(session_id)
+            if not session_obj:
+                raise ValueError("Session not found.")
+            enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(
+                session_obj.class_id
+            )
+            return [
+                enrollment.student
+                for enrollment in enrollments
+                if enrollment.student is not None
+                and self._enrollment_covers_session_date(
+                    enrollment,
+                    session_obj.scheduled_date,
+                )
+            ]
 
     @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
