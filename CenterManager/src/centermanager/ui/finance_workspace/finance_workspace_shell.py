@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QComboBox,
+    QPushButton,
 )
 
 from centermanager.ui.workspace_navigation import WorkspaceNavigation
@@ -21,6 +22,7 @@ from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
 from centermanager.ui.finance_workspace.financial_settlement_page import FinancialSettlementPage
+from centermanager.ui.finance_workspace.finance_period_config_dialog import FinancePeriodConfigDialog
 from centermanager.core.current_user import get_current_user
 from centermanager.events.event_bus import EventBus
 from centermanager.events.finance_events import FinanceDataChanged
@@ -61,6 +63,7 @@ class FinanceWorkspaceShell(QWidget):
         self._notification_service = notification_service
         self._event_bus = event_bus or EventBus()
         self._authorized = False
+        self._write_enabled = False
         self._period_selector_ready = False
 
         # Reuse the dashboard's injected FinancePeriodService when available so
@@ -110,6 +113,16 @@ class FinanceWorkspaceShell(QWidget):
         except Exception:
             return False
 
+    def _can_manage_periods(self) -> bool:
+        try:
+            user = get_current_user()
+            return bool(
+                user
+                and (user.has_permission("finance.period.manage") or user.is_admin)
+            )
+        except Exception:
+            return False
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -145,6 +158,14 @@ class FinanceWorkspaceShell(QWidget):
         self.period_label = QLabel("")
         period_layout.addWidget(self.period_label)
         period_layout.addStretch()
+        self.period_config_btn = QPushButton("⚙ Cấu hình kỳ")
+        self.period_config_btn.setToolTip(
+            "Quản lý cấu hình Finance Period theo ngày hiệu lực"
+        )
+        self.period_config_btn.setVisible(self._can_manage_periods())
+        self.period_config_btn.setEnabled(False)
+        self.period_config_btn.clicked.connect(self._open_period_config)
+        period_layout.addWidget(self.period_config_btn)
         layout.addWidget(period_bar)
 
         body = QHBoxLayout()
@@ -244,6 +265,36 @@ class FinanceWorkspaceShell(QWidget):
     def _refresh_page(self, page) -> None:
         self._refresh_pages([page])
 
+    def _open_period_config(self) -> None:
+        if self._finance_period_service is None or not self._can_manage_periods():
+            return
+        if (
+            self._collaboration_manager is not None
+            and not self._collaboration_manager.ensure_write()
+        ):
+            if (
+                self._notification_service is not None
+                and hasattr(self._notification_service, "notify")
+            ):
+                self._notification_service.notify(
+                    "You must be in WRITE mode to manage Finance Period.",
+                    "warning",
+                )
+            return
+        FinancePeriodConfigDialog(
+            self._finance_period_service,
+            self._collaboration_manager,
+            self._notification_service,
+            parent=self,
+        ).exec()
+        self._refresh_pages([
+            self.dashboard_page,
+            self.income_page,
+            self.expense_page,
+            self.outstanding_page,
+            self.settlement_page,
+        ])
+
     def _on_period_selection_changed(self, _index: int) -> None:
         if not self._period_selector_ready or not self._has_finance_access():
             return
@@ -299,6 +350,10 @@ class FinanceWorkspaceShell(QWidget):
             self._refresh_page(current)
 
     def set_write_enabled(self, enabled: bool) -> None:
+        self._write_enabled = bool(enabled)
         self.income_page.set_write_enabled(enabled)
         self.expense_page.set_write_enabled(enabled)
         self.settlement_page.set_write_enabled(enabled)
+        self.period_config_btn.setEnabled(
+            self._write_enabled and self._can_manage_periods()
+        )

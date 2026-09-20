@@ -157,7 +157,11 @@ class FinanceDashboardService:
     def get_expense_today(self) -> float:
         today = self._get_today_date()
         expenses, _ = self._expense_service.list_expenses(
-            date_from=today, date_to=today, page=1, per_page=10000
+            date_from=today,
+            date_to=today,
+            page=1,
+            per_page=10000,
+            realized_only=True,
         )
         return sum(e.amount for e in expenses)
 
@@ -165,7 +169,11 @@ class FinanceDashboardService:
         start = self._get_first_day_of_month()
         end = self._get_today_date()
         expenses, _ = self._expense_service.list_expenses(
-            date_from=start, date_to=end, page=1, per_page=10000
+            date_from=start,
+            date_to=end,
+            page=1,
+            per_page=10000,
+            realized_only=True,
         )
         return sum(e.amount for e in expenses)
 
@@ -200,6 +208,7 @@ class FinanceDashboardService:
         self, period_start: date, query_end: date, limit: int = 10
     ) -> List[Expense]:
         expenses, _ = self._expense_service.list_expenses(
+            finance_period_start=period_start,
             date_from=period_start,
             date_to=query_end,
             page=1,
@@ -234,9 +243,19 @@ class FinanceDashboardService:
             "Other": result.get("Other", 0.0),
         }
 
-    def get_expense_by_payment_method(self, date_from: date, date_to: date) -> Dict[str, float]:
+    def get_expense_by_payment_method(
+        self,
+        date_from: date,
+        date_to: date,
+        finance_period_start: Optional[date] = None,
+    ) -> Dict[str, float]:
         expenses, _ = self._expense_service.list_expenses(
-            date_from=date_from, date_to=date_to, page=1, per_page=10000
+            finance_period_start=finance_period_start,
+            date_from=date_from,
+            date_to=date_to,
+            page=1,
+            per_page=10000,
+            realized_only=True,
         )
         result: Dict[str, float] = {}
         for exp in expenses:
@@ -298,7 +317,9 @@ class FinanceDashboardService:
             finance_period_start=resolved_period_start,
         )
         expense_by_method = self.get_expense_by_payment_method(
-            resolved_period_start, query_end
+            resolved_period_start,
+            query_end,
+            finance_period_start=resolved_period_start,
         )
         revenue_period = sum(revenue_by_method.values())
         expense_period = sum(expense_by_method.values())
@@ -395,7 +416,13 @@ class FinanceDashboardService:
             ),
         )
         expense = self.get_expense_by_payment_method(
-            resolved_period_start, query_end
+            resolved_period_start,
+            query_end,
+            finance_period_start=(
+                resolved_period_start
+                if self._finance_period_service is not None
+                else None
+            ),
         )
         stats = self._get_outstanding_stats(resolved_period_start, target)
         return SimpleNamespace(
