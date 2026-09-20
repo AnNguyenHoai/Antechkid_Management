@@ -16,7 +16,8 @@ def test_attendance_and_assessment_use_existing_service_boundaries():
     assessment_dialog = _read("assessment/assessment_dialog.py")
 
     assert "SessionAttendanceWidget" in session_detail
-    assert "create_or_update_attendance" in attendance
+    assert "save_session_attendance" in attendance
+    assert "create_or_update_attendance" not in attendance
     assert "AssessmentService" in assessment
     assert "create_assessment" in assessment_dialog
     assert "update_assessment" in assessment_dialog
