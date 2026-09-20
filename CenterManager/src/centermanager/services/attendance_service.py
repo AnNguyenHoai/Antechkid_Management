@@ -313,7 +313,22 @@ class AttendanceService:
         session_id: int,
         attendance_rows: Dict[int, Dict[str, Any]],
     ) -> List[Attendance]:
-        """Save all rows from the Session attendance UI as one atomic unit."""
+        """Save a complete Session attendance sheet as one atomic unit."""
+        roster_ids = {student.id for student in self._get_roster_for_session(session_id)}
+        payload_ids = {int(student_id) for student_id in attendance_rows}
+        if payload_ids != roster_ids:
+            missing_ids = sorted(roster_ids - payload_ids)
+            unexpected_ids = sorted(payload_ids - roster_ids)
+            details = []
+            if missing_ids:
+                details.append(f"missing student(s): {', '.join(map(str, missing_ids))}")
+            if unexpected_ids:
+                details.append(f"unexpected student(s): {', '.join(map(str, unexpected_ids))}")
+            raise ValueError(
+                "Attendance sheet must contain exactly one marked row for every student in the session roster"
+                + (f" ({'; '.join(details)})" if details else "")
+                + "."
+            )
         return self._save_session_attendance_atomic(session_id, attendance_rows)
 
     @require_permission("attendance.create")
@@ -336,9 +351,8 @@ class AttendanceService:
         }
         return self._save_session_attendance_atomic(session_id, attendance_rows)
 
-    @require_permission("attendance.view")
-    def get_roster_for_session(self, session_id: int) -> List[Student]:
-        """Return students whose Enrollment covered the Session scheduled date."""
+    def _get_roster_for_session(self, session_id: int) -> List[Student]:
+        """Resolve the canonical historical roster without adding another permission boundary."""
         with self._session_factory() as session:
             session_obj = self._repository_provider.sessions(session).get_by_id(session_id)
             if not session_obj:
@@ -362,6 +376,11 @@ class AttendanceService:
             ]
 
     @require_permission("attendance.view")
+    def get_roster_for_session(self, session_id: int) -> List[Student]:
+        """Return students whose Enrollment covered the Session scheduled date."""
+        return self._get_roster_for_session(session_id)
+
+    @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
         with self._session_factory() as session:
             return self._repository_provider.attendance(session).get_by_session(session_id)
@@ -375,6 +394,25 @@ class AttendanceService:
     def get_summary_for_session(self, session_id: int) -> Dict[str, int]:
         with self._session_factory() as session:
             return self._repository_provider.attendance(session).get_summary_by_session(session_id)
+
+    @require_permission("attendance.view")
+    def get_session_attendance_overview(self, session_id: int) -> Dict[str, Any]:
+        """Return one roster-aware Session summary used by all Attendance surfaces."""
+        roster = self._get_roster_for_session(session_id)
+        with self._session_factory() as session:
+            summary = self._repository_provider.attendance(session).get_summary_by_session(session_id)
+        roster_total = len(roster)
+        recorded = sum(summary.values())
+        unmarked = max(roster_total - recorded, 0)
+        present = summary.get(AttendanceStatus.PRESENT.value, 0)
+        attendance_rate = (present / roster_total * 100) if roster_total > 0 else 0.0
+        return {
+            **summary,
+            "RosterTotal": roster_total,
+            "Recorded": recorded,
+            "Unmarked": unmarked,
+            "AttendanceRate": attendance_rate,
+        }
 
     @require_permission("attendance.view")
     def get_attendance_rate_for_student(self, student_id: int) -> float:
