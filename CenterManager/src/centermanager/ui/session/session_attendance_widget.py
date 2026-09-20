@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class SessionAttendanceWidget(QWidget):
     attendance_changed = Signal()
+    UNMARKED_STATUS = "Not Marked"
 
     def __init__(
         self,
@@ -212,9 +213,10 @@ class SessionAttendanceWidget(QWidget):
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 0, name_item)
 
-            # Status combo
+            # Status combo. A new roster row is intentionally NOT pre-marked Present.
             combo = QComboBox()
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            combo.addItem(self.UNMARKED_STATUS)
             for status in AttendanceStatus.choices():
                 combo.addItem(status)
             att = att_map.get(student.id)
@@ -223,7 +225,7 @@ class SessionAttendanceWidget(QWidget):
                 if idx >= 0:
                     combo.setCurrentIndex(idx)
             else:
-                combo.setCurrentIndex(0)  # Present
+                combo.setCurrentIndex(0)
             self.table.setCellWidget(row, 1, combo)
             self._status_combos[row] = combo
 
@@ -247,19 +249,27 @@ class SessionAttendanceWidget(QWidget):
 
     def _update_summary(self, attendances: List) -> None:
         try:
-            summary = self._attendance_service.get_summary_for_session(self._session_id)
+            overview = self._attendance_service.get_session_attendance_overview(self._session_id)
         except Exception:
-            summary = {"Present": 0, "Late": 0, "Absent": 0, "Excused": 0}
+            overview = {
+                "Present": 0,
+                "Late": 0,
+                "Absent": 0,
+                "Excused": 0,
+                "Unmarked": len(self._students),
+                "AttendanceRate": 0.0,
+            }
 
-        total = len(self._students)
-        present = summary.get("Present", 0)
-        late = summary.get("Late", 0)
-        absent = summary.get("Absent", 0)
-        excused = summary.get("Excused", 0)
-        rate = (present / total * 100) if total > 0 else 0
+        present = overview.get("Present", 0)
+        late = overview.get("Late", 0)
+        absent = overview.get("Absent", 0)
+        excused = overview.get("Excused", 0)
+        unmarked = overview.get("Unmarked", 0)
+        rate = overview.get("AttendanceRate", 0.0)
 
         self.summary_label.setText(
-            f"Summary: Present {present}, Late {late}, Absent {absent}, Excused {excused}  |  Attendance Rate: {rate:.1f}%"
+            f"Summary: Present {present}, Late {late}, Absent {absent}, Excused {excused}, "
+            f"Unmarked {unmarked}  |  Attendance Rate: {rate:.1f}%"
         )
 
     def _mark_all_present(self) -> None:
@@ -277,6 +287,23 @@ class SessionAttendanceWidget(QWidget):
 
         if self._session_id is None or not self._students:
             QMessageBox.warning(self, "Error", "No session or students to save.")
+            return
+
+        unmarked_students = [
+            self._students[row].full_name
+            for row, combo in self._status_combos.items()
+            if row < len(self._students) and combo.currentText() == self.UNMARKED_STATUS
+        ]
+        if unmarked_students:
+            preview = ", ".join(unmarked_students[:5])
+            if len(unmarked_students) > 5:
+                preview += f" and {len(unmarked_students) - 5} more"
+            QMessageBox.warning(
+                self,
+                "Incomplete Attendance",
+                "Please mark attendance for every student before saving. "
+                f"Unmarked: {preview}.",
+            )
             return
 
         attendance_rows = {}
