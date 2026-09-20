@@ -104,6 +104,7 @@ class FinancialSettlementService:
             date_to=period_end,
             offset=0,
             limit=100000,
+            realized_only=True,
         )
         for expense in expenses:
             bucket = self._method_bucket(expense.payment_method)
