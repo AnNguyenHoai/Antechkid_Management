@@ -105,8 +105,8 @@ class ClassScheduleWidget(QWidget):
             self._show_empty()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        # Chỉ các nút trong widget này (nếu có) sẽ được disable
-        # Hiện tại không có nút ghi trực tiếp, nhưng có thể có trong tương lai
+        # Session detail resolves live WRITE authority from CollaborationManager.
+        # This surface itself has no direct mutation controls.
         pass
     
     def _update_table(self) -> None:
@@ -224,6 +224,12 @@ class ClassScheduleWidget(QWidget):
                 self._attendance_service,
                 session_id,
                 parent=self
+            )
+            # Attendance mutations use the same live collaboration authority as
+            # the owning Class workspace. Missing/invalid WRITE authority fails closed.
+            dialog.attendance_widget.set_write_guard(
+                self._collaboration_manager.ensure_write,
+                self._notification_service,
             )
             if dialog.exec() == SessionDetailDialog.DialogCode.Accepted:
                 self._load_sessions()
