@@ -33,12 +33,17 @@ def test_existing_class_service_already_owns_legacy_enrollment_operations():
     assert "def remove_student" in CLASS_SERVICE
 
 
-def test_attendance_currently_depends_on_enrollment_existence():
+def test_attendance_depends_on_enrollment_eligibility_for_session_date():
     assert "_check_student_enrolled" in ATTENDANCE
-    # The attendance service now obtains the class through the session repository
-    # and then asks the enrollment repository whether the student is enrolled in
-    # that class. Keep the contract aligned with the provider-backed implementation.
-    assert "enroll_repo.exists(student_id, session_obj.class_id)" in ATTENDANCE
+    # EP-ATT-02 keeps Enrollment as the attendance eligibility boundary, but the
+    # canonical production path is now historical/date-aware instead of checking
+    # only today's ACTIVE enrollment. Lightweight legacy providers may still use
+    # the narrow exists(...) fallback for dependency-injection compatibility.
+    assert "_is_student_eligible_for_session" in ATTENDANCE
+    assert "get_by_student_and_class" in ATTENDANCE
+    assert "_enrollment_covers_session_date" in ATTENDANCE
+    assert 'getattr(session_obj, "scheduled_date", None)' in ATTENDANCE
+    assert 'exists = getattr(enrollment_repo, "exists", None)' in ATTENDANCE
 
 
 def test_enrollment_has_existing_lifecycle_fields_to_formalize():
