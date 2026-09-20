@@ -337,18 +337,19 @@ class SessionDetailDialog(QDialog):
         self.status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def _update_attendance_summary(self) -> None:
-        """Update the read-only attendance summary in Overview tab."""
+        """Update the read-only roster-aware attendance summary in Overview tab."""
         try:
-            summary = self._attendance_service.get_summary_for_session(self._session_id)
-            total = sum(summary.values())
-            present = summary.get("Present", 0)
-            late = summary.get("Late", 0)
-            absent = summary.get("Absent", 0)
-            excused = summary.get("Excused", 0)
-            rate = (present / total * 100) if total > 0 else 0
+            overview = self._attendance_service.get_session_attendance_overview(self._session_id)
+            present = overview.get("Present", 0)
+            late = overview.get("Late", 0)
+            absent = overview.get("Absent", 0)
+            excused = overview.get("Excused", 0)
+            unmarked = overview.get("Unmarked", 0)
+            rate = overview.get("AttendanceRate", 0.0)
 
             self.att_summary_label.setText(
-                f"Present: {present}  |  Late: {late}  |  Absent: {absent}  |  Excused: {excused}"
+                f"Present: {present}  |  Late: {late}  |  Absent: {absent}  |  "
+                f"Excused: {excused}  |  Unmarked: {unmarked}"
             )
             self.att_rate_label.setText(f"Rate: {rate:.1f}%")
         except Exception as e:
