@@ -226,31 +226,22 @@ class SessionAttendanceWidget(QWidget):
             QMessageBox.warning(self, "Error", "No session or students to save.")
             return
 
-        student_statuses = {}
+        attendance_rows = {}
         for row, combo in self._status_combos.items():
             if row < len(self._students):
                 student = self._students[row]
-                status = combo.currentText()
-                arrival_time = self._time_edits.get(row, QLineEdit()).text().strip() or None
-                teacher_note = self._note_edits.get(row, QLineEdit()).text().strip() or None
-                student_statuses[student.id] = {
-                    "status": status,
-                    "arrival_time": arrival_time,
-                    "teacher_note": teacher_note
+                attendance_rows[student.id] = {
+                    "status": combo.currentText(),
+                    "arrival_time": self._time_edits.get(row, QLineEdit()).text().strip() or None,
+                    "teacher_note": self._note_edits.get(row, QLineEdit()).text().strip() or None,
                 }
 
         try:
-            success_count = 0
-            for student_id, data in student_statuses.items():
-                self._attendance_service.create_or_update_attendance(
-                    session_id=self._session_id,
-                    student_id=student_id,
-                    status=data["status"],
-                    arrival_time=data["arrival_time"],
-                    teacher_note=data["teacher_note"]
-                )
-                success_count += 1
-
+            saved = self._attendance_service.save_session_attendance(
+                session_id=self._session_id,
+                attendance_rows=attendance_rows,
+            )
+            success_count = len(saved)
             if success_count > 0:
                 QMessageBox.information(self, "Success", f"Saved attendance for {success_count} students.")
                 self.attendance_changed.emit()
