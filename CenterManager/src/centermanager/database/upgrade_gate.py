@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable
+from urllib.parse import quote
 
 from centermanager.database.migration import (
     get_current_revision,
@@ -53,8 +54,8 @@ def _quote_identifier(identifier: str) -> str:
 
 
 def _connect_read_only(database_path: Path) -> sqlite3.Connection:
-    uri = f"file:{database_path.resolve().as_posix()}?mode=ro"
-    return sqlite3.connect(uri, uri=True)
+    encoded_path = quote(database_path.resolve().as_posix(), safe="/:")
+    return sqlite3.connect(f"file:{encoded_path}?mode=ro", uri=True)
 
 
 def _user_tables(connection: sqlite3.Connection) -> Iterable[str]:
