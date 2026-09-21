@@ -146,6 +146,11 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         )
         return total_minutes / 60
 
+    @staticmethod
+    def _registration_identity(registration):
+        registration_id = getattr(registration, "id", None)
+        return ("registration", registration_id) if registration_id is not None else None
+
     def refresh(self):
         try:
             self._week_start = self._rs.next_week()
@@ -183,7 +188,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
     def _selection_changed(self):
         row = self.table.currentRow()
         if 0 <= row < len(self._filtered_rows):
-            self._selected_registration_id = getattr(self._filtered_rows[row], "id", None)
+            self._selected_registration_id = self._registration_identity(
+                self._filtered_rows[row]
+            )
         else:
             self._selected_registration_id = None
         self._update_actions()
@@ -220,7 +227,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 ]
                 for column, value in enumerate(values):
                     self.table.setItem(row, column, QTableWidgetItem(value))
-                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.id)
+                self.table.item(row, 0).setData(
+                    Qt.ItemDataRole.UserRole,
+                    self._registration_identity(registration),
+                )
 
             self.table.clearSelection()
             self.table.setCurrentCell(-1, -1)
@@ -228,7 +238,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 (
                     index
                     for index, registration in enumerate(self._filtered_rows)
-                    if getattr(registration, "id", None) == previous_id
+                    if self._registration_identity(registration) == previous_id
                 ),
                 None,
             )
@@ -237,7 +247,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 self._selected_registration_id = previous_id
             elif previous_id is None and user_filter_change and self._filtered_rows:
                 self.table.selectRow(0)
-                self._selected_registration_id = getattr(self._filtered_rows[0], "id", None)
+                self._selected_registration_id = self._registration_identity(
+                    self._filtered_rows[0]
+                )
             else:
                 self._selected_registration_id = None
         finally:
