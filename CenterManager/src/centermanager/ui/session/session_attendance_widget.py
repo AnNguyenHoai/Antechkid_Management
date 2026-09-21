@@ -43,6 +43,7 @@ class SessionAttendanceWidget(QWidget):
         self._note_edits: Dict[int, QLineEdit] = {}
         self._write_guard: Optional[Callable[[], bool]] = None
         self._notification_service: Optional[Any] = None
+        self._session_lifecycle_allows_write = False
 
         self._setup_ui()
         self._apply_write_state()
@@ -116,6 +117,8 @@ class SessionAttendanceWidget(QWidget):
         self._apply_write_state()
 
     def _can_write(self) -> bool:
+        if not self._session_lifecycle_allows_write:
+            return False
         if self._write_guard is None:
             return False
         try:
@@ -139,14 +142,19 @@ class SessionAttendanceWidget(QWidget):
         self._apply_write_state()
 
     def _notify_write_required(self) -> None:
-        message = "You must be in WRITE mode to save attendance."
+        if not self._session_lifecycle_allows_write:
+            message = "Attendance is read-only for Cancelled or Postponed sessions."
+            title = "Attendance Read-only"
+        else:
+            message = "You must be in WRITE mode to save attendance."
+            title = "Read-only"
         if self._notification_service is not None:
             try:
                 self._notification_service.notify(message, "warning")
                 return
             except Exception:
                 logger.exception("Attendance WRITE warning notification failed")
-        QMessageBox.warning(self, "Read-only", message)
+        QMessageBox.warning(self, title, message)
 
     def _show_empty(self) -> None:
         self.table.clearSpans()
@@ -163,6 +171,13 @@ class SessionAttendanceWidget(QWidget):
         """Set the session and load attendance data."""
         self._session_id = session_id
         self._class_id = class_id
+        try:
+            self._session_lifecycle_allows_write = (
+                self._attendance_service.can_edit_session_attendance(session_id)
+            )
+        except Exception:
+            logger.exception("Failed to resolve attendance lifecycle state")
+            self._session_lifecycle_allows_write = False
         self._load_data()
 
     def _load_data(self) -> None:
@@ -267,9 +282,12 @@ class SessionAttendanceWidget(QWidget):
         unmarked = overview.get("Unmarked", 0)
         rate = overview.get("AttendanceRate", 0.0)
 
+        suffix = ""
+        if not self._session_lifecycle_allows_write:
+            suffix = "  |  Read-only: Cancelled/Postponed session"
         self.summary_label.setText(
             f"Summary: Present {present}, Late {late}, Absent {absent}, Excused {excused}, "
-            f"Unmarked {unmarked}  |  Attendance Rate: {rate:.1f}%"
+            f"Unmarked {unmarked}  |  Attendance Rate: {rate:.1f}%{suffix}"
         )
 
     def _mark_all_present(self) -> None:
@@ -279,7 +297,7 @@ class SessionAttendanceWidget(QWidget):
                 combo.setCurrentIndex(idx)
 
     def _save_attendance(self) -> None:
-        # Runtime guard is authoritative even if the visual WRITE projection became stale.
+        # Runtime guard and Session lifecycle are authoritative even if visual state became stale.
         if not self._can_write():
             self._apply_write_state()
             self._notify_write_required()
@@ -335,6 +353,6 @@ class SessionAttendanceWidget(QWidget):
 
     def refresh(self) -> None:
         if self._session_id is not None and self._class_id is not None:
-            self._load_data()
+            self.set_session(self._session_id, self._class_id)
         else:
             self._apply_write_state()

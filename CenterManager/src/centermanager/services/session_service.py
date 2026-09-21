@@ -294,6 +294,7 @@ class SessionService:
                 description=f"Session '{session_obj.title}' was cancelled.",
                 metadata={"session_id": session_obj.id}
             )
+            self._publish_class_session_changed(session_obj, action="cancelled")
             return session_obj
 
     @require_permission("lesson.delete")

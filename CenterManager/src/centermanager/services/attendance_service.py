@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.attendance import Attendance, AttendanceStatus
+from centermanager.models.session import SessionStatus
 from centermanager.models.student import Student
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.services.timeline_service import TimelineService
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceService:
+    EDITABLE_SESSION_STATUSES = frozenset(
+        {
+            SessionStatus.SCHEDULED.value,
+            SessionStatus.COMPLETED.value,
+        }
+    )
+
     def __init__(
         self,
         session_factory: sessionmaker,
@@ -95,6 +103,24 @@ class AttendanceService:
         exists = getattr(enrollment_repo, "exists", None)
         return bool(callable(exists) and exists(student_id, class_id))
 
+    @classmethod
+    def _session_allows_attendance_write(cls, session_obj: Any) -> bool:
+        status = getattr(session_obj, "status", None)
+        if status is None:
+            # Compatibility seam for lightweight legacy/test providers. The
+            # production Session model owns a non-null lifecycle status.
+            return True
+        return status in cls.EDITABLE_SESSION_STATUSES
+
+    @classmethod
+    def _require_attendance_writeable(cls, session_obj: Any) -> None:
+        status = getattr(session_obj, "status", None)
+        if not cls._session_allows_attendance_write(session_obj):
+            raise ValueError(
+                f"Attendance is read-only while the session status is {status or 'unknown'}. "
+                "Only Scheduled or Completed sessions can be edited."
+            )
+
     def _check_student_enrolled(self, student_id: int, session_id: int) -> bool:
         with self._session_factory() as session:
             session_repo = self._repository_provider.sessions(session)
@@ -160,10 +186,10 @@ class AttendanceService:
     def _publish_session_save_side_effects(
         self,
         session_id: int,
-        changes: List[Tuple[int, Optional[str], str]],
+        changes: List[Tuple[int, Optional[str], str, bool]],
     ) -> None:
-        """Preserve legacy timeline/report/event behavior after the atomic commit."""
-        for student_id, old_status, new_status in changes:
+        """Publish timeline/report/event side effects only after the atomic commit."""
+        for student_id, old_status, new_status, row_changed in changes:
             if old_status is None:
                 self._timeline_service.log_event(
                     student_id=student_id,
@@ -172,15 +198,7 @@ class AttendanceService:
                     description=f"Session {session_id}: {new_status}",
                     metadata={"session_id": session_id, "status": new_status},
                 )
-                if self._event_bus is not None:
-                    self._event_bus.publish(
-                        StudentUpdated(
-                            student_id=student_id,
-                            student_code="",
-                            student_name="",
-                            changes=["attendance"],
-                        )
-                    )
+                self._publish_student_attendance_updated(student_id)
                 continue
 
             if old_status != new_status:
@@ -196,6 +214,20 @@ class AttendanceService:
                     },
                 )
             self._trigger_report_policy(student_id, session_id, new_status)
+            if row_changed:
+                self._publish_student_attendance_updated(student_id)
+
+    def _publish_student_attendance_updated(self, student_id: int) -> None:
+        if self._event_bus is None:
+            return
+        self._event_bus.publish(
+            StudentUpdated(
+                student_id=student_id,
+                student_code="",
+                student_name="",
+                changes=["attendance"],
+            )
+        )
 
     def _save_session_attendance_atomic(
         self,
@@ -213,7 +245,7 @@ class AttendanceService:
         if not normalized_rows:
             return []
 
-        side_effects: List[Tuple[int, Optional[str], str]] = []
+        side_effects: List[Tuple[int, Optional[str], str, bool]] = []
         results: List[Attendance] = []
 
         with self._session_factory() as session:
@@ -225,6 +257,7 @@ class AttendanceService:
                 session_obj = session_repo.get_by_id(session_id)
                 if not session_obj:
                     raise ValueError("Session not found.")
+                self._require_attendance_writeable(session_obj)
 
                 # Validate every requested row against the roster that belonged to
                 # this class on the Session date, not only today's ACTIVE roster.
@@ -248,18 +281,34 @@ class AttendanceService:
                     existing = existing_by_student.get(student_id)
                     if existing is not None:
                         old_status = existing.status
-                        existing.status = row["status"]
                         if preserve_existing_optional_fields:
-                            if row["arrival_time"] is not None:
-                                existing.arrival_time = row["arrival_time"]
-                            if row["teacher_note"] is not None:
-                                existing.teacher_note = row["teacher_note"]
+                            new_arrival_time = (
+                                existing.arrival_time
+                                if row["arrival_time"] is None
+                                else row["arrival_time"]
+                            )
+                            new_teacher_note = (
+                                existing.teacher_note
+                                if row["teacher_note"] is None
+                                else row["teacher_note"]
+                            )
                         else:
                             # The Session sheet is authoritative: blank UI values clear old values.
-                            existing.arrival_time = row["arrival_time"]
-                            existing.teacher_note = row["teacher_note"]
+                            new_arrival_time = row["arrival_time"]
+                            new_teacher_note = row["teacher_note"]
+
+                        row_changed = (
+                            existing.status != row["status"]
+                            or existing.arrival_time != new_arrival_time
+                            or existing.teacher_note != new_teacher_note
+                        )
+                        existing.status = row["status"]
+                        existing.arrival_time = new_arrival_time
+                        existing.teacher_note = new_teacher_note
                         results.append(existing)
-                        side_effects.append((student_id, old_status, row["status"]))
+                        side_effects.append(
+                            (student_id, old_status, row["status"], row_changed)
+                        )
                         continue
 
                     attendance = Attendance(
@@ -271,7 +320,7 @@ class AttendanceService:
                     )
                     attendance_repo.add(attendance)
                     results.append(attendance)
-                    side_effects.append((student_id, None, row["status"]))
+                    side_effects.append((student_id, None, row["status"], True))
 
                 session.commit()
             except Exception:
@@ -356,6 +405,15 @@ class AttendanceService:
     def get_roster_for_session(self, session_id: int) -> List[Student]:
         """Return students whose Enrollment covered the Session scheduled date."""
         return self._get_roster_for_session(session_id)
+
+    @require_permission("attendance.view")
+    def can_edit_session_attendance(self, session_id: int) -> bool:
+        """Return whether Session lifecycle permits Attendance mutations."""
+        with self._session_factory() as session:
+            session_obj = self._repository_provider.sessions(session).get_by_id(session_id)
+            if not session_obj:
+                raise ValueError("Session not found.")
+            return self._session_allows_attendance_write(session_obj)
 
     @require_permission("attendance.view")
     def get_attendance_for_session(self, session_id: int) -> List[Attendance]:
