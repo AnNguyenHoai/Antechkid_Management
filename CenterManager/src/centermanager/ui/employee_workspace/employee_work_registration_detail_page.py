@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from calendar import monthrange
-from datetime import date
+from datetime import timedelta
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -22,7 +20,7 @@ from centermanager.models.employee_work_registration_period import EmployeeWorkR
 
 
 class EmployeeWorkRegistrationDetailPage(QWidget):
-    """Manager detail view for one employee's monthly work registration."""
+    """Manager detail view for one employee's weekly work registration."""
 
     def __init__(self, registration_service, registration, parent=None):
         super().__init__(parent)
@@ -97,20 +95,31 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         name = getattr(employee, "full_name", None) or "-"
         code = getattr(employee, "employee_code", None) or "-"
         period = getattr(r, "period", None)
-        if period:
-            period_text = f"{period.month:02d}/{period.year}"
-            self._period_status = getattr(period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN)
+        if period and getattr(period, "week_start", None):
+            week_start = period.week_start
+            week_end = getattr(period, "week_end", week_start + timedelta(days=6))
+            period_text = f"{week_start:%d/%m/%Y} - {week_end:%d/%m/%Y}"
+            self._period_status = getattr(
+                period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN
+            )
         else:
             period_text = "-"
 
         self.title.setText(f"{name} • Registration Detail")
         self.summary.setText(
             f"Employee: {name} ({code})\n"
-            f"Registration month: {period_text}\n"
+            f"Registration week: {period_text}\n"
             f"Availability blocks: {len(r.blocks)}"
         )
-        effective = "ADMIN OVERRIDE" if self._admin_override and self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED else self._period_status
-        self.status.setText(f"Status: {r.status} • Period: {self._period_status} • Access: {effective}")
+        effective = (
+            "ADMIN OVERRIDE"
+            if self._admin_override
+            and self._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
+            else self._period_status
+        )
+        self.status.setText(
+            f"Status: {r.status} • Period: {self._period_status} • Access: {effective}"
+        )
 
         self.table.setRowCount(0)
         total_minutes = 0
@@ -163,22 +172,26 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self.edit_btn.setEnabled(can_edit)
         self.delete_btn.setEnabled(can_edit)
 
-    def _period_values(self):
+    def _week_start(self):
         period = getattr(self.registration, "period", None)
-        if period is None:
-            raise ValueError("Registration period is unavailable.")
-        return period.year, period.month
+        week_start = getattr(period, "week_start", None)
+        if week_start is None:
+            raise ValueError("Registration week is unavailable.")
+        return week_start
+
+    def _reload(self):
+        week_start = self._week_start()
+        self.registration = self._rs.list_for_employee(
+            self.registration.employee_id, week_start
+        )
+        self.refresh()
 
     def _accept(self):
         if not self._write_enabled:
             return
         try:
-            year, month = self._period_values()
-            self._rs.accept(self.registration.employee_id, year, month)
-            self.registration = self._rs.list_for_employee(
-                self.registration.employee_id, year, month
-            )
-            self.refresh()
+            self._rs.accept(self.registration.employee_id, self._week_start())
+            self._reload()
         except Exception as exc:
             QMessageBox.warning(self, "Accept Registration", str(exc))
 
@@ -186,12 +199,8 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         if not self._write_enabled:
             return
         try:
-            year, month = self._period_values()
-            self._rs.reopen(self.registration.employee_id, year, month)
-            self.registration = self._rs.list_for_employee(
-                self.registration.employee_id, year, month
-            )
-            self.refresh()
+            self._rs.reopen(self.registration.employee_id, self._week_start())
+            self._reload()
         except Exception as exc:
             QMessageBox.warning(self, "Reopen Registration", str(exc))
 
@@ -213,24 +222,29 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         if block is None or not self.edit_btn.isEnabled():
             return
         from centermanager.ui.employee_workspace.employee_work_registration_widget import WorkRegistrationDialog
+
         period = self.registration.period
+        min_date = period.week_start
+        max_date = period.week_start + timedelta(days=6)
         dialog = WorkRegistrationDialog(
-            self, block,
-            min_date=date(period.year, period.month, 1),
-            max_date=date(period.year, period.month, monthrange(period.year, period.month)[1]),
+            self,
+            block,
+            min_date=min_date,
+            max_date=max_date,
         )
         if not dialog.exec():
             return
         work_date, start_time, end_time, work_type, notes = dialog.values()
         try:
             self._rs.update(
-                block.id, work_date=work_date, start_time=start_time,
-                end_time=end_time, work_type=work_type, notes=notes
+                block.id,
+                work_date=work_date,
+                start_time=start_time,
+                end_time=end_time,
+                work_type=work_type,
+                notes=notes,
             )
-            self.registration = self._rs.list_for_employee(
-                self.registration.employee_id, period.year, period.month
-            )
-            self.refresh()
+            self._reload()
         except Exception as exc:
             QMessageBox.warning(self, "Edit Registration", str(exc))
 
@@ -239,24 +253,29 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         if block is None or not self.delete_btn.isEnabled():
             return
         reason = self._ask_reason(
-            self, "Delete Availability",
+            self,
+            "Delete Availability",
             "Reason for deleting this availability block:",
         )
         if not reason:
             return
         if QMessageBox.question(
-            self, "Confirm Availability Deletion",
+            self,
+            "Confirm Availability Deletion",
             "Delete the selected availability block?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:
             return
         try:
             self._rs.delete(block.id)
-            period = self.registration.period
-            self.registration = self._rs.list_for_employee(
-                self.registration.employee_id, period.year, period.month
+            refreshed = self._rs.list_for_employee(
+                self.registration.employee_id, self._week_start()
             )
-            self.refresh()
+            if refreshed is not None:
+                self.registration = refreshed
+                self.refresh()
+            else:
+                self._back()
         except Exception as exc:
             QMessageBox.warning(self, "Delete Availability", str(exc))
 
