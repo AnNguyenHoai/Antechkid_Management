@@ -19,9 +19,9 @@ def test_employee_workspace_exposes_admin_employee_delete_action():
 
 def test_registration_review_exposes_admin_closed_period_reopen_action():
     source = read("employee_work_registration_review_page.py")
-    assert 'self.reopen_period_btn = QPushButton("Re-open Closed Month")' in source
+    assert 'self.reopen_period_btn = QPushButton("Re-open Closed Week")' in source
     assert 'def reopen_period(self):' in source
-    assert 'self._admin_service.reopen_period(year, month, reason=reason)' in source
+    assert 'self._admin_service.reopen_period(self._week_start, reason=reason)' in source
     assert 'Registration workflow states will not be changed.' in source
 
 
@@ -38,7 +38,7 @@ def test_admin_can_override_registration_status_and_closed_period_in_detail_serv
     assert 'ADMIN_OVERRIDE_PERMISSION="work_registration.period.admin_override"' in source
     assert 'def can_admin_override(self,user=None):' in source
     assert 'if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override' in source
-    assert 'if admin_override:' in source
+    assert 'p=self._period(s,ws) if admin_override else self._open_period(s,ws)' in source
     assert '"admin_override":admin_override' in source
 
 
