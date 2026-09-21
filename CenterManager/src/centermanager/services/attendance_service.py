@@ -118,56 +118,21 @@ class AttendanceService:
         arrival_time: Optional[str] = None,
         teacher_note: Optional[str] = None,
     ) -> Attendance:
-        if not self._check_student_enrolled(student_id, session_id):
-            raise ValueError("Student is not enrolled in this class for this session date.")
-        status = self._validate_status(status)
-
-        with self._session_factory() as session:
-            repo = self._repository_provider.attendance(session)
-            existing = repo.get_by_session_and_student(session_id, student_id)
-            if existing:
-                old_status = existing.status
-                existing.status = status
-                if arrival_time is not None:
-                    existing.arrival_time = arrival_time
-                if teacher_note is not None:
-                    existing.teacher_note = teacher_note
-                session.commit()
-                repo.refresh(existing)
-
-                if old_status != status:
-                    self._timeline_service.log_event(
-                        student_id=student_id,
-                        event_type=TimelineEventType.ATTENDANCE_UPDATED,
-                        title="Attendance Updated",
-                        description=f"Session {session_id}: status changed from {old_status} to {status}",
-                        metadata={"session_id": session_id, "old_status": old_status, "new_status": status},
-                    )
-                self._trigger_report_policy(student_id, session_id, status)
-                return existing
-
-            attendance = Attendance(
-                session_id=session_id,
-                student_id=student_id,
-                status=status,
-                arrival_time=arrival_time,
-                teacher_note=teacher_note,
-            )
-            repo.add(attendance)
-            session.commit()
-            repo.refresh(attendance)
-            self._timeline_service.log_event(
-                student_id=student_id,
-                event_type=TimelineEventType.ATTENDANCE_CREATED,
-                title="Attendance Recorded",
-                description=f"Session {session_id}: {status}",
-                metadata={"session_id": session_id, "status": status},
-            )
-            if self._event_bus is not None:
-                self._event_bus.publish(
-                    StudentUpdated(student_id=student_id, student_code="", student_name="", changes=["attendance"])
-                )
-            return attendance
+        """Backward-compatible single-row API routed through the atomic mutation boundary."""
+        saved = self._save_session_attendance_atomic(
+            session_id,
+            {
+                student_id: {
+                    "status": status,
+                    "arrival_time": arrival_time,
+                    "teacher_note": teacher_note,
+                }
+            },
+            preserve_existing_optional_fields=True,
+        )
+        if not saved:
+            raise RuntimeError("Attendance save did not return a record.")
+        return saved[0]
 
     def _trigger_report_policy(self, student_id: int, session_id: int, status: str) -> None:
         return None
@@ -236,8 +201,14 @@ class AttendanceService:
         self,
         session_id: int,
         attendance_rows: Dict[int, Dict[str, Any]],
+        preserve_existing_optional_fields: bool = False,
     ) -> List[Attendance]:
-        """Persist one Session attendance sheet with exactly one database commit."""
+        """Persist attendance rows with exactly one database commit.
+
+        Session-sheet callers are authoritative and may clear optional values.
+        The legacy single-row API can preserve existing optional fields when its
+        historical ``None`` defaults mean "not supplied" rather than "clear".
+        """
         normalized_rows = self._normalize_session_rows(attendance_rows)
         if not normalized_rows:
             return []
@@ -255,7 +226,7 @@ class AttendanceService:
                 if not session_obj:
                     raise ValueError("Session not found.")
 
-                # Validate the complete sheet against the roster that belonged to
+                # Validate every requested row against the roster that belonged to
                 # this class on the Session date, not only today's ACTIVE roster.
                 for student_id in normalized_rows:
                     if not self._is_student_eligible_for_session(
@@ -278,9 +249,15 @@ class AttendanceService:
                     if existing is not None:
                         old_status = existing.status
                         existing.status = row["status"]
-                        # The session sheet is authoritative: blank UI values clear old values.
-                        existing.arrival_time = row["arrival_time"]
-                        existing.teacher_note = row["teacher_note"]
+                        if preserve_existing_optional_fields:
+                            if row["arrival_time"] is not None:
+                                existing.arrival_time = row["arrival_time"]
+                            if row["teacher_note"] is not None:
+                                existing.teacher_note = row["teacher_note"]
+                        else:
+                            # The Session sheet is authoritative: blank UI values clear old values.
+                            existing.arrival_time = row["arrival_time"]
+                            existing.teacher_note = row["teacher_note"]
                         results.append(existing)
                         side_effects.append((student_id, old_status, row["status"]))
                         continue
