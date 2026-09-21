@@ -1,0 +1,266 @@
+# -*- coding: utf-8 -*-
+"""Pre-release upgrade gate for a production-like SQLite database copy."""
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Iterable
+from urllib.parse import quote
+
+from centermanager.database.migration import (
+    get_current_revision,
+    get_head_revision,
+    upgrade_database_path_to_head,
+)
+
+_IGNORED_COUNT_TABLES = {"alembic_version", "sqlite_sequence"}
+
+
+class DatabaseUpgradeGateError(RuntimeError):
+    """Raised when a production database upgrade rehearsal is unsafe or invalid."""
+
+
+@dataclass(frozen=True)
+class DatabaseHealth:
+    integrity_check: str
+    foreign_key_violations: int
+    table_counts: Dict[str, int]
+
+
+@dataclass(frozen=True)
+class DatabaseUpgradeGateReport:
+    status: str
+    source_database: str
+    snapshot_database: str
+    source_sha256_before_snapshot: str
+    source_sha256_after_snapshot: str
+    source_preserved: bool
+    snapshot_sha256_before_upgrade: str
+    snapshot_sha256_after_upgrade: str
+    source_revision: str | None
+    target_revision: str
+    upgraded_revision: str | None
+    reopened_revision: str | None
+    integrity_before: str
+    integrity_after: str
+    integrity_after_reopen: str
+    foreign_key_violations_before: int
+    foreign_key_violations_after: int
+    foreign_key_violations_after_reopen: int
+    table_counts_before: Dict[str, int]
+    table_counts_after: Dict[str, int]
+    completed_at_utc: str
+
+
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _connect_read_only(database_path: Path) -> sqlite3.Connection:
+    encoded_path = quote(database_path.resolve().as_posix(), safe="/:")
+    return sqlite3.connect(f"file:{encoded_path}?mode=ro", uri=True)
+
+
+def _user_tables(connection: sqlite3.Connection) -> Iterable[str]:
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    return (row[0] for row in rows)
+
+
+def inspect_database_health(database_path: Path) -> DatabaseHealth:
+    """Read integrity, foreign-key state, and row counts without mutating the DB."""
+    database_path = Path(database_path)
+    if not database_path.exists() or not database_path.is_file():
+        raise DatabaseUpgradeGateError(f"Database file does not exist: {database_path}")
+    if database_path.stat().st_size == 0:
+        raise DatabaseUpgradeGateError(f"Database file is empty: {database_path}")
+
+    try:
+        connection = _connect_read_only(database_path)
+        try:
+            integrity_rows = connection.execute("PRAGMA integrity_check").fetchall()
+            integrity = "\n".join(str(row[0]) for row in integrity_rows)
+            fk_violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+            counts: Dict[str, int] = {}
+            for table in _user_tables(connection):
+                if table in _IGNORED_COUNT_TABLES:
+                    continue
+                row = connection.execute(
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
+                ).fetchone()
+                counts[table] = int(row[0])
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as exc:
+        raise DatabaseUpgradeGateError(
+            f"Could not inspect SQLite database {database_path}: {exc}"
+        ) from exc
+
+    return DatabaseHealth(
+        integrity_check=integrity,
+        foreign_key_violations=len(fk_violations),
+        table_counts=counts,
+    )
+
+
+def assert_healthy(health: DatabaseHealth, *, phase: str) -> None:
+    if health.integrity_check.strip().lower() != "ok":
+        raise DatabaseUpgradeGateError(
+            f"{phase}: PRAGMA integrity_check failed: {health.integrity_check}"
+        )
+    if health.foreign_key_violations:
+        raise DatabaseUpgradeGateError(
+            f"{phase}: {health.foreign_key_violations} foreign-key violation(s) detected"
+        )
+
+
+def create_consistent_snapshot(source_database: Path, snapshot_database: Path) -> None:
+    """Create a transactionally consistent SQLite snapshot without writing source.
+
+    SQLite's online backup API is deliberately used instead of copying the main
+    database file. A live WAL database may have committed pages outside the main
+    file, while ``Connection.backup`` produces one consistent database image.
+    """
+    source_database = Path(source_database).resolve()
+    snapshot_database = Path(snapshot_database).resolve()
+    if source_database == snapshot_database:
+        raise DatabaseUpgradeGateError("Snapshot path must differ from the source database")
+    if not source_database.exists() or not source_database.is_file():
+        raise DatabaseUpgradeGateError(f"Source database does not exist: {source_database}")
+
+    snapshot_database.parent.mkdir(parents=True, exist_ok=True)
+    if snapshot_database.exists():
+        raise DatabaseUpgradeGateError(
+            f"Refusing to overwrite existing snapshot: {snapshot_database}"
+        )
+
+    source = _connect_read_only(source_database)
+    destination = sqlite3.connect(snapshot_database)
+    try:
+        source.backup(destination)
+        destination.commit()
+    finally:
+        destination.close()
+        source.close()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def assert_preserved_rows(before: Dict[str, int], after: Dict[str, int]) -> None:
+    """Fail closed if any table that existed before migration loses/changes rows."""
+    missing = sorted(set(before) - set(after))
+    changed = {
+        table: (before[table], after[table])
+        for table in sorted(set(before) & set(after))
+        if before[table] != after[table]
+    }
+    if missing or changed:
+        details = []
+        if missing:
+            details.append(f"missing tables={missing}")
+        if changed:
+            details.append(f"row-count changes={changed}")
+        raise DatabaseUpgradeGateError(
+            "Migration changed pre-existing business data; explicit migration review is required: "
+            + "; ".join(details)
+        )
+
+
+def run_database_upgrade_gate(
+    source_database: Path,
+    evidence_dir: Path,
+) -> DatabaseUpgradeGateReport:
+    """Rehearse the release migration on a consistent copy and prove invariants.
+
+    The source database is opened read-only only long enough to create the
+    snapshot. Every migration and post-upgrade probe targets the snapshot path.
+    """
+    source_database = Path(source_database).resolve()
+    evidence_dir = Path(evidence_dir).resolve()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_database = evidence_dir / "center.upgrade-rehearsal.db"
+    report_path = evidence_dir / "database-upgrade-report.json"
+
+    if not source_database.exists() or not source_database.is_file():
+        raise DatabaseUpgradeGateError(f"Source database does not exist: {source_database}")
+
+    source_hash_before = sha256_file(source_database)
+    create_consistent_snapshot(source_database, snapshot_database)
+    source_hash_after = sha256_file(source_database)
+    if source_hash_after != source_hash_before:
+        raise DatabaseUpgradeGateError(
+            "Source database main file changed while creating the read-only snapshot; "
+            "rerun the gate in a controlled maintenance window."
+        )
+
+    snapshot_hash_before = sha256_file(snapshot_database)
+    before = inspect_database_health(snapshot_database)
+    assert_healthy(before, phase="pre-upgrade")
+    source_revision = get_current_revision(snapshot_database)
+    target_revision = get_head_revision(snapshot_database)
+
+    upgrade_database_path_to_head(snapshot_database)
+
+    after = inspect_database_health(snapshot_database)
+    assert_healthy(after, phase="post-upgrade")
+    upgraded_revision = get_current_revision(snapshot_database)
+    if upgraded_revision != target_revision:
+        raise DatabaseUpgradeGateError(
+            "Database is not at Alembic head after upgrade: "
+            f"current={upgraded_revision!r}, head={target_revision!r}"
+        )
+    assert_preserved_rows(before.table_counts, after.table_counts)
+    snapshot_hash_after = sha256_file(snapshot_database)
+
+    # Restart/reopen gate: all prior connections are closed by the helpers above.
+    # Open the migrated artifact again from disk and prove the same health/revision.
+    reopened = inspect_database_health(snapshot_database)
+    assert_healthy(reopened, phase="post-reopen")
+    reopened_revision = get_current_revision(snapshot_database)
+    if reopened_revision != target_revision:
+        raise DatabaseUpgradeGateError(
+            "Database did not remain at Alembic head after reopen: "
+            f"current={reopened_revision!r}, head={target_revision!r}"
+        )
+    assert_preserved_rows(after.table_counts, reopened.table_counts)
+
+    report = DatabaseUpgradeGateReport(
+        status="passed",
+        source_database=str(source_database),
+        snapshot_database=str(snapshot_database),
+        source_sha256_before_snapshot=source_hash_before,
+        source_sha256_after_snapshot=source_hash_after,
+        source_preserved=source_hash_before == source_hash_after,
+        snapshot_sha256_before_upgrade=snapshot_hash_before,
+        snapshot_sha256_after_upgrade=snapshot_hash_after,
+        source_revision=source_revision,
+        target_revision=target_revision,
+        upgraded_revision=upgraded_revision,
+        reopened_revision=reopened_revision,
+        integrity_before=before.integrity_check,
+        integrity_after=after.integrity_check,
+        integrity_after_reopen=reopened.integrity_check,
+        foreign_key_violations_before=before.foreign_key_violations,
+        foreign_key_violations_after=after.foreign_key_violations,
+        foreign_key_violations_after_reopen=reopened.foreign_key_violations,
+        table_counts_before=before.table_counts,
+        table_counts_after=after.table_counts,
+        completed_at_utc=datetime.now(timezone.utc).isoformat(),
+    )
+    report_path.write_text(
+        json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report
