@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -47,7 +48,7 @@ def test_admin_reopen_requires_a_reason_before_touching_storage():
     service = _service()
 
     with pytest.raises(EmployeeAdminManagementValidationError, match="reason is required"):
-        service.reopen_period(2026, 10, user=_user(RoleDefinitions.ADMIN))
+        service.reopen_period(date(2026, 10, 5), user=_user(RoleDefinitions.ADMIN))
 
 
 def test_admin_delete_registration_requires_a_reason_before_touching_storage():
