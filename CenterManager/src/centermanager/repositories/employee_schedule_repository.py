@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import List, Optional
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from centermanager.models.employee_schedule import (
     EmployeeScheduleRule,
     EmployeeScheduleException,
@@ -96,7 +96,7 @@ class EmployeeScheduleRepository:
         week_start = self.normalize_week_start(week_start)
         return self._session.scalar(
             select(EmployeeScheduleWeek)
-            .options(joinedload(EmployeeScheduleWeek.assignments))
+            .options(selectinload(EmployeeScheduleWeek.assignments))
             .where(EmployeeScheduleWeek.week_start == week_start)
         )
 
