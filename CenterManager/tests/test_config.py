@@ -15,11 +15,12 @@ from centermanager.core.config import (
     _DEFAULT_CONFIG,
 )
 from centermanager.core.paths import get_paths
+from centermanager.core.version import get_application_version
 from tests.conftest import REAL_RUNTIME_PATH
 
 
 def test_config_uses_default_when_missing(temp_runtime):
-    """Test that load_config returns defaults when file is missing."""
+    """Test that load_config returns canonical defaults when file is missing."""
     paths = get_paths()
     config_file = paths.config_file
     # ensure file does not exist
@@ -27,19 +28,23 @@ def test_config_uses_default_when_missing(temp_runtime):
         config_file.unlink()
     data = load_config(config_file)
     assert data["application"]["name"] == "CenterManager"
-    assert data["application"]["version"] == "0.1.0"
+    assert data["application"]["version"] == get_application_version()
 
 
 def test_config_save_and_load(temp_runtime):
-    """Test that save_config writes a file that load_config can read."""
+    """Test operator configuration round-trips without overriding release identity."""
     paths = get_paths()
     config_file = paths.config_file
     config_file.parent.mkdir(parents=True, exist_ok=True)
-    test_data = {"application": {"name": "TestApp", "version": "9.9.9"}}
+    test_data = {
+        "application": {"name": "TestApp", "version": "9.9.9"},
+        "collaboration": {"enabled": True, "poll_interval": 15},
+    }
     save_config(test_data, config_file)
     loaded = load_config(config_file)
-    assert loaded["application"]["name"] == "TestApp"
-    assert loaded["application"]["version"] == "9.9.9"
+    assert loaded["application"]["name"] == "CenterManager"
+    assert loaded["application"]["version"] == get_application_version()
+    assert loaded["collaboration"] == test_data["collaboration"]
 
 
 def test_init_config_creates_default_if_missing(temp_runtime):
