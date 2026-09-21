@@ -127,7 +127,13 @@ def test_prod_05_verifier_accepts_only_converged_two_machine_pass_evidence():
     "mutator, expected",
     [
         (lambda a, b, s: b["repository"].update(head="9" * 40), "HEADs have not converged"),
-        (lambda a, b, s: b["database"].update(authoritative_sha256="8" * 64), "database hashes differ"),
+        (
+            lambda a, b, s: b["database"].update(
+                runtime_sha256="8" * 64,
+                authoritative_sha256="8" * 64,
+            ),
+            "database hashes differ",
+        ),
         (lambda a, b, s: b.update(machine_fingerprint=a["machine_fingerprint"]), "same machine fingerprint"),
         (lambda a, b, s: s["scenarios"][0].update(status="FAIL"), "not fully PASS"),
     ],
@@ -140,6 +146,19 @@ def test_prod_05_verifier_fails_closed(mutator, expected):
     mutator(a, b, scenarios)
     with pytest.raises(verifier.TwoMachineUATError, match=expected):
         verifier.verify_evidence(a, b, scenarios)
+
+
+def test_prod_05_verifier_rejects_internal_machine_database_contradiction():
+    verifier = _load_verifier()
+    a = _machine("A", "a" * 64)
+    b = _machine("B", "b" * 64)
+    b["database"]["authoritative_sha256"] = "8" * 64
+
+    with pytest.raises(
+        verifier.TwoMachineUATError,
+        match="database hashes contradict convergence flag",
+    ):
+        verifier.verify_evidence(a, b, _scenarios())
 
 
 def test_prod_05_verifier_cli_source_compiles():
