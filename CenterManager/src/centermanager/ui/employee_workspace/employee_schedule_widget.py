@@ -282,7 +282,7 @@ class EmployeeScheduleWidget(QWidget):
         )
         self.rules.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rules.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.rules.setMinimumHeight(170)
+        self.rules.setMinimumHeight(190)
         self.rules.verticalHeader().setDefaultSectionSize(32)
         for column in range(4):
             self.rules.horizontalHeader().setSectionResizeMode(
@@ -307,7 +307,7 @@ class EmployeeScheduleWidget(QWidget):
         self.exceptions.setHorizontalHeaderLabels(["Date", "Type", "Time", "Notes"])
         self.exceptions.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.exceptions.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.exceptions.setMinimumHeight(140)
+        self.exceptions.setMinimumHeight(150)
         self.exceptions.verticalHeader().setDefaultSectionSize(32)
         for column in range(3):
             self.exceptions.horizontalHeader().setSectionResizeMode(
