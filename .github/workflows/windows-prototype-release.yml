@@ -1,10 +1,10 @@
-name: Windows Prototype Release
+name: Windows Production Release
 
 on:
   workflow_dispatch:
   push:
     tags:
-      - "v*-prototype"
+      - "v*"
 
 permissions:
   contents: read
@@ -19,6 +19,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate release identity
+        id: release
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
+            throw "VERSION is not valid SemVer: $version"
+          }
+          $releaseName = "CenterManager-v$version-windows-x64"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "release_name=$releaseName" >> $env:GITHUB_OUTPUT
+
+          if ($env:GITHUB_EVENT_NAME -eq "push") {
+            $expectedTag = "v$version"
+            if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+              throw "Release tag $env:GITHUB_REF_NAME does not match canonical VERSION $expectedTag"
+            }
+            git fetch origin main_repos
+            $mainSha = (git rev-parse origin/main_repos).Trim()
+            if ($env:GITHUB_SHA -ne $mainSha) {
+              throw "Production release tag must point to current main_repos HEAD. tag=$env:GITHUB_SHA main_repos=$mainSha"
+            }
+          }
+          elseif ($env:GITHUB_REF_NAME -ne "main_repos") {
+            throw "Manual production release must run from main_repos, got $env:GITHUB_REF_NAME"
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,24 +68,42 @@ jobs:
       - name: Run full test suite
         run: python -m pytest -q
 
-      - name: Build Windows prototype
+      - name: Build Windows production candidate
         run: python build_release.py
 
-      - name: Verify release package
+      - name: Verify release package and provenance
         shell: pwsh
         run: |
-          $zip = "release/CenterManager-v0.1.0-prototype-windows-x64.zip"
-          $exe = "release/CenterManager-v0.1.0-prototype-windows-x64/CenterManager.exe"
-          $runtime = "release/CenterManager-v0.1.0-prototype-windows-x64/runtime"
-          $git = "release/CenterManager-v0.1.0-prototype-windows-x64/git/cmd/git.exe"
-          if (!(Test-Path $zip)) { throw "Release ZIP was not created: $zip" }
-          if (!(Test-Path $exe)) { throw "Executable was not created: $exe" }
-          if (!(Test-Path $runtime)) { throw "External runtime directory was not created: $runtime" }
-          if (!(Test-Path $git)) { throw "Bundled Git was not created: $git" }
+          $releaseName = "${{ steps.release.outputs.release_name }}"
+          $version = "${{ steps.release.outputs.version }}"
+          $package = "release/$releaseName"
+          $zip = "release/$releaseName.zip"
+          $checksum = "$zip.sha256"
+          $manifest = "$package/RELEASE_MANIFEST.json"
+          $exe = "$package/CenterManager.exe"
+          $runtime = "$package/runtime"
+          $git = "$package/git/cmd/git.exe"
+
+          foreach ($required in @($zip, $checksum, $manifest, $exe, $runtime, $git)) {
+            if (!(Test-Path $required)) { throw "Required release artifact missing: $required" }
+          }
           if ((Get-Item $exe).Length -le 0) { throw "Executable is empty" }
 
-          $package = Get-Item "release/CenterManager-v0.1.0-prototype-windows-x64"
-          $forbidden = Get-ChildItem -Path $package.FullName -Recurse -File |
+          $manifestData = Get-Content $manifest -Raw | ConvertFrom-Json
+          if ($manifestData.version -ne $version) {
+            throw "Manifest version mismatch: $($manifestData.version) != $version"
+          }
+          if ($manifestData.source_commit -ne $env:GITHUB_SHA.ToLower()) {
+            throw "Manifest commit mismatch: $($manifestData.source_commit) != $env:GITHUB_SHA"
+          }
+
+          $expectedHash = ((Get-Content $checksum -Raw).Trim() -split '\s+')[0].ToLower()
+          $actualHash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($expectedHash -ne $actualHash) {
+            throw "Release ZIP checksum mismatch"
+          }
+
+          $forbidden = Get-ChildItem -Path $package -Recurse -File |
             Where-Object { $_.Name -in @("python.exe", "pythonw.exe") -or $_.FullName -match "\\src\\|\\.git\\" }
           if ($forbidden) {
             $forbidden | ForEach-Object { Write-Host "Forbidden release file: $($_.FullName)" }
@@ -66,17 +113,20 @@ jobs:
       - name: Clean-machine portable smoke test
         shell: pwsh
         run: |
-          $zip = (Resolve-Path "release/CenterManager-v0.1.0-prototype-windows-x64.zip").Path
+          $releaseName = "${{ steps.release.outputs.release_name }}"
+          $zip = (Resolve-Path "release/$releaseName.zip").Path
           $smokeRoot = Join-Path $env:RUNNER_TEMP "CenterManager-clean-machine"
           if (Test-Path $smokeRoot) { Remove-Item $smokeRoot -Recurse -Force }
           New-Item -ItemType Directory -Path $smokeRoot | Out-Null
           Expand-Archive -Path $zip -DestinationPath $smokeRoot -Force
-          $package = Join-Path $smokeRoot "CenterManager-v0.1.0-prototype-windows-x64"
+          $package = Join-Path $smokeRoot $releaseName
           $exe = Join-Path $package "CenterManager.exe"
           $git = Join-Path $package "git\cmd\git.exe"
+          $manifest = Join-Path $package "RELEASE_MANIFEST.json"
 
           if (!(Test-Path $exe)) { throw "Clean-machine EXE missing" }
           if (!(Test-Path $git)) { throw "Clean-machine bundled Git missing" }
+          if (!(Test-Path $manifest)) { throw "Clean-machine release manifest missing" }
 
           $oldPath = $env:PATH
           try {
@@ -98,9 +148,11 @@ jobs:
             Remove-Item Env:CENTERMANAGER_PORTABLE_SMOKE -ErrorAction SilentlyContinue
           }
 
-      - name: Upload prototype artifact
+      - name: Upload production release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CenterManager-v0.1.0-prototype-windows-x64
-          path: CenterManager/release/CenterManager-v0.1.0-prototype-windows-x64.zip
+          name: ${{ steps.release.outputs.release_name }}
+          path: |
+            CenterManager/release/${{ steps.release.outputs.release_name }}.zip
+            CenterManager/release/${{ steps.release.outputs.release_name }}.zip.sha256
           if-no-files-found: error
