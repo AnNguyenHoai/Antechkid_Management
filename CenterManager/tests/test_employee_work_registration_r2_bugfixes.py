@@ -57,7 +57,7 @@ class TestEmployeeWorkRegistrationR2Bugfixes:
             "centermanager.services.employee_work_registration_service.get_current_user",
             return_value=manager,
         ):
-            result = service.reopen(7, 2026, 9)
+            result = service.reopen(7, date(2026, 9, 7))
 
         assert result is registration
         assert registration.status == EmployeeWorkRegistration.STATUS_DRAFT

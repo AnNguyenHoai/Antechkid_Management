@@ -81,12 +81,12 @@ def test_work_registration_service_uses_canonical_self_and_all_permissions():
 
 def test_get_period_checks_all_scope_before_employee_self_scope():
     source = SERVICE.read_text(encoding="utf-8")
-    all_check = 'if self._permission_service.has_permission(self.ALL_PERMISSION, u):'
-    self_check = 'if employee is not None and ('
+    all_check = 'self._permission_service.has_permission(self.ALL_PERMISSION,u)'
+    self_check = 'employee is not None and ('
     assert all_check in source
     assert self_check in source
     assert source.index(all_check) < source.index(self_check)
-    assert re.search(r"return self\._period_readonly\(y,\s*m\)", source)
+    assert 'repo.get_or_create(self.week_start(week_start))' in source
 
 
 def test_shell_uses_capability_policy_for_registration_navigation():

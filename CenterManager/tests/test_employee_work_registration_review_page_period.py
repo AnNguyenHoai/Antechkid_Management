@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -8,9 +9,13 @@ from centermanager.ui.employee_workspace.employee_work_registration_review_page 
 )
 
 
+WEEK_START = date(2026, 9, 7)
+
+
 def _registration(status, employee_id=1):
     employee = SimpleNamespace(full_name="Employee", employee_code="E001")
     return SimpleNamespace(
+        id=employee_id + 100,
         employee_id=employee_id,
         employee=employee,
         blocks=[],
@@ -23,8 +28,11 @@ def _registration(status, employee_id=1):
 def _page(qtbot, period_status):
     employee_service = Mock()
     registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.get_period.return_value = SimpleNamespace(status=period_status)
+    registration_service.next_week.return_value = WEEK_START
+    registration_service.get_period.return_value = SimpleNamespace(
+        status=period_status,
+        week_start=WEEK_START,
+    )
     registration_service.list_all.return_value = [
         _registration(EmployeeWorkRegistration.STATUS_ACCEPTED)
     ]
@@ -39,7 +47,7 @@ def test_closed_period_is_reflected_in_review_page(qtbot):
     page, _ = _page(qtbot, EmployeeWorkRegistrationPeriod.STATUS_CLOSED)
 
     assert page._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
-    assert "Period: Closed" in page.month.text()
+    assert "Period: Closed" in page.period_label.text()
     assert not page.accept_btn.isEnabled()
     assert not page.reopen_btn.isEnabled()
     assert not page.close_btn.isEnabled()
@@ -48,7 +56,7 @@ def test_closed_period_is_reflected_in_review_page(qtbot):
 def test_open_period_keeps_close_action_available_when_all_accepted(qtbot):
     page, _ = _page(qtbot, EmployeeWorkRegistrationPeriod.STATUS_OPEN)
 
-    assert "Period: Open" in page.month.text()
+    assert "Period: Open" in page.period_label.text()
     assert page.close_btn.isEnabled()
     assert page.reopen_btn.isEnabled()
 
@@ -58,9 +66,10 @@ def test_close_refreshes_period_status(qtbot):
 
     period_state = {"status": EmployeeWorkRegistrationPeriod.STATUS_OPEN}
     registration_service.get_period.side_effect = lambda *args, **kwargs: SimpleNamespace(
-        status=period_state["status"]
+        status=period_state["status"],
+        week_start=WEEK_START,
     )
-    registration_service.close_month.side_effect = lambda year, month: period_state.update(
+    registration_service.close_week.side_effect = lambda week_start: period_state.update(
         status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED
     )
 
@@ -68,11 +77,11 @@ def test_close_refreshes_period_status(qtbot):
         "centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question",
         return_value=16384,
     ):
-        page.close_month()
+        page.close_week()
 
-    registration_service.close_month.assert_called_once_with(2026, 10)
+    registration_service.close_week.assert_called_once_with(WEEK_START)
     registration_service.get_period.assert_called()
     assert page._period_status == EmployeeWorkRegistrationPeriod.STATUS_CLOSED
-    assert "Period: Closed" in page.month.text()
+    assert "Period: Closed" in page.period_label.text()
     assert not page.close_btn.isEnabled()
     assert not page.reopen_btn.isEnabled()

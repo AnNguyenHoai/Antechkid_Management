@@ -1,4 +1,4 @@
-from datetime import date, datetime, time
+from datetime import datetime, time
 
 from centermanager.core.clock import Clock, reset_clock, set_clock
 from centermanager.core.current_user import CurrentUserContext
@@ -27,28 +27,28 @@ def test_audit_service_always_populates_summary(tmp_path):
         assert persisted.summary == "TEST_AUDIT_SUMMARY: ExampleEntity#7"
 
 
-def test_close_month_persists_summary_and_entity_identity(tmp_path):
+def test_close_week_persists_summary_and_entity_identity(tmp_path):
     fixed_now = datetime(2026, 8, 31, 10, 30, 0)
     set_clock(Clock(now_fn=lambda: fixed_now, today_fn=lambda: fixed_now.date()))
     try:
         Session, user, _, employee, _ = setup_db(tmp_path)
         service = EmployeeWorkRegistrationService(Session)
-        year, month = service.next_month()
+        week_start = service.next_week()
 
         with CurrentUserContext(user):
-            service.create(employee.id, date(year, month, 5), time(9), time(12), "WORK")
-            service.submit_month(employee.id, year, month)
+            service.create(employee.id, week_start, time(9), time(12), "WORK")
+            service.submit_week(employee.id, week_start)
 
         with Session() as session:
             manager = session.query(__import__("centermanager.models", fromlist=["User"]).User).filter_by(username="manager").one()
 
         with CurrentUserContext(manager):
-            service.accept(employee.id, year, month)
-            service.close_month(year, month)
+            service.accept(employee.id, week_start)
+            service.close_week(week_start)
 
         with Session() as session:
             log = session.query(AuditLog).filter_by(action=service.AUDIT_CLOSED).one()
-            period = session.query(EmployeeWorkRegistrationPeriod).filter_by(year=year, month=month).one()
+            period = session.query(EmployeeWorkRegistrationPeriod).filter_by(week_start=week_start).one()
 
             assert log.summary == f"WORK_REGISTRATION_PERIOD_CLOSED: EmployeeWorkRegistrationPeriod#{period.id}"
             assert log.entity_type == "EmployeeWorkRegistrationPeriod"

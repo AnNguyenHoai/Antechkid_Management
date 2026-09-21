@@ -15,14 +15,14 @@ class FakeService:
         self.registration = registration
         self.refresh_calls = 0
 
-    def next_month(self):
-        return 2026, 10
+    def next_week(self):
+        return date(2026, 9, 28)
 
-    def list_for_employee(self, employee_id, year, month):
+    def list_for_employee(self, employee_id, week_start):
         return self.registration
 
-    def get_period(self, year, month):
-        return SimpleNamespace(submission_deadline=date(2026, 10, 25))
+    def get_period(self, week_start):
+        return SimpleNamespace(submission_deadline=date(2026, 10, 3))
 
 
 def test_empty_registration_is_editable_in_draft(qtbot):

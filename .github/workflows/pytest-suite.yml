@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main_repos
+  pull_request:
+    branches:
+      - main_repos
 
 permissions:
   contents: read
@@ -12,6 +15,7 @@ jobs:
   pytest:
     name: Full pytest suite (Windows)
     runs-on: windows-latest
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: CenterManager
@@ -50,6 +54,8 @@ jobs:
           --tb=long
           --junitxml=pytest-report.xml
           --durations=50
+          --timeout=120
+          --timeout-method=thread
 
       - name: Upload pytest report
         if: always()

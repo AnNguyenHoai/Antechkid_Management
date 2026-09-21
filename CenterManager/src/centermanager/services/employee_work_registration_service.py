@@ -82,7 +82,9 @@ class EmployeeWorkRegistrationService:
         return r
     def _audit(self,s,action,target,target_type="EmployeeWorkRegistration",details=None,actor=None,target_name=None): return self._audit_service.record_in_session(s,action,self.AUDIT_MODULE,target_type=target_type,target_id=getattr(target,"id",target),target_name=target_name,result="success",details=details,actor=actor)
     def create(self,eid,work_date,start_time,end_time,work_type="WORK",notes=None,user=None,week_start=None):
-        u=self._user(user);self._scope(eid,u);ws=self.week_start(week_start or work_date);self._validate(work_date,start_time,end_time,work_type,ws)
+        u=self._user(user);self._scope(eid,u);ws=self.week_start(week_start or work_date)
+        if ws!=self.next_week():raise EmployeeWorkRegistrationValidationError("Work registration is only available for next week.")
+        self._validate(work_date,start_time,end_time,work_type,ws)
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._open_period(s,ws);r=self._get_registration(s,eid,p.id,True);created=not bool(r.blocks)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("This registration week has already been submitted and cannot be changed.")

@@ -1,12 +1,17 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from PySide6.QtCore import Qt
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 from centermanager.ui.employee_workspace.employee_work_registration_review_page import (
     EmployeeWorkRegistrationReviewPage,
 )
+
+
+WEEK_START = date(2026, 9, 7)
 
 
 def _registration(status, employee_id, registration_id):
@@ -28,7 +33,11 @@ def _registration(status, employee_id, registration_id):
 def _page(registrations):
     employee_service = Mock()
     registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
+    registration_service.next_week.return_value = WEEK_START
+    registration_service.get_period.return_value = SimpleNamespace(
+        status=EmployeeWorkRegistrationPeriod.STATUS_OPEN,
+        week_start=WEEK_START,
+    )
     registration_service.list_all.return_value = registrations
     return EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
 

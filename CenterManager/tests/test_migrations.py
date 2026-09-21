@@ -105,7 +105,7 @@ def test_existing_employee_database_upgrades_timestamp_defaults(migration_db_pat
 
 
 def test_migration_downgrade(migration_db_path):
-    """The canonical monthly registration schema explicitly does not support downgrade."""
+    """The canonical weekly registration schema explicitly does not support downgrade."""
     migration_files = _get_migration_files()
     if not migration_files:
         pytest.fail("No migration files found.")
@@ -115,7 +115,7 @@ def test_migration_downgrade(migration_db_path):
     alembic_cfg = _upgrade_to_head(migration_db_path)
     with pytest.raises(
         RuntimeError,
-        match="Downgrade from the canonical monthly registration schema is not supported",
+        match="Weekly work-registration migration is intentionally irreversible because monthly aggregates are split across weeks",
     ):
         command.downgrade(alembic_cfg, "base")
 
