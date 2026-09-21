@@ -42,6 +42,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self._rs = registration_service
         self._rows = []
         self._filtered_rows = []
+        self._selected_registration_id = None
         self._write_enabled = False
         self._period_status = EmployeeWorkRegistrationPeriod.STATUS_OPEN
         self._week_start = None
@@ -120,7 +121,7 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         self.close_btn.clicked.connect(self.close_week)
         self.reopen_period_btn.clicked.connect(self.reopen_period)
-        self.table.itemSelectionChanged.connect(self._update_actions)
+        self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
         self._update_actions()
 
@@ -179,38 +180,68 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
                 f"Could not load next-week registrations.\n\n{exc}",
             )
 
-    def _apply_filter(self, *_):
+    def _selection_changed(self):
+        row = self.table.currentRow()
+        if 0 <= row < len(self._filtered_rows):
+            self._selected_registration_id = getattr(self._filtered_rows[row], "id", None)
+        else:
+            self._selected_registration_id = None
+        self._update_actions()
+
+    def _apply_filter(self, *args):
         selected = self.status_filter.currentText()
+        previous_id = self._selected_registration_id
+        user_filter_change = bool(args)
         self._filtered_rows = (
             list(self._rows)
             if selected == "ALL"
             else [registration for registration in self._rows if registration.status == selected]
         )
 
-        self.table.clearContents()
-        self.table.setRowCount(0)
-        for registration in self._filtered_rows:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            values = [
-                registration.employee.full_name or "-",
-                registration.employee.employee_code or "-",
-                str(len(registration.blocks)),
-                f"{self._hours(registration):.2f}",
-                registration.status,
-                registration.submitted_at.strftime("%d/%m/%Y %H:%M")
-                if registration.submitted_at
-                else "-",
-                registration.accepted_at.strftime("%d/%m/%Y %H:%M")
-                if registration.accepted_at
-                else "-",
-            ]
-            for column, value in enumerate(values):
-                self.table.setItem(row, column, QTableWidgetItem(value))
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.id)
+        old_block_state = self.table.blockSignals(True)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            for registration in self._filtered_rows:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                values = [
+                    registration.employee.full_name or "-",
+                    registration.employee.employee_code or "-",
+                    str(len(registration.blocks)),
+                    f"{self._hours(registration):.2f}",
+                    registration.status,
+                    registration.submitted_at.strftime("%d/%m/%Y %H:%M")
+                    if registration.submitted_at
+                    else "-",
+                    registration.accepted_at.strftime("%d/%m/%Y %H:%M")
+                    if registration.accepted_at
+                    else "-",
+                ]
+                for column, value in enumerate(values):
+                    self.table.setItem(row, column, QTableWidgetItem(value))
+                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, registration.id)
 
-        if self._filtered_rows:
-            self.table.selectRow(0)
+            self.table.clearSelection()
+            self.table.setCurrentCell(-1, -1)
+            target_row = next(
+                (
+                    index
+                    for index, registration in enumerate(self._filtered_rows)
+                    if getattr(registration, "id", None) == previous_id
+                ),
+                None,
+            )
+            if target_row is not None:
+                self.table.selectRow(target_row)
+                self._selected_registration_id = previous_id
+            elif previous_id is None and user_filter_change and self._filtered_rows:
+                self.table.selectRow(0)
+                self._selected_registration_id = getattr(self._filtered_rows[0], "id", None)
+            else:
+                self._selected_registration_id = None
+        finally:
+            self.table.blockSignals(old_block_state)
         self._update_actions()
 
     def _selected(self):
