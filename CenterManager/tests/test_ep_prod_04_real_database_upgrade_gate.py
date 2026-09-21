@@ -83,7 +83,7 @@ def test_prod_04_gate_upgrades_only_snapshot_and_emits_evidence(tmp_path, monkey
     evidence = tmp_path / "evidence"
     _create_database(source)
     source_hash = _sha(source)
-    revisions = iter(["old-revision", "head-revision"])
+    revisions = iter(["old-revision", "head-revision", "head-revision"])
     migrated_paths = []
 
     monkeypatch.setattr(
@@ -116,9 +116,16 @@ def test_prod_04_gate_upgrades_only_snapshot_and_emits_evidence(tmp_path, monkey
     assert report.source_revision == "old-revision"
     assert report.target_revision == "head-revision"
     assert report.upgraded_revision == "head-revision"
+    assert report.reopened_revision == "head-revision"
+    assert report.source_preserved is True
+    assert report.source_sha256_before_snapshot == source_hash
+    assert report.source_sha256_after_snapshot == source_hash
+    assert report.integrity_after_reopen == "ok"
+    assert report.foreign_key_violations_after_reopen == 0
     assert report.table_counts_before == {"attendance": 1, "students": 1}
     assert report.table_counts_after["attendance"] == 1
     assert report.table_counts_after["students"] == 1
+    assert report.snapshot_sha256_before_upgrade != report.snapshot_sha256_after_upgrade
     assert migrated_paths == [(evidence / "center.upgrade-rehearsal.db").resolve()]
     assert migrated_paths[0] != source.resolve()
     assert _sha(source) == source_hash
