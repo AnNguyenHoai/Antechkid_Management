@@ -1,32 +1,16 @@
 from __future__ import annotations
 
-"""Administrative boundary for Employee Work Registration data management.
+"""Administrative boundary for Employee Work Registration data management."""
 
-This service is intentionally separate from the employee self-service flow.  An
-administrator may override a closed registration period and remove registration
-or employee records, while every privileged/destructive operation is audited.
-
-The contract is deliberately narrow:
-* only an administrator may call these operations;
-* reopening a period is an explicit administrative override;
-* deleting a registration is an aggregate delete (its blocks follow the ORM
-  cascade) and does not delete the period;
-* an Employee may be hard-deleted only when it has no operational history.  A
-  historical employee must be archived instead of destroying related records.
-"""
-
+from datetime import date
 from typing import Optional
 
-from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
-from centermanager.models.employee import Employee
-from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.audit_service import AuditService
-from centermanager.services.permission_service import PermissionService
 
 
 class EmployeeAdminManagementError(Exception):
@@ -45,7 +29,6 @@ class EmployeeAdminManagementService:
     """Admin-only lifecycle and data-management boundary."""
 
     AUDIT_MODULE = "employee_work_registration_admin"
-
     ACTION_PERIOD_REOPENED = "WORK_REGISTRATION_PERIOD_ADMIN_REOPENED"
     ACTION_REGISTRATION_DELETED = "WORK_REGISTRATION_ADMIN_DELETED"
     ACTION_EMPLOYEE_DELETED = "EMPLOYEE_ADMIN_DELETED"
@@ -57,7 +40,6 @@ class EmployeeAdminManagementService:
     def __init__(self, session_factory, repository_provider: Optional[RepositoryProvider] = None):
         self._session_factory = session_factory
         self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
-        self._permission_service = PermissionService(session_factory)
         self._audit_service = AuditService(session_factory)
 
     @staticmethod
@@ -85,15 +67,16 @@ class EmployeeAdminManagementService:
 
     def reopen_period(
         self,
-        year: int,
-        month: int,
+        week_start: date,
         *,
         reason: Optional[str] = None,
         user: Optional[User] = None,
     ) -> EmployeeWorkRegistrationPeriod:
-        """Reopen a CLOSED monthly period as an explicit Admin override."""
+        """Reopen a CLOSED weekly period as an explicit Admin override."""
         actor = self._require_admin(user)
         reason = self._reason(reason)
+        if not isinstance(week_start, date):
+            raise EmployeeAdminManagementValidationError("A valid registration week is required.")
         if not reason:
             raise EmployeeAdminManagementValidationError(
                 "A reason is required when an administrator reopens a closed period."
@@ -101,10 +84,11 @@ class EmployeeAdminManagementService:
 
         with self._session_factory() as session:
             period_repo = self._repository_provider.employee_work_registration_periods(session)
-            period = period_repo.get_by_year_month(year, month)
+            normalized = period_repo.normalize_week_start(week_start)
+            period = period_repo.get_by_week_start(normalized)
             if period is None:
                 raise EmployeeAdminManagementValidationError(
-                    f"Registration period {month:02d}/{year} not found."
+                    f"Registration week {normalized:%d/%m/%Y} not found."
                 )
             if period.status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED:
                 raise EmployeeAdminManagementValidationError(
@@ -121,10 +105,10 @@ class EmployeeAdminManagementService:
                 self.AUDIT_MODULE,
                 target_type="EmployeeWorkRegistrationPeriod",
                 target_id=period.id,
-                target_name=f"{year:04d}-{month:02d}",
+                target_name=normalized.isoformat(),
                 details={
-                    "year": year,
-                    "month": month,
+                    "week_start": normalized.isoformat(),
+                    "week_end": period.week_end.isoformat(),
                     "old_status": old_status,
                     "new_status": period.status,
                     "reason": reason,
@@ -164,6 +148,9 @@ class EmployeeAdminManagementService:
                 "registration_id": registration.id,
                 "employee_id": registration.employee_id,
                 "period_id": registration.period_id,
+                "week_start": getattr(period, "week_start", None).isoformat()
+                if getattr(period, "week_start", None)
+                else None,
                 "period_status": getattr(period, "status", None),
                 "registration_status": registration.status,
                 "block_count": len(registration.blocks),
