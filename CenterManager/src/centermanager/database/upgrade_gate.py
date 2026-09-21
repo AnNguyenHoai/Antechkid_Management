@@ -36,14 +36,21 @@ class DatabaseUpgradeGateReport:
     status: str
     source_database: str
     snapshot_database: str
+    source_sha256_before_snapshot: str
+    source_sha256_after_snapshot: str
+    source_preserved: bool
     snapshot_sha256_before_upgrade: str
+    snapshot_sha256_after_upgrade: str
     source_revision: str | None
     target_revision: str
     upgraded_revision: str | None
+    reopened_revision: str | None
     integrity_before: str
     integrity_after: str
+    integrity_after_reopen: str
     foreign_key_violations_before: int
     foreign_key_violations_after: int
+    foreign_key_violations_after_reopen: int
     table_counts_before: Dict[str, int]
     table_counts_after: Dict[str, int]
     completed_at_utc: str
@@ -114,7 +121,12 @@ def assert_healthy(health: DatabaseHealth, *, phase: str) -> None:
 
 
 def create_consistent_snapshot(source_database: Path, snapshot_database: Path) -> None:
-    """Create a transactionally consistent SQLite snapshot without writing source."""
+    """Create a transactionally consistent SQLite snapshot without writing source.
+
+    SQLite's online backup API is deliberately used instead of copying the main
+    database file. A live WAL database may have committed pages outside the main
+    file, while ``Connection.backup`` produces one consistent database image.
+    """
     source_database = Path(source_database).resolve()
     snapshot_database = Path(snapshot_database).resolve()
     if source_database == snapshot_database:
@@ -170,16 +182,30 @@ def run_database_upgrade_gate(
     source_database: Path,
     evidence_dir: Path,
 ) -> DatabaseUpgradeGateReport:
-    """Rehearse the release migration on a consistent copy and prove invariants."""
+    """Rehearse the release migration on a consistent copy and prove invariants.
+
+    The source database is opened read-only only long enough to create the
+    snapshot. Every migration and post-upgrade probe targets the snapshot path.
+    """
     source_database = Path(source_database).resolve()
     evidence_dir = Path(evidence_dir).resolve()
     evidence_dir.mkdir(parents=True, exist_ok=True)
     snapshot_database = evidence_dir / "center.upgrade-rehearsal.db"
     report_path = evidence_dir / "database-upgrade-report.json"
 
-    create_consistent_snapshot(source_database, snapshot_database)
-    snapshot_hash = sha256_file(snapshot_database)
+    if not source_database.exists() or not source_database.is_file():
+        raise DatabaseUpgradeGateError(f"Source database does not exist: {source_database}")
 
+    source_hash_before = sha256_file(source_database)
+    create_consistent_snapshot(source_database, snapshot_database)
+    source_hash_after = sha256_file(source_database)
+    if source_hash_after != source_hash_before:
+        raise DatabaseUpgradeGateError(
+            "Source database main file changed while creating the read-only snapshot; "
+            "rerun the gate in a controlled maintenance window."
+        )
+
+    snapshot_hash_before = sha256_file(snapshot_database)
     before = inspect_database_health(snapshot_database)
     assert_healthy(before, phase="pre-upgrade")
     source_revision = get_current_revision(snapshot_database)
@@ -192,23 +218,43 @@ def run_database_upgrade_gate(
     upgraded_revision = get_current_revision(snapshot_database)
     if upgraded_revision != target_revision:
         raise DatabaseUpgradeGateError(
-            f"Database is not at Alembic head after upgrade: "
+            "Database is not at Alembic head after upgrade: "
             f"current={upgraded_revision!r}, head={target_revision!r}"
         )
     assert_preserved_rows(before.table_counts, after.table_counts)
+    snapshot_hash_after = sha256_file(snapshot_database)
+
+    # Restart/reopen gate: all prior connections are closed by the helpers above.
+    # Open the migrated artifact again from disk and prove the same health/revision.
+    reopened = inspect_database_health(snapshot_database)
+    assert_healthy(reopened, phase="post-reopen")
+    reopened_revision = get_current_revision(snapshot_database)
+    if reopened_revision != target_revision:
+        raise DatabaseUpgradeGateError(
+            "Database did not remain at Alembic head after reopen: "
+            f"current={reopened_revision!r}, head={target_revision!r}"
+        )
+    assert_preserved_rows(after.table_counts, reopened.table_counts)
 
     report = DatabaseUpgradeGateReport(
         status="passed",
         source_database=str(source_database),
         snapshot_database=str(snapshot_database),
-        snapshot_sha256_before_upgrade=snapshot_hash,
+        source_sha256_before_snapshot=source_hash_before,
+        source_sha256_after_snapshot=source_hash_after,
+        source_preserved=source_hash_before == source_hash_after,
+        snapshot_sha256_before_upgrade=snapshot_hash_before,
+        snapshot_sha256_after_upgrade=snapshot_hash_after,
         source_revision=source_revision,
         target_revision=target_revision,
         upgraded_revision=upgraded_revision,
+        reopened_revision=reopened_revision,
         integrity_before=before.integrity_check,
         integrity_after=after.integrity_check,
+        integrity_after_reopen=reopened.integrity_check,
         foreign_key_violations_before=before.foreign_key_violations,
         foreign_key_violations_after=after.foreign_key_violations,
+        foreign_key_violations_after_reopen=reopened.foreign_key_violations,
         table_counts_before=before.table_counts,
         table_counts_after=after.table_counts,
         completed_at_utc=datetime.now(timezone.utc).isoformat(),
