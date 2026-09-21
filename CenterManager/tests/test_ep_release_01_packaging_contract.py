@@ -17,11 +17,16 @@ def test_release_script_produces_external_runtime_package():
 
 def test_release_script_has_portable_release_metadata_and_archive():
     source = (ROOT / "build_release.py").read_text(encoding="utf-8")
-    assert 'VERSION = "0.1.0-prototype"' in source
+    assert 'VERSION_FILE = PROJECT_ROOT / "VERSION"' in source
+    assert 'VERSION = read_release_version()' in source
     assert 'RELEASE_NAME = f"{APP_NAME}-v{VERSION}-windows-x64"' in source
+    assert 'generate_windows_version_metadata' in source
+    assert 'RELEASE_MANIFEST.json' in source
     assert 'README_RELEASE.md' in source
     assert 'UAT_CHECKLIST.md' in source
     assert 'shutil.make_archive(' in source
+    assert 'write_archive_checksum' in source
+    assert 'VERSION = "0.1.0-prototype"' not in source
 
 
 def test_frozen_paths_keep_mutable_runtime_next_to_executable():
@@ -39,13 +44,7 @@ def test_release_entrypoint_remains_run_py():
 
 
 def test_runtime_repository_is_not_a_gitlink():
-    """The runtime template must not contain a stale nested-repository gitlink.
-
-    A gitlink without a matching .gitmodules entry breaks clean checkouts and
-    can trigger fatal submodule cleanup errors in CI. The application creates
-    the runtime repository when Git collaboration is configured, so the source
-    tree must not carry a nested repository pointer.
-    """
+    """The runtime template must not contain a stale nested-repository gitlink."""
     repo_root = ROOT.parent
     result = subprocess.run(
         ["git", "ls-files", "--stage", "--", "runtime/repository"],
