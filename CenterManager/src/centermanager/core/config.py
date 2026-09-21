@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
-"""
-Configuration loader for CenterManager.
-...
-"""
+"""Configuration loader for CenterManager."""
+
+import copy
 import json
 import logging
-import copy
-from typing import Any, Dict, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from centermanager.core.paths import get_paths
 from centermanager.core.version import APPLICATION_VERSION
