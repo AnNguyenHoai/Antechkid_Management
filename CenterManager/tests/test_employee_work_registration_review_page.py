@@ -1,10 +1,15 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
+from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 from centermanager.ui.employee_workspace.employee_work_registration_review_page import (
     EmployeeWorkRegistrationReviewPage,
 )
+
+
+WEEK_START = date(2026, 9, 7)
 
 
 def _registration(status, employee_id=1, registration_id=None):
@@ -20,15 +25,24 @@ def _registration(status, employee_id=1, registration_id=None):
     )
 
 
+def _registration_service(rows):
+    service = Mock()
+    service.next_week.return_value = WEEK_START
+    service.get_period.return_value = SimpleNamespace(
+        status=EmployeeWorkRegistrationPeriod.STATUS_OPEN,
+        week_start=WEEK_START,
+    )
+    service.list_all.return_value = rows
+    return service
+
+
 def test_filter_by_status_and_selection(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.list_all.return_value = [
+    registration_service = _registration_service([
         _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
         _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
         _registration(EmployeeWorkRegistration.STATUS_ACCEPTED, 3),
-    ]
+    ])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
@@ -41,12 +55,10 @@ def test_filter_by_status_and_selection(qtbot):
 
 def test_filter_rebuild_preserves_selection_when_row_remains(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.list_all.return_value = [
+    registration_service = _registration_service([
         _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1, registration_id=101),
         _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2, registration_id=202),
-    ]
+    ])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
@@ -61,12 +73,10 @@ def test_filter_rebuild_preserves_selection_when_row_remains(qtbot):
 
 def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.list_all.return_value = [
+    registration_service = _registration_service([
         _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1, registration_id=101),
         _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2, registration_id=202),
-    ]
+    ])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
@@ -81,12 +91,10 @@ def test_filter_rebuild_clears_selection_when_selected_row_is_removed(qtbot):
 
 def test_filter_rebuild_does_not_reenter_action_update(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.list_all.return_value = [
+    registration_service = _registration_service([
         _registration(EmployeeWorkRegistration.STATUS_DRAFT, 1),
         _registration(EmployeeWorkRegistration.STATUS_SUBMITTED, 2),
-    ]
+    ])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
@@ -103,45 +111,51 @@ def test_filter_rebuild_does_not_reenter_action_update(qtbot):
 
 def test_accept_selected_calls_service_and_refreshes(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
     submitted = _registration(EmployeeWorkRegistration.STATUS_SUBMITTED)
-    registration_service.list_all.side_effect = [[submitted], [_registration(EmployeeWorkRegistration.STATUS_ACCEPTED)]]
+    registration_service = _registration_service([submitted])
+    registration_service.list_all.side_effect = [
+        [submitted],
+        [_registration(EmployeeWorkRegistration.STATUS_ACCEPTED)],
+    ]
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
     page.set_write_enabled(True)
     page.table.selectRow(0)
 
-    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=16384):
+    with patch(
+        "centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question",
+        return_value=16384,
+    ):
         page.accept_selected()
 
-    registration_service.accept.assert_called_once_with(1, 2026, 10)
+    registration_service.accept.assert_called_once_with(1, WEEK_START)
 
 
 def test_reopen_selected_calls_service(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
     accepted = _registration(EmployeeWorkRegistration.STATUS_ACCEPTED)
-    registration_service.list_all.return_value = [accepted]
+    registration_service = _registration_service([accepted])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
     page.set_write_enabled(True)
     page.table.selectRow(0)
 
-    with patch("centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question", return_value=16384):
+    with patch(
+        "centermanager.ui.employee_workspace.employee_work_registration_review_page.QMessageBox.question",
+        return_value=16384,
+    ):
         page.reopen_selected()
 
-    registration_service.reopen.assert_called_once_with(1, 2026, 10)
+    registration_service.reopen.assert_called_once_with(1, WEEK_START)
 
 
 def test_actions_disabled_without_write(qtbot):
     employee_service = Mock()
-    registration_service = Mock()
-    registration_service.next_month.return_value = (2026, 10)
-    registration_service.list_all.return_value = [_registration(EmployeeWorkRegistration.STATUS_SUBMITTED)]
+    registration_service = _registration_service([
+        _registration(EmployeeWorkRegistration.STATUS_SUBMITTED)
+    ])
 
     page = EmployeeWorkRegistrationReviewPage(employee_service, registration_service)
     qtbot.addWidget(page)
