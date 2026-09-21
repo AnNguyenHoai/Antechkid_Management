@@ -41,6 +41,10 @@ runtime/temp/
 runtime/reports/
 runtime/repository/.git/
 
+# Production rehearsal evidence can contain a full database snapshot.
+# Keep it local/off-repository and archive it only in the approved release evidence store.
+release-evidence/
+
 # Never commit local credential/config bundles
 **/runtime/Config/config.json
 **/runtime/Config/*.json
