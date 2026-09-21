@@ -178,18 +178,6 @@ class AttendanceService:
             }
         return normalized
 
-    def _publish_student_attendance_updated(self, student_id: int) -> None:
-        if self._event_bus is None:
-            return
-        self._event_bus.publish(
-            StudentUpdated(
-                student_id=student_id,
-                student_code="",
-                student_name="",
-                changes=["attendance"],
-            )
-        )
-
     def _publish_session_save_side_effects(
         self,
         session_id: int,
@@ -223,6 +211,18 @@ class AttendanceService:
             self._trigger_report_policy(student_id, session_id, new_status)
             if row_changed:
                 self._publish_student_attendance_updated(student_id)
+
+    def _publish_student_attendance_updated(self, student_id: int) -> None:
+        if self._event_bus is None:
+            return
+        self._event_bus.publish(
+            StudentUpdated(
+                student_id=student_id,
+                student_code="",
+                student_name="",
+                changes=["attendance"],
+            )
+        )
 
     def _save_session_attendance_atomic(
         self,
