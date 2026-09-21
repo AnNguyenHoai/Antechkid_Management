@@ -103,7 +103,13 @@ def create_client(tmp_path, remote_path, name, lease_duration_seconds=None):
         lock_timeout=lease_duration_seconds if lease_duration_seconds is not None else 60,
     )
     cm.initialize(f"user_{name}", f"User {name}", "admin")
-    poller = CollaborationPoller(cm, event_bus, normal_interval=2, waiting_interval=1)
+
+    # This module verifies cross-machine state through explicit wait_for_poll()
+    # boundaries. Keep automatic timers outside each test observation window so
+    # a background cycle cannot overlap the Git mutation being observed and
+    # coalesce the explicit refresh behind it. Production polling cadence is
+    # covered separately by CollaborationPoller tests.
+    poller = CollaborationPoller(cm, event_bus, normal_interval=60, waiting_interval=60)
     return {"runtime_root": runtime_root, "repo_path": repo_path, "provider": provider,
             "cm": cm, "poller": poller, "event_bus": event_bus, "name": name}
 
