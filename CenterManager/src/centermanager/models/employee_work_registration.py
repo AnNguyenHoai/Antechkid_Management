@@ -11,7 +11,7 @@ from centermanager.models.mixins import TimestampMixin
 
 
 class EmployeeWorkRegistration(Base, TimestampMixin):
-    """Monthly aggregate containing one employee's proposed availability."""
+    """Weekly aggregate containing one employee's proposed availability."""
     __tablename__ = "employee_work_registrations"
 
     STATUS_DRAFT = "DRAFT"
@@ -39,7 +39,7 @@ class EmployeeWorkRegistration(Base, TimestampMixin):
 
 
 class EmployeeWorkRegistrationBlock(Base, TimestampMixin):
-    """Availability block belonging to a monthly registration aggregate."""
+    """Availability block belonging to a weekly registration aggregate."""
     __tablename__ = "employee_work_registration_blocks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
