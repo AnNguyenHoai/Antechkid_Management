@@ -1,31 +1,47 @@
 # -*- coding: utf-8 -*-
-"""
-Configuration loader for CenterManager.
-...
-"""
+"""Configuration loader for CenterManager."""
+
+import copy
 import json
 import logging
-import copy
-from typing import Any, Dict, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from centermanager.core.paths import get_paths
+from centermanager.core.version import APPLICATION_VERSION
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "application": {
         "name": "CenterManager",
-        "version": "0.1.0",
+        "version": APPLICATION_VERSION,
     }
 }
+
+
+def _with_runtime_identity(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return config with immutable application identity from the release asset.
+
+    Runtime/operator configuration may persist across upgrades. Application
+    name/version are release identity, not operator-owned settings, so stale
+    values from an older config.json must never override the running binary.
+    """
+    normalized = copy.deepcopy(data)
+    application = normalized.get("application")
+    if not isinstance(application, dict):
+        application = {}
+        normalized["application"] = application
+    application["name"] = "CenterManager"
+    application["version"] = APPLICATION_VERSION
+    return normalized
 
 
 class Config:
     """Configuration container."""
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        self._data = data
+        self._data = _with_runtime_identity(data)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value using dot notation, e.g. 'application.name'."""
@@ -37,6 +53,7 @@ class Config:
             return current
         except (KeyError, TypeError):
             return default
+
     def get_collaboration_settings(self) -> dict:
         """Get collaboration-specific settings."""
         return self._data.get("collaboration", {})
@@ -45,6 +62,7 @@ class Config:
         """Update collaboration settings and save."""
         self._data["collaboration"] = settings
         save_config(self._data)
+
     @property
     def raw(self) -> Dict[str, Any]:
         return copy.deepcopy(self._data)
@@ -61,7 +79,7 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
         path: Path to config.json (defaults to runtime/Config/config.json)
 
     Returns:
-        Dictionary with configuration data.
+        Dictionary with configuration data and canonical runtime identity.
     """
     if path is None:
         path = get_paths().config_file
@@ -70,13 +88,13 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         logger.debug(f"Configuration loaded from {path}")
-        return data
+        return _with_runtime_identity(data)
     except FileNotFoundError:
         logger.warning(f"Config file not found: {path}. Using defaults.")
-        return _DEFAULT_CONFIG.copy()
+        return _with_runtime_identity(_DEFAULT_CONFIG)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in config file: {e}. Using defaults.")
-        return _DEFAULT_CONFIG.copy()
+        return _with_runtime_identity(_DEFAULT_CONFIG)
 
 
 def save_config(data: Dict[str, Any], path: Optional[Path] = None) -> None:
@@ -90,11 +108,11 @@ def save_config(data: Dict[str, Any], path: Optional[Path] = None) -> None:
     if path is None:
         path = get_paths().config_file
 
-    # Ensure directory exists
     path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = _with_runtime_identity(data)
 
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+        json.dump(normalized, f, indent=4, ensure_ascii=False)
     logger.debug(f"Configuration saved to {path}")
 
 
