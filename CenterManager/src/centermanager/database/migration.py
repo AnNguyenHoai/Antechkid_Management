@@ -8,9 +8,11 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
-from centermanager.database.engine import create_production_engine
+from centermanager.database.engine import create_engine_for_path, get_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -56,24 +58,28 @@ def get_alembic_config(database_path: Path | None = None) -> Config:
     project_root = get_paths().project_root
     config = Config(str(_alembic_ini_path(project_root)))
     if database_path is None:
-        database_path = get_paths().database_dir / "center.db"
+        database_path = get_database_path()
     config.set_main_option("sqlalchemy.url", f"sqlite:///{Path(database_path).resolve()}")
     config.set_main_option("script_location", str(_migration_root(project_root)))
     return config
 
 
-def upgrade_database_to_head() -> None:
-    """Upgrade the runtime database to Alembic head.
+def upgrade_database_path_to_head(database_path: Path) -> None:
+    """Upgrade one existing database file to the current Alembic head.
 
-    Existing pre-Alembic databases are stamped at the legacy baseline only
-    when they already contain the historical core schema. New databases are
-    upgraded from base normally.
+    The caller owns the path. This is the canonical migration implementation
+    used both by the production runtime database and by the pre-release real-DB
+    upgrade gate. The helper never creates a missing database implicitly.
     """
-    engine = create_production_engine()
-    inspector = inspect(engine)
-    tables = set(inspector.get_table_names())
+    database_path = Path(database_path).resolve()
+    engine = create_engine_for_path(database_path, allow_create=False)
+    try:
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+    finally:
+        engine.dispose()
 
-    config = get_alembic_config()
+    config = get_alembic_config(database_path)
     if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
         logger.info(
             "Legacy database detected without Alembic version; stamping baseline %s",
@@ -81,25 +87,35 @@ def upgrade_database_to_head() -> None:
         )
         command.stamp(config, "5ce9314feb37")
 
-    logger.info("Upgrading database schema to Alembic head")
+    logger.info("Upgrading database schema to Alembic head: %s", database_path)
     command.upgrade(config, "head")
-    logger.info("Database schema migration completed successfully")
+    logger.info("Database schema migration completed successfully: %s", database_path)
 
 
-def get_current_revision() -> str | None:
-    config = get_alembic_config()
-    from alembic.script import ScriptDirectory
-    engine = create_production_engine()
-    with engine.connect() as connection:
-        context = __import__("alembic.runtime.migration", fromlist=["MigrationContext"]).MigrationContext.configure(connection)
-        return context.get_current_revision()
+def upgrade_database_to_head() -> None:
+    """Upgrade the canonical production runtime database to Alembic head."""
+    upgrade_database_path_to_head(get_database_path())
 
 
-def get_head_revision() -> str:
-    from alembic.script import ScriptDirectory
-    script = ScriptDirectory.from_config(get_alembic_config())
+def get_current_revision(database_path: Path | None = None) -> str | None:
+    """Return the Alembic revision for an existing database path."""
+    if database_path is None:
+        database_path = get_database_path()
+    engine = create_engine_for_path(Path(database_path), allow_create=False)
+    try:
+        with engine.connect() as connection:
+            context = MigrationContext.configure(connection)
+            return context.get_current_revision()
+    finally:
+        engine.dispose()
+
+
+def get_head_revision(database_path: Path | None = None) -> str:
+    """Return the migration script head used for the supplied database context."""
+    script = ScriptDirectory.from_config(get_alembic_config(database_path))
     return script.get_current_head()
 
 
-def validate_database_at_head() -> bool:
-    return get_current_revision() == get_head_revision()
+def validate_database_at_head(database_path: Path | None = None) -> bool:
+    """Return True only when the selected database is at the current head."""
+    return get_current_revision(database_path) == get_head_revision(database_path)
