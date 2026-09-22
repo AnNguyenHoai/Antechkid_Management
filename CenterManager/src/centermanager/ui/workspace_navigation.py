@@ -1,20 +1,27 @@
 # -*- coding: utf-8 -*-
-"""
-WorkspaceNavigation - sidebar navigation for a workspace.
-"""
-from typing import Optional, List, Dict
+"""WorkspaceNavigation - production sidebar navigation for a workspace."""
+from __future__ import annotations
+
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QLabel, QFrame,
-    QScrollArea, QSizePolicy
-)
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from centermanager.ui.design_system.tokens import COLORS
+from centermanager.ui.design_system.tokens import (
+    COLORS,
+    COMPONENT_METRICS,
+    CONTROL_SIZES,
+    FONT_FAMILY,
+    FONT_WEIGHTS,
+    RADIUS,
+    SPACING,
+    TYPOGRAPHY,
+)
 
 
 class NavItem(QPushButton):
-    """Navigation menu item with icon and label."""
+    """Compact text-first sidebar item with semantic selected state."""
+
     clicked_signal = Signal(str)
 
     def __init__(
@@ -22,108 +29,134 @@ class NavItem(QPushButton):
         page_id: str,
         icon: str,
         label: str,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(label, parent)
         self._page_id = page_id
-        self._setup_ui(icon, label)
+        self._icon = icon  # Kept for API compatibility; shell V2 is text-first.
+        self._setup_ui()
 
-    def _setup_ui(self, icon: str, label: str) -> None:
-        self.setText(f"{icon}  {label}")
-        self.setStyleSheet(f"""
-            QPushButton {{
-                text-align: left;
-                padding: 8px 12px;
-                border: none;
-                border-radius: 6px;
-                background: transparent;
-                font-size: 14px;
-                color: {COLORS['text_secondary']};
-            }}
-            QPushButton:hover {{
-                background: #e8f0fe;
-            }}
-            QPushButton:checked {{
-                background: #e3f2fd;
-                color: {COLORS['primary']};
-                font-weight: 500;
-            }}
-        """)
+    def _setup_ui(self) -> None:
         self.setCheckable(True)
         self.setAutoExclusive(True)
-        self.setFixedHeight(40)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(self.text())
+        self.setFixedHeight(CONTROL_SIZES["lg"]["height"])
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                text-align: left;
+                padding: 0 {SPACING['md']}px;
+                border: none;
+                border-left: {COMPONENT_METRICS['nav_indicator_width']}px solid transparent;
+                border-radius: {RADIUS['md']}px;
+                background: transparent;
+                color: {COLORS['text_secondary']};
+                font-family: {FONT_FAMILY};
+                font-size: {TYPOGRAPHY['body']}px;
+                font-weight: {FONT_WEIGHTS['regular']};
+            }}
+            QPushButton:hover {{
+                background: {COLORS['surface_hover']};
+                color: {COLORS['text_primary']};
+            }}
+            QPushButton:checked {{
+                background: {COLORS['blue_50']};
+                color: {COLORS['action_primary_hover']};
+                border-left-color: {COLORS['action_primary']};
+                font-weight: {FONT_WEIGHTS['semibold']};
+            }}
+            QPushButton:focus {{
+                border-color: {COLORS['focus_ring']};
+            }}
+            """
+        )
         self.clicked.connect(lambda: self.clicked_signal.emit(self._page_id))
 
 
 class WorkspaceNavigation(QWidget):
-    """Sidebar navigation for a workspace."""
+    """Shared production sidebar used by all workspaces."""
+
     page_selected = Signal(str)
 
     def __init__(
         self,
         workspace_name: str,
         pages: List[Dict[str, str]],
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._pages = pages
-        self._setup_ui(workspace_name)
+        self._workspace_name = workspace_name
+        self._setup_ui()
 
-    def _setup_ui(self, workspace_name: str) -> None:
-        self.setStyleSheet(f"""
-            QWidget {{
-                background: white;
-                border-right: 1px solid {COLORS['gray_200']};
-            }}
-        """)
-        self.setFixedWidth(220)
+    def _setup_ui(self) -> None:
+        self.setObjectName("WorkspaceSidebar")
+        self.setFixedWidth(COMPONENT_METRICS["workspace_sidebar_width"])
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(
+            f"""
+            QWidget#WorkspaceSidebar {{
+                background: {COLORS['surface_page']};
+                border: none;
+                border-right: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
+            }}
+            """
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Workspace header
-        header = QWidget()
-        header.setStyleSheet(f"""
-            background: {COLORS['gray_100']};
-            padding: 12px 16px;
-            border-bottom: 1px solid {COLORS['gray_200']};
-        """)
+        header = QFrame()
+        header.setObjectName("WorkspaceSidebarHeader")
+        header.setFixedHeight(COMPONENT_METRICS["workspace_sidebar_header_height"])
+        header.setStyleSheet(
+            f"""
+            QFrame#WorkspaceSidebarHeader {{
+                background: {COLORS['surface_page']};
+                border: none;
+                border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_subtle']};
+            }}
+            """
+        )
         header_layout = QVBoxLayout(header)
-        header_layout.setSpacing(2)
-        ws_label = QLabel(workspace_name)
-        ws_label.setStyleSheet(f"""
-            font-size: 16px;
-            font-weight: 600;
-            color: {COLORS['text_primary']};
-        """)
+        header_layout.setContentsMargins(SPACING["lg"], SPACING["md"], SPACING["lg"], SPACING["md"])
+        header_layout.setSpacing(SPACING["xs"])
+
+        eyebrow = QLabel("WORKSPACE")
+        eyebrow.setStyleSheet(
+            f"color: {COLORS['action_accent']}; font-family: {FONT_FAMILY}; "
+            f"font-size: {TYPOGRAPHY['badge']}px; font-weight: {FONT_WEIGHTS['bold']}; letter-spacing: 0.6px;"
+        )
+        header_layout.addWidget(eyebrow)
+
+        ws_label = QLabel(self._workspace_name.replace(" Workspace", ""))
+        ws_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-family: {FONT_FAMILY}; "
+            f"font-size: {TYPOGRAPHY['card_title']}px; font-weight: {FONT_WEIGHTS['semibold']};"
+        )
         header_layout.addWidget(ws_label)
-        sub_label = QLabel("Navigation")
-        sub_label.setStyleSheet(f"""
-            font-size: 12px;
-            color: {COLORS['muted']};
-        """)
-        header_layout.addWidget(sub_label)
         layout.addWidget(header)
 
-        # Pages
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(8, 8, 8, 8)
-        container_layout.setSpacing(2)
+        container_layout.setContentsMargins(SPACING["sm"], SPACING["md"], SPACING["sm"], SPACING["md"])
+        container_layout.setSpacing(SPACING["xs"])
 
-        self._buttons = []
+        self._buttons: List[NavItem] = []
         for page in self._pages:
-            btn = NavItem(page["id"], page["icon"], page["label"])
-            btn.clicked_signal.connect(self._on_page_clicked)
-            container_layout.addWidget(btn)
-            self._buttons.append(btn)
+            button = NavItem(page["id"], page.get("icon", ""), page["label"])
+            button.clicked_signal.connect(self._on_page_clicked)
+            container_layout.addWidget(button)
+            self._buttons.append(button)
 
         container_layout.addStretch()
         scroll.setWidget(container)
@@ -133,7 +166,10 @@ class WorkspaceNavigation(QWidget):
         self.page_selected.emit(page_id)
 
     def set_active_page(self, page_id: str) -> None:
-        for btn in self._buttons:
-            if btn._page_id == page_id:
-                btn.setChecked(True)
-                break
+        for button in self._buttons:
+            if button._page_id == page_id:
+                button.setChecked(True)
+                return
+
+
+__all__ = ["NavItem", "WorkspaceNavigation"]
