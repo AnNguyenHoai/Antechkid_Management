@@ -5,9 +5,9 @@ Recurring rules/exceptions are the reusable Schedule Template. Weekly schedule
 entities represent the actual operational plan for one Monday-Sunday week.
 """
 from __future__ import annotations
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import List, Optional
-from sqlalchemy import Date, Integer, String, Time, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Date, DateTime, Integer, String, Time, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from centermanager.database.base import Base
 from centermanager.models.mixins import TimestampMixin
@@ -52,19 +52,27 @@ class EmployeeScheduleException(Base, TimestampMixin):
 
 
 class EmployeeScheduleWeek(Base, TimestampMixin):
-    """Operational schedule aggregate for one Monday-Sunday week.
-
-    EP-EMP-WEEKLY-02 deliberately keeps the lifecycle at DRAFT. Publish/freeze,
-    versioning and immutable history belong to EP-EMP-WEEKLY-03.
-    """
+    """Versioned operational schedule aggregate for one Monday-Sunday week."""
 
     __tablename__ = "employee_schedule_weeks"
     STATUS_DRAFT = "DRAFT"
+    STATUS_PUBLISHED = "PUBLISHED"
+    STATUS_FROZEN = "FROZEN"
+    VALID_STATUSES = {STATUS_DRAFT, STATUS_PUBLISHED, STATUS_FROZEN}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     week_start: Mapped[date] = mapped_column(Date, nullable=False, unique=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=STATUS_DRAFT, server_default=STATUS_DRAFT
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    published_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    frozen_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
     )
     assignments: Mapped[List["EmployeeScheduleAssignment"]] = relationship(
         "EmployeeScheduleAssignment",
@@ -78,9 +86,17 @@ class EmployeeScheduleWeek(Base, TimestampMixin):
     def week_end(self) -> date:
         return self.week_start + timedelta(days=6)
 
+    @property
+    def is_official(self) -> bool:
+        return self.status in {self.STATUS_PUBLISHED, self.STATUS_FROZEN}
+
+    @property
+    def is_locked(self) -> bool:
+        return self.status != self.STATUS_DRAFT
+
 
 class EmployeeScheduleAssignment(Base, TimestampMixin):
-    """One actual planned working interval inside a weekly schedule draft."""
+    """One actual planned working interval inside a weekly schedule."""
 
     __tablename__ = "employee_schedule_assignments"
 

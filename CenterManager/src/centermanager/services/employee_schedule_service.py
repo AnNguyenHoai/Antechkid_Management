@@ -13,6 +13,7 @@ from centermanager.repositories.provider import RepositoryProvider, create_defau
 from centermanager.core.current_user import get_current_user
 from centermanager.core.clock import get_clock
 from centermanager.services.employee_capability_policy import EmployeeCapabilityPolicy
+from centermanager.services.audit_service import AuditService
 
 
 class EmployeeScheduleError(Exception):
@@ -28,15 +29,23 @@ class EmployeeScheduleValidationError(EmployeeScheduleError):
 
 
 class EmployeeScheduleService:
-    """Schedule Template + weekly operational planning business boundary."""
+    """Schedule Template + versioned weekly operational schedule boundary."""
 
     VIEW_SELF = "schedule.view.self"
     VIEW_ALL = "schedule.view.all"
     MANAGE = "schedule.manage"
 
+    AUDIT_MODULE = "employee_weekly_schedule"
+    AUDIT_PUBLISHED = "WEEKLY_SCHEDULE_PUBLISHED"
+    AUDIT_FROZEN = "WEEKLY_SCHEDULE_FROZEN"
+    AUDIT_REOPENED = "WEEKLY_SCHEDULE_REOPENED_FOR_OVERRIDE"
+
     def __init__(self, session_factory, repository_provider: RepositoryProvider | None = None):
         self._sf = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
+        self._audit_service = AuditService(
+            session_factory, repository_provider=self._repository_provider
+        )
 
     @staticmethod
     def _user(user=None):
@@ -57,6 +66,12 @@ class EmployeeScheduleService:
         u = self._user(user)
         return self._has(u, self.VIEW_SELF) or self.can_view_all(u)
 
+    def _assert_manage(self, user=None):
+        u = self._user(user)
+        if not self._has(u, self.MANAGE):
+            raise EmployeeScheduleAccessDeniedError(f"Permission '{self.MANAGE}' is required.")
+        return u
+
     def _employee(self, employee_id):
         with self._sf() as s:
             e = self._repository_provider.employees(s).get_by_id(employee_id)
@@ -74,11 +89,8 @@ class EmployeeScheduleService:
         raise EmployeeScheduleAccessDeniedError("You can only access your own schedule.")
 
     def _assert_manage_scope(self, employee_id, user=None):
-        u = self._user(user)
-        e = self._employee(employee_id)
-        if self._has(u, self.MANAGE):
-            return e
-        raise EmployeeScheduleAccessDeniedError(f"Permission '{self.MANAGE}' is required.")
+        u = self._assert_manage(user)
+        return self._employee(employee_id)
 
     @staticmethod
     def week_start(value=None):
@@ -245,7 +257,6 @@ class EmployeeScheduleService:
         ]
 
     def expected_for_date(self, employee_id, work_date: date, user=None):
-        """Return effective Schedule Template blocks for a date."""
         self._assert_read_scope(employee_id, user)
         with self._sf() as s:
             return self._effective_template_blocks(
@@ -253,7 +264,7 @@ class EmployeeScheduleService:
             )
 
     # ------------------------------------------------------------------
-    # Weekly Schedule Planning
+    # Weekly Schedule Planning + lifecycle
     # ------------------------------------------------------------------
     def _accepted_registration(self, session, employee_id, week_start):
         period = self._repository_provider.employee_work_registration_periods(session).get_by_week_start(week_start)
@@ -293,29 +304,82 @@ class EmployeeScheduleService:
             raise EmployeeScheduleValidationError(
                 "Employee has no accepted work registration for this week."
             )
-        if not self._covered_by_availability(
-            registration.blocks, work_date, start_time, end_time
-        ):
+        if not self._covered_by_availability(registration.blocks, work_date, start_time, end_time):
             raise EmployeeScheduleValidationError(
                 "Scheduled time must be inside the employee's accepted availability."
             )
         return registration
 
-    def _ensure_no_assignment_overlap(
-        self, repo, employee_id, week_start, work_date, start_time, end_time, exclude_id=None
-    ):
+    def _ensure_no_assignment_overlap(self, repo, employee_id, week_start, work_date, start_time, end_time, exclude_id=None):
         for assignment in repo.list_employee_week(employee_id, week_start):
             if exclude_id is not None and assignment.id == exclude_id:
                 continue
             if (
                 assignment.work_date == work_date
-                and self._times_overlap(
-                    start_time, end_time, assignment.start_time, assignment.end_time
-                )
+                and self._times_overlap(start_time, end_time, assignment.start_time, assignment.end_time)
             ):
                 raise EmployeeScheduleValidationError(
                     "Schedule assignment overlaps another assignment for this employee."
                 )
+
+    @staticmethod
+    def _require_draft(week):
+        if week.status != EmployeeScheduleWeek.STATUS_DRAFT:
+            raise EmployeeScheduleValidationError(
+                "Published or frozen schedules are locked. Re-open the week with an override reason before editing."
+            )
+        return week
+
+    def _validate_publishable(self, session, repo, week):
+        assignments = repo.list_week_assignments(week.week_start)
+        if not assignments:
+            raise EmployeeScheduleValidationError("Cannot publish an empty weekly schedule.")
+        for item in assignments:
+            self._validate_assignment(
+                item.work_date,
+                item.start_time,
+                item.end_time,
+                week.week_start,
+                item.source,
+            )
+            self._ensure_available(
+                session,
+                item.employee_id,
+                week.week_start,
+                item.work_date,
+                item.start_time,
+                item.end_time,
+            )
+            self._ensure_no_assignment_overlap(
+                repo,
+                item.employee_id,
+                week.week_start,
+                item.work_date,
+                item.start_time,
+                item.end_time,
+                exclude_id=item.id,
+            )
+        return assignments
+
+    def _audit_week(self, session, action, week, actor, details=None):
+        payload = {
+            "week_start": week.week_start.isoformat(),
+            "week_end": week.week_end.isoformat(),
+            "status": week.status,
+            "version": week.version,
+        }
+        if details:
+            payload.update(details)
+        return self._audit_service.record_in_session(
+            session,
+            action,
+            self.AUDIT_MODULE,
+            target_type="EmployeeScheduleWeek",
+            target_id=week.id,
+            target_name=week.week_start.isoformat(),
+            details=payload,
+            actor=actor,
+        )
 
     def get_week(self, week_start, user=None):
         u = self._user(user)
@@ -339,6 +403,36 @@ class EmployeeScheduleService:
         with self._sf() as s:
             return self._repository_provider.employee_schedules(s).list_employee_week(employee_id, ws)
 
+    def list_official_employee_week(self, employee_id, week_start, user=None):
+        """Return only the published/frozen schedule visible as official to employees."""
+        self._assert_read_scope(employee_id, user)
+        ws = self.week_start(week_start)
+        with self._sf() as s:
+            repo = self._repository_provider.employee_schedules(s)
+            week = repo.get_week(ws)
+            if week is None or not week.is_official:
+                return []
+            return repo.list_employee_week(employee_id, ws)
+
+    def employee_week_state(self, employee_id, week_start, user=None):
+        """Read lifecycle metadata without exposing draft assignments as official schedule."""
+        u = self._user(user)
+        self._assert_read_scope(employee_id, u)
+        ws = self.week_start(week_start)
+        privileged = self._has(u, self.VIEW_ALL) or self._has(u, self.MANAGE)
+        with self._sf() as s:
+            week = self._repository_provider.employee_schedules(s).get_week(ws)
+            if week is None:
+                return {"status": None, "version": None, "official": False}
+            official = week.is_official
+            return {
+                "status": week.status if privileged or official else "UNPUBLISHED",
+                "version": week.version if privileged or official else None,
+                "official": official,
+                "published_at": week.published_at if official else None,
+                "frozen_at": week.frozen_at if week.status == EmployeeScheduleWeek.STATUS_FROZEN else None,
+            }
+
     def add_week_assignment(
         self,
         employee_id,
@@ -352,16 +446,12 @@ class EmployeeScheduleService:
         user=None,
     ):
         self._assert_manage_scope(employee_id, user)
-        ws = self._validate_assignment(
-            work_date, start_time, end_time, week_start or work_date, source
-        )
+        ws = self._validate_assignment(work_date, start_time, end_time, week_start or work_date, source)
         with self._sf() as s:
             repo = self._repository_provider.employee_schedules(s)
+            week = self._require_draft(repo.get_or_create_week(ws))
             self._ensure_available(s, employee_id, ws, work_date, start_time, end_time)
-            self._ensure_no_assignment_overlap(
-                repo, employee_id, ws, work_date, start_time, end_time
-            )
-            week = repo.get_or_create_week(ws)
+            self._ensure_no_assignment_overlap(repo, employee_id, ws, work_date, start_time, end_time)
             assignment = EmployeeScheduleAssignment(
                 schedule_week_id=week.id,
                 employee_id=employee_id,
@@ -383,29 +473,26 @@ class EmployeeScheduleService:
             if assignment is None:
                 return
             self._assert_manage_scope(assignment.employee_id, u)
+            self._require_draft(assignment.schedule_week)
             repo.delete_assignment(assignment)
             s.commit()
 
     def seed_week_from_registration(self, employee_id, week_start, user=None):
-        """Copy accepted availability into the weekly draft once, skipping overlaps."""
+        """Copy accepted availability into a DRAFT weekly schedule once."""
         self._assert_manage_scope(employee_id, user)
         ws = self.week_start(week_start)
         with self._sf() as s:
             repo = self._repository_provider.employee_schedules(s)
+            week = self._require_draft(repo.get_or_create_week(ws))
             registration = self._accepted_registration(s, employee_id, ws)
             if registration is None:
-                raise EmployeeScheduleValidationError(
-                    "Employee has no accepted work registration for this week."
-                )
-            week = repo.get_or_create_week(ws)
+                raise EmployeeScheduleValidationError("Employee has no accepted work registration for this week.")
             existing = repo.list_employee_week(employee_id, ws)
             created = 0
             for block in registration.blocks:
                 if any(
                     item.work_date == block.work_date
-                    and self._times_overlap(
-                        block.start_time, block.end_time, item.start_time, item.end_time
-                    )
+                    and self._times_overlap(block.start_time, block.end_time, item.start_time, item.end_time)
                     for item in existing
                 ):
                     continue
@@ -425,35 +512,27 @@ class EmployeeScheduleService:
             return created
 
     def seed_week_from_template(self, employee_id, week_start, user=None):
-        """Build a weekly draft from the template, but only inside accepted availability."""
+        """Build a DRAFT weekly schedule from template within accepted availability."""
         self._assert_manage_scope(employee_id, user)
         ws = self.week_start(week_start)
         with self._sf() as s:
             repo = self._repository_provider.employee_schedules(s)
+            week = self._require_draft(repo.get_or_create_week(ws))
             registration = self._accepted_registration(s, employee_id, ws)
             if registration is None:
-                raise EmployeeScheduleValidationError(
-                    "Employee has no accepted work registration for this week."
-                )
-            week = repo.get_or_create_week(ws)
+                raise EmployeeScheduleValidationError("Employee has no accepted work registration for this week.")
             existing = repo.list_employee_week(employee_id, ws)
             created = 0
             skipped_outside_availability = 0
             for offset in range(7):
                 work_date = ws + timedelta(days=offset)
-                for start_time, end_time in self._effective_template_blocks(
-                    repo, employee_id, work_date
-                ):
-                    if not self._covered_by_availability(
-                        registration.blocks, work_date, start_time, end_time
-                    ):
+                for start_time, end_time in self._effective_template_blocks(repo, employee_id, work_date):
+                    if not self._covered_by_availability(registration.blocks, work_date, start_time, end_time):
                         skipped_outside_availability += 1
                         continue
                     if any(
                         item.work_date == work_date
-                        and self._times_overlap(
-                            start_time, end_time, item.start_time, item.end_time
-                        )
+                        and self._times_overlap(start_time, end_time, item.start_time, item.end_time)
                         for item in existing
                     ):
                         continue
@@ -469,10 +548,93 @@ class EmployeeScheduleService:
                     existing.append(assignment)
                     created += 1
             s.commit()
-            return {
-                "created": created,
-                "skipped_outside_availability": skipped_outside_availability,
-            }
+            return {"created": created, "skipped_outside_availability": skipped_outside_availability}
+
+    def publish_week(self, week_start, user=None):
+        """Publish a validated DRAFT as the official employee schedule."""
+        actor = self._assert_manage(user)
+        ws = self.week_start(week_start)
+        with self._sf() as s:
+            repo = self._repository_provider.employee_schedules(s)
+            week = repo.get_week(ws)
+            if week is None:
+                raise EmployeeScheduleValidationError("Weekly schedule draft not found.")
+            self._require_draft(week)
+            assignments = self._validate_publishable(s, repo, week)
+            week.status = EmployeeScheduleWeek.STATUS_PUBLISHED
+            week.published_at = get_clock().now()
+            week.published_by_user_id = actor.id
+            week.frozen_at = None
+            week.frozen_by_user_id = None
+            self._audit_week(
+                s,
+                self.AUDIT_PUBLISHED,
+                week,
+                actor,
+                {"assignment_count": len(assignments)},
+            )
+            s.commit()
+            return week
+
+    def freeze_week(self, week_start, user=None):
+        """Freeze a published schedule so it remains an immutable official record."""
+        actor = self._assert_manage(user)
+        ws = self.week_start(week_start)
+        with self._sf() as s:
+            repo = self._repository_provider.employee_schedules(s)
+            week = repo.get_week(ws)
+            if week is None or week.status != EmployeeScheduleWeek.STATUS_PUBLISHED:
+                raise EmployeeScheduleValidationError("Only a published weekly schedule can be frozen.")
+            week.status = EmployeeScheduleWeek.STATUS_FROZEN
+            week.frozen_at = get_clock().now()
+            week.frozen_by_user_id = actor.id
+            self._audit_week(s, self.AUDIT_FROZEN, week, actor)
+            s.commit()
+            return week
+
+    def reopen_week_for_override(self, week_start, reason, user=None):
+        """Re-open PUBLISHED/FROZEN schedule as a new DRAFT revision.
+
+        A reason is mandatory because this operation changes an already official
+        schedule. The previous lifecycle state remains available in audit logs.
+        """
+        actor = self._assert_manage(user)
+        reason = (reason or "").strip()
+        if not reason:
+            raise EmployeeScheduleValidationError("An override reason is required.")
+        ws = self.week_start(week_start)
+        with self._sf() as s:
+            repo = self._repository_provider.employee_schedules(s)
+            week = repo.get_week(ws)
+            if week is None or week.status not in {
+                EmployeeScheduleWeek.STATUS_PUBLISHED,
+                EmployeeScheduleWeek.STATUS_FROZEN,
+            }:
+                raise EmployeeScheduleValidationError(
+                    "Only a published or frozen weekly schedule can be re-opened for override."
+                )
+            old_status = week.status
+            old_version = week.version
+            week.status = EmployeeScheduleWeek.STATUS_DRAFT
+            week.version += 1
+            week.published_at = None
+            week.published_by_user_id = None
+            week.frozen_at = None
+            week.frozen_by_user_id = None
+            self._audit_week(
+                s,
+                self.AUDIT_REOPENED,
+                week,
+                actor,
+                {
+                    "old_status": old_status,
+                    "old_version": old_version,
+                    "new_version": week.version,
+                    "reason": reason,
+                },
+            )
+            s.commit()
+            return week
 
     def registered_vs_scheduled(self, employee_id, week_start, user=None):
         """Return planning totals for one employee/week in hours."""
@@ -486,13 +648,14 @@ class EmployeeScheduleService:
                 for block in (registration.blocks if registration else [])
             )
             assignments = repo.list_employee_week(employee_id, ws)
-            scheduled_minutes = sum(
-                self._minutes(item.start_time, item.end_time) for item in assignments
-            )
+            scheduled_minutes = sum(self._minutes(item.start_time, item.end_time) for item in assignments)
+            week = repo.get_week(ws)
             return {
                 "week_start": ws,
                 "week_end": ws + timedelta(days=6),
                 "registration_status": registration.status if registration else None,
+                "schedule_status": week.status if week else None,
+                "schedule_version": week.version if week else None,
                 "registered_hours": registered_minutes / 60,
                 "scheduled_hours": scheduled_minutes / 60,
                 "remaining_hours": (registered_minutes - scheduled_minutes) / 60,
