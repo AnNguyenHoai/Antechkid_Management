@@ -1,27 +1,32 @@
 # -*- coding: utf-8 -*-
+"""CenterManager Design System V2 tokens.
+
+This module is the single source of truth for visual constants.  Product UI
+code may consume semantic tokens from here (preferably through ``theme.py``)
+but must not define competing palettes or spacing/type scales.
+
+UI-PROD-01 keeps the legacy token names as aliases so existing screens can
+migrate incrementally without a flag-day rewrite.
 """
-Design Tokens - Colors, Typography, Spacing, etc.
-"""
-# ===== Colors =====
+from __future__ import annotations
+
+TOKEN_SCHEMA_VERSION = 2
+
+# ---------------------------------------------------------------------------
+# Color
+# ---------------------------------------------------------------------------
+# Primitive values live only in this file.  New UI should prefer semantic
+# names (surface_*, text_*, action_*, state_*) over palette/legacy aliases.
 COLORS = {
-    # Primary
-    "primary": "#1976d2",
-    "primary_light": "#42a5f5",
-    "primary_dark": "#1565c0",
-    "primary_hover": "#e3f2fd",
-    "primary_selected": "#bbdefb",
-    
-    # Status
-    "success": "#2e7d32",
-    "success_bg": "#e8f5e9",
-    "warning": "#ed6c02",
-    "warning_bg": "#fff3e0",
-    "danger": "#d32f2f",
-    "danger_bg": "#ffebee",
-    "info": "#0288d1",
-    "info_bg": "#e1f5fe",
-    
-    # Grays
+    # Brand / palette primitives
+    "brand_blue_300": "#42a5f5",
+    "brand_blue_500": "#1976d2",
+    "brand_blue_700": "#1565c0",
+    "brand_blue_900": "#0d47a1",
+    "brand_orange_500": "#f57c00",
+    "brand_orange_700": "#e65100",
+
+    # Neutral palette
     "gray_50": "#fafafa",
     "gray_100": "#f5f5f5",
     "gray_200": "#eeeeee",
@@ -32,37 +37,102 @@ COLORS = {
     "gray_700": "#616161",
     "gray_800": "#424242",
     "gray_900": "#212121",
-    
-    # Surfaces
-    "background": "#f5f7fa",
-    "surface": "#ffffff",
+
+    # State palette
+    "green_50": "#e8f5e9",
+    "green_800": "#2e7d32",
+    "amber_50": "#fff3e0",
+    "amber_800": "#ed6c02",
+    "red_50": "#ffebee",
+    "red_100": "#fde0e0",
+    "red_200": "#ffcccc",
+    "red_700": "#d32f2f",
+    "red_800": "#c62828",
+    "cyan_50": "#e1f5fe",
+    "cyan_700": "#0288d1",
+    "blue_50": "#e3f2fd",
+    "blue_100": "#bbdefb",
+
+    # Semantic surfaces
+    "surface_app": "#f5f7fa",
+    "surface_page": "#ffffff",
+    "surface_card": "#ffffff",
     "surface_hover": "#f8f9fa",
     "surface_pressed": "#f0f0f0",
-    "border": "#e0e0e0",
-    "border_light": "#f0f0f0",
-    
-    # Text
+    "surface_disabled": "#f5f5f5",
+
+    # Semantic text
     "text_primary": "#1a1a1a",
     "text_secondary": "#424242",
     "text_muted": "#9e9e9e",
-    "text_white": "#ffffff",
-    
-    # === ALIASES for backward compatibility (keep old keys) ===
-    "muted": "#9e9e9e",           # alias for text_muted
-    "muted_light": "#bdbdbd",      # alias for gray_400
-    "gray_100": "#f5f5f5",         # already defined, but keep explicit
-    "gray_200": "#eeeeee",
-    "gray_300": "#e0e0e0",
-    "gray_400": "#bdbdbd",
-    "gray_500": "#9e9e9e",
-    "gray_600": "#757575",
-    "gray_700": "#616161",
-    "gray_800": "#424242",
-    "gray_900": "#212121",
+    "text_disabled": "#9e9e9e",
+    "text_inverse": "#ffffff",
+
+    # Semantic borders / focus
+    "border_default": "#e0e0e0",
+    "border_subtle": "#f0f0f0",
+    "border_strong": "#bdbdbd",
+    "focus_ring": "#42a5f5",
+
+    # Semantic actions
+    "action_primary": "#1976d2",
+    "action_primary_hover": "#1565c0",
+    "action_primary_selected": "#bbdefb",
+    "action_accent": "#f57c00",
+    "action_accent_hover": "#e65100",
+
+    # Semantic states
+    "state_success": "#2e7d32",
+    "state_success_bg": "#e8f5e9",
+    "state_warning": "#ed6c02",
+    "state_warning_bg": "#fff3e0",
+    "state_danger": "#d32f2f",
+    "state_danger_bg": "#ffebee",
+    "state_danger_hover_bg": "#fde0e0",
+    "state_danger_pressed_bg": "#ffcccc",
+    "state_info": "#0288d1",
+    "state_info_bg": "#e1f5fe",
 }
 
-# ===== Typography =====
+# Backward-compatible aliases.  Values are copied from the semantic/palette
+# entries above; this block is not an independent palette.
+COLORS.update({
+    "primary": COLORS["action_primary"],
+    "primary_light": COLORS["brand_blue_300"],
+    "primary_dark": COLORS["action_primary_hover"],
+    "primary_hover": COLORS["blue_50"],
+    "primary_selected": COLORS["action_primary_selected"],
+    "success": COLORS["state_success"],
+    "success_bg": COLORS["state_success_bg"],
+    "warning": COLORS["state_warning"],
+    "warning_bg": COLORS["state_warning_bg"],
+    "danger": COLORS["state_danger"],
+    "danger_bg": COLORS["state_danger_bg"],
+    "info": COLORS["state_info"],
+    "info_bg": COLORS["state_info_bg"],
+    "background": COLORS["surface_app"],
+    "surface": COLORS["surface_card"],
+    "border": COLORS["border_default"],
+    "border_light": COLORS["border_subtle"],
+    "muted": COLORS["text_disabled"],
+    "muted_light": COLORS["gray_400"],
+    "text_white": COLORS["text_inverse"],
+})
+
+# ---------------------------------------------------------------------------
+# Typography
+# ---------------------------------------------------------------------------
+FONT_FAMILY = "Segoe UI, Roboto, Arial, sans-serif"
+
+FONT_WEIGHTS = {
+    "regular": 400,
+    "medium": 500,
+    "semibold": 600,
+    "bold": 700,
+}
+
 TYPOGRAPHY = {
+    "display": 32,
     "page_title": 26,
     "section_title": 18,
     "card_title": 16,
@@ -78,8 +148,11 @@ TYPOGRAPHY = {
     "icon_small": 16,
 }
 
-# ===== Spacing =====
+# ---------------------------------------------------------------------------
+# Spacing
+# ---------------------------------------------------------------------------
 SPACING = {
+    "none": 0,
     "xs": 4,
     "sm": 8,
     "md": 12,
@@ -89,34 +162,118 @@ SPACING = {
     "xxxl": 48,
 }
 
-# ===== Border Radius =====
-BORDER_RADIUS = {
+# ---------------------------------------------------------------------------
+# Radius
+# ---------------------------------------------------------------------------
+RADIUS = {
+    "none": 0,
     "sm": 4,
     "md": 8,
     "lg": 12,
     "xl": 16,
+    "pill": 999,
     "circle": 999,
 }
 
-# ===== Shadows =====
+# Legacy public name used by existing components.
+BORDER_RADIUS = RADIUS
+
+# ---------------------------------------------------------------------------
+# Elevation
+# ---------------------------------------------------------------------------
+# Qt widgets implement elevation with QGraphicsDropShadowEffect rather than
+# QSS box-shadow.  These values are renderer-neutral design intent.
+ELEVATION = {
+    "none": {"blur_radius": 0, "x_offset": 0, "y_offset": 0, "alpha": 0},
+    "sm": {"blur_radius": 8, "x_offset": 0, "y_offset": 1, "alpha": 20},
+    "md": {"blur_radius": 16, "x_offset": 0, "y_offset": 3, "alpha": 28},
+    "lg": {"blur_radius": 28, "x_offset": 0, "y_offset": 6, "alpha": 36},
+}
+
+# Legacy CSS-like descriptions retained only for compatibility/documentation.
 SHADOWS = {
     "sm": "0 1px 3px rgba(0,0,0,0.08)",
     "md": "0 2px 8px rgba(0,0,0,0.10)",
     "lg": "0 4px 16px rgba(0,0,0,0.12)",
 }
 
-# ===== Badge Colors =====
-BADGE_COLORS = {
-    "ACTIVE": {"bg": "#e8f5e9", "text": "#2e7d32"},
-    "INACTIVE": {"bg": "#ffebee", "text": "#c62828"},
-    "ARCHIVED": {"bg": "#f5f5f5", "text": "#616161"},
-    "SCHEDULED": {"bg": "#e3f2fd", "text": "#0d47a1"},
-    "COMPLETED": {"bg": "#e8f5e9", "text": "#2e7d32"},
-    "CANCELLED": {"bg": "#ffebee", "text": "#c62828"},
-    "POSTPONED": {"bg": "#fff3e0", "text": "#e65100"},
-    "EXCELLENT": {"bg": "#e8f5e9", "text": "#2e7d32"},
-    "GOOD": {"bg": "#e3f2fd", "text": "#0d47a1"},
-    "NORMAL": {"bg": "#fff3e0", "text": "#e65100"},
-    "NEED_IMPROVEMENT": {"bg": "#ffebee", "text": "#c62828"},
-    "WARNING": {"bg": "#fff3e0", "text": "#e65100"},
+# ---------------------------------------------------------------------------
+# Interaction / status state
+# ---------------------------------------------------------------------------
+STATES = {
+    "default": {
+        "background": COLORS["surface_card"],
+        "foreground": COLORS["text_primary"],
+        "border": COLORS["border_default"],
+    },
+    "hover": {
+        "background": COLORS["surface_hover"],
+        "foreground": COLORS["text_primary"],
+        "border": COLORS["border_strong"],
+    },
+    "pressed": {
+        "background": COLORS["surface_pressed"],
+        "foreground": COLORS["text_primary"],
+        "border": COLORS["border_strong"],
+    },
+    "selected": {
+        "background": COLORS["action_primary_selected"],
+        "foreground": COLORS["action_primary_hover"],
+        "border": COLORS["action_primary"],
+    },
+    "disabled": {
+        "background": COLORS["surface_disabled"],
+        "foreground": COLORS["text_disabled"],
+        "border": COLORS["border_default"],
+    },
+    "success": {
+        "background": COLORS["state_success_bg"],
+        "foreground": COLORS["state_success"],
+        "border": COLORS["state_success"],
+    },
+    "warning": {
+        "background": COLORS["state_warning_bg"],
+        "foreground": COLORS["state_warning"],
+        "border": COLORS["state_warning"],
+    },
+    "danger": {
+        "background": COLORS["state_danger_bg"],
+        "foreground": COLORS["state_danger"],
+        "border": COLORS["state_danger"],
+    },
+    "info": {
+        "background": COLORS["state_info_bg"],
+        "foreground": COLORS["state_info"],
+        "border": COLORS["state_info"],
+    },
 }
+
+BADGE_COLORS = {
+    "ACTIVE": {"bg": STATES["success"]["background"], "text": STATES["success"]["foreground"]},
+    "INACTIVE": {"bg": STATES["danger"]["background"], "text": COLORS["red_800"]},
+    "ARCHIVED": {"bg": COLORS["gray_100"], "text": COLORS["gray_700"]},
+    "SCHEDULED": {"bg": COLORS["blue_50"], "text": COLORS["brand_blue_900"]},
+    "COMPLETED": {"bg": STATES["success"]["background"], "text": STATES["success"]["foreground"]},
+    "CANCELLED": {"bg": STATES["danger"]["background"], "text": COLORS["red_800"]},
+    "POSTPONED": {"bg": STATES["warning"]["background"], "text": COLORS["brand_orange_700"]},
+    "EXCELLENT": {"bg": STATES["success"]["background"], "text": STATES["success"]["foreground"]},
+    "GOOD": {"bg": COLORS["blue_50"], "text": COLORS["brand_blue_900"]},
+    "NORMAL": {"bg": STATES["warning"]["background"], "text": COLORS["brand_orange_700"]},
+    "NEED_IMPROVEMENT": {"bg": STATES["danger"]["background"], "text": COLORS["red_800"]},
+    "WARNING": {"bg": STATES["warning"]["background"], "text": COLORS["brand_orange_700"]},
+}
+
+__all__ = [
+    "TOKEN_SCHEMA_VERSION",
+    "COLORS",
+    "FONT_FAMILY",
+    "FONT_WEIGHTS",
+    "TYPOGRAPHY",
+    "SPACING",
+    "RADIUS",
+    "BORDER_RADIUS",
+    "ELEVATION",
+    "SHADOWS",
+    "STATES",
+    "BADGE_COLORS",
+]

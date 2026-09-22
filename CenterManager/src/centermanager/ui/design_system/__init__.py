@@ -1,7 +1,21 @@
 # -*- coding: utf-8 -*-
-"""
-Design System - Reusable UI components for CenterManager.
-"""
+"""CenterManager Design System public API."""
+
+from .tokens import (
+    TOKEN_SCHEMA_VERSION,
+    BADGE_COLORS,
+    BORDER_RADIUS,
+    COLORS,
+    ELEVATION,
+    FONT_FAMILY,
+    FONT_WEIGHTS,
+    RADIUS,
+    SHADOWS,
+    SPACING,
+    STATES,
+    TYPOGRAPHY,
+)
+from .theme import DEFAULT_THEME, DesignTheme, theme
 from .components import (
     StatisticCard,
     InfoCard,
@@ -21,6 +35,21 @@ from .components import (
 )
 
 __all__ = [
+    "TOKEN_SCHEMA_VERSION",
+    "COLORS",
+    "FONT_FAMILY",
+    "FONT_WEIGHTS",
+    "TYPOGRAPHY",
+    "SPACING",
+    "RADIUS",
+    "BORDER_RADIUS",
+    "ELEVATION",
+    "SHADOWS",
+    "STATES",
+    "BADGE_COLORS",
+    "DesignTheme",
+    "DEFAULT_THEME",
+    "theme",
     "StatisticCard",
     "InfoCard",
     "ActivityCard",
