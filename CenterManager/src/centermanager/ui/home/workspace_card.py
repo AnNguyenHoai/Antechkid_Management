@@ -1,19 +1,41 @@
-# src/centermanager/ui/home/workspace_card.py
 # -*- coding: utf-8 -*-
-"""
-WorkspaceCard - card for Home Workspace with summary and health status.
-Now with flexible sizing.
-"""
+"""Compact workspace access card for Home Dashboard V2."""
+from __future__ import annotations
+
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
-from centermanager.ui.design_system.tokens import COLORS, TYPOGRAPHY, SPACING
+from centermanager.ui.design_system.foundation import (
+    Badge,
+    BadgeTone,
+    Button,
+    ButtonVariant,
+    ComponentSize,
+)
+from centermanager.ui.design_system.tokens import (
+    COLORS,
+    COMPONENT_METRICS,
+    FONT_FAMILY,
+    FONT_WEIGHTS,
+    RADIUS,
+    SPACING,
+    TYPOGRAPHY,
+)
 
 
 class WorkspaceCard(QFrame):
-    clicked = Signal(str)  # workspace_id
+    """Text-first workspace summary with semantic health and quick action."""
+
+    clicked = Signal(str)
 
     def __init__(
         self,
@@ -24,95 +46,156 @@ class WorkspaceCard(QFrame):
         summary_text: str,
         health_status: str,
         health_details: str,
-        quick_action_label: str = "Open →",
-        parent: Optional[QWidget] = None
+        quick_action_label: str = "Open",
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._workspace_id = workspace_id
-        self._setup_ui(name, icon, description, summary_text, health_status, health_details, quick_action_label)
+        # Retained for constructor/API compatibility. Home V2 intentionally does
+        # not render emoji or mixed icon languages.
+        self._icon = icon
+        self._health_status = health_status
+        self._setup_ui(
+            name,
+            description,
+            summary_text,
+            health_status,
+            health_details,
+            quick_action_label,
+        )
 
-    def _setup_ui(self, name: str, icon: str, description: str, summary_text: str, health_status: str, health_details: str, quick_action_label: str) -> None:
-        self.setFrameStyle(QFrame.Shape.NoFrame)
-        border_color = COLORS['gray_300']
-        if health_status == "warning":
-            border_color = COLORS['warning']
-        elif health_status == "critical":
-            border_color = COLORS['danger']
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: white;
-                border-radius: 12px;
-                border: 2px solid {border_color};
-                padding: 16px;
-            }}
-            QFrame:hover {{
-                background: {COLORS['gray_100']};
-            }}
-        """)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumHeight(180)
+    @property
+    def workspace_id(self) -> str:
+        return self._workspace_id
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        top_layout = QHBoxLayout()
-        icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"font-size: {TYPOGRAPHY['icon_large']}px;")
-        top_layout.addWidget(icon_label)
-
-        name_label = QLabel(name)
-        name_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
-        top_layout.addWidget(name_label)
-
-        top_layout.addStretch()
-
-        status_color = {
-            "good": COLORS['success'],
-            "warning": COLORS['warning'],
-            "critical": COLORS['danger'],
-        }.get(health_status, COLORS['gray_400'])
-        status_dot = QLabel("●")
-        status_dot.setStyleSheet(f"color: {status_color}; font-size: 14px;")
-        top_layout.addWidget(status_dot)
-        if health_details:
-            status_label = QLabel(health_details)
-            status_label.setStyleSheet(f"font-size: 12px; color: {status_color};")
-            top_layout.addWidget(status_label)
-
-        layout.addLayout(top_layout)
-
-        desc_label = QLabel(description)
-        desc_label.setStyleSheet(f"font-size: 13px; color: {COLORS['muted']};")
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-
-        summary_label = QLabel(summary_text)
-        summary_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_secondary']};")
-        summary_label.setWordWrap(True)
-        layout.addWidget(summary_label)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self.action_btn = QPushButton(quick_action_label)
-        self.action_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['primary']};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 16px;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['primary_dark']};
-            }}
-        """)
-        self.action_btn.clicked.connect(lambda: self.clicked.emit(self._workspace_id))
-        btn_layout.addWidget(self.action_btn)
-        layout.addLayout(btn_layout)
-
+    def _setup_ui(
+        self,
+        name: str,
+        description: str,
+        summary_text: str,
+        health_status: str,
+        health_details: str,
+        quick_action_label: str,
+    ) -> None:
+        self.setObjectName("HomeWorkspaceCard")
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(184)
+        self.setAccessibleName(name)
+        self.setToolTip(f"Open {name}")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(
+            SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"]
+        )
+        root.setSpacing(SPACING["sm"])
+
+        heading = QHBoxLayout()
+        heading.setContentsMargins(0, 0, 0, 0)
+        heading.setSpacing(SPACING["sm"])
+
+        self.name_label = QLabel(name, self)
+        self.name_label.setObjectName("HomeWorkspaceName")
+        self.name_label.setWordWrap(True)
+        heading.addWidget(self.name_label, 1)
+
+        status_text, tone = self._health_presentation(health_status)
+        self.health_badge = Badge(status_text, tone=tone, parent=self)
+        heading.addWidget(self.health_badge, alignment=Qt.AlignmentFlag.AlignTop)
+        root.addLayout(heading)
+
+        self.description_label = QLabel(description, self)
+        self.description_label.setObjectName("HomeWorkspaceDescription")
+        self.description_label.setWordWrap(True)
+        root.addWidget(self.description_label)
+
+        self.summary_label = QLabel(summary_text, self)
+        self.summary_label.setObjectName("HomeWorkspaceSummary")
+        self.summary_label.setWordWrap(True)
+        root.addWidget(self.summary_label)
+
+        self.health_details_label = QLabel(health_details, self)
+        self.health_details_label.setObjectName("HomeWorkspaceHealthDetails")
+        self.health_details_label.setWordWrap(True)
+        self.health_details_label.setVisible(bool(health_details.strip()))
+        root.addWidget(self.health_details_label)
+
+        root.addStretch()
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addStretch()
+        action_text = quick_action_label.strip() or "Open"
+        self.action_btn = Button(
+            action_text,
+            variant=ButtonVariant.GHOST,
+            size=ComponentSize.SMALL,
+            parent=self,
+        )
+        self.action_btn.setAccessibleName(f"Open {name}")
+        # Keep the stable workspace selection contract visible at the setup
+        # boundary; source-driven regression tests intentionally guard it here.
+        self.action_btn.clicked.connect(
+            lambda: self.clicked.emit(self._workspace_id)
+        )
+        action_row.addWidget(self.action_btn)
+        root.addLayout(action_row)
+
+        self.setStyleSheet(
+            f"""
+            QFrame#HomeWorkspaceCard {{
+                background-color: {COLORS["surface_card"]};
+                border: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]};
+                border-radius: {RADIUS["lg"]}px;
+            }}
+            QFrame#HomeWorkspaceCard:hover {{
+                background-color: {COLORS["surface_hover"]};
+                border-color: {COLORS["border_strong"]};
+            }}
+            QLabel#HomeWorkspaceName {{
+                color: {COLORS["text_primary"]};
+                font-family: {FONT_FAMILY};
+                font-size: {TYPOGRAPHY["card_title"]}px;
+                font-weight: {FONT_WEIGHTS["semibold"]};
+                border: none;
+            }}
+            QLabel#HomeWorkspaceDescription {{
+                color: {COLORS["text_muted"]};
+                font-family: {FONT_FAMILY};
+                font-size: {TYPOGRAPHY["body_small"]}px;
+                font-weight: {FONT_WEIGHTS["regular"]};
+                border: none;
+            }}
+            QLabel#HomeWorkspaceSummary {{
+                color: {COLORS["text_secondary"]};
+                font-family: {FONT_FAMILY};
+                font-size: {TYPOGRAPHY["body"]}px;
+                font-weight: {FONT_WEIGHTS["medium"]};
+                border: none;
+            }}
+            QLabel#HomeWorkspaceHealthDetails {{
+                color: {COLORS["state_warning"]};
+                font-family: {FONT_FAMILY};
+                font-size: {TYPOGRAPHY["caption"]}px;
+                font-weight: {FONT_WEIGHTS["regular"]};
+                border: none;
+            }}
+            """
+        )
+
+    @staticmethod
+    def _health_presentation(health_status: str) -> tuple[str, BadgeTone]:
+        normalized = (health_status or "").strip().lower()
+        if normalized == "good":
+            return "Healthy", BadgeTone.SUCCESS
+        if normalized == "warning":
+            return "Attention", BadgeTone.WARNING
+        if normalized == "critical":
+            return "Critical", BadgeTone.DANGER
+        return "Status", BadgeTone.NEUTRAL
 
     def mousePressEvent(self, event) -> None:
-        self.clicked.emit(self._workspace_id)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._workspace_id)
         super().mousePressEvent(event)
