@@ -12,6 +12,8 @@ from typing import Mapping
 from .tokens import (
     BADGE_COLORS,
     COLORS,
+    COMPONENT_METRICS,
+    CONTROL_SIZES,
     ELEVATION,
     FONT_FAMILY,
     FONT_WEIGHTS,
@@ -33,6 +35,8 @@ class DesignTheme:
     radius: Mapping[str, int]
     elevation: Mapping[str, Mapping[str, int]]
     states: Mapping[str, Mapping[str, str]]
+    control_sizes: Mapping[str, Mapping[str, int]]
+    component_metrics: Mapping[str, int]
     badge_colors: Mapping[str, Mapping[str, str]]
     font_family: str
 
@@ -54,6 +58,12 @@ class DesignTheme:
     def state(self, name: str = "default") -> Mapping[str, str]:
         return self.states[name]
 
+    def control(self, name: str = "md") -> Mapping[str, int]:
+        return self.control_sizes[name]
+
+    def metric(self, name: str) -> int:
+        return self.component_metrics[name]
+
 
 DEFAULT_THEME = DesignTheme(
     colors=COLORS,
@@ -63,6 +73,8 @@ DEFAULT_THEME = DesignTheme(
     radius=RADIUS,
     elevation=ELEVATION,
     states=STATES,
+    control_sizes=CONTROL_SIZES,
+    component_metrics=COMPONENT_METRICS,
     badge_colors=BADGE_COLORS,
     font_family=FONT_FAMILY,
 )
