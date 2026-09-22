@@ -1,96 +1,138 @@
 # -*- coding: utf-8 -*-
-"""
-SearchToolbar - Search input with optional filters.
-"""
-from typing import Optional, List, Dict
+"""Search and filter toolbar for data-heavy operational screens."""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton, QComboBox, QSizePolicy
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
-from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.design_system.foundation import (
+    Button,
+    ButtonVariant,
+    ComponentSize,
+    Input,
+    Select,
+)
+from centermanager.ui.design_system.tokens import COMPONENT_METRICS, SPACING
 
 
 class SearchToolbar(QWidget):
+    """Compact search/filter row with legacy and full-state filter signals.
+
+    ``filter_changed`` retains the historical one-key delta contract. New data-heavy
+    pages should prefer ``filters_changed``, which emits the complete filter state.
+    """
+
     search_changed = Signal(str)
     filter_changed = Signal(dict)
+    filters_changed = Signal(dict)
+    cleared = Signal()
 
     def __init__(
         self,
         placeholder: str = "Search...",
-        filters: Optional[List[Dict[str, List[str]]]] = None,
-        parent: Optional[QWidget] = None
+        filters: Optional[List[Dict[str, Any]]] = None,
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._filters = filters or []
+        self.filter_controls: Dict[str, Select] = {}
         self._setup_ui(placeholder)
 
     def _setup_ui(self, placeholder: str) -> None:
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACING['sm'])
+        layout.setSpacing(SPACING["sm"])
 
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(f"🔍 {placeholder}")
-        self.search_input.setStyleSheet(f"""
-            QLineEdit {{
-                background: white;
-                border: 1px solid {COLORS['border']};
-                border-radius: 20px;
-                padding: 6px 14px;
-                font-size: 14px;
-            }}
-            QLineEdit:focus {{
-                border-color: {COLORS['primary']};
-                outline: none;
-            }}
-        """)
-        self.search_input.setFixedHeight(36)
+        self.search_input = Input(
+            placeholder,
+            size=ComponentSize.SMALL,
+            clearable=True,
+            parent=self,
+        )
+        self.search_input.setMinimumWidth(COMPONENT_METRICS["data_search_min_width"])
         self.search_input.textChanged.connect(self.search_changed.emit)
-        layout.addWidget(self.search_input)
+        layout.addWidget(self.search_input, 1)
 
         for filter_config in self._filters:
-            name = filter_config.get('name', '')
-            options = filter_config.get('options', [])
-            combo = QComboBox()
-            combo.addItems(['All'] + options)
-            combo.setStyleSheet(f"""
-                QComboBox {{
-                    border: 1px solid {COLORS['border']};
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                    font-size: 13px;
-                    min-width: 100px;
-                }}
-            """)
-            combo.currentTextChanged.connect(
-                lambda text, key=name: self.filter_changed.emit({key: text if text != 'All' else ''})
+            key = str(filter_config.get("key") or filter_config.get("name") or "").strip()
+            if not key:
+                continue
+            label = str(filter_config.get("label") or filter_config.get("name") or key).strip()
+            options = list(filter_config.get("options") or [])
+            combo = Select(
+                options,
+                placeholder="All",
+                size=ComponentSize.SMALL,
+                parent=self,
             )
+            combo.setMinimumWidth(COMPONENT_METRICS["data_filter_min_width"])
+            combo.setAccessibleName(label)
+            combo.setToolTip(label)
+            combo.currentTextChanged.connect(
+                lambda text, filter_key=key: self._on_filter_changed(filter_key, text)
+            )
+            self.filter_controls[key] = combo
             layout.addWidget(combo)
 
-        layout.addStretch()
+        self.clear_btn = Button(
+            "Clear",
+            variant=ButtonVariant.GHOST,
+            size=ComponentSize.SMALL,
+            parent=self,
+        )
+        self.clear_btn.setToolTip("Clear search and filters")
+        self.clear_btn.clicked.connect(self.clear)
+        layout.addWidget(self.clear_btn)
 
-        clear_btn = QPushButton("✕ Clear")
-        clear_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {COLORS['muted']};
-                border: none;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                color: {COLORS['text_primary']};
-            }}
-        """)
-        clear_btn.clicked.connect(self.clear)
-        layout.addWidget(clear_btn)
+    def _on_filter_changed(self, key: str, text: str) -> None:
+        combo = self.filter_controls[key]
+        value = text if combo.currentIndex() > 0 else ""
+        self.filter_changed.emit({key: value})
+        self.filters_changed.emit(self.filters())
+
+    def filters(self) -> Dict[str, str]:
+        """Return the complete filter state using stable filter keys."""
+        values: Dict[str, str] = {}
+        for key, combo in self.filter_controls.items():
+            values[key] = combo.currentText() if combo.currentIndex() > 0 else ""
+        return values
+
+    def set_filter_value(self, key: str, value: str) -> None:
+        combo = self.filter_controls.get(key)
+        if combo is None:
+            raise KeyError(key)
+        if not value:
+            combo.setCurrentIndex(0)
+            return
+        index = combo.findText(value)
+        if index < 0:
+            raise ValueError(f"Unknown value for {key}: {value}")
+        combo.setCurrentIndex(index)
 
     def clear(self) -> None:
         self.search_input.clear()
-        for i in range(self.layout().count()):
-            widget = self.layout().itemAt(i).widget()
-            if isinstance(widget, QComboBox):
-                widget.setCurrentIndex(0)
+        changed = False
+        for combo in self.filter_controls.values():
+            if combo.currentIndex() != 0:
+                changed = True
+                combo.setCurrentIndex(0)
+        if not changed:
+            self.filters_changed.emit(self.filters())
+        self.cleared.emit()
 
     def text(self) -> str:
         return self.search_input.text()
+
+    def setText(self, text: str) -> None:
+        """Compatibility helper matching the legacy SearchBar naming style."""
+        self.search_input.setText(text)
+
+    def setPlaceholderText(self, text: str) -> None:
+        """Compatibility helper for pages migrating from SearchBar."""
+        self.search_input.setPlaceholderText(text)
+
+
+__all__ = ["SearchToolbar"]

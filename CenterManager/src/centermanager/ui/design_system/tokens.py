@@ -6,7 +6,8 @@ code may consume semantic tokens from here (preferably through ``theme.py``)
 but must not define competing palettes or spacing/type scales.
 
 UI-PROD-01 keeps legacy token names as aliases so existing screens can migrate
-incrementally. UI-PROD-02 adds component geometry; UI-PROD-03 adds shell metrics.
+incrementally. UI-PROD-02 adds component geometry; UI-PROD-03 adds shell metrics;
+UI-PROD-05 adds shared data-heavy interaction metrics.
 """
 from __future__ import annotations
 
@@ -214,6 +215,15 @@ COMPONENT_METRICS = {
     "workspace_sidebar_header_height": 72,
     "page_header_height": 78,
     "nav_indicator_width": 3,
+    # Data-heavy UX V2
+    "data_table_header_height": 36,
+    "data_table_row_height_compact": 32,
+    "data_table_row_height_comfortable": 40,
+    "data_table_footer_height": 42,
+    "data_table_min_column_width": 88,
+    "data_bulk_bar_height": 44,
+    "data_filter_min_width": 116,
+    "data_search_min_width": 240,
 }
 
 BADGE_COLORS = {

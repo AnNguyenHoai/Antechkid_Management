@@ -1,36 +1,35 @@
 # -*- coding: utf-8 -*-
-"""StudentListPage - Enterprise data management screen."""
+"""StudentListPage - production data-heavy student management screen."""
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QMenu, QSizePolicy
-)
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu, QMessageBox, QVBoxLayout, QWidget
 
 from centermanager.models.student import Student
-from centermanager.services.student_service import StudentService
-from centermanager.services.parent_service import ParentService
 from centermanager.services.assessment_service import AssessmentService
+from centermanager.services.parent_service import ParentService
+from centermanager.services.student_export_service import StudentExportService
 from centermanager.services.student_filter_service import StudentFilterService
 from centermanager.services.student_import_service import StudentImportService
-from centermanager.services.student_export_service import StudentExportService
-from centermanager.ui.design_system import (
-    Avatar, SearchBar, EmptyState, PrimaryButton, SecondaryButton,
-    FilterBar
+from centermanager.services.student_service import StudentService
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.design_system.tokens import SPACING
+from centermanager.ui.shared import (
+    BulkActionBar,
+    DataTable,
+    SearchToolbar,
+    TableDensity,
 )
-from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget
-from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_filter_dialog import StudentFilterDialog
+from centermanager.ui.students.student_form_dialog import StudentFormDialog
 from centermanager.ui.students.student_import_dialog import StudentImportDialog
 
-from centermanager.platform.context import PlatformContext
+from centermanager.platform.business import PermissionGuard, WriteGuard
 from centermanager.platform.collaboration import CollaborationManager
-from centermanager.platform.business import WriteGuard, PermissionGuard
+from centermanager.platform.context import PlatformContext
 from centermanager.ui.workspace_base import WorkspaceBase
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,7 @@ class StudentListPage(WorkspaceBase):
         export_service: StudentExportService,
         platform_context: PlatformContext,
         collaboration_manager: CollaborationManager,
-        notification_service,  # <-- THÊM
+        notification_service,
         parent: Optional[QWidget] = None,
     ):
         self._student_service = student_service
@@ -60,7 +59,7 @@ class StudentListPage(WorkspaceBase):
         self._filter_service = filter_service
         self._import_service = import_service
         self._export_service = export_service
-        self._notification_service = notification_service  # <-- LƯU
+        self._notification_service = notification_service
 
         super().__init__(
             workspace_id="student_list",
@@ -84,85 +83,80 @@ class StudentListPage(WorkspaceBase):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        toolbar = QWidget()
-        toolbar.setStyleSheet(f"""
-            background: {COLORS['surface']};
-            padding: {SPACING['sm']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
-        """)
-        toolbar_layout = QVBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(SPACING['xs'])
+        toolbar = Toolbar(self)
+        self.search_bar = SearchToolbar(
+            placeholder="Search by code, name, parent phone, parent name...",
+            filters=[
+                {
+                    "key": "status",
+                    "label": "Status",
+                    "options": ["Active", "Archived", "Deleted"],
+                },
+                {
+                    "key": "enrollment",
+                    "label": "Enrollment",
+                    "options": ["Enrolled", "Not Enrolled"],
+                },
+                {
+                    "key": "assessment",
+                    "label": "Assessment",
+                    "options": ["Has Assessment", "No Assessment"],
+                },
+            ],
+            parent=toolbar,
+        )
+        self.search_bar.search_changed.connect(self._on_search)
+        self.search_bar.filters_changed.connect(self._on_filter_changed)
+        # Compatibility alias for older workspace code that referred to the
+        # separate FilterBar. V2 intentionally owns search + filters together.
+        self.filter_bar = self.search_bar
+        toolbar.add_widget(self.search_bar, align="start")
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(SPACING['sm'])
-
-        self.search_bar = SearchBar()
-        self.search_bar.setPlaceholderText("Search by code, name, parent phone, parent name...")
-        self.search_bar.text_changed.connect(self._on_search)
-        top_row.addWidget(self.search_bar)
-
-        self.filter_btn = SecondaryButton("🔍 Filter")
-        self.filter_btn.setFixedHeight(34)
-        self.filter_btn.clicked.connect(self.filter_clicked.emit)
-        top_row.addWidget(self.filter_btn)
-
-        self.refresh_btn = SecondaryButton("🔄 Refresh")
-        self.refresh_btn.setFixedHeight(34)
-        self.refresh_btn.clicked.connect(self.refresh)
-        top_row.addWidget(self.refresh_btn)
-
-        self.add_btn = PrimaryButton("+ Add")
-        self.add_btn.setFixedHeight(34)
-        self.add_btn.clicked.connect(self.show_add_dialog)
-        top_row.addWidget(self.add_btn)
-
-        self.import_btn = SecondaryButton("📥 Import")
-        self.import_btn.setFixedHeight(34)
-        self.import_btn.clicked.connect(self.show_import_dialog)
-        top_row.addWidget(self.import_btn)
-
-        self.export_btn = SecondaryButton("📤 Export")
-        self.export_btn.setFixedHeight(34)
-        self.export_btn.clicked.connect(self.export_students)
-        top_row.addWidget(self.export_btn)
-
-        toolbar_layout.addLayout(top_row)
-
-        self.filter_bar = FilterBar([
-            {"key": "status", "label": "Status", "type": "combo", "options": ["Active", "Archived", "Deleted"]},
-            {"key": "enrollment", "label": "Enrollment", "type": "combo", "options": ["Enrolled", "Not Enrolled"]},
-            {"key": "assessment", "label": "Assessment", "type": "combo", "options": ["Has Assessment", "No Assessment"]},
-        ])
-        self.filter_bar.filter_changed.connect(self._on_filter_changed)
-        toolbar_layout.addWidget(self.filter_bar)
-
+        self.filter_btn = toolbar.add_action(
+            "More filters",
+            self.filter_clicked.emit,
+            variant=ButtonVariant.SECONDARY,
+        )
+        self.refresh_btn = toolbar.add_action(
+            "Refresh",
+            self.refresh,
+            variant=ButtonVariant.SECONDARY,
+        )
+        self.import_btn = toolbar.add_action(
+            "Import",
+            self.show_import_dialog,
+            variant=ButtonVariant.SECONDARY,
+        )
+        self.export_btn = toolbar.add_action(
+            "Export",
+            self.export_students,
+            variant=ButtonVariant.SECONDARY,
+        )
+        self.add_btn = toolbar.add_action(
+            "Add student",
+            self.show_add_dialog,
+            variant=ButtonVariant.PRIMARY,
+        )
         layout.addWidget(toolbar)
 
-        # Bulk actions bar
-        self.bulk_bar = QWidget()
-        self.bulk_bar.setStyleSheet(f"""
-            background: {COLORS['primary_hover']};
-            padding: {SPACING['xs']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
-        """)
-        self.bulk_bar.setVisible(False)
-        bulk_layout = QHBoxLayout(self.bulk_bar)
-        bulk_layout.setContentsMargins(0, 0, 0, 0)
-        self.bulk_count_label = QLabel("0 selected")
-        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
-        bulk_layout.addWidget(self.bulk_count_label)
-        bulk_layout.addStretch()
-        self.bulk_delete_btn = QPushButton("Delete Selected")
-        self.bulk_delete_btn.setStyleSheet(f"color: {COLORS['danger']};")
-        self.bulk_delete_btn.clicked.connect(self._bulk_delete)
-        bulk_layout.addWidget(self.bulk_delete_btn)
-        self.bulk_export_btn = QPushButton("Export Selected")
-        self.bulk_export_btn.clicked.connect(self._bulk_export)
-        bulk_layout.addWidget(self.bulk_export_btn)
-        self.bulk_clear_btn = QPushButton("Clear")
-        self.bulk_clear_btn.clicked.connect(self._clear_selection)
-        bulk_layout.addWidget(self.bulk_clear_btn)
+        self.bulk_bar = BulkActionBar(self)
+        self.bulk_delete_btn = self.bulk_bar.add_action(
+            "delete",
+            "Delete selected",
+            self._bulk_delete,
+            variant=ButtonVariant.DANGER,
+        )
+        self.bulk_export_btn = self.bulk_bar.add_action(
+            "export",
+            "Export selected",
+            self._bulk_export,
+            variant=ButtonVariant.SECONDARY,
+        )
+        self.bulk_bar.clear_requested.connect(self._clear_selection)
+        # Compatibility aliases retained for tests/integrations that inspect
+        # these controls directly.
+        self.bulk_count_label = self.bulk_bar.count_label
+        self.bulk_clear_btn = self.bulk_bar.clear_button
         layout.addWidget(self.bulk_bar)
 
         columns = [
@@ -172,18 +166,22 @@ class StudentListPage(WorkspaceBase):
             {"key": "current_level", "label": "Level", "sortable": True},
             {"key": "created_at", "label": "Created", "sortable": True},
         ]
-        self.data_table = DataTable(columns, page_size=20)
+        self.data_table = DataTable(
+            columns,
+            page_size=20,
+            density=TableDensity.COMPACT,
+            empty_title="No students found",
+            empty_message="Try changing search or filters, then refresh the list.",
+        )
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.selection_changed.connect(self._on_selection_changed)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
         self.data_table.context_menu_requested.connect(self._on_context_menu)
-        layout.addWidget(self.data_table)
+        layout.addWidget(self.data_table, 1)
 
-        self.loading = LoadingWidget()
-        self.loading.setVisible(False)
-        layout.addWidget(self.loading)
+        # Compatibility reference: loading is now rendered inline by DataTable.
+        self.loading = self.data_table.loading_state
 
-        # Update permissions
         self._update_button_states()
 
     def _update_button_states(self) -> None:
@@ -197,18 +195,21 @@ class StudentListPage(WorkspaceBase):
         pass
 
     def refresh(self) -> None:
-        self.loading.setVisible(True)
+        self.data_table.set_loading(True)
         self._selected_ids = []
         self._update_bulk_bar()
         try:
             self._students = self._student_service.list_students()
             self._filtered_base = self._students[:]
             self._apply_filters_and_sort()
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to refresh student list")
+            self.data_table.set_error(
+                "Student records could not be loaded.",
+                title="Unable to load students",
+                retry_callback=self.refresh,
+            )
             QMessageBox.critical(self, "Error", "Failed to load students.")
-        finally:
-            self.loading.setVisible(False)
         self.data_updated.emit()
         self._update_button_states()
 
@@ -226,7 +227,10 @@ class StudentListPage(WorkspaceBase):
     def _apply_filters_and_sort(self) -> None:
         filtered = self._filter_students(self.search_bar.text())
         if self._sort_key:
-            filtered.sort(key=lambda s: getattr(s, self._sort_key, ""), reverse=not self._sort_asc)
+            filtered.sort(
+                key=lambda s: getattr(s, self._sort_key, ""),
+                reverse=not self._sort_asc,
+            )
         self._filtered = filtered
         self._populate_table()
 
@@ -245,18 +249,17 @@ class StudentListPage(WorkspaceBase):
                 results.append(student)
                 continue
 
-            # Keep the search promise in the UI honest: parent name/phone are
-            # part of the supported quick search and failures for one student
-            # must not break the entire list.
             try:
                 parents = self._parent_service.get_parents_by_student(student.id)
             except Exception:
                 parents = []
 
             for parent in parents or []:
-                parent_name = (getattr(parent, "full_name", None)
-                               or getattr(parent, "name", None)
-                               or "").lower()
+                parent_name = (
+                    getattr(parent, "full_name", None)
+                    or getattr(parent, "name", None)
+                    or ""
+                ).lower()
                 parent_phone = (getattr(parent, "phone", None) or "").lower()
                 if lower in parent_name or lower in parent_phone:
                     results.append(student)
@@ -265,15 +268,17 @@ class StudentListPage(WorkspaceBase):
 
     def _populate_table(self) -> None:
         data = []
-        for s in self._filtered:
-            data.append({
-                "student_code": s.student_code,
-                "full_name": s.full_name,
-                "status": s.status or "",
-                "current_level": s.current_level or "",
-                "created_at": s.created_at.strftime("%d/%m/%Y"),
-                "_id": s.id,
-            })
+        for student in self._filtered:
+            data.append(
+                {
+                    "student_code": student.student_code,
+                    "full_name": student.full_name,
+                    "status": student.status or "",
+                    "current_level": student.current_level or "",
+                    "created_at": student.created_at.strftime("%d/%m/%Y"),
+                    "_id": student.id,
+                }
+            )
         self.data_table.set_data(data, len(data))
         if not data:
             self.data_table.setToolTip(
@@ -288,9 +293,20 @@ class StudentListPage(WorkspaceBase):
 
     def _on_filter_changed(self, filters: Dict[str, str]) -> None:
         from centermanager.dto.student_filter_dto import StudentFilter
-        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
-        enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
-        assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
+
+        status_map = {
+            "Active": "ACTIVE",
+            "Archived": "ARCHIVED",
+            "Deleted": "DELETED",
+        }
+        enrollment_map = {
+            "Enrolled": "enrolled",
+            "Not Enrolled": "not_enrolled",
+        }
+        assessment_map = {
+            "Has Assessment": "has_assessment",
+            "No Assessment": "no_assessment",
+        }
 
         filter_dto = StudentFilter(
             status=status_map.get(filters.get("status", ""), None),
@@ -311,15 +327,14 @@ class StudentListPage(WorkspaceBase):
 
     def _on_selection_changed(self, indices: List[int]) -> None:
         self._selected_ids = []
-        for idx in indices:
-            if idx < len(self._filtered):
-                self._selected_ids.append(self._filtered[idx].id)
+        for visible_row in indices:
+            data_index = self.data_table.data_index_for_visible_row(visible_row)
+            if 0 <= data_index < len(self._filtered):
+                self._selected_ids.append(self._filtered[data_index].id)
         self._update_bulk_bar()
 
     def _update_bulk_bar(self) -> None:
-        count = len(self._selected_ids)
-        self.bulk_bar.setVisible(count > 0)
-        self.bulk_count_label.setText(f"{count} selected")
+        self.bulk_bar.set_selection_count(len(self._selected_ids))
 
     def _clear_selection(self) -> None:
         self.data_table.clear_selection()
@@ -330,43 +345,54 @@ class StudentListPage(WorkspaceBase):
         if not self._selected_ids:
             return
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to delete students.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to delete students.", "warning"
+            )
             return
         reply = QMessageBox.question(
-            self, "Confirm Delete",
+            self,
+            "Confirm Delete",
             f"Are you sure you want to delete {len(self._selected_ids)} students?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                for sid in self._selected_ids:
-                    self._student_service.delete_student(sid)
+                for student_id in self._selected_ids:
+                    self._student_service.delete_student(student_id)
                 self._clear_selection()
                 self.refresh()
-            except Exception as e:
+            except Exception:
                 logger.exception("Bulk delete failed")
                 QMessageBox.critical(self, "Error", "Failed to delete students.")
 
     def _bulk_export(self) -> None:
         if not self._selected_ids:
             return
-        # Export is read-only, no need to check write.
         try:
-            students = [self._student_service.get_student(sid) for sid in self._selected_ids]
+            students = [
+                self._student_service.get_student(student_id)
+                for student_id in self._selected_ids
+            ]
             file_path = self._export_service.export_csv(students)
-            QMessageBox.information(self, "Export", f"Exported {len(students)} students to {file_path}")
-        except Exception as e:
+            QMessageBox.information(
+                self,
+                "Export",
+                f"Exported {len(students)} students to {file_path}",
+            )
+        except Exception:
             logger.exception("Bulk export failed")
             QMessageBox.critical(self, "Error", "Failed to export students.")
 
     def _on_row_double_clicked(self, row: int) -> None:
-        if row < len(self._filtered):
-            self.student_selected.emit(self._filtered[row].id)
+        data_index = self.data_table.data_index_for_visible_row(row)
+        if 0 <= data_index < len(self._filtered):
+            self.student_selected.emit(self._filtered[data_index].id)
 
     def _on_context_menu(self, pos, row: int) -> None:
-        if row < 0 or row >= len(self._filtered):
+        data_index = self.data_table.data_index_for_visible_row(row)
+        if data_index < 0 or data_index >= len(self._filtered):
             return
-        student = self._filtered[row]
+        student = self._filtered[data_index]
         menu = QMenu(self)
         view_action = QAction("View Student", self)
         view_action.triggered.connect(lambda: self.student_selected.emit(student.id))
@@ -401,16 +427,19 @@ class StudentListPage(WorkspaceBase):
 
     def _archive_student(self, student_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to archive.", "warning"
+            )
             return
         reply = QMessageBox.question(
-            self, "Confirm Archive",
+            self,
+            "Confirm Archive",
             "Archive this student? They will not appear in default lists.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self._student_service.archive_student(student_id)  # <-- service sẽ publish event
+                self._student_service.archive_student(student_id)
                 self.refresh()
             except Exception as e:
                 logger.exception("Archive failed")
@@ -418,43 +447,56 @@ class StudentListPage(WorkspaceBase):
 
     def _activate_student(self, student_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to activate.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to activate.", "warning"
+            )
             return
         try:
-            self._student_service.activate_student(student_id)  # <-- service sẽ publish event
+            self._student_service.activate_student(student_id)
             self.refresh()
         except Exception as e:
             logger.exception("Activate failed")
             QMessageBox.critical(self, "Error", str(e))
-            
+
     def _edit_student(self, student_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to edit.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to edit.", "warning"
+            )
             return
-        dialog = StudentFormDialog(self._student_service, student_id=student_id, parent=self)
+        dialog = StudentFormDialog(
+            self._student_service,
+            student_id=student_id,
+            parent=self,
+        )
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
             self.refresh()
 
     def _delete_student(self, student_id: int) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to delete.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to delete.", "warning"
+            )
             return
         reply = QMessageBox.question(
-            self, "Confirm Delete",
+            self,
+            "Confirm Delete",
             "Delete this student?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 self._student_service.delete_student(student_id)
                 self.refresh()
-            except Exception as e:
+            except Exception:
                 logger.exception("Delete failed")
                 QMessageBox.critical(self, "Error", "Failed to delete student.")
 
     def show_add_dialog(self) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to add a student.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to add a student.", "warning"
+            )
             return
         dialog = StudentFormDialog(self._student_service, parent=self)
         if dialog.exec() == StudentFormDialog.DialogCode.Accepted:
@@ -462,14 +504,15 @@ class StudentListPage(WorkspaceBase):
 
     def show_import_dialog(self) -> None:
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to import.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to import.", "warning"
+            )
             return
         dialog = StudentImportDialog(self._import_service, parent=self)
         if dialog.exec() == StudentImportDialog.DialogCode.Accepted:
             self.refresh()
 
     def export_students(self) -> None:
-        # Export is read-only, no write check needed.
         try:
             file_path = self._export_service.export_all_active()
             QMessageBox.information(self, "Export", f"Exported to: {file_path}")
@@ -483,15 +526,15 @@ class StudentListPage(WorkspaceBase):
             filter_criteria = dialog.get_filter()
             if filter_criteria:
                 try:
-                    self._filtered_base = self._filter_service.filter_students(filter_criteria)
+                    self._filtered_base = self._filter_service.filter_students(
+                        filter_criteria
+                    )
                     self._apply_filters_and_sort()
                 except Exception as e:
                     QMessageBox.critical(self, "Filter Error", str(e))
 
-    # ====== NEW: Collaboration method ======
     def set_write_enabled(self, enabled: bool) -> None:
         self.add_btn.setEnabled(enabled)
         self.import_btn.setEnabled(enabled)
         self.bulk_delete_btn.setEnabled(enabled)
-        # Export is read-only, keep enabled
-        # Filter, refresh, search, etc. are read-only, keep enabled
+        # Export/filter/refresh/search remain read-only operations.
