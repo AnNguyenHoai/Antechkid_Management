@@ -234,6 +234,12 @@ class ApplicationTopBar(QFrame):
         self.finish_edit_btn = self.finish_edit_button
         self.cancel_btn = self.cancel_edit_button
 
+        # A standalone QWidget starts with Qt's default 640x480 geometry before
+        # it enters a parent layout. Preserve UI-PROD-03's immediate 60px idle
+        # contract without fixing the maximum height: FeedbackHost can still make
+        # the shell grow naturally when feedback or busy state becomes visible.
+        self.resize(self.width(), COMPONENT_METRICS["app_top_bar_height"])
+
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         self.mode_badge.setText(f"Mode: {mode}")
         self.mode_badge.set_tone(tone)
