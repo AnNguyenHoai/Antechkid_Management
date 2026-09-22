@@ -36,6 +36,13 @@ from .foundation import (
     Tabs,
     Toolbar,
 )
+from .form_detail import (
+    DetailRow,
+    DetailSection,
+    EditStateBanner,
+    FormField,
+    FormSection,
+)
 from .components import (
     ActivityCard,
     Avatar,
@@ -87,6 +94,12 @@ __all__ = [
     "EmptyState",
     "LoadingState",
     "ErrorState",
+    # Form / Detail patterns
+    "FormField",
+    "FormSection",
+    "DetailRow",
+    "DetailSection",
+    "EditStateBanner",
     # Legacy component exports retained until workspace migration.
     "StatisticCard",
     "InfoCard",
