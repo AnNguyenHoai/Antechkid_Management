@@ -10,7 +10,7 @@ from .error_state import ErrorState
 from .section_header import SectionHeader
 from .search_toolbar import SearchToolbar
 from .loading_widget import LoadingWidget, LoadingSkeleton
-from .data_table import DataTable
+from .data_table import BulkActionBar, DataTable, TableDensity
 from .chart_card import ChartCard
 
 __all__ = [
@@ -25,6 +25,8 @@ __all__ = [
     "SearchToolbar",
     "LoadingWidget",
     "LoadingSkeleton",
+    "BulkActionBar",
     "DataTable",
+    "TableDensity",
     "ChartCard",
 ]
