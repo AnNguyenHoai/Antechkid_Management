@@ -47,7 +47,11 @@ def test_assessment_update_and_delete_are_report_relevant_contracts():
 def test_mainwindow_marks_assessment_student_dirty():
     main = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
     assert "StudentAssessmentChanged" in main
-    assert "self._event_bus.register(StudentAssessmentChanged, self._on_student_assessment_changed_event)" in main
+    normalized_main = "".join(main.split())
+    assert (
+        "self._event_bus.register(StudentAssessmentChanged,"
+        "self._on_student_assessment_changed_event)"
+    ) in normalized_main
     start = main.index("def _on_student_assessment_changed_event")
     end = main.index("def _on_student_enrollment_changed_event", start)
     body = main[start:end]
