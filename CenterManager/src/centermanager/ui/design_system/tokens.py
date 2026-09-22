@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """CenterManager Design System V2 tokens.
 
-This module is the single source of truth for visual constants.  Product UI
+This module is the single source of truth for visual constants. Product UI
 code may consume semantic tokens from here (preferably through ``theme.py``)
-but must not define competing palettes or spacing/type scales.
+but must not define competing palettes or spacing/type/component scales.
 
-UI-PROD-01 keeps the legacy token names as aliases so existing screens can
-migrate incrementally without a flag-day rewrite.
+UI-PROD-01 established semantic tokens. UI-PROD-02 adds component metrics
+without moving visual ownership out of this module.
 """
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ TOKEN_SCHEMA_VERSION = 2
 # ---------------------------------------------------------------------------
 # Color
 # ---------------------------------------------------------------------------
-# Primitive values live only in this file.  New UI should prefer semantic
-# names (surface_*, text_*, action_*, state_*) over palette/legacy aliases.
 COLORS = {
     # Brand / palette primitives
     "brand_blue_300": "#42a5f5",
@@ -37,6 +35,7 @@ COLORS = {
     "gray_700": "#616161",
     "gray_800": "#424242",
     "gray_900": "#212121",
+    "shadow_color": "#000000",
 
     # State palette
     "green_50": "#e8f5e9",
@@ -94,8 +93,8 @@ COLORS = {
     "state_info_bg": "#e1f5fe",
 }
 
-# Backward-compatible aliases.  Values are copied from the semantic/palette
-# entries above; this block is not an independent palette.
+# Backward-compatible aliases. Values are derived from the canonical entries
+# above; this block is not an independent palette.
 COLORS.update({
     "primary": COLORS["action_primary"],
     "primary_light": COLORS["brand_blue_300"],
@@ -175,14 +174,11 @@ RADIUS = {
     "circle": 999,
 }
 
-# Legacy public name used by existing components.
 BORDER_RADIUS = RADIUS
 
 # ---------------------------------------------------------------------------
 # Elevation
 # ---------------------------------------------------------------------------
-# Qt widgets implement elevation with QGraphicsDropShadowEffect rather than
-# QSS box-shadow.  These values are renderer-neutral design intent.
 ELEVATION = {
     "none": {"blur_radius": 0, "x_offset": 0, "y_offset": 0, "alpha": 0},
     "sm": {"blur_radius": 8, "x_offset": 0, "y_offset": 1, "alpha": 20},
@@ -190,7 +186,6 @@ ELEVATION = {
     "lg": {"blur_radius": 28, "x_offset": 0, "y_offset": 6, "alpha": 36},
 }
 
-# Legacy CSS-like descriptions retained only for compatibility/documentation.
 SHADOWS = {
     "sm": "0 1px 3px rgba(0,0,0,0.08)",
     "md": "0 2px 8px rgba(0,0,0,0.10)",
@@ -248,6 +243,44 @@ STATES = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Component scale
+# ---------------------------------------------------------------------------
+# Component geometry remains token-owned so low-level widgets do not invent
+# local heights/padding/border widths.
+CONTROL_SIZES = {
+    "sm": {
+        "height": 30,
+        "padding_x": SPACING["sm"],
+        "font_size": TYPOGRAPHY["body_small"],
+    },
+    "md": {
+        "height": 36,
+        "padding_x": SPACING["md"],
+        "font_size": TYPOGRAPHY["body"],
+    },
+    "lg": {
+        "height": 44,
+        "padding_x": SPACING["lg"],
+        "font_size": TYPOGRAPHY["body_large"],
+    },
+}
+
+COMPONENT_METRICS = {
+    "border_width": 1,
+    "badge_height": 22,
+    "toolbar_height": 48,
+    "tab_height": 38,
+    "tab_min_width": 80,
+    "tab_indicator_width": 2,
+    "dialog_min_width": 480,
+    "state_max_width": 520,
+    "state_symbol_size": 40,
+    "loading_width": 160,
+    "loading_height": 8,
+    "skeleton_row_height": 48,
+}
+
 BADGE_COLORS = {
     "ACTIVE": {"bg": STATES["success"]["background"], "text": STATES["success"]["foreground"]},
     "INACTIVE": {"bg": STATES["danger"]["background"], "text": COLORS["red_800"]},
@@ -275,5 +308,7 @@ __all__ = [
     "ELEVATION",
     "SHADOWS",
     "STATES",
+    "CONTROL_SIZES",
+    "COMPONENT_METRICS",
     "BADGE_COLORS",
 ]

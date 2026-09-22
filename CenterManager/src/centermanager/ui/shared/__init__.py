@@ -6,6 +6,7 @@ from .activity_card import ActivityCard
 from .timeline_card import TimelineCard
 from .warning_banner import WarningBanner
 from .empty_state import EmptyState
+from .error_state import ErrorState
 from .section_header import SectionHeader
 from .search_toolbar import SearchToolbar
 from .loading_widget import LoadingWidget, LoadingSkeleton
@@ -19,6 +20,7 @@ __all__ = [
     "TimelineCard",
     "WarningBanner",
     "EmptyState",
+    "ErrorState",
     "SectionHeader",
     "SearchToolbar",
     "LoadingWidget",
