@@ -339,36 +339,14 @@ class HomePage(QWidget):
             self._show_error_state()
 
     def _populate_workspace_cards(self) -> None:
-        """Compatibility method retained while rendering Dashboard V2."""
+        """Load summaries and populate the V2 dashboard while preserving the legacy contract."""
         summaries = list(self._service.get_workspace_summaries())
+        self._clear_workspace_grid()
         if not summaries:
-            self._clear_workspace_grid()
             self._show_empty_state()
             return
 
-        self._render_summaries(summaries)
-        self._show_dashboard_content()
-
-    def _render_summaries(self, summaries: Iterable[WorkspaceSummary]) -> None:
-        summaries = list(summaries)
-        self._clear_workspace_grid()
-
-        healthy = sum(1 for summary in summaries if summary.health_status == "good")
-        attention = sum(
-            1 for summary in summaries if summary.health_status in {"warning", "critical"}
-        )
-        self.available_tile.set_value(len(summaries))
-        self.healthy_tile.set_value(healthy)
-        self.attention_tile.set_value(attention)
-
-        attention_messages = []
-        for summary in summaries:
-            if summary.health_status in {"warning", "critical"}:
-                detail = summary.health_details.strip() or "Review this workspace"
-                attention_messages.append(f"{summary.name}: {detail}")
-        self.attention_details.setText("  |  ".join(attention_messages))
-        self.attention_panel.setVisible(bool(attention_messages))
-
+        self._render_summary_metrics(summaries)
         for index, summary in enumerate(summaries):
             card = WorkspaceCard(
                 workspace_id=summary.workspace_id,
@@ -384,6 +362,26 @@ class HomePage(QWidget):
             card.clicked.connect(self._on_workspace_clicked)
             self._cards.append(card)
             self.workspace_grid.addWidget(card, index // 3, index % 3)
+
+        self._show_dashboard_content()
+
+    def _render_summary_metrics(self, summaries: Iterable[WorkspaceSummary]) -> None:
+        summaries = list(summaries)
+        healthy = sum(1 for summary in summaries if summary.health_status == "good")
+        attention = sum(
+            1 for summary in summaries if summary.health_status in {"warning", "critical"}
+        )
+        self.available_tile.set_value(len(summaries))
+        self.healthy_tile.set_value(healthy)
+        self.attention_tile.set_value(attention)
+
+        attention_messages = []
+        for summary in summaries:
+            if summary.health_status in {"warning", "critical"}:
+                detail = summary.health_details.strip() or "Review this workspace"
+                attention_messages.append(f"{summary.name}: {detail}")
+        self.attention_details.setText("  |  ".join(attention_messages))
+        self.attention_panel.setVisible(bool(attention_messages))
 
     def _clear_workspace_grid(self) -> None:
         self._cards.clear()

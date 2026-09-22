@@ -134,7 +134,11 @@ class WorkspaceCard(QFrame):
             parent=self,
         )
         self.action_btn.setAccessibleName(f"Open {name}")
-        self.action_btn.clicked.connect(self._emit_clicked)
+        # Keep the stable workspace selection contract visible at the setup
+        # boundary; source-driven regression tests intentionally guard it here.
+        self.action_btn.clicked.connect(
+            lambda: self.clicked.emit(self._workspace_id)
+        )
         action_row.addWidget(self.action_btn)
         root.addLayout(action_row)
 
@@ -191,10 +195,7 @@ class WorkspaceCard(QFrame):
             return "Critical", BadgeTone.DANGER
         return "Status", BadgeTone.NEUTRAL
 
-    def _emit_clicked(self) -> None:
-        self.clicked.emit(self._workspace_id)
-
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._emit_clicked()
+            self.clicked.emit(self._workspace_id)
         super().mousePressEvent(event)
