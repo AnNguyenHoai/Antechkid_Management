@@ -1,3 +1,4 @@
+import ast
 from datetime import date
 from pathlib import Path
 from sqlalchemy import create_engine
@@ -7,6 +8,41 @@ from centermanager.database.base import Base
 from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentAssessmentChanged
 from centermanager.services.assessment_service import AssessmentService
+
+
+def _has_main_window_event_registration(
+    source: str,
+    event_name: str,
+    handler_name: str,
+) -> bool:
+    """Match the semantic EventBus registration, independent of formatting."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or len(node.args) < 2:
+            continue
+
+        func = node.func
+        event_arg, handler_arg = node.args[:2]
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr == "register"
+            and isinstance(func.value, ast.Attribute)
+            and func.value.attr == "_event_bus"
+            and isinstance(func.value.value, ast.Name)
+            and func.value.value.id == "self"
+        ):
+            continue
+
+        if (
+            isinstance(event_arg, ast.Name)
+            and event_arg.id == event_name
+            and isinstance(handler_arg, ast.Attribute)
+            and handler_arg.attr == handler_name
+            and isinstance(handler_arg.value, ast.Name)
+            and handler_arg.value.id == "self"
+        ):
+            return True
+    return False
 
 
 def test_assessment_service_publishes_committed_student_assessment_event():
@@ -47,11 +83,11 @@ def test_assessment_update_and_delete_are_report_relevant_contracts():
 def test_mainwindow_marks_assessment_student_dirty():
     main = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
     assert "StudentAssessmentChanged" in main
-    normalized_main = "".join(main.split())
-    assert (
-        "self._event_bus.register(StudentAssessmentChanged,"
-        "self._on_student_assessment_changed_event)"
-    ) in normalized_main
+    assert _has_main_window_event_registration(
+        main,
+        "StudentAssessmentChanged",
+        "_on_student_assessment_changed_event",
+    )
     start = main.index("def _on_student_assessment_changed_event")
     end = main.index("def _on_student_enrollment_changed_event", start)
     body = main[start:end]
