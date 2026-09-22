@@ -2,7 +2,8 @@
 """Application shell primitives for CenterManager.
 
 UI-PROD-03 keeps application-wide state in one top bar and page-local context
-inside workspace headers. Visual values are consumed from Design System V2.
+inside workspace headers. UI-PROD-07 adds the canonical application feedback
+region while preserving the existing shell/transaction compatibility aliases.
 """
 from __future__ import annotations
 
@@ -11,13 +12,17 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.ui.design_system.feedback import (
+    FeedbackController,
+    FeedbackHost,
+    FeedbackRequest,
+)
 from centermanager.ui.design_system.foundation import Badge, Button
 from centermanager.ui.design_system.tokens import (
     COLORS,
     COMPONENT_METRICS,
     FONT_FAMILY,
     FONT_WEIGHTS,
-    RADIUS,
     SPACING,
     TYPOGRAPHY,
 )
@@ -81,7 +86,12 @@ class Breadcrumbs(QWidget):
 
 
 class ApplicationTopBar(QFrame):
-    """Application-wide product, runtime, user and write-state projection."""
+    """Application-wide product, runtime, user, write-state and feedback shell.
+
+    The first row preserves the UI-PROD-03 top-bar contract. ``FeedbackHost``
+    lives directly below that row and is hidden when idle, so existing layouts
+    retain their 60px shell height until feedback or an operation is active.
+    """
 
     start_edit_requested = Signal()
     finish_edit_requested = Signal()
@@ -94,28 +104,22 @@ class ApplicationTopBar(QFrame):
         role_name: str = "",
         runtime_version: str = "",
         sync_status: str = "disabled",
+        feedback_controller: Optional[FeedbackController] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("ApplicationTopBar")
-        self.setFixedHeight(COMPONENT_METRICS["app_top_bar_height"])
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setStyleSheet(
-            f"""
-            QFrame#ApplicationTopBar {{
-                background-color: {COLORS['surface_page']};
-                border: none;
-                border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
-            }}
-            QLabel {{
-                border: none;
-                background: transparent;
-                font-family: {FONT_FAMILY};
-            }}
-            """
-        )
+        self.setMinimumHeight(COMPONENT_METRICS["app_top_bar_height"])
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-        layout = QHBoxLayout(self)
+        shell_layout = QVBoxLayout(self)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        self.header = QFrame(self)
+        self.header.setObjectName("ApplicationTopBarHeader")
+        self.header.setFixedHeight(COMPONENT_METRICS["app_top_bar_height"])
+        layout = QHBoxLayout(self.header)
         layout.setContentsMargins(SPACING["lg"], 0, SPACING["lg"], 0)
         layout.setSpacing(SPACING["md"])
 
@@ -195,6 +199,33 @@ class ApplicationTopBar(QFrame):
         user_layout.addWidget(self.role_label, alignment=Qt.AlignmentFlag.AlignRight)
         layout.addLayout(user_layout)
 
+        shell_layout.addWidget(self.header)
+
+        # UI-PROD-07: one application-level feedback path. Page empty/loading/
+        # error states remain owned by StateView in the page content area.
+        self.feedback_controller = feedback_controller or FeedbackController(self)
+        self.feedback_host = FeedbackHost(self.feedback_controller, parent=self)
+        shell_layout.addWidget(self.feedback_host)
+
+        self.setStyleSheet(
+            f"""
+            QFrame#ApplicationTopBar {{
+                background-color: {COLORS['surface_page']};
+                border: none;
+            }}
+            QFrame#ApplicationTopBarHeader {{
+                background-color: {COLORS['surface_page']};
+                border: none;
+                border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
+            }}
+            QFrame#ApplicationTopBarHeader QLabel {{
+                border: none;
+                background: transparent;
+                font-family: {FONT_FAMILY};
+            }}
+            """
+        )
+
         # Compatibility aliases used by MainWindow's existing transaction code.
         self.mode_label = self.mode_badge
         self.waiting_indicator = self.editor_badge
@@ -215,10 +246,34 @@ class ApplicationTopBar(QFrame):
         self.transaction_label.setText(text)
 
     def set_runtime_version(self, version: str) -> None:
-        self.version_label.setText(f"Runtime: v{version}" if not version.startswith("v") else f"Runtime: {version}")
+        self.version_label.setText(
+            f"Runtime: v{version}" if not version.startswith("v") else f"Runtime: {version}"
+        )
 
     def set_sync_status(self, status: str) -> None:
         self.sync_label.setText(f"Sync: {status}")
+
+    # ---- UI-PROD-07 shell feedback API ---------------------------------
+    def show_feedback(self, request: FeedbackRequest) -> FeedbackRequest:
+        return self.feedback_controller.publish(request)
+
+    def notify_info(self, message: str, **kwargs) -> FeedbackRequest:
+        return self.feedback_controller.info(message, **kwargs)
+
+    def notify_success(self, message: str, **kwargs) -> FeedbackRequest:
+        return self.feedback_controller.success(message, **kwargs)
+
+    def notify_warning(self, message: str, **kwargs) -> FeedbackRequest:
+        return self.feedback_controller.warning(message, **kwargs)
+
+    def notify_error(self, message: str, **kwargs) -> FeedbackRequest:
+        return self.feedback_controller.error(message, **kwargs)
+
+    def begin_operation(self, operation_id: str, message: str = "Working…") -> bool:
+        return self.feedback_controller.begin_operation(operation_id, message)
+
+    def finish_operation(self, operation_id: str) -> bool:
+        return self.feedback_controller.finish_operation(operation_id)
 
 
 __all__ = ["ApplicationTopBar", "Breadcrumbs"]
