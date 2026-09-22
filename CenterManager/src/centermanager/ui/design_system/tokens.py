@@ -3,10 +3,10 @@
 
 This module is the single source of truth for visual constants. Product UI
 code may consume semantic tokens from here (preferably through ``theme.py``)
-but must not define competing palettes or spacing/type/component scales.
+but must not define competing palettes or spacing/type scales.
 
-UI-PROD-01 established semantic tokens. UI-PROD-02 adds component metrics
-without moving visual ownership out of this module.
+UI-PROD-01 keeps legacy token names as aliases so existing screens can migrate
+incrementally. UI-PROD-02 adds component geometry; UI-PROD-03 adds shell metrics.
 """
 from __future__ import annotations
 
@@ -16,15 +16,12 @@ TOKEN_SCHEMA_VERSION = 2
 # Color
 # ---------------------------------------------------------------------------
 COLORS = {
-    # Brand / palette primitives
     "brand_blue_300": "#42a5f5",
     "brand_blue_500": "#1976d2",
     "brand_blue_700": "#1565c0",
     "brand_blue_900": "#0d47a1",
     "brand_orange_500": "#f57c00",
     "brand_orange_700": "#e65100",
-
-    # Neutral palette
     "gray_50": "#fafafa",
     "gray_100": "#f5f5f5",
     "gray_200": "#eeeeee",
@@ -35,9 +32,6 @@ COLORS = {
     "gray_700": "#616161",
     "gray_800": "#424242",
     "gray_900": "#212121",
-    "shadow_color": "#000000",
-
-    # State palette
     "green_50": "#e8f5e9",
     "green_800": "#2e7d32",
     "amber_50": "#fff3e0",
@@ -51,36 +45,26 @@ COLORS = {
     "cyan_700": "#0288d1",
     "blue_50": "#e3f2fd",
     "blue_100": "#bbdefb",
-
-    # Semantic surfaces
     "surface_app": "#f5f7fa",
     "surface_page": "#ffffff",
     "surface_card": "#ffffff",
     "surface_hover": "#f8f9fa",
     "surface_pressed": "#f0f0f0",
     "surface_disabled": "#f5f5f5",
-
-    # Semantic text
     "text_primary": "#1a1a1a",
     "text_secondary": "#424242",
     "text_muted": "#9e9e9e",
     "text_disabled": "#9e9e9e",
     "text_inverse": "#ffffff",
-
-    # Semantic borders / focus
     "border_default": "#e0e0e0",
     "border_subtle": "#f0f0f0",
     "border_strong": "#bdbdbd",
     "focus_ring": "#42a5f5",
-
-    # Semantic actions
     "action_primary": "#1976d2",
     "action_primary_hover": "#1565c0",
     "action_primary_selected": "#bbdefb",
     "action_accent": "#f57c00",
     "action_accent_hover": "#e65100",
-
-    # Semantic states
     "state_success": "#2e7d32",
     "state_success_bg": "#e8f5e9",
     "state_warning": "#ed6c02",
@@ -91,10 +75,9 @@ COLORS = {
     "state_danger_pressed_bg": "#ffcccc",
     "state_info": "#0288d1",
     "state_info_bg": "#e1f5fe",
+    "shadow_color": "#000000",
 }
 
-# Backward-compatible aliases. Values are derived from the canonical entries
-# above; this block is not an independent palette.
 COLORS.update({
     "primary": COLORS["action_primary"],
     "primary_light": COLORS["brand_blue_300"],
@@ -122,14 +105,12 @@ COLORS.update({
 # Typography
 # ---------------------------------------------------------------------------
 FONT_FAMILY = "Segoe UI, Roboto, Arial, sans-serif"
-
 FONT_WEIGHTS = {
     "regular": 400,
     "medium": 500,
     "semibold": 600,
     "bold": 700,
 }
-
 TYPOGRAPHY = {
     "display": 32,
     "page_title": 26,
@@ -173,7 +154,6 @@ RADIUS = {
     "pill": 999,
     "circle": 999,
 }
-
 BORDER_RADIUS = RADIUS
 
 # ---------------------------------------------------------------------------
@@ -185,7 +165,6 @@ ELEVATION = {
     "md": {"blur_radius": 16, "x_offset": 0, "y_offset": 3, "alpha": 28},
     "lg": {"blur_radius": 28, "x_offset": 0, "y_offset": 6, "alpha": 36},
 }
-
 SHADOWS = {
     "sm": "0 1px 3px rgba(0,0,0,0.08)",
     "md": "0 2px 8px rgba(0,0,0,0.10)",
@@ -196,74 +175,24 @@ SHADOWS = {
 # Interaction / status state
 # ---------------------------------------------------------------------------
 STATES = {
-    "default": {
-        "background": COLORS["surface_card"],
-        "foreground": COLORS["text_primary"],
-        "border": COLORS["border_default"],
-    },
-    "hover": {
-        "background": COLORS["surface_hover"],
-        "foreground": COLORS["text_primary"],
-        "border": COLORS["border_strong"],
-    },
-    "pressed": {
-        "background": COLORS["surface_pressed"],
-        "foreground": COLORS["text_primary"],
-        "border": COLORS["border_strong"],
-    },
-    "selected": {
-        "background": COLORS["action_primary_selected"],
-        "foreground": COLORS["action_primary_hover"],
-        "border": COLORS["action_primary"],
-    },
-    "disabled": {
-        "background": COLORS["surface_disabled"],
-        "foreground": COLORS["text_disabled"],
-        "border": COLORS["border_default"],
-    },
-    "success": {
-        "background": COLORS["state_success_bg"],
-        "foreground": COLORS["state_success"],
-        "border": COLORS["state_success"],
-    },
-    "warning": {
-        "background": COLORS["state_warning_bg"],
-        "foreground": COLORS["state_warning"],
-        "border": COLORS["state_warning"],
-    },
-    "danger": {
-        "background": COLORS["state_danger_bg"],
-        "foreground": COLORS["state_danger"],
-        "border": COLORS["state_danger"],
-    },
-    "info": {
-        "background": COLORS["state_info_bg"],
-        "foreground": COLORS["state_info"],
-        "border": COLORS["state_info"],
-    },
+    "default": {"background": COLORS["surface_card"], "foreground": COLORS["text_primary"], "border": COLORS["border_default"]},
+    "hover": {"background": COLORS["surface_hover"], "foreground": COLORS["text_primary"], "border": COLORS["border_strong"]},
+    "pressed": {"background": COLORS["surface_pressed"], "foreground": COLORS["text_primary"], "border": COLORS["border_strong"]},
+    "selected": {"background": COLORS["action_primary_selected"], "foreground": COLORS["action_primary_hover"], "border": COLORS["action_primary"]},
+    "disabled": {"background": COLORS["surface_disabled"], "foreground": COLORS["text_disabled"], "border": COLORS["border_default"]},
+    "success": {"background": COLORS["state_success_bg"], "foreground": COLORS["state_success"], "border": COLORS["state_success"]},
+    "warning": {"background": COLORS["state_warning_bg"], "foreground": COLORS["state_warning"], "border": COLORS["state_warning"]},
+    "danger": {"background": COLORS["state_danger_bg"], "foreground": COLORS["state_danger"], "border": COLORS["state_danger"]},
+    "info": {"background": COLORS["state_info_bg"], "foreground": COLORS["state_info"], "border": COLORS["state_info"]},
 }
 
 # ---------------------------------------------------------------------------
 # Component scale
 # ---------------------------------------------------------------------------
-# Component geometry remains token-owned so low-level widgets do not invent
-# local heights/padding/border widths.
 CONTROL_SIZES = {
-    "sm": {
-        "height": 30,
-        "padding_x": SPACING["sm"],
-        "font_size": TYPOGRAPHY["body_small"],
-    },
-    "md": {
-        "height": 36,
-        "padding_x": SPACING["md"],
-        "font_size": TYPOGRAPHY["body"],
-    },
-    "lg": {
-        "height": 44,
-        "padding_x": SPACING["lg"],
-        "font_size": TYPOGRAPHY["body_large"],
-    },
+    "sm": {"height": 30, "padding_x": SPACING["sm"], "font_size": TYPOGRAPHY["body_small"]},
+    "md": {"height": 36, "padding_x": SPACING["md"], "font_size": TYPOGRAPHY["body"]},
+    "lg": {"height": 44, "padding_x": SPACING["lg"], "font_size": TYPOGRAPHY["body_large"]},
 }
 
 COMPONENT_METRICS = {
@@ -279,6 +208,12 @@ COMPONENT_METRICS = {
     "loading_width": 160,
     "loading_height": 8,
     "skeleton_row_height": 48,
+    # Application Shell V2
+    "app_top_bar_height": 60,
+    "workspace_sidebar_width": 224,
+    "workspace_sidebar_header_height": 72,
+    "page_header_height": 78,
+    "nav_indicator_width": 3,
 }
 
 BADGE_COLORS = {
