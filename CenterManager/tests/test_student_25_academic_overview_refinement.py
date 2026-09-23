@@ -4,9 +4,10 @@ UI = Path("src/centermanager/ui/student_workspace/enrollment_widget.py").read_te
 REPO = Path("src/centermanager/repositories/enrollment_repository.py").read_text(encoding="utf-8")
 
 def test_25_academic_overview_summary_exists():
-    assert "Academic Overview" in UI
-    assert "Academic Summary" in UI
-    for label in ("Active", "Completed", "Withdrawn", "Total Records"):
+    assert "Academic summary" in UI
+    assert "Current enrollment" in UI
+    assert "Academic history" in UI
+    for label in ("Active", "Completed", "Withdrawn", "Total records"):
         assert f'("{label}"' in UI
 
 def test_25_summary_is_derived_from_canonical_enrollment_statuses():

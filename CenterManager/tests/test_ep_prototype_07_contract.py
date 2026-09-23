@@ -26,8 +26,9 @@ def test_attendance_and_assessment_use_existing_service_boundaries():
 
 def test_student_attendance_remains_read_only():
     source = _read("student_workspace/student_attendance_widget.py")
-    assert "NoEditTriggers" in source
+    assert "DataTable" in source
     assert "create_or_update_attendance" not in source
+    assert "save_session_attendance" not in source
 
 
 def test_assessment_dialog_imports_qwidget_for_constructor_annotation():

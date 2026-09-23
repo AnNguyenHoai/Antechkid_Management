@@ -48,9 +48,10 @@ def test_student_financial_widget_uses_outstanding_source_of_truth():
 
 def test_student_financial_widget_shows_per_class_status():
     source = Path("src/centermanager/ui/student_workspace/student_financial_widget.py").read_text(encoding="utf-8")
-    assert '"Trạng thái"' in source
+    assert '"label": "Status"' in source
     assert "detail.status" in source
-    assert '"Chưa cấu hình"' in source
+    assert '"Not configured"' in source
+    assert "self.detail_data_table.set_data(rows, len(rows))" in source
 
 
 def test_outstanding_list_does_not_display_unknown_debt_as_zero():

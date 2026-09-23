@@ -10,13 +10,13 @@ def test_search_matches_current_filtered_base_not_global_list():
     start = SOURCE.index("def _filter_students")
     end = SOURCE.index("def _populate_table", start)
     section = SOURCE[start:end]
-    assert 'base = getattr(self, "_filtered_base", self._students)' in section
+    assert "base = self._filtered_base" in section
 
 def test_search_matches_parent_name_and_phone_as_promised_by_placeholder():
     start = SOURCE.index("def _filter_students")
     end = SOURCE.index("def _populate_table", start)
     section = SOURCE[start:end]
-    assert "get_parents_by_student" in section
+    assert "get_parents_for_student" in section
     assert "parent_phone" in section
 
 def test_refresh_clears_stale_selection():
@@ -30,7 +30,7 @@ def test_context_menu_disables_mutations_in_read_only_mode():
     start = SOURCE.index("def _on_context_menu")
     end = SOURCE.index("def _archive_student", start)
     section = SOURCE[start:end]
-    assert "can_write = self.can_write()" in section
+    assert "can_write = self._write_enabled or self.can_write()" in section
     assert section.count("setEnabled(can_write)") >= 3
 
 def test_filter_dialog_preserves_base_for_search_and_sort():
