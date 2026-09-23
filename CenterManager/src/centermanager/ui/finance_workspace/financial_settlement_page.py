@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
+from centermanager.core.current_user import get_current_user
+
 
 class FinancialSettlementPage(QWidget):
     """FinancePeriod reconciliation UI driven by the workspace shared period."""
@@ -239,8 +241,17 @@ class FinancialSettlementPage(QWidget):
         except Exception as exc:
             self._notify(str(exc))
 
+    @staticmethod
+    def _current_user_is_admin() -> bool:
+        user = get_current_user()
+        return bool(user and getattr(user, "is_admin", False))
+
     def _apply_write_state(self) -> None:
-        editable = self._write_enabled and self._loaded_status == "DRAFT"
+        editable = (
+            self._write_enabled
+            and self._loaded_status == "DRAFT"
+            and self._current_user_is_admin()
+        )
         for widget in (
             self.opening_cash,
             self.opening_bank,
