@@ -22,8 +22,15 @@ class FinancePeriodService:
         self._session_factory = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
 
-    @require_permission("finance.period.view")
+    @require_permission("finance.view")
     def get_active_period(self, on_date: Optional[date] = None) -> Optional[FinancePeriod]:
+        """Resolve the period needed by every Finance read surface.
+
+        Reading the active period is part of the canonical ``finance.view``
+        contract because Dashboard, Income, Expense, Outstanding and Settlement
+        all need it merely to render their data. Administrative period history
+        remains separately guarded by ``finance.period.view`` below.
+        """
         target = on_date or date.today()
         with self._session_factory() as session:
             return self._repository_provider.finance_periods(session).get_effective(target)
