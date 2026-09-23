@@ -37,6 +37,7 @@ class IncomeFormDialog(QDialog):
         student_service: StudentService,
         class_service: ClassService,
         income_id: Optional[int] = None,
+        initial_payment_date: Optional[date] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -45,6 +46,7 @@ class IncomeFormDialog(QDialog):
         self._class_service = class_service
         self._income_id = income_id
         self._is_edit = income_id is not None
+        self._initial_payment_date = initial_payment_date or date.today()
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(550)
@@ -101,7 +103,8 @@ class IncomeFormDialog(QDialog):
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("dd/MM/yyyy")
-        self.date_edit.setDate(QDate.currentDate())
+        initial = self._initial_payment_date
+        self.date_edit.setDate(QDate(initial.year, initial.month, initial.day))
         form.addRow("Ngày thu *", self.date_edit)
 
         # Legacy display metadata only. Canonical Finance period is always
