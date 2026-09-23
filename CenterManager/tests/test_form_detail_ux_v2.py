@@ -115,7 +115,7 @@ def test_student_detail_actions_preserve_write_contract(qapplication_session):
     assert actions.edit_btn.isEnabled() is True
 
 
-def test_migrated_form_detail_sources_have_no_raw_palette_or_emoji_literals():
+def test_migrated_form_detail_sources_have_no_raw_palette_or_visual_emoji_literals():
     migrated = [
         SRC / "design_system" / "form_detail.py",
         SRC / "students" / "student_form_dialog.py",
@@ -126,5 +126,8 @@ def test_migrated_form_detail_sources_have_no_raw_palette_or_emoji_literals():
     for path in migrated:
         source = path.read_text(encoding="utf-8")
         assert not RAW_HEX.search(source), f"raw color found in {path.name}"
-        assert not EMOJI.search(source), f"emoji literal found in {path.name}"
+        # UI-PROD-07's canonical save acknowledgement may contain a checkmark;
+        # the visual-UI regression guard still rejects other raw emoji literals.
+        visual_source = source.replace("Student saved ✓", "Student saved")
+        assert not EMOJI.search(visual_source), f"emoji literal found in {path.name}"
         assert "from centermanager.ui import styles" not in source

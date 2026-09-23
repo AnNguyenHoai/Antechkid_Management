@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Dialog for creating or editing a student."""
+"""Dialog for creating or editing a student using Design System V2 form UX."""
+from __future__ import annotations
+
 import logging
 from datetime import date
 from typing import Optional
@@ -10,14 +12,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from centermanager.services.exceptions import StudentNotFoundError, StudentValidationError
 from centermanager.services.student_service import StudentService
-from centermanager.services.exceptions import StudentValidationError, StudentNotFoundError
 from centermanager.ui.design_system import (
     Button,
     ButtonVariant,
@@ -27,6 +28,7 @@ from centermanager.ui.design_system import (
     Input,
     Select,
 )
+from centermanager.ui.design_system.feedback import FeedbackController
 from centermanager.ui.design_system.tokens import (
     COLORS,
     COMPONENT_METRICS,
@@ -34,6 +36,7 @@ from centermanager.ui.design_system.tokens import (
     FONT_WEIGHTS,
     RADIUS,
     SPACING,
+    STATES,
     TYPOGRAPHY,
 )
 
@@ -41,13 +44,14 @@ logger = logging.getLogger(__name__)
 
 
 class StudentFormDialog(QDialog):
-    """Dialog for creating or editing a student."""
+    """Create/edit Student form with inline validation and guarded save feedback."""
 
     def __init__(
         self,
         student_service: StudentService,
         student_id: Optional[int] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
+        feedback_controller: Optional[FeedbackController] = None,
     ) -> None:
         super().__init__(parent)
         self._service = student_service
@@ -55,6 +59,8 @@ class StudentFormDialog(QDialog):
         self._is_edit = student_id is not None
         self._dob_null = True
         self._suppress_date_changed = False
+        self._feedback = feedback_controller or FeedbackController(self)
+        self._save_operation_id = f"student-form-save-{student_id or 'new'}"
 
         self.setObjectName("StudentFormDialog")
         self.setWindowTitle("Edit Student" if self._is_edit else "Add Student")
@@ -63,15 +69,12 @@ class StudentFormDialog(QDialog):
 
         self._setup_ui()
         self._connect_signals()
-
         if self._is_edit:
             self._load_student()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(
-            SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["lg"]
-        )
+        layout.setContentsMargins(SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["lg"])
         layout.setSpacing(SPACING["lg"])
 
         self.title_label = QLabel("Edit student" if self._is_edit else "Add student")
@@ -87,6 +90,12 @@ class StudentFormDialog(QDialog):
         self.description_label.setWordWrap(True)
         layout.addWidget(self.description_label)
 
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("StudentFormStatus")
+        self.status_label.setWordWrap(True)
+        self.status_label.hide()
+        layout.addWidget(self.status_label)
+
         section = FormSection(
             "Student information",
             "Keep the profile concise and use the preferred name only when needed.",
@@ -94,19 +103,12 @@ class StudentFormDialog(QDialog):
         )
         layout.addWidget(section)
 
-        # Full Name (required)
         self.full_name_edit = Input("Enter full name", clearable=True)
-        self.full_name_field = section.add_field(
-            FormField("Full Name", self.full_name_edit, required=True)
-        )
+        self.full_name_field = section.add_field(FormField("Full Name", self.full_name_edit, required=True))
 
-        # Preferred Name
         self.preferred_name_edit = Input("Optional", clearable=True)
-        self.preferred_name_field = section.add_field(
-            FormField("Preferred Name", self.preferred_name_edit)
-        )
+        self.preferred_name_field = section.add_field(FormField("Preferred Name", self.preferred_name_edit))
 
-        # Date of Birth (nullable)
         self.dob_edit = QDateEdit()
         self.dob_edit.setObjectName("StudentDobInput")
         self.dob_edit.setCalendarPopup(True)
@@ -121,30 +123,22 @@ class StudentFormDialog(QDialog):
         dob_layout.setContentsMargins(0, 0, 0, 0)
         dob_layout.setSpacing(SPACING["sm"])
         dob_layout.addWidget(self.dob_edit, 1)
-        self.clear_dob_btn = Button(
-            "Clear",
-            variant=ButtonVariant.SECONDARY,
-            size=ComponentSize.MEDIUM,
-        )
+        self.clear_dob_btn = Button("Clear", variant=ButtonVariant.SECONDARY, size=ComponentSize.MEDIUM)
         dob_layout.addWidget(self.clear_dob_btn)
         self.dob_field = section.add_field(FormField("Date of Birth", dob_widget))
 
-        # Gender
         self.gender_combo = Select(["", "Male", "Female", "Other"])
         self.gender_field = section.add_field(FormField("Gender", self.gender_combo))
 
-        # Current Level
         self.level_edit = Input("e.g. Python Beginner", clearable=True)
         self.level_field = section.add_field(FormField("Current Level", self.level_edit))
 
-        # Notes (multiline)
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setObjectName("StudentNotesInput")
         self.notes_edit.setPlaceholderText("Additional notes (optional)")
         self.notes_edit.setMaximumHeight(100)
         self.notes_field = section.add_field(FormField("Notes", self.notes_edit))
 
-        # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(SPACING["sm"])
         btn_layout.addStretch()
@@ -192,6 +186,21 @@ class StudentFormDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.full_name_edit.textChanged.connect(self.full_name_field.clear_error)
 
+    def _show_status(self, message: str, tone: str = "info") -> None:
+        palette = STATES[tone]
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(
+            f"color: {palette['foreground']}; background: {palette['background']}; "
+            f"border: {COMPONENT_METRICS['border_width']}px solid {palette['border']}; "
+            f"border-radius: {RADIUS['md']}px; padding: {SPACING['sm']}px; "
+            f"font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY['body_small']}px;"
+        )
+        self.status_label.show()
+
+    def _clear_status(self) -> None:
+        self.status_label.clear()
+        self.status_label.hide()
+
     def _on_date_changed(self) -> None:
         if self._suppress_date_changed:
             return
@@ -222,37 +231,28 @@ class StudentFormDialog(QDialog):
         try:
             student = self._service.get_student(self._student_id)
         except StudentNotFoundError:
-            QMessageBox.warning(self, "Not Found", "Student not found.")
+            self._feedback.warning("Student not found.", title="Student unavailable", key="student-form-load")
             self.reject()
             return
-        except Exception:
+        except Exception as exc:
             logger.exception("Error loading student")
-            QMessageBox.critical(self, "Error", "Could not load student data.")
+            self._feedback.system_error(exc, message="The student profile could not be loaded.", key="student-form-load")
             self.reject()
             return
 
         self.full_name_edit.setText(student.full_name)
         self.preferred_name_edit.setText(student.preferred_name or "")
-
         if student.date_of_birth:
             self._dob_null = False
-            qdate = QDate(
-                student.date_of_birth.year,
-                student.date_of_birth.month,
-                student.date_of_birth.day,
-            )
-            self.dob_edit.setDate(qdate)
+            self.dob_edit.setDate(QDate(student.date_of_birth.year, student.date_of_birth.month, student.date_of_birth.day))
         else:
             self._dob_null = True
             self.dob_edit.setDate(QDate(2000, 1, 1))
         self._update_dob_ui()
 
-        gender_index = self.gender_combo.findText(
-            student.gender or "", Qt.MatchFlag.MatchFixedString
-        )
+        gender_index = self.gender_combo.findText(student.gender or "", Qt.MatchFlag.MatchFixedString)
         if gender_index >= 0:
             self.gender_combo.setCurrentIndex(gender_index)
-
         self.level_edit.setText(student.current_level or "")
         self.notes_edit.setPlainText(student.notes or "")
 
@@ -264,7 +264,14 @@ class StudentFormDialog(QDialog):
         level = self.level_edit.text().strip() or None
         notes = self.notes_edit.toPlainText().strip() or None
         self.full_name_field.clear_error()
+        self._clear_status()
 
+        if not self._feedback.begin_save(self._save_operation_id):
+            self._show_status("Another operation is still running. Try again when it finishes.", "warning")
+            return
+
+        self.save_btn.setEnabled(False)
+        self.save_btn.setText("Saving…")
         try:
             if self._is_edit:
                 self._service.update_student(
@@ -288,15 +295,28 @@ class StudentFormDialog(QDialog):
                     notes=notes,
                 )
                 logger.info("Created new student")
-            self.accept()
-        except StudentValidationError as e:
-            self.full_name_field.set_error(str(e))
-            self.full_name_edit.setFocus()
-            QMessageBox.warning(self, "Validation Error", str(e))
-        except Exception:
-            logger.exception("Unexpected error saving student")
-            QMessageBox.critical(
-                self,
-                "Error",
-                "An unexpected error occurred. Please check the logs.",
+            self._feedback.save_succeeded(
+                self._save_operation_id,
+                message="Student saved ✓",
+                key="student-save",
             )
+            self.accept()
+        except StudentValidationError as exc:
+            self._feedback.finish_operation(self._save_operation_id)
+            message = str(exc)
+            self.full_name_field.set_error(message)
+            self.full_name_edit.setFocus()
+            self._show_status(message, "warning")
+            self._feedback.warning(message, title="Check student information", key="student-save")
+        except Exception as exc:
+            logger.exception("Unexpected error saving student")
+            self._feedback.save_failed(
+                self._save_operation_id,
+                message="The student could not be saved. Check the form and try again.",
+                key="student-save",
+            )
+            self._show_status("The student could not be saved. Please try again.", "danger")
+        finally:
+            if self.result() != QDialog.DialogCode.Accepted:
+                self.save_btn.setEnabled(True)
+                self.save_btn.setText("Save")

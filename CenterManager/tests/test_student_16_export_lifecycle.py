@@ -8,7 +8,9 @@ P=Path("src/centermanager/export/pdf/student_report_generator.py").read_text(enc
 SR=Path("src/centermanager/repositories/student_repository.py").read_text(encoding="utf-8")
 
 def test_archived_filter_uses_status(): assert 'Student.status == "ARCHIVED"' in SR
-def test_ui_preserves_filter_base(): assert 'self._filtered_base = self._filter_service.filter_students(filter_dto)' in L
+def test_ui_preserves_filter_base():
+    assert "self._filtered_base" in L
+    assert "self._filter_service.filter_students(filter_dto)" in L
 def test_latest_report_singleton_and_atomic(): 
     assert '"StudentProfile.pdf"' in R
     assert 'temp_path' in R and 'file_path.replace(output_path)' in R

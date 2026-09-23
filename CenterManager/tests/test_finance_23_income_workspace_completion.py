@@ -59,8 +59,6 @@ def test_income_list_uses_real_server_pagination_and_shared_finance_period():
     assert "def _void_income" in source
     assert "def _export_csv" in source
     assert "finance_period_start" in source
-    # A legacy payment-period metadata selector must not become a second
-    # Finance Period selector in the list workspace.
     assert "self.period_combo = QComboBox()" not in source
 
 
@@ -85,7 +83,8 @@ def test_student_finance_remains_read_only():
     assert "update_income(" not in source
     assert "delete_income(" not in source
     assert "void_income(" not in source
-    assert "Mở Finance Workspace" in source
+    assert "Open Finance Workspace" in source
+    assert "open_finance_clicked" in source
 
 
 def test_income_lifecycle_migration_follows_finance_head():

@@ -7,8 +7,8 @@ MAIN = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
 APP = Path("src/centermanager/app.py").read_text(encoding="utf-8")
 
 def test_enrollment_widget_has_current_and_history_surfaces():
-    assert "Current Enrollment" in WIDGET
-    assert "Academic History" in WIDGET
+    assert "Current enrollment" in WIDGET
+    assert "Academic history" in WIDGET
     assert "No active enrollment." in WIDGET
 
 def test_enrollment_widget_supports_enroll_complete_withdraw():
@@ -17,11 +17,12 @@ def test_enrollment_widget_supports_enroll_complete_withdraw():
 
 def test_enrollment_mutations_are_write_guarded():
     assert "set_write_enabled" in WIDGET
-    assert "Start Editing before changing enrollment." in WIDGET
+    assert "Start editing before changing enrollment." in WIDGET
+    assert "ConfirmationDialog" in WIDGET
 
 def test_detail_page_hosts_enrollment_tab_and_refreshes_student():
     assert "EnrollmentWidget" in DETAIL
-    assert '"🎓 Enrollment"' in DETAIL
+    assert '"Enrollment"' in DETAIL
     assert "self.enrollment_widget.set_student(student.id)" in DETAIL
 
 def test_enrollment_write_state_is_propagated():

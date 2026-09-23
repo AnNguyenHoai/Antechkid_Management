@@ -6,7 +6,7 @@ DETAIL = Path("src/centermanager/ui/student_workspace/student_detail_page.py").r
 
 
 def test_workspace_centrally_projects_write_state():
-    assert "self._write_enabled = enabled" in SHELL
+    assert "self._write_enabled = bool(enabled)" in SHELL
     assert "self.dashboard_page, self.list_page, self.detail_page" in SHELL
 
 

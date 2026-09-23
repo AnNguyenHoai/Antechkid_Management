@@ -78,9 +78,9 @@ def test_latest_report_policy_is_preserved():
 
 def test_filter_search_sort_share_one_filtered_base():
     section = _section(LIST, "def _filter_students", "def _populate_table")
-    assert 'base = getattr(self, "_filtered_base", self._students)' in section
+    assert "base = self._filtered_base" in section
     assert "parent_phone" in section
-    assert "get_parents_by_student" in section
+    assert "get_parents_for_student" in section
 
 
 def test_all_student_lifecycle_filters_are_supported():
@@ -97,5 +97,5 @@ def test_refresh_clears_stale_bulk_selection():
 
 def test_read_only_mode_does_not_advertise_mutation_actions():
     section = _section(LIST, "def _on_context_menu", "def _archive_student")
-    assert "can_write = self.can_write()" in section
+    assert "can_write = self._write_enabled or self.can_write()" in section
     assert section.count("setEnabled(can_write)") >= 3
