@@ -1,7 +1,8 @@
 # Finance Workspace Audit — 2026-09-23
 
-Base: `main_repos@0ce14e94b0fa5b6ebc45790a13e265586962a887`  
-Fix branch / PR: `codex/finance-workspace-audit-fixes` / #326
+Original audit base: `main_repos@0ce14e94b0fa5b6ebc45790a13e265586962a887`  
+Wave-2 audit base: `main_repos@e12b7f56cb8e3336bfe535f287ad92ee5845a473`  
+Wave-2 branch: `codex/finance-audit-wave-2`
 
 ## Scope
 
@@ -21,13 +22,15 @@ Audit covers the Finance workspace end to end:
 
 ## Executive result
 
-The original symptom — newly created Income/Expense visible on Dashboard but missing from the list — had two independent root causes: Finance-period permission mismatch and period selection resolving from day 1 while creation used today. Both are fixed in PR #326.
+The original symptom — newly created Income/Expense visible on Dashboard but missing from the list — had two independent root causes: Finance-period permission mismatch and period selection resolving from day 1 while creation used today. Those paths were fixed in the first Finance audit wave.
 
-The second audit pass found additional consistency defects that did not necessarily lose persistence but could produce stale projections, silently preserve values a user tried to clear, or make Dashboard/list/Settlement disagree on legacy Expense data. Those defects are also fixed in the same PR and covered by runtime regression tests.
+The second audit pass on `main_repos@e12b7f56...` found an additional cross-surface period-boundary defect: a superseded FinancePeriod configuration could still expose the remainder of its theoretical calendar bucket beyond `effective_to`. Because Expense is date-scoped while Income stores `finance_period_start`, this could make Dashboard, Expense, Outstanding and Settlement disagree around a mid-bucket configuration transition. Wave 2 clips every configuration-backed period to its effective lifetime.
+
+Wave 2 also projects fine-grained `finance.income.*` / `finance.expense.*` capabilities into list-page mutation controls while retaining service authorization as the authoritative boundary.
 
 No evidence was found that DataTable pagination, SQLite persistence, or server-side list loading itself was dropping transactions.
 
-## Correctness findings fixed in PR #326
+## Correctness findings fixed in the first audit wave
 
 ### F-01 — Finance role could not resolve the active period — HIGH — FIXED
 
@@ -69,57 +72,81 @@ Persisted canonical values (`Cash`/`Bank`, `Completed`/`Pending`) did not match 
 
 Earlier tests searched source text for tokens such as `Cash`, `Bank`, `Completed`, `Pending` and `currentData()`. Comments could satisfy these assertions even when runtime behavior was broken.
 
-**Fix:** PR #326 adds runtime Qt and repository/service regressions for the affected contracts.
+**Fix:** runtime Qt and repository/service regressions cover the affected contracts.
 
 ### F-07 — Finance used a private EventBus instead of the application bus — MEDIUM/HIGH — FIXED
 
-Production creates one application EventBus and injects it into CollaborationManager, but Finance Workspace previously created its own fallback EventBus because MainWindow did not pass one explicitly. Income/Expense mutations therefore refreshed Finance internally but did not participate in the application-wide event stream.
+Finance Workspace previously risked creating a private fallback EventBus instead of participating in the application-wide event stream.
 
-**Fix:** Finance Workspace now reuses, in order, an explicitly supplied bus, the CollaborationManager application bus, an already-bound Finance service bus, and only then a local compatibility fallback. Income and Expense are aligned onto that shared bus.
+**Fix:** Finance Workspace reuses the explicit/shared CollaborationManager application bus before any compatibility fallback, and aligns Income/Expense mutation events to that bus.
 
 ### F-08 — Home Finance card could remain stale after Finance mutations — MEDIUM — FIXED
 
-HomeDashboardService caches workspace summaries and previously invalidated only on selected Student events. Returning Home calls a normal refresh, which reuses the cache.
+HomeDashboardService caches workspace summaries and previously did not invalidate that cache on Finance mutations.
 
-**Effect:** after a payment/expense change, Finance could be current while the Home Finance card still showed old values.
-
-**Fix:** HomeDashboardService subscribes to `FinanceDataChanged` and invalidates its cache. The card label was also corrected from misleading `Revenue` to `Tuition paid`, because the value comes from Outstanding tuition payments rather than total Income.
+**Fix:** HomeDashboardService subscribes to `FinanceDataChanged` and invalidates its cache. The card label was also corrected from misleading `Revenue` to `Tuition paid` because the value comes from Outstanding tuition payments rather than total Income.
 
 ### F-09 — Settlement UI authorization was broader than service authorization — MEDIUM — FIXED
 
 FinancialSettlementService permits save/confirm only for Admin, but the UI previously enabled inputs whenever the application entered WRITE mode.
 
-**Fix:** Settlement controls now require WRITE mode + DRAFT status + Admin. Service enforcement remains authoritative.
+**Fix:** Settlement controls require WRITE mode + DRAFT status + Admin. Service enforcement remains authoritative.
 
 ### F-10 — Edit could not clear nullable Income/Expense fields — MEDIUM — FIXED
 
 Forms converted blank text to `None`, while update services use `None` to mean “field omitted / leave unchanged”.
 
-**Effect:** users could erase a note/payment-period/paid-by field in the form, save successfully, and still see the old value afterward.
-
-**Fix:** edit mode passes explicit empty strings so service normalization can clear nullable values. Create mode retains the existing optional-value behavior.
+**Fix:** edit mode passes explicit empty strings so service normalization can clear nullable values. Create mode retains the existing optional-value behavior. Wave 2 re-verified this on the exact `e12b7f56...` base and intentionally did not duplicate the fix.
 
 ### F-11 — Expense filters disagreed with legacy data and Dashboard normalization — MEDIUM — FIXED
 
 Dashboard normalized legacy payment methods, but ExpenseRepository filtering used exact persisted strings.
 
-**Effect:** filtering `Bank` could omit `Bank Transfer` / `TÀI KHOẢN CÔNG TY`; filtering `Cash` could omit `TÀI KHOẢN CÁ NHÂN`; filtering `Completed` could omit legacy `Paid` rows.
-
-**Fix:** repository filters now use canonical equivalence groups. Count/list/export share the same `_filtered_query`, so totals and exported rows remain consistent.
+**Fix:** repository filters use canonical equivalence groups. Count/list/export share the same filtered query so totals and exported rows remain consistent.
 
 ### F-12 — Settlement could undercount legacy Expense payment methods — HIGH — FIXED
 
-Dashboard recognized Vietnamese legacy payment-method labels, but Settlement only bucketed `Cash`, `Bank`, and `Bank Transfer`.
+Dashboard recognized Vietnamese legacy payment-method labels, but Settlement did not originally bucket all legacy values.
 
-**Effect:** a legacy realized Expense could reduce Dashboard cash/bank totals but be absent from Settlement reconciliation.
+**Fix:** Settlement maps `TÀI KHOẢN CÁ NHÂN` to Cash and `TÀI KHOẢN CÔNG TY` to Bank as well.
 
-**Fix:** Settlement now maps `TÀI KHOẢN CÁ NHÂN` to Cash and `TÀI KHOẢN CÔNG TY` to Bank as well.
+## Correctness findings fixed in wave 2
+
+### F-20 — Superseded FinancePeriod leaked past `effective_to` — HIGH — FIXED IN WAVE 2
+
+`FinancePeriodDefinition.period_for_date()` correctly calculates a theoretical calendar bucket, but production read surfaces were using that bucket directly even when the owning configuration had been superseded before the theoretical bucket ended.
+
+Example:
+
+- configuration A: effective `01/01/2026`, duration 3 months;
+- configuration B: effective `15/02/2026`;
+- configuration A therefore has `effective_to = 14/02/2026`;
+- theoretical A bucket for `01/02/2026` is `01/01–31/03`.
+
+Without lifecycle clipping, an old-period view could include Expense/enrollment activity after 14/02 while the new configuration also owns those dates.
+
+**Fix:** `FinancePeriodDefinition.period_for_configuration()` clips the theoretical bucket to the configuration lifetime. Finance Workspace, Dashboard fallback resolution, Outstanding and Settlement now use lifecycle-bounded periods. The original three-argument `FinancePeriodService.get_period_bounds()` retains its mathematical compatibility semantics; production callers pass `effective_to` when a concrete configuration owns the query.
+
+### F-18 — Mutation controls were only WRITE-mode gated — MEDIUM — FIXED IN WAVE 2
+
+Income/Expense services already enforce fine-grained capabilities, but list-page buttons/context actions were enabled from collaboration WRITE state alone.
+
+**Effect:** custom roles could see and invoke an action that the service would reject only after interaction.
+
+**Fix:** Income and Expense mutation controls now require both WRITE state and their matching capability:
+
+- `finance.income.create` / `finance.income.update` / `finance.income.delete`;
+- `finance.expense.create` / `finance.expense.update` / `finance.expense.delete`.
+
+Service guards remain authoritative. UI gating only prevents misleading actions and does not grant permissions.
 
 ## Remaining findings / product decisions
 
 ### F-13 — Historical month/year selector is ambiguous for mid-month FinancePeriods — MEDIUM — FOLLOW-UP
 
 A calendar month can overlap two canonical FinancePeriods, for example `15/08–14/09` and `15/09–14/10`. A plain “September 2026” selector cannot identify which one the user means.
+
+Lifecycle clipping in F-20 prevents cross-configuration leakage, but it does not solve selection ambiguity.
 
 **Recommended product direction:** replace month/year inference with a canonical selector showing exact period bounds, e.g. `15/09/2026 – 14/10/2026`, with “Current period” as the default.
 
@@ -143,7 +170,7 @@ Current-period Dashboard revenue/expense is clamped to today. Income/Expense lis
 
 Confirmed settlements are immutable snapshots, but Income/Expense mutations in that same period are not locked afterward.
 
-This is internally consistent with the current model name and implementation, but it is not equivalent to accounting period closure.
+This is internally consistent with the current model and regression tests, but it is not equivalent to accounting period closure.
 
 **Decision needed:** if “Confirm Settlement” is intended to close a period, add a domain-level closed-period guard to Income/Expense create/update/void/delete. If it is only a reconciliation snapshot, rename/explain the behavior clearly.
 
@@ -153,17 +180,30 @@ Outstanding applies `Class.fee` once per FinancePeriod regardless of `duration_m
 
 **Decision needed before changing calculation:** define the billing meaning of `Class.fee`. Do not multiply automatically without this rule.
 
-### F-18 — Mutation controls are still mostly WRITE-mode gated — LOW/MEDIUM — FOLLOW-UP
+### F-21 — Backdated FinancePeriod reconfiguration can reclassify Expense but not existing Income — HIGH — PRODUCT RULE REQUIRED
 
-Income/Expense service methods enforce fine-grained capabilities, but list-page buttons/context actions are primarily enabled by collaboration WRITE state. A custom role can therefore see an action that the service will reject.
+FinancePeriod administration allows a new configuration with an effective date in the past and allows a configuration to be truncated. Income persists the `finance_period_start` that was canonical when the Income was created; Expense does not persist period membership and is derived from payment date at read time.
 
-**Recommendation:** project `finance.income.*` / `finance.expense.*` capabilities into each UI action while retaining service checks.
+**Risk:** after a retroactive configuration change, Expense automatically follows the new date boundary while existing Income can retain its old `finance_period_start`. A transaction may then disappear from the newly resolved Income period even though Expense for the same dates moves to the new period.
+
+This is not safe to repair implicitly because confirmed settlements and audit history may already reference the old classification.
+
+**Decision needed:** choose one explicit policy:
+
+1. prohibit retroactive FinancePeriod changes once affected financial activity/settlements exist; or
+2. provide an audited reclassification/migration operation that updates affected Income and defines how confirmed Settlement snapshots are handled.
 
 ### F-19 — Finance UI still has legacy production-UX debt — LOW/MEDIUM — FOLLOW-UP
 
 Finance surfaces still contain `QMessageBox`, emoji/raw literals, mixed Vietnamese/English copy, older forms/detail dialogs, and an unused `finance_list_page.py` placeholder.
 
 **Recommendation:** handle this in the dedicated Finance UI-PROD migration rather than mixing broad visual churn into correctness fixes.
+
+### Composition cleanup — LOW — FOLLOW-UP
+
+Production Finance can recover the application EventBus from CollaborationManager, so mutation refresh is functionally correct. MainWindow still does not explicitly pass `event_bus` / `notification_service` into `FinanceWorkspaceShell`, and app composition constructs Income/Expense without an explicit event bus before the shell aligns them.
+
+**Recommendation:** make those dependencies explicit in the composition root during the Finance UI-PROD migration; do not mix the broad constructor churn into this correctness patch.
 
 ## Verified healthy boundaries
 
@@ -175,24 +215,22 @@ Finance surfaces still contain `QMessageBox`, emoji/raw literals, mixed Vietname
 - Expense Pending is excluded from realized Dashboard/Settlement outflow; legacy `Paid` remains realized.
 - Settlement recalculates live activity before confirmation and freezes a confirmed snapshot.
 - Finance service authorization remains authoritative even when UI projects permissions.
-- WriteTransactionManager publishes the database on Finish Editing regardless of its convenience `_has_changes` flag; Finance was not at risk of being silently omitted from publish for lack of a `mark_dirty()` event handler.
+- WriteTransactionManager publishes the database on Finish Editing regardless of its convenience `_has_changes` flag; Finance is not silently omitted from publish for lack of a `mark_dirty()` event handler.
 
-## Regression gates in PR #326
+## Wave-2 regression gates
 
-Runtime coverage now includes:
+Runtime coverage added in wave 2 includes:
 
-1. Finance viewer active-period resolution via `finance.view`.
-2. Current-month mid-month FinancePeriod resolution.
-3. Historical selection compatibility behavior.
-4. Income/Expense create-date binding to visible period.
-5. Expense canonical and legacy edit restoration.
-6. Explicit clearing of nullable Income/Expense edit fields.
-7. Legacy Expense payment/status filter equivalence.
-8. Settlement legacy Cash/Bank bucketing.
-9. Settlement Admin-only edit projection.
-10. Finance Workspace reuse of the application EventBus.
-11. Home cache invalidation on `FinanceDataChanged`.
+1. lifecycle clipping of a theoretical FinancePeriod bucket at `effective_to`;
+2. preservation of the legacy three-argument mathematical period helper;
+3. Finance Workspace shared-period lifecycle bounds;
+4. Dashboard fallback lifecycle bounds;
+5. Outstanding lifecycle bounds;
+6. Settlement lifecycle bounds;
+7. Income create/update/delete capability projection combined with WRITE state;
+8. Expense create/update/delete capability projection combined with WRITE state;
+9. denied UI capability stops before requesting a collaboration write lock.
 
 ## Release recommendation
 
-PR #326 should be treated as the Finance correctness/consistency gate. After its final CI is green, the next Finance task should focus on F-13 through F-19, with product decisions made first for future-dated postings, period closure and fee semantics. A dedicated Finance UI-PROD migration can then modernize the visual layer without changing accounting rules implicitly.
+Wave 2 is a narrow Finance correctness patch: merge only after the focused Finance regressions and the full Windows pytest suite pass. F-13, F-14, F-15, F-16, F-17 and F-21 require explicit product/accounting decisions before code changes. F-19 and composition cleanup belong in the dedicated Finance UI-PROD migration.
