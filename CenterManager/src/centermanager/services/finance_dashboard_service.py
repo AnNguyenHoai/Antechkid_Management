@@ -81,6 +81,7 @@ class FinanceDashboardService:
             config.effective_from,
             target,
             config.duration_months,
+            config.effective_to,
         )
         query_end = today if start <= today <= end else end
         return start, end, query_end
