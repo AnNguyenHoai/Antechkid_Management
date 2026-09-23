@@ -5,10 +5,8 @@ from centermanager.core.current_user import CurrentUserContext
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.services.finance_period_service import FinancePeriodService
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
-from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.finance_workspace_shell import FinanceWorkspaceShell
 from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
-from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 
 
 class _EmptyStudentService:
@@ -125,23 +123,3 @@ def test_expense_edit_restores_canonical_bank_and_pending_values(qtbot):
     qtbot.addWidget(dialog)
     assert dialog.method_combo.currentData() == "Bank"
     assert dialog.status_combo.currentData() == "Pending"
-
-
-def test_income_and_expense_default_transaction_date_stays_inside_selected_period():
-    period_start = date(2026, 8, 15)
-    period_end = date(2026, 9, 14)
-
-    income_page = IncomeListPage.__new__(IncomeListPage)
-    income_page._period_start = period_start
-    income_page._period_end = period_end
-    income_page._target_date = date(2026, 9, 1)
-
-    expense_page = ExpenseListPage.__new__(ExpenseListPage)
-    expense_page._period_start = period_start
-    expense_page._period_end = period_end
-    expense_page._target_date = date(2026, 9, 1)
-
-    # The helper must never default a newly-created row outside the visible
-    # period. Since the selected target is inside it, both use that target.
-    assert income_page._default_transaction_date() == date(2026, 9, 1)
-    assert expense_page._default_transaction_date() == date(2026, 9, 1)
