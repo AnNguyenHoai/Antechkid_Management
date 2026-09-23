@@ -1,0 +1,18 @@
+{
+  "schema": "UI-PROD-10/v1",
+  "task": "UI-PROD-10",
+  "source_commit": "REPLACE_WITH_40_CHAR_COMMIT",
+  "build_version": "REPLACE_WITH_BUILD_VERSION",
+  "scenarios": [
+    {"id": "shell-1366x768", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/01-shell-1366x768.png", "notes": ""},
+    {"id": "shell-1920x1080", "status": "PENDING", "viewport": {"width": 1920, "height": 1080}, "scale_percent": 100, "screenshot": "screenshots/02-shell-1920x1080.png", "notes": ""},
+    {"id": "shell-scale-125", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 125, "screenshot": "screenshots/03-shell-scale-125.png", "notes": ""},
+    {"id": "student-list-read", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/04-student-list-read.png", "notes": ""},
+    {"id": "student-list-write", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/05-student-list-write.png", "notes": ""},
+    {"id": "student-form-validation-save", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/06-student-form-validation-save.png", "notes": ""},
+    {"id": "student-detail-tabs", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/07-student-detail-tabs.png", "notes": ""},
+    {"id": "enrollment-confirmation-feedback", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/08-enrollment-confirmation-feedback.png", "notes": ""},
+    {"id": "loading-empty-error-permission", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/09-loading-empty-error-permission.png", "notes": ""},
+    {"id": "window-restore-overflow-focus", "status": "PENDING", "viewport": {"width": 1366, "height": 768}, "scale_percent": 100, "screenshot": "screenshots/10-window-restore-overflow-focus.png", "notes": ""}
+  ]
+}

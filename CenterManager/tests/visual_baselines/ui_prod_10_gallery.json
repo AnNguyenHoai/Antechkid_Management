@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "geometry": {
+    "top_bar_min_height": 60,
+    "page_header_min_height": 78
+  },
+  "image_quality": {
+    "min_sampled_colors": 12,
+    "min_png_bytes": 3000
+  },
+  "states": {
+    "read": {
+      "mode_text": "Mode: READ",
+      "edit_state": "readonly",
+      "feedback_visible": false,
+      "start_edit_visible": true,
+      "finish_edit_visible": false
+    },
+    "write_saved": {
+      "mode_text": "Mode: WRITE",
+      "edit_state": "editing",
+      "feedback_visible": true,
+      "start_edit_visible": false,
+      "finish_edit_visible": true
+    },
+    "error": {
+      "mode_text": "Mode: READ",
+      "edit_state": "readonly",
+      "feedback_visible": true,
+      "start_edit_visible": true,
+      "finish_edit_visible": false
+    }
+  }
+}

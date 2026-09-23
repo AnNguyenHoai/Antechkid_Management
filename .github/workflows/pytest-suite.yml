@@ -64,3 +64,11 @@ jobs:
           name: pytest-report-${{ github.run_id }}
           path: CenterManager/pytest-report.xml
           if-no-files-found: warn
+
+      - name: Upload UI visual regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-prod-10-visual-evidence-${{ github.run_id }}
+          path: CenterManager/visual-regression-artifacts/ui_prod_10
+          if-no-files-found: warn
