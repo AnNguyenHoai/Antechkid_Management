@@ -115,8 +115,18 @@ class FinancePeriodService:
             return period
 
     @staticmethod
-    def get_period_bounds(anchor_date: date, target_date: date, duration_months: int) -> Tuple[date, date]:
-        return FinancePeriodDefinition.period_for_date(anchor_date, target_date, duration_months)
+    def get_period_bounds(
+        anchor_date: date,
+        target_date: date,
+        duration_months: int,
+        effective_to: Optional[date] = None,
+    ) -> Tuple[date, date]:
+        return FinancePeriodDefinition.period_for_configuration(
+            anchor_date,
+            target_date,
+            duration_months,
+            effective_to,
+        )
 
     @staticmethod
     def get_period_index(anchor_date: date, target_date: date, duration_months: int) -> int:
