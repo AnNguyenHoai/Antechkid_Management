@@ -6,10 +6,10 @@
 
 | Field | Value |
 |---|---|
-| Base | `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4` |
+| Base | `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
 | Current phase | `FW2-02 — Expense Period Assignment` |
-| Current task | `FW2-02 runtime verification / reconciliation follow-up` |
+| Current task | `FW2-02 CI rerun after migration-contract regression fix` |
 | Last completed | `FW2-01 — Canonical FinancePeriod Foundation` |
 | Last updated | `2026-09-23` |
 
@@ -62,10 +62,10 @@ Runtime pytest reported PASS by repository owner on 2026-09-23.
 
 ## FW2-02 — Expense Period Assignment — `[>] CURRENT`
 
-### Implemented on `finance-wallet-v2-fw2-02`
+### Implemented
 
 - [x] add nullable `Expense.finance_period_id` FK bridge; nullable preserves legacy rows until FW2-09 reconciliation;
-- [x] Alembic `1e10a026` migration from current `1e10a025` head;
+- [x] Alembic `1e10a026` migration from repository head `1e10a025`;
 - [x] require unique covering FinancePeriod for new/updated COMPLETED Expense;
 - [x] reject future COMPLETED Expense;
 - [x] allow future PENDING as non-realized;
@@ -75,12 +75,26 @@ Runtime pytest reported PASS by repository owner on 2026-09-23.
 - [x] post-commit timeline/event failures are best-effort and no longer report committed money mutation as failed;
 - [x] focused rule regressions added.
 
+### Runtime evidence
+
+GitHub Actions `Pytest Suite #159` on merged PR #333 / `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d` executed 1,923 tests:
+
+- [x] all FW2-01 resolver tests passed;
+- [x] all FW2-02 Expense assignment tests passed;
+- [x] FinancePeriod repository round-trip passed;
+- [x] Alembic migration upgrade/downgrade integration tests passed;
+- [x] 1,919 tests passed and 3 skipped;
+- [!] exactly one test failed: `test_finance_period_migrations_use_unique_revisions_and_current_chain` because its hard-coded finance-migration filename list predated `1e10a026_expense_finance_period.py`.
+
+The failure was a stale test contract, not a production migration or FW2-02 domain failure. The fix keeps the strict migration inventory check and adds `1e10a026` plus its expected `down_revision = "1e10a025"`; production behavior was intentionally not relaxed.
+
 ### Remaining before phase closure
 
-- [>] run migration + focused/full pytest on branch;
-- [ ] verify repository integration with real SQLite/PostgreSQL test session;
-- [ ] leave bulk legacy deterministic backfill to FW2-09 as planned;
-- [ ] record runtime evidence and close FW2-02 if green.
+- [x] audit full failed run and isolate root cause;
+- [x] fix stale migration revision contract on `finance-wallet-v2-fw2-02-ci-fix`;
+- [>] rerun full pytest after the test-contract fix;
+- [ ] mark FW2-02 DONE only after green rerun;
+- [ ] leave bulk legacy deterministic backfill to FW2-09 as planned.
 
 ## FW2-03 — Income Period & Realized Semantics
 
@@ -175,12 +189,17 @@ Runtime pytest reported PASS by repository owner on 2026-09-23.
 | 2026-09-23 | Future realized postings are rejected, not treated as planned actuals. | FINAL |
 | 2026-09-23 | Expense FK remains nullable during rollout; service requires it for new realized postings, FW2-09 owns legacy reconciliation. | FINAL |
 | 2026-09-23 | Ambiguous period coverage is a hard validation failure for new realized postings. | FINAL |
+| 2026-09-23 | CI fix updates the strict migration revision contract; it must not weaken FW2-02 posting invariants to make tests green. | FINAL |
 
 ## Implementation journal
 
-### 2026-09-23 — FW2-02 implementation started from new main base
+### 2026-09-23 — FW2-02 CI failure audited and fixed
 
-Base rebased to `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4`, which is merge PR #332 and already contains FW2-01 implementation. Created `finance-wallet-v2-fw2-02`. Added Expense period FK/migration, deterministic unique-period assignment, future-realized guard, reassignment on date/status change, best-effort post-commit projections, and focused regressions. Runtime verification remains before marking FW2-02 DONE.
+PR #333 merged to `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d`. Pytest Suite #159 completed with `1 failed, 1919 passed, 3 skipped`. The only failure was the legacy strict filename inventory in `test_finance_period_migration_revision.py`, which did not include the intentionally added `1e10a026_expense_finance_period.py`. All FW2-01, FW2-02, FinancePeriod repository, and migration upgrade/downgrade runtime tests passed. Created `finance-wallet-v2-fw2-02-ci-fix`; updated the migration contract to include revision `1e10a026` chained from global head `1e10a025`. Awaiting green full-suite rerun before closing FW2-02.
+
+### 2026-09-23 — FW2-02 implementation merged
+
+Base was `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4`. FW2-02 added Expense period FK/migration, deterministic unique-period assignment, future-realized guard, reassignment on date/status change, best-effort post-commit projections, and focused regressions. PR #333 merged into main_repos.
 
 ### 2026-09-23 — FW2-01 completed
 
