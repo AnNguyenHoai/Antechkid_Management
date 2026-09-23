@@ -73,9 +73,9 @@ class FinancialSettlementService:
     @staticmethod
     def _method_bucket(payment_method: Optional[str]) -> Optional[str]:
         normalized = (payment_method or "").strip().lower().replace("_", " ")
-        if normalized == "cash":
+        if normalized in {"cash", "tài khoản cá nhân"}:
             return "cash"
-        if normalized in {"bank transfer", "bank"}:
+        if normalized in {"bank transfer", "bank", "tài khoản công ty"}:
             return "bank"
         return None
 
