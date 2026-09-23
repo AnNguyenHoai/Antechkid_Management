@@ -10,6 +10,7 @@ from centermanager.repositories.provider import RepositoryProvider, create_defau
 from centermanager.core.current_user import get_current_user
 from centermanager.models.user import User
 from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted
+from centermanager.events.finance_events import FinanceDataChanged
 from centermanager.events.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,8 @@ class HomeDashboardService:
             event_bus.register(StudentArchived, self._on_student_archived)
             event_bus.register(StudentActivated, self._on_student_activated)
             event_bus.register(StudentDeleted, self._on_student_deleted)
-            logger.info("HomeDashboardService registered for student events")
+            event_bus.register(FinanceDataChanged, self._on_finance_data_changed)
+            logger.info("HomeDashboardService registered for student and finance events")
 
     def _on_student_archived(self, event: StudentArchived) -> None:
         self._cache_invalidated = True
@@ -53,6 +55,15 @@ class HomeDashboardService:
     def _on_student_deleted(self, event: StudentDeleted) -> None:
         self._cache_invalidated = True
         logger.info(f"Cache invalidated: student {event.student_id} deleted")
+
+    def _on_finance_data_changed(self, event: FinanceDataChanged) -> None:
+        self._cache_invalidated = True
+        logger.info(
+            "Cache invalidated: finance %s %s (id=%s)",
+            event.entity,
+            event.action,
+            event.entity_id,
+        )
 
     def get_workspace_summaries(self) -> List[WorkspaceSummary]:
         """Get workspace summaries with caching."""
@@ -134,12 +145,15 @@ class HomeDashboardService:
             if user and (user.has_permission("finance.view") or user.is_admin):
                 from centermanager.services.outstanding_service import OutstandingService
                 stats = OutstandingService(self._session_factory).get_outstanding_stats()
-                revenue = stats.get("total_paid", 0)
+                tuition_paid = stats.get("total_paid", 0)
                 outstanding = stats.get("total_outstanding", 0)
                 summaries.append(WorkspaceSummary(
                     workspace_id="finance", name="Finance Workspace", icon="💰",
                     description="Invoices, payments, revenue",
-                    summary_text=f"Revenue: {revenue:,.0f} VND, Outstanding: {outstanding:,.0f} VND",
+                    summary_text=(
+                        f"Tuition paid: {tuition_paid:,.0f} VND, "
+                        f"Outstanding: {outstanding:,.0f} VND"
+                    ),
                     health_status="good", health_details="", quick_action_label="Open →", quick_action_target="finance"
                 ))
 
