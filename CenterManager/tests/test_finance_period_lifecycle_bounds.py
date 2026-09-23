@@ -8,6 +8,7 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 from centermanager.services.finance_period_service import FinancePeriodService
 from centermanager.services.financial_settlement_service import FinancialSettlementService
 from centermanager.services.outstanding_service import OutstandingService
+from centermanager.ui.finance_workspace.finance_workspace_shell import FinanceWorkspaceShell
 
 
 class _SessionContext:
@@ -55,6 +56,14 @@ class _DashboardPeriodService:
         )
 
 
+class _Label:
+    def __init__(self):
+        self.text = ""
+
+    def setText(self, value):
+        self.text = value
+
+
 def _superseded_config():
     return SimpleNamespace(
         effective_from=date(2026, 1, 1),
@@ -90,12 +99,33 @@ def test_finance_period_service_bounds_preserve_legacy_call_and_support_clipping
     assert FinancePeriodService.get_period_bounds(
         date(2026, 1, 1), date(2026, 2, 1), 3
     ) == (date(2026, 1, 1), date(2026, 3, 31))
+    # Historical callers of the original three-argument helper remain valid.
+    assert FinancePeriodService.get_period_bounds(
+        date(2026, 4, 1), date(2026, 2, 1), 1
+    ) == (date(2026, 2, 1), date(2026, 2, 28))
     assert FinancePeriodService.get_period_bounds(
         date(2026, 1, 1),
         date(2026, 2, 1),
         3,
         date(2026, 2, 14),
     ) == (date(2026, 1, 1), date(2026, 2, 14))
+
+
+def test_workspace_shared_period_respects_configuration_effective_to():
+    config = _superseded_config()
+    dummy = SimpleNamespace(
+        _finance_period_service=_DashboardPeriodService(config),
+        _selected_target_date=lambda: date(2026, 2, 1),
+        period_label=_Label(),
+    )
+    resolved = FinanceWorkspaceShell._resolve_shared_period(dummy)
+    assert resolved == (
+        date(2026, 2, 1),
+        date(2026, 1, 1),
+        date(2026, 2, 14),
+        True,
+    )
+    assert dummy.period_label.text == "01/01/2026 - 14/02/2026"
 
 
 def test_settlement_resolver_respects_configuration_effective_to():
