@@ -1,90 +1,127 @@
 # -*- coding: utf-8 -*-
-import logging
-from typing import Optional, List
+"""Read-only Student attendance projection using Design System V2 data states."""
+from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFrame
-)
+import logging
+from typing import Optional
+
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from centermanager.services.attendance_service import AttendanceService
-from centermanager.models.attendance import Attendance
+from centermanager.ui.design_system.feedback import FeedbackController
+from centermanager.ui.design_system.foundation import Card
+from centermanager.ui.design_system.tokens import COLORS, FONT_WEIGHTS, SPACING, TYPOGRAPHY
+from centermanager.ui.shared import DataTable, TableDensity
 
 logger = logging.getLogger(__name__)
 
 
 class StudentAttendanceWidget(QWidget):
-    def __init__(self, attendance_service: AttendanceService, parent: Optional[QWidget] = None):
+    """Attendance history with canonical loading/empty/error table states."""
+
+    def __init__(
+        self,
+        attendance_service: AttendanceService,
+        parent: Optional[QWidget] = None,
+        feedback_controller: Optional[FeedbackController] = None,
+    ) -> None:
         super().__init__(parent)
         self._attendance_service = attendance_service
+        self._feedback = feedback_controller or FeedbackController(self)
         self._student_id: Optional[int] = None
         self._setup_ui()
         self._show_empty()
 
-    def _setup_ui(self):
+    def set_feedback_controller(self, controller: FeedbackController) -> None:
+        self._feedback = controller
+
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
+        layout.setSpacing(SPACING["md"])
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Date", "Class", "Session", "Status"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.table)
+        summary = Card(
+            "Attendance summary",
+            "Attendance is read-only here and is recorded from class sessions.",
+            parent=self,
+        )
+        self.rate_label = QLabel("Attendance rate: —", summary)
+        self.rate_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['section_title']}px; "
+            f"font-weight: {FONT_WEIGHTS['semibold']};"
+        )
+        summary.add_widget(self.rate_label)
+        layout.addWidget(summary)
 
-        self.rate_label = QLabel()
-        self.rate_label.setStyleSheet("padding: 4px; background: #f5f5f5; border-radius: 4px;")
-        layout.addWidget(self.rate_label)
+        self.data_table = DataTable(
+            [
+                {"key": "date", "label": "Date", "sortable": True},
+                {"key": "class", "label": "Class", "sortable": True},
+                {"key": "session", "label": "Session", "sortable": False},
+                {"key": "status", "label": "Status", "sortable": True},
+            ],
+            page_size=20,
+            density=TableDensity.COMPACT,
+            empty_title="No attendance records",
+            empty_message="Attendance will appear after the student has recorded class sessions.",
+            parent=self,
+        )
+        layout.addWidget(self.data_table, 1)
+        # Compatibility alias retained for callers/tests that previously inspected table.
+        self.table = self.data_table.table
 
-    def _show_empty(self):
-        self.table.clearSpans()
-        self.table.setRowCount(1)
-        self.table.setItem(0, 0, QTableWidgetItem("No attendance records"))
-        self.table.setSpan(0, 0, 1, 4)
-        self.rate_label.setText("Attendance Rate: N/A")
-        logger.debug("Attendance widget set to empty state")
+    def _show_empty(self) -> None:
+        self.data_table.set_data([], 0)
+        self.rate_label.setText("Attendance rate: —")
 
-    def set_student(self, student_id: int):
+    def set_student(self, student_id: int) -> None:
         self._student_id = student_id
         self._load_data()
 
-    def _load_data(self):
+    def _load_data(self) -> None:
         if self._student_id is None:
             self._show_empty()
             return
+        self.data_table.set_loading(True)
         try:
             attendances = self._attendance_service.get_attendance_for_student(self._student_id)
-            logger.info(f"Loaded {len(attendances)} attendance records for student {self._student_id}")
-            if not attendances:
-                self._show_empty()
-                return
-
-            # Xóa span cũ trước khi điền dữ liệu
-            self.table.clearSpans()
-            self.table.setRowCount(len(attendances))
-            for row, att in enumerate(attendances):
-                # Date
-                date_item = QTableWidgetItem(att.session.scheduled_date.strftime("%d/%m/%Y"))
-                self.table.setItem(row, 0, date_item)
-                # Class name
-                class_name = att.session.class_.name if att.session.class_ else "-"
-                class_item = QTableWidgetItem(class_name)
-                self.table.setItem(row, 1, class_item)
-                # Session
-                session_item = QTableWidgetItem(f"#{att.session.session_number} - {att.session.title}")
-                self.table.setItem(row, 2, session_item)
-                # Status
-                status_item = QTableWidgetItem(att.status)
-                self.table.setItem(row, 3, status_item)
-
-            # Rate
-            rate = self._attendance_service.get_attendance_rate_for_student(self._student_id)
-            self.rate_label.setText(f"Attendance Rate: {rate:.1f}%")
-            logger.debug(f"Attendance table populated with {len(attendances)} rows")
-        except Exception as e:
+            rows = []
+            for attendance in attendances:
+                session = attendance.session
+                class_name = session.class_.name if session.class_ else "—"
+                rows.append(
+                    {
+                        "date": session.scheduled_date.strftime("%d/%m/%Y"),
+                        "class": class_name,
+                        "session": f"#{session.session_number} - {session.title}",
+                        "status": attendance.status,
+                    }
+                )
+            self.data_table.set_data(rows, len(rows))
+            if rows:
+                rate = self._attendance_service.get_attendance_rate_for_student(self._student_id)
+                self.rate_label.setText(f"Attendance rate: {rate:.1f}%")
+            else:
+                self.rate_label.setText("Attendance rate: —")
+            logger.info("Loaded %s attendance records for student %s", len(rows), self._student_id)
+        except Exception as exc:
             logger.exception("Failed to load student attendance")
-            self._show_empty()
-            # Có thể hiển thị lỗi trên UI nếu cần
-            self.rate_label.setText(f"Error: {str(e)}")
+            self.rate_label.setText("Attendance rate: unavailable")
+            self.data_table.set_error(
+                "Attendance records could not be loaded.",
+                title="Unable to load attendance",
+                retry_callback=self._load_data,
+            )
+            self._feedback.system_error(
+                exc,
+                message="Attendance records could not be loaded.",
+                retry_action_id="student-attendance-refresh",
+                key="student-attendance-load",
+            )
+
+    def refresh(self) -> None:
+        self._load_data()
+
+    def set_write_enabled(self, _enabled: bool) -> None:
+        """Attendance is intentionally read-only from the Student workspace."""
+        return

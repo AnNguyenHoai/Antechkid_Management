@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Student Enrollment UI: current enrollment + academic history."""
+"""Student Enrollment UI migrated to Design System V2."""
 from __future__ import annotations
 
 from datetime import date
 from typing import Optional
 
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QMessageBox, QFrame, QScrollArea
-)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from centermanager.services.enrollment_service import (
-    EnrollmentService, EnrollmentStatus, EnrollmentAlreadyActiveError,
-    EnrollmentCapacityError, EnrollmentError,
+    EnrollmentAlreadyActiveError,
+    EnrollmentCapacityError,
+    EnrollmentError,
+    EnrollmentStatus,
 )
+from centermanager.ui.design_system.feedback import ConfirmationDialog, FeedbackController
+from centermanager.ui.design_system.form_detail import EditStateBanner
+from centermanager.ui.design_system.foundation import Badge, Button, ButtonVariant, Card, Select
+from centermanager.ui.design_system.tokens import COLORS, FONT_WEIGHTS, SPACING, TYPOGRAPHY
 
 
 class EnrollmentWidget(QWidget):
@@ -22,78 +25,93 @@ class EnrollmentWidget(QWidget):
 
     enrollment_changed = Signal()
 
-    def __init__(self, enrollment_service, class_service, collaboration_manager, parent=None):
+    def __init__(
+        self,
+        enrollment_service,
+        class_service,
+        collaboration_manager,
+        parent=None,
+        feedback_controller: Optional[FeedbackController] = None,
+    ) -> None:
         super().__init__(parent)
         self._enrollment_service = enrollment_service
         self._class_service = class_service
         self._collaboration_manager = collaboration_manager
+        self._feedback = feedback_controller or FeedbackController(self)
         self._student_id: Optional[int] = None
         self._write_enabled = False
         self._build_ui()
 
-    def _build_ui(self):
+    def set_feedback_controller(self, controller: FeedbackController) -> None:
+        self._feedback = controller
+
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
+        layout.setSpacing(SPACING["lg"])
 
-        title = QLabel("🎓 Academic Overview")
-        title.setStyleSheet("font-size: 18px; font-weight: 600;")
-        layout.addWidget(title)
+        self.edit_state_banner = EditStateBanner("readonly", parent=self)
+        layout.addWidget(self.edit_state_banner)
 
-        subtitle = QLabel("Current learning, completed classes, and enrollment history.")
-        subtitle.setStyleSheet("color: #777;")
-        layout.addWidget(subtitle)
-
-        self.overview_section = self._make_section("Academic Summary")
-        self.overview_layout = QHBoxLayout()
-        self.overview_layout.setSpacing(10)
-        self.overview_section.layout().addLayout(self.overview_layout)
+        self.overview_section = Card(
+            "Academic summary",
+            "Current learning, completed classes, and enrollment history.",
+            parent=self,
+        )
+        overview_wrap = QWidget(self.overview_section)
+        self.overview_layout = QHBoxLayout(overview_wrap)
+        self.overview_layout.setContentsMargins(0, 0, 0, 0)
+        self.overview_layout.setSpacing(SPACING["sm"])
+        self.overview_section.add_widget(overview_wrap)
         layout.addWidget(self.overview_section)
 
-        # Enroll action
-        action = QHBoxLayout()
-        self.class_combo = QComboBox()
+        action_card = Card(
+            "Enroll in a class",
+            "Choose an active class that the student is not currently enrolled in.",
+            parent=self,
+        )
+        action_wrap = QWidget(action_card)
+        action = QHBoxLayout(action_wrap)
+        action.setContentsMargins(0, 0, 0, 0)
+        action.setSpacing(SPACING["sm"])
+        self.class_combo = Select([], parent=action_wrap)
         self.class_combo.setMinimumWidth(280)
+        self.class_combo.setAccessibleName("Class to enroll")
         self.class_combo.setToolTip("Select an active class to enroll this student")
-        self.enroll_btn = QPushButton("+ Enroll in Class")
+        self.enroll_btn = Button("Enroll in class", variant=ButtonVariant.PRIMARY, parent=action_wrap)
         self.enroll_btn.clicked.connect(self._enroll_selected)
-        action.addWidget(self.class_combo)
+        action.addWidget(self.class_combo, 1)
         action.addWidget(self.enroll_btn)
-        action.addStretch()
-        layout.addLayout(action)
+        action_card.add_widget(action_wrap)
+        layout.addWidget(action_card)
 
-        self.current_section = self._make_section("Current Enrollment")
-        self.current_layout = QVBoxLayout()
-        self.current_layout.setSpacing(8)
-        self.current_section.layout().addLayout(self.current_layout)
+        self.current_section = Card("Current enrollment", parent=self)
+        self.current_container = QWidget(self.current_section)
+        self.current_layout = QVBoxLayout(self.current_container)
+        self.current_layout.setContentsMargins(0, 0, 0, 0)
+        self.current_layout.setSpacing(SPACING["sm"])
+        self.current_section.add_widget(self.current_container)
         layout.addWidget(self.current_section)
 
-        self.history_section = self._make_section("Academic History")
-        self.history_layout = QVBoxLayout()
-        self.history_layout.setSpacing(8)
-        self.history_section.layout().addLayout(self.history_layout)
+        self.history_section = Card("Academic history", parent=self)
+        self.history_container = QWidget(self.history_section)
+        self.history_layout = QVBoxLayout(self.history_container)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_layout.setSpacing(SPACING["sm"])
+        self.history_section.add_widget(self.history_container)
         layout.addWidget(self.history_section)
         layout.addStretch()
 
-    def _make_section(self, title):
-        box = QFrame()
-        box.setFrameShape(QFrame.Shape.StyledPanel)
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(14, 12, 14, 12)
-        label = QLabel(title)
-        label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(label)
-        return box
-
-    def set_student(self, student_id: int):
+    def set_student(self, student_id: int) -> None:
         self._student_id = student_id
         self.refresh()
 
-    def set_write_enabled(self, enabled: bool):
+    def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
+        self.edit_state_banner.set_state("editing" if enabled else "readonly")
         self._update_action_state()
 
-    def refresh(self):
+    def refresh(self) -> None:
         self._clear(self.overview_layout)
         self._clear(self.current_layout)
         self._clear(self.history_layout)
@@ -105,15 +123,20 @@ class EnrollmentWidget(QWidget):
         try:
             history = self._enrollment_service.get_student_history(self._student_id)
         except Exception as exc:
-            self._add_message(self.current_layout, f"Unable to load enrollment: {exc}")
+            self._add_message(self.current_layout, "Enrollment history could not be loaded.")
+            self._feedback.system_error(
+                exc,
+                message="Enrollment history could not be loaded.",
+                retry_action_id="student-enrollment-refresh",
+                key="student-enrollment-load",
+            )
             self._update_action_state()
             return
 
-        active = [e for e in history if e.status == EnrollmentStatus.ACTIVE.value]
-        completed = [e for e in history if e.status == EnrollmentStatus.COMPLETED.value]
-        withdrawn = [e for e in history if e.status == EnrollmentStatus.WITHDRAWN.value]
-        past = [e for e in history if e.status != EnrollmentStatus.ACTIVE.value]
-
+        active = [item for item in history if item.status == EnrollmentStatus.ACTIVE.value]
+        completed = [item for item in history if item.status == EnrollmentStatus.COMPLETED.value]
+        withdrawn = [item for item in history if item.status == EnrollmentStatus.WITHDRAWN.value]
+        past = [item for item in history if item.status != EnrollmentStatus.ACTIVE.value]
         self._populate_overview(active, completed, withdrawn, history)
 
         if active:
@@ -127,82 +150,76 @@ class EnrollmentWidget(QWidget):
                 self.history_layout.addWidget(self._card(enrollment, current=False))
         else:
             self._add_message(self.history_layout, "No academic history yet.")
-
         self._update_action_state()
 
-    def _populate_overview(self, active, completed, withdrawn, history):
-        cards = [
+    def _populate_overview(self, active, completed, withdrawn, history) -> None:
+        for label, value in (
             ("Active", len(active)),
             ("Completed", len(completed)),
             ("Withdrawn", len(withdrawn)),
-            ("Total Records", len(history)),
-        ]
-        for label, value in cards:
-            card = QFrame()
-            card.setFrameShape(QFrame.Shape.StyledPanel)
-            card.setStyleSheet(
-                "QFrame { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; }"
-            )
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 8, 12, 8)
-            value_label = QLabel(str(value))
-            value_label.setStyleSheet("font-size: 20px; font-weight: 600;")
+            ("Total records", len(history)),
+        ):
+            metric = Card(parent=self)
+            value_label = QLabel(str(value), metric)
             value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            text_label = QLabel(label)
+            value_label.setStyleSheet(
+                f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['section_title']}px; "
+                f"font-weight: {FONT_WEIGHTS['semibold']};"
+            )
+            text_label = QLabel(label, metric)
             text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            text_label.setStyleSheet("color: #666;")
-            card_layout.addWidget(value_label)
-            card_layout.addWidget(text_label)
-            self.overview_layout.addWidget(card)
+            text_label.setStyleSheet(
+                f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;"
+            )
+            metric.add_widget(value_label)
+            metric.add_widget(text_label)
+            self.overview_layout.addWidget(metric)
 
-    def _reload_classes(self):
+    def _reload_classes(self) -> None:
         current = self.class_combo.currentData()
         self.class_combo.blockSignals(True)
         self.class_combo.clear()
+        self.class_combo.addItem("Select class", None)
         try:
             active_class_ids = set()
             if self._student_id is not None:
                 active_class_ids = {
-                    e.class_id for e in self._enrollment_service.get_student_history(self._student_id)
-                    if e.status == EnrollmentStatus.ACTIVE.value and e.class_id is not None
+                    item.class_id
+                    for item in self._enrollment_service.get_student_history(self._student_id)
+                    if item.status == EnrollmentStatus.ACTIVE.value and item.class_id is not None
                 }
             for class_obj in self._class_service.list_classes():
-                if (
-                    getattr(class_obj, "status", "ACTIVE") == "ACTIVE"
-                    and class_obj.id not in active_class_ids
-                ):
+                if getattr(class_obj, "status", "ACTIVE") == "ACTIVE" and class_obj.id not in active_class_ids:
                     label = f"{class_obj.name} — {class_obj.course or 'No course'}"
                     self.class_combo.addItem(label, class_obj.id)
-        except Exception:
-            self.class_combo.addItem("Unable to load classes", None)
+        except Exception as exc:
+            self.class_combo.clear()
+            self.class_combo.addItem("Classes unavailable", None)
+            self._feedback.system_error(
+                exc,
+                message="Available classes could not be loaded.",
+                key="student-enrollment-classes",
+            )
         self.class_combo.blockSignals(False)
         if current is not None:
             index = self.class_combo.findData(current)
             if index >= 0:
                 self.class_combo.setCurrentIndex(index)
 
-    def _card(self, enrollment, current: bool):
-        card = QFrame()
-        card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet(
-            "QFrame { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; }"
+    def _card(self, enrollment, current: bool) -> Card:
+        card = Card(parent=self)
+        header = QWidget(card)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        name = QLabel(enrollment.class_name or f"Class #{enrollment.class_id}", header)
+        name.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body']}px; "
+            f"font-weight: {FONT_WEIGHTS['semibold']};"
         )
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(6)
-
-        header = QHBoxLayout()
-        name = QLabel(enrollment.class_name or f"Class #{enrollment.class_id}")
-        name.setStyleSheet("font-weight: 600;")
-        header.addWidget(name)
-        header.addStretch()
-
-        status = QLabel(enrollment.status)
-        status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status.setMinimumWidth(92)
-        status.setStyleSheet(self._status_style(enrollment.status))
-        header.addWidget(status)
-        layout.addLayout(header)
+        header_layout.addWidget(name)
+        header_layout.addStretch()
+        header_layout.addWidget(Badge.from_status(enrollment.status, parent=header))
+        card.add_widget(header)
 
         metadata = []
         if enrollment.course_name:
@@ -212,7 +229,7 @@ class EnrollmentWidget(QWidget):
         if enrollment.level:
             metadata.append(f"Level: {enrollment.level}")
         if metadata:
-            layout.addWidget(QLabel(" • ".join(metadata)))
+            card.add_widget(QLabel(" • ".join(metadata), card))
 
         dates = []
         if enrollment.start_date:
@@ -220,38 +237,30 @@ class EnrollmentWidget(QWidget):
         if enrollment.end_date:
             dates.append(f"End: {enrollment.end_date.strftime('%d/%m/%Y')}")
         if dates:
-            layout.addWidget(QLabel("   ".join(dates)))
+            card.add_widget(QLabel("   ".join(dates), card))
 
         duration = self._format_duration(enrollment.start_date, enrollment.end_date, current)
         if duration:
-            duration_label = QLabel(duration)
-            duration_label.setStyleSheet("color: #666;")
-            layout.addWidget(duration_label)
+            duration_label = QLabel(duration, card)
+            duration_label.setStyleSheet(f"color: {COLORS['text_muted']};")
+            card.add_widget(duration_label)
 
         if current:
-            buttons = QHBoxLayout()
-            complete = QPushButton("Complete")
+            actions = QWidget(card)
+            actions_layout = QHBoxLayout(actions)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            actions_layout.setSpacing(SPACING["sm"])
+            complete = Button("Complete", variant=ButtonVariant.SECONDARY, parent=actions)
             complete.setEnabled(self._write_enabled)
-            complete.clicked.connect(
-                lambda _=False, eid=enrollment.id: self._transition(eid, "complete")
-            )
-            withdraw = QPushButton("Withdraw")
+            complete.clicked.connect(lambda _=False, eid=enrollment.id: self._transition(eid, "complete"))
+            withdraw = Button("Withdraw", variant=ButtonVariant.DANGER, parent=actions)
             withdraw.setEnabled(self._write_enabled)
-            withdraw.clicked.connect(
-                lambda _=False, eid=enrollment.id: self._transition(eid, "withdraw")
-            )
-            buttons.addWidget(complete)
-            buttons.addWidget(withdraw)
-            buttons.addStretch()
-            layout.addLayout(buttons)
+            withdraw.clicked.connect(lambda _=False, eid=enrollment.id: self._transition(eid, "withdraw"))
+            actions_layout.addWidget(complete)
+            actions_layout.addWidget(withdraw)
+            actions_layout.addStretch()
+            card.add_widget(actions)
         return card
-
-    @staticmethod
-    def _status_style(status: str) -> str:
-        return (
-            "font-weight: 600; padding: 3px 8px; border-radius: 9px; "
-            "background: #e8eef5; color: #2f4f6f;"
-        )
 
     @staticmethod
     def _format_duration(start_date, end_date, current: bool) -> str:
@@ -262,56 +271,95 @@ class EnrollmentWidget(QWidget):
         suffix = "ongoing" if current and end_date is None else "duration"
         return f"{days} day(s) {suffix}"
 
-    def _enroll_selected(self):
+    def _enroll_selected(self) -> None:
         if not self._require_write() or self._student_id is None:
             return
         class_id = self.class_combo.currentData()
         if class_id is None:
+            self._feedback.info("Select a class before enrolling the student.", key="student-enrollment")
+            return
+        operation_id = "student-enrollment-create"
+        if not self._feedback.begin_operation(operation_id, "Enrolling student…"):
             return
         try:
             self._enrollment_service.enroll(self._student_id, int(class_id))
             self.refresh()
             self.enrollment_changed.emit()
+            self._feedback.finish_operation(operation_id)
+            self._feedback.success("Student enrolled", key="student-enrollment")
         except (EnrollmentAlreadyActiveError, EnrollmentCapacityError, EnrollmentError) as exc:
-            QMessageBox.warning(self, "Enrollment", str(exc))
+            self._feedback.finish_operation(operation_id)
+            self._feedback.warning(str(exc), title="Enrollment unavailable", key="student-enrollment")
         except Exception as exc:
-            QMessageBox.critical(self, "Enrollment Error", str(exc))
+            self._feedback.finish_operation(operation_id)
+            self._feedback.system_error(
+                exc,
+                message="The student could not be enrolled.",
+                key="student-enrollment",
+            )
 
-    def _transition(self, enrollment_id: int, action: str):
+    def _transition(self, enrollment_id: int, action: str) -> None:
         if not self._require_write():
+            return
+        verb = "Complete" if action == "complete" else "Withdraw"
+        dialog = ConfirmationDialog(
+            f"{verb} enrollment",
+            f"{verb} this enrollment record?",
+            confirm_text=verb,
+            dangerous=action == "withdraw",
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        operation_id = f"student-enrollment-{action}-{enrollment_id}"
+        if not self._feedback.begin_operation(operation_id, f"{verb}ing enrollment…"):
             return
         try:
             if action == "complete":
                 self._enrollment_service.complete(enrollment_id)
+                success_text = "Enrollment completed"
             else:
                 self._enrollment_service.withdraw(enrollment_id)
+                success_text = "Enrollment withdrawn"
             self.refresh()
             self.enrollment_changed.emit()
+            self._feedback.finish_operation(operation_id)
+            self._feedback.success(success_text, key="student-enrollment")
         except EnrollmentError as exc:
-            QMessageBox.warning(self, "Enrollment", str(exc))
+            self._feedback.finish_operation(operation_id)
+            self._feedback.warning(str(exc), title="Enrollment unavailable", key="student-enrollment")
         except Exception as exc:
-            QMessageBox.critical(self, "Enrollment Error", str(exc))
+            self._feedback.finish_operation(operation_id)
+            self._feedback.system_error(
+                exc,
+                message="The enrollment could not be updated.",
+                key="student-enrollment",
+            )
 
-    def _require_write(self):
+    def _require_write(self) -> bool:
         if self._write_enabled:
             return True
-        QMessageBox.warning(self, "Read mode", "Start Editing before changing enrollment.")
+        self._feedback.warning(
+            "Start editing before changing enrollment.",
+            title="Read-only mode",
+            key="student-enrollment-write",
+        )
         return False
 
-    def _update_action_state(self):
+    def _update_action_state(self) -> None:
         has_class = self.class_combo.count() > 0 and self.class_combo.currentData() is not None
         self.class_combo.setEnabled(self._write_enabled)
         self.enroll_btn.setEnabled(self._write_enabled and self._student_id is not None and has_class)
 
     @staticmethod
-    def _clear(layout):
+    def _clear(layout) -> None:
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
     @staticmethod
-    def _add_message(layout, text):
+    def _add_message(layout, text: str) -> None:
         label = QLabel(text)
-        label.setStyleSheet("color: #777;")
+        label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['body_small']}px;")
         layout.addWidget(label)
