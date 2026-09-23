@@ -223,7 +223,7 @@ class StudentListPage(WorkspaceBase):
                 results.append(student)
                 continue
             try:
-                parents = self._parent_service.get_parents_by_student(student.id)
+                parents = self._parent_service.get_parents_for_student(student.id)
             except Exception:
                 parents = []
             for parent in parents or []:
