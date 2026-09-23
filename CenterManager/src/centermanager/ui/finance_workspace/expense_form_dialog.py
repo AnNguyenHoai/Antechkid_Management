@@ -66,6 +66,7 @@ class ExpenseFormDialog(QDialog):
         self.method_combo = QComboBox()
         self.method_combo.addItem("TÀI KHOẢN CÁ NHÂN", "Cash")
         self.method_combo.addItem("TÀI KHOẢN CÔNG TY", "Bank")
+        self.method_combo.addItem("Khác", "Other")
         form.addRow("Payment Method *", self.method_combo)
 
         self.date_edit = QDateEdit()
@@ -104,6 +105,22 @@ class ExpenseFormDialog(QDialog):
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
 
+    @staticmethod
+    def _canonical_payment_method(value: str) -> str:
+        return {
+            "TÀI KHOẢN CÁ NHÂN": "Cash",
+            "TÀI KHOẢN CÔNG TY": "Bank",
+            "Bank Transfer": "Bank",
+        }.get(value, value)
+
+    @staticmethod
+    def _canonical_status(value: str) -> str:
+        return {
+            "ĐÃ HOÀN TRẢ": "Completed",
+            "CHƯA HOÀN TRẢ": "Pending",
+            "Paid": "Completed",
+        }.get(value, value)
+
     def _load_expense(self):
         try:
             exp = self._service.get_expense(self._expense_id)
@@ -112,13 +129,15 @@ class ExpenseFormDialog(QDialog):
                 self.category_combo.setCurrentIndex(idx)
             self.desc_edit.setPlainText(exp.description)
             self.amount_spin.setValue(exp.amount)
-            idx2 = self.method_combo.findData(exp.payment_method)
+            idx2 = self.method_combo.findData(
+                self._canonical_payment_method(exp.payment_method)
+            )
             if idx2 >= 0:
                 self.method_combo.setCurrentIndex(idx2)
             qdate = QDate(exp.payment_date.year, exp.payment_date.month, exp.payment_date.day)
             self.date_edit.setDate(qdate)
             self.paid_by_edit.setText(exp.paid_by or "")
-            idx3 = self.status_combo.findData(exp.status)
+            idx3 = self.status_combo.findData(self._canonical_status(exp.status))
             if idx3 >= 0:
                 self.status_combo.setCurrentIndex(idx3)
             self.note_edit.setPlainText(exp.note or "")
