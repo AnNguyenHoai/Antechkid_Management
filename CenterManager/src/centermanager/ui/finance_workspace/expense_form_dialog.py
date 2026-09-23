@@ -155,9 +155,11 @@ class ExpenseFormDialog(QDialog):
             return
         payment_method = self.method_combo.currentData()
         payment_date = self.date_edit.date().toPython()
-        paid_by = self.paid_by_edit.text().strip() or None
+        # Keep explicit empty strings in edit mode so nullable fields can be
+        # cleared instead of being interpreted as "leave unchanged".
+        paid_by = self.paid_by_edit.text().strip()
         status = self.status_combo.currentData()
-        note = self.note_edit.toPlainText().strip() or None
+        note = self.note_edit.toPlainText().strip()
 
         try:
             if self._is_edit:
@@ -179,9 +181,9 @@ class ExpenseFormDialog(QDialog):
                     amount=amount,
                     payment_method=payment_method,
                     payment_date=payment_date,
-                    paid_by=paid_by,
+                    paid_by=paid_by or None,
                     status=status,
-                    note=note,
+                    note=note or None,
                 )
             self.accept()
         except ExpenseValidationError as exc:
