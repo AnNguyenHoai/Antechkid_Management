@@ -37,6 +37,7 @@ class ExpenseListPage(QWidget):
         self._sort_by = "payment_date"
         self._sort_ascending = False
         self._write_enabled = False
+        self._target_date = date.today()
         self._period_start: Optional[date] = None
         self._period_end: Optional[date] = None
         self._period_configured = None
@@ -138,7 +139,8 @@ class ExpenseListPage(QWidget):
 
     def refresh(self, *_args, target_date=None, period_start=None, period_end=None,
                 period_configured=None, **_kwargs) -> None:
-        del target_date
+        if target_date is not None:
+            self._target_date = target_date
         period_changed = period_start is not None and period_end is not None and (
             period_start != self._period_start or period_end != self._period_end
         )
@@ -158,6 +160,17 @@ class ExpenseListPage(QWidget):
             QMessageBox.critical(self, "Lỗi", str(exc))
         finally:
             self.loading.setVisible(False)
+
+    def _default_transaction_date(self) -> date:
+        """Choose a create date that belongs to the Finance period being viewed."""
+        today = date.today()
+        if self._period_start is None or self._period_end is None:
+            return self._target_date or today
+        if self._period_start <= today <= self._period_end:
+            return today
+        if self._period_start <= self._target_date <= self._period_end:
+            return self._target_date
+        return self._period_start
 
     def _effective_date_bounds(self):
         user_from, user_to = self.date_from.date().toPython(), self.date_to.date().toPython()
@@ -180,7 +193,6 @@ class ExpenseListPage(QWidget):
         self._current_page = 1
         self._load_page()
 
-    # Compatibility alias used by older tests/callers.
     def _apply_filters(self) -> None:
         self._filters_changed()
 
@@ -260,8 +272,14 @@ class ExpenseListPage(QWidget):
 
     def _show_add_dialog(self) -> None:
         if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to add expense."); return
-        dialog = ExpenseFormDialog(self._service, parent=self)
-        if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted: self.refresh()
+        dialog = ExpenseFormDialog(
+            self._service,
+            initial_payment_date=self._default_transaction_date(),
+            parent=self,
+        )
+        if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted:
+            self._current_page = 1
+            self.refresh()
 
     def _show_edit_dialog(self, expense_id: int) -> None:
         if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to edit expense."); return
@@ -277,7 +295,7 @@ class ExpenseListPage(QWidget):
             self._service.delete_expense(expense_id); self.refresh()
 
     def _clear_filters(self) -> None:
-        for widget in (self.search_bar,): widget.clear()
+        self.search_bar.clear()
         self.category_combo.setCurrentIndex(0); self.method_combo.setCurrentIndex(0); self.status_combo.setCurrentIndex(0)
         if self._period_start is not None and self._period_end is not None:
             self._reset_date_filters_to_period()
