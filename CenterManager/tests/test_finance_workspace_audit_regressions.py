@@ -1,12 +1,14 @@
 from datetime import date
 from types import SimpleNamespace
 
+from centermanager.core.current_user import CurrentUserContext
 from centermanager.models.finance_period import FinancePeriodDefinition
+from centermanager.services.finance_period_service import FinancePeriodService
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
+from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.finance_workspace_shell import FinanceWorkspaceShell
 from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
-from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 
 
 class _EmptyStudentService:
@@ -31,6 +33,49 @@ class _ExpenseReadService:
             status="Pending",
             note="Keep canonical values",
         )
+
+
+class _FinanceViewer:
+    is_admin = False
+    is_active = True
+    role = SimpleNamespace(name="finance")
+
+    def has_permission(self, permission_name):
+        return permission_name == "finance.view"
+
+
+class _SessionContext:
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FinancePeriodRepo:
+    def __init__(self, period):
+        self._period = period
+
+    def get_effective(self, _target):
+        return self._period
+
+
+class _RepositoryProvider:
+    def __init__(self, period):
+        self._period = period
+
+    def finance_periods(self, _session):
+        return _FinancePeriodRepo(self._period)
+
+
+def test_finance_viewer_can_resolve_active_period_without_admin_period_capability():
+    period = SimpleNamespace(effective_from=date(2026, 9, 15), duration_months=1)
+    service = FinancePeriodService(
+        lambda: _SessionContext(),
+        repository_provider=_RepositoryProvider(period),
+    )
+    with CurrentUserContext(_FinanceViewer()):
+        assert service.get_active_period(date(2026, 9, 23)) is period
 
 
 def test_current_month_selector_resolves_from_today_not_day_one():
@@ -83,7 +128,6 @@ def test_expense_edit_restores_canonical_bank_and_pending_values(qtbot):
 
 
 def test_income_and_expense_default_transaction_date_stays_inside_selected_period():
-    today = date(2026, 9, 23)
     period_start = date(2026, 8, 15)
     period_end = date(2026, 9, 14)
 
