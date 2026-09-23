@@ -20,15 +20,19 @@ class _EmptyClassService:
 
 
 class _ExpenseReadService:
+    def __init__(self, payment_method="Bank", status="Pending"):
+        self._payment_method = payment_method
+        self._status = status
+
     def get_expense(self, _expense_id):
         return SimpleNamespace(
             category="Office Rent",
             description="September rent",
             amount=5_000_000.0,
-            payment_method="Bank",
+            payment_method=self._payment_method,
             payment_date=date(2026, 9, 20),
             paid_by="Admin",
-            status="Pending",
+            status=self._status,
             note="Keep canonical values",
         )
 
@@ -81,9 +85,6 @@ def test_current_month_selector_resolves_from_today_not_day_one():
     target = FinanceWorkspaceShell._target_date_for_selection(2026, 9, today)
     assert target == today
 
-    # A mid-month one-month FinancePeriod would previously resolve September 1
-    # to the prior bucket (15 Aug - 14 Sep), while a newly-created transaction
-    # defaulted to September 23 and landed in the next bucket.
     period_start, period_end = FinancePeriodDefinition.period_for_date(
         date(2026, 8, 15), target, 1
     )
@@ -123,3 +124,17 @@ def test_expense_edit_restores_canonical_bank_and_pending_values(qtbot):
     qtbot.addWidget(dialog)
     assert dialog.method_combo.currentData() == "Bank"
     assert dialog.status_combo.currentData() == "Pending"
+
+
+def test_expense_edit_normalizes_legacy_bank_transfer_and_paid_values(qtbot):
+    dialog = ExpenseFormDialog(
+        _ExpenseReadService(payment_method="Bank Transfer", status="Paid"),
+        expense_id=1,
+    )
+    qtbot.addWidget(dialog)
+    assert dialog.method_combo.currentData() == "Bank"
+    assert dialog.status_combo.currentData() == "Completed"
+
+
+def test_expense_other_payment_method_remains_selectable():
+    assert ExpenseFormDialog._canonical_payment_method("Other") == "Other"
