@@ -61,7 +61,19 @@ class FinanceWorkspaceShell(QWidget):
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
-        self._event_bus = event_bus or EventBus()
+
+        # Finance must participate in the same application event stream as the
+        # collaboration/runtime layer. Production already injects the app bus
+        # into CollaborationManager, so reuse it before falling back to a local
+        # compatibility bus for lightweight tests.
+        shared_bus = (
+            event_bus
+            or getattr(collaboration_manager, "_event_bus", None)
+            or getattr(income_service, "_event_bus", None)
+            or getattr(expense_service, "_event_bus", None)
+            or EventBus()
+        )
+        self._event_bus = shared_bus
         self._authorized = False
         self._write_enabled = False
         self._period_selector_ready = False
@@ -87,10 +99,10 @@ class FinanceWorkspaceShell(QWidget):
 
                 self._settlement_service = FinancialSettlementService(session_factory)
 
-        # Finance events must be active even while MainWindow wiring is being
-        # migrated. When a shared app bus is supplied, this uses that bus.
-        if getattr(self._income_service, "_event_bus", None) is None:
-            self._income_service._event_bus = self._event_bus
+        # Align both Finance mutation services to the same bus. This preserves
+        # local refresh while also allowing app-level projections (Home, audit
+        # observers, future subscribers) to invalidate from the same event.
+        self._income_service._event_bus = self._event_bus
         if hasattr(self._expense_service, "set_event_bus"):
             self._expense_service.set_event_bus(self._event_bus)
 
