@@ -37,6 +37,7 @@ class IncomeFormDialog(QDialog):
         student_service: StudentService,
         class_service: ClassService,
         income_id: Optional[int] = None,
+        initial_payment_date: Optional[date] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -45,6 +46,7 @@ class IncomeFormDialog(QDialog):
         self._class_service = class_service
         self._income_id = income_id
         self._is_edit = income_id is not None
+        self._initial_payment_date = initial_payment_date or date.today()
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(550)
@@ -101,7 +103,8 @@ class IncomeFormDialog(QDialog):
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("dd/MM/yyyy")
-        self.date_edit.setDate(QDate.currentDate())
+        initial = self._initial_payment_date
+        self.date_edit.setDate(QDate(initial.year, initial.month, initial.day))
         form.addRow("Ngày thu *", self.date_edit)
 
         # Legacy display metadata only. Canonical Finance period is always
@@ -282,8 +285,11 @@ class IncomeFormDialog(QDialog):
 
         payment_method = self.method_combo.currentText()
         payment_date = self.date_edit.date().toPython()
-        payment_period = self.period_combo.currentData() or None
-        received_by = self.received_by_edit.text().strip() or None
+        # Preserve explicit empty values in edit mode so the service can clear
+        # nullable fields instead of interpreting None as "leave unchanged".
+        payment_period = self.period_combo.currentData()
+        received_by = self.received_by_edit.text().strip()
+        note = self.note_edit.text().strip()
 
         try:
             if self._is_edit:
@@ -295,10 +301,10 @@ class IncomeFormDialog(QDialog):
                     payment_date=payment_date,
                     payment_period=payment_period,
                     received_by=received_by,
-                    note=self.note_edit.text().strip() or None,
+                    note=note,
                 )
             else:
-                student_id, class_id, income_type, note = (
+                student_id, class_id, income_type, create_note = (
                     self._create_identity_payload()
                 )
                 self._income_service.create_income(
@@ -308,9 +314,9 @@ class IncomeFormDialog(QDialog):
                     income_type=income_type,
                     payment_method=payment_method,
                     payment_date=payment_date,
-                    payment_period=payment_period,
-                    received_by=received_by,
-                    note=note,
+                    payment_period=payment_period or None,
+                    received_by=received_by or None,
+                    note=create_note,
                 )
             self.accept()
         except IncomeValidationError as exc:

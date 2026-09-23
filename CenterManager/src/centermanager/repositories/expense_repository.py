@@ -14,6 +14,11 @@ class ExpenseRepository(BaseRepository[Expense]):
 
     # ``Paid`` is retained as a legacy realized state for existing databases/tests.
     REALIZED_STATUSES = ("Completed", "Paid")
+    PAYMENT_METHOD_EQUIVALENTS = {
+        "Cash": ("Cash", "TÀI KHOẢN CÁ NHÂN"),
+        "Bank": ("Bank", "Bank Transfer", "TÀI KHOẢN CÔNG TY"),
+        "Other": ("Other",),
+    }
     SORT_COLUMNS = {
         "payment_date": Expense.payment_date,
         "category": Expense.category,
@@ -58,11 +63,17 @@ class ExpenseRepository(BaseRepository[Expense]):
         if category:
             query = query.filter(Expense.category == category)
         if payment_method:
-            query = query.filter(Expense.payment_method == payment_method)
+            equivalents = self.PAYMENT_METHOD_EQUIVALENTS.get(
+                payment_method, (payment_method,)
+            )
+            query = query.filter(Expense.payment_method.in_(equivalents))
         if realized_only:
             query = query.filter(Expense.status.in_(self.REALIZED_STATUSES))
         elif status:
-            query = query.filter(Expense.status == status)
+            if status == "Completed":
+                query = query.filter(Expense.status.in_(self.REALIZED_STATUSES))
+            else:
+                query = query.filter(Expense.status == status)
         if date_from:
             query = query.filter(Expense.payment_date >= date_from)
         if date_to:

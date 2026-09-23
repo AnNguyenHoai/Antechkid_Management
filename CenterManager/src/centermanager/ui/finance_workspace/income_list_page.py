@@ -31,12 +31,8 @@ from centermanager.ui.design_system import (
     SecondaryButton,
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.finance_workspace.income_detail_dialog import (
-    IncomeDetailDialog,
-)
-from centermanager.ui.finance_workspace.income_form_dialog import (
-    IncomeFormDialog,
-)
+from centermanager.ui.finance_workspace.income_detail_dialog import IncomeDetailDialog
+from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
 from centermanager.ui.shared import DataTable, LoadingWidget
 
 logger = logging.getLogger(__name__)
@@ -63,6 +59,7 @@ class IncomeListPage(QWidget):
 
         self._incomes = []
         self._write_enabled = False
+        self._target_date = date.today()
         self._period_start: Optional[date] = None
         self._period_end: Optional[date] = None
         self._period_configured = None
@@ -167,16 +164,8 @@ class IncomeListPage(QWidget):
             {"key": "class_name", "label": "Lớp", "sortable": False},
             {"key": "income_type", "label": "Loại", "sortable": True},
             {"key": "amount", "label": "Số tiền", "sortable": True},
-            {
-                "key": "payment_method",
-                "label": "Hình thức",
-                "sortable": True,
-            },
-            {
-                "key": "payment_period",
-                "label": "Kỳ ghi chú",
-                "sortable": True,
-            },
+            {"key": "payment_method", "label": "Hình thức", "sortable": True},
+            {"key": "payment_period", "label": "Kỳ ghi chú", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": False},
             {"key": "received_by", "label": "Người thu", "sortable": True},
             {"key": "note", "label": "Ghi chú", "sortable": False},
@@ -184,12 +173,8 @@ class IncomeListPage(QWidget):
         self.data_table = DataTable(columns, page_size=self._page_size)
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
-        self.data_table.row_double_clicked.connect(
-            self._on_row_double_clicked
-        )
-        self.data_table.context_menu_requested.connect(
-            self._on_context_menu
-        )
+        self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
+        self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
 
         self.loading = LoadingWidget()
@@ -197,9 +182,8 @@ class IncomeListPage(QWidget):
         layout.addWidget(self.loading)
 
     def _notify(self, message: str, level: str = "warning") -> None:
-        if (
-            self._notification_service is not None
-            and hasattr(self._notification_service, "notify")
+        if self._notification_service is not None and hasattr(
+            self._notification_service, "notify"
         ):
             self._notification_service.notify(message, level)
         else:
@@ -229,7 +213,8 @@ class IncomeListPage(QWidget):
         period_configured=None,
         **_kwargs,
     ) -> None:
-        del target_date
+        if target_date is not None:
+            self._target_date = target_date
         period_changed = (
             period_start is not None
             and period_end is not None
@@ -259,6 +244,17 @@ class IncomeListPage(QWidget):
             QMessageBox.critical(self, "Lỗi", str(exc))
         finally:
             self.loading.setVisible(False)
+
+    def _default_transaction_date(self) -> date:
+        """Choose a create date that belongs to the Finance period being viewed."""
+        today = date.today()
+        if self._period_start is None or self._period_end is None:
+            return self._target_date or today
+        if self._period_start <= today <= self._period_end:
+            return today
+        if self._period_start <= self._target_date <= self._period_end:
+            return self._target_date
+        return self._period_start
 
     def _effective_date_bounds(self):
         user_from = self.date_from_edit.date().toPython()
@@ -308,9 +304,7 @@ class IncomeListPage(QWidget):
             ascending=self._sort_ascending,
         )
 
-        max_page = max(
-            1, (total + self._page_size - 1) // self._page_size
-        )
+        max_page = max(1, (total + self._page_size - 1) // self._page_size)
         if self._current_page > max_page:
             self._current_page = max_page
             items, total = self._income_service.list_incomes(
@@ -333,19 +327,9 @@ class IncomeListPage(QWidget):
             data.append(
                 {
                     "payment_date": income.payment_date.strftime("%d/%m/%Y"),
-                    "source": (
-                        "STUDENT_PAYMENT" if linked else "OTHER_INCOME"
-                    ),
-                    "student_name": (
-                        income.student.full_name
-                        if linked and income.student
-                        else "-"
-                    ),
-                    "class_name": (
-                        income.class_.name
-                        if linked and income.class_
-                        else "-"
-                    ),
+                    "source": "STUDENT_PAYMENT" if linked else "OTHER_INCOME",
+                    "student_name": income.student.full_name if linked and income.student else "-",
+                    "class_name": income.class_.name if linked and income.class_ else "-",
                     "income_type": income.income_type,
                     "amount": f"{income.amount:,.0f}",
                     "payment_method": income.payment_method,
@@ -383,9 +367,6 @@ class IncomeListPage(QWidget):
         self._sort_ascending = ascending
         self._current_page = 1
         self._load_page()
-        # Server-side sorting establishes the global order. This stable local
-        # sort preserves the legacy IncomeList contract for the loaded page
-        # without changing the server-side pagination semantics.
         self._incomes.sort(key=getter, reverse=not ascending)
         self._populate_table()
 
@@ -399,23 +380,16 @@ class IncomeListPage(QWidget):
 
         income = self._incomes[row]
         menu = QMenu(self)
-        menu.addAction(
-            "Xem", lambda: self._show_detail_dialog(income.id)
-        )
+        menu.addAction("Xem", lambda: self._show_detail_dialog(income.id))
 
         if income.status == Income.STATUS_ACTIVE:
-            edit_action = menu.addAction(
-                "Sửa", lambda: self._show_edit_dialog(income.id)
-            )
+            edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(income.id))
             edit_action.setEnabled(self._write_enabled)
-            void_action = menu.addAction(
-                "Void", lambda: self._void_income(income.id)
-            )
+            void_action = menu.addAction("Void", lambda: self._void_income(income.id))
             void_action.setEnabled(self._write_enabled)
         elif income.status == Income.STATUS_VOIDED:
             delete_action = menu.addAction(
-                "Xóa (soft delete)",
-                lambda: self._delete_income(income.id),
+                "Xóa (soft delete)", lambda: self._delete_income(income.id)
             )
             delete_action.setEnabled(self._write_enabled)
 
@@ -424,9 +398,7 @@ class IncomeListPage(QWidget):
     def _ensure_write(self, action: str) -> bool:
         if self._collaboration_manager.ensure_write():
             return True
-        self._notify(
-            f"You must be in WRITE mode to {action} income."
-        )
+        self._notify(f"You must be in WRITE mode to {action} income.")
         return False
 
     def _show_add_dialog(self) -> None:
@@ -436,9 +408,11 @@ class IncomeListPage(QWidget):
             self._income_service,
             self._student_service,
             self._class_service,
+            initial_payment_date=self._default_transaction_date(),
             parent=self,
         )
         if dialog.exec() == IncomeFormDialog.DialogCode.Accepted:
+            self._current_page = 1
             self.refresh()
 
     def _show_edit_dialog(self, income_id: int) -> None:
@@ -455,9 +429,7 @@ class IncomeListPage(QWidget):
             self.refresh()
 
     def _show_detail_dialog(self, income_id: int) -> None:
-        IncomeDetailDialog(
-            self._income_service, income_id, parent=self
-        ).exec()
+        IncomeDetailDialog(self._income_service, income_id, parent=self).exec()
 
     def _void_income(self, income_id: int) -> None:
         if not self._ensure_write("void"):
@@ -471,9 +443,7 @@ class IncomeListPage(QWidget):
             return
         reason = reason.strip()
         if not reason:
-            QMessageBox.warning(
-                self, "Thiếu lý do", "Vui lòng nhập lý do void."
-            )
+            QMessageBox.warning(self, "Thiếu lý do", "Vui lòng nhập lý do void.")
             return
         try:
             self._income_service.void_income(income_id, reason)
@@ -488,12 +458,8 @@ class IncomeListPage(QWidget):
         reply = QMessageBox.question(
             self,
             "Xác nhận xóa",
-            (
-                "Khoản thu đã VOID sẽ được ẩn khỏi danh sách thông thường "
-                "nhưng lịch sử/audit vẫn được giữ. Tiếp tục?"
-            ),
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No,
+            "Khoản thu đã VOID sẽ được ẩn khỏi danh sách thông thường nhưng lịch sử/audit vẫn được giữ. Tiếp tục?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -531,9 +497,7 @@ class IncomeListPage(QWidget):
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
             )
-            Path(filename).write_text(
-                csv_text, encoding="utf-8-sig"
-            )
+            Path(filename).write_text(csv_text, encoding="utf-8-sig")
             self._notify("Xuất CSV thành công.", "info")
         except Exception as exc:
             logger.exception("Export income CSV failed")
@@ -556,9 +520,7 @@ class IncomeListPage(QWidget):
         if self._period_start is not None and self._period_end is not None:
             self._reset_date_filters_to_period()
         else:
-            self.date_from_edit.setDate(
-                QDate.currentDate().addDays(-30)
-            )
+            self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
             self.date_to_edit.setDate(QDate.currentDate())
 
         self._current_page = 1
