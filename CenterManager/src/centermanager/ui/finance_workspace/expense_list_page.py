@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMenu, QComboBox, QDateEdit, QFileDialog,
 )
 
+from centermanager.core.current_user import get_current_user
 from centermanager.services.expense_service import ExpenseService
 from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
@@ -67,6 +68,7 @@ class ExpenseListPage(QWidget):
         top_row.addWidget(self.export_btn)
         self.add_btn = PrimaryButton("+ Thêm chi phí")
         self.add_btn.clicked.connect(self._show_add_dialog)
+        self.add_btn.setEnabled(False)
         top_row.addWidget(self.add_btn)
         toolbar_layout.addLayout(top_row)
 
@@ -126,6 +128,28 @@ class ExpenseListPage(QWidget):
             self._notification_service.notify(message, level)
         else:
             logger.warning("Finance notification fallback: %s", message)
+
+    @staticmethod
+    def _has_capability(capability: str) -> bool:
+        user = get_current_user()
+        if user is None:
+            return False
+        if getattr(user, "is_admin", False):
+            return True
+        checker = getattr(user, "has_permission", None)
+        return bool(callable(checker) and checker(capability))
+
+    def _can_mutate(self, capability: str) -> bool:
+        return self._write_enabled and self._has_capability(capability)
+
+    def _ensure_mutation(self, capability: str, action: str) -> bool:
+        if not self._has_capability(capability):
+            self._notify("Bạn không có quyền thực hiện thao tác này trong Finance.")
+            return False
+        if self._collaboration_manager.ensure_write():
+            return True
+        self._notify(f"You must be in WRITE mode to {action} expense.")
+        return False
 
     @staticmethod
     def _to_qdate(value: date) -> QDate:
@@ -266,12 +290,15 @@ class ExpenseListPage(QWidget):
         if row < 0 or row >= len(self._expenses): return
         exp = self._expenses[row]; menu = QMenu(self)
         menu.addAction("Xem", lambda: self._show_detail_dialog(exp.id))
-        edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id)); edit_action.setEnabled(self._write_enabled)
-        delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id)); delete_action.setEnabled(self._write_enabled)
+        edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id))
+        edit_action.setEnabled(self._can_mutate("finance.expense.update"))
+        delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id))
+        delete_action.setEnabled(self._can_mutate("finance.expense.delete"))
         menu.exec(pos)
 
     def _show_add_dialog(self) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to add expense."); return
+        if not self._ensure_mutation("finance.expense.create", "add"):
+            return
         dialog = ExpenseFormDialog(
             self._service,
             initial_payment_date=self._default_transaction_date(),
@@ -282,7 +309,8 @@ class ExpenseListPage(QWidget):
             self.refresh()
 
     def _show_edit_dialog(self, expense_id: int) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to edit expense."); return
+        if not self._ensure_mutation("finance.expense.update", "edit"):
+            return
         dialog = ExpenseFormDialog(self._service, expense_id=expense_id, parent=self)
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted: self.refresh()
 
@@ -290,7 +318,8 @@ class ExpenseListPage(QWidget):
         ExpenseDetailDialog(self._service, expense_id, parent=self).exec()
 
     def _delete_expense(self, expense_id: int) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to delete expense."); return
+        if not self._ensure_mutation("finance.expense.delete", "delete"):
+            return
         if QMessageBox.question(self, "Xác nhận xóa", "Bạn có chắc muốn xóa chi phí này?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self._service.delete_expense(expense_id); self.refresh()
 
@@ -304,4 +333,5 @@ class ExpenseListPage(QWidget):
         self._current_page = 1; self._load_page()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        self._write_enabled = bool(enabled); self.add_btn.setEnabled(self._write_enabled)
+        self._write_enabled = bool(enabled)
+        self.add_btn.setEnabled(self._can_mutate("finance.expense.create"))
