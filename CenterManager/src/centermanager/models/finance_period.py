@@ -116,3 +116,32 @@ class FinancePeriodDefinition:
 
         period_start = cls.add_months(anchor_date, bucket * duration_months)
         return cls.bounds_for(period_start, duration_months)
+
+    @classmethod
+    def period_for_configuration(
+        cls,
+        effective_from: date,
+        target_date: date,
+        duration_months: int,
+        effective_to: Optional[date] = None,
+    ) -> tuple[date, date]:
+        """Return one bucket clipped to the configuration's effective lifetime.
+
+        A configuration may be superseded in the middle of a theoretical
+        calendar bucket. Finance reads must not allow the old configuration to
+        claim dates owned by the succeeding configuration.
+        """
+        if target_date < effective_from:
+            raise ValueError("target_date is earlier than the configuration effective date.")
+        if effective_to is not None and target_date > effective_to:
+            raise ValueError("target_date is later than the configuration effective range.")
+
+        period_start, period_end = cls.period_for_date(
+            effective_from,
+            target_date,
+            duration_months,
+        )
+        period_start = max(period_start, effective_from)
+        if effective_to is not None:
+            period_end = min(period_end, effective_to)
+        return period_start, period_end
