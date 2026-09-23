@@ -43,6 +43,14 @@ from .form_detail import (
     FormField,
     FormSection,
 )
+from .feedback import (
+    ConfirmationDialog,
+    FeedbackController,
+    FeedbackHost,
+    FeedbackRequest,
+    FeedbackTone,
+)
+from .state_patterns import EmptySearchState, PermissionState
 from .components import (
     ActivityCard,
     Avatar,
@@ -100,6 +108,14 @@ __all__ = [
     "DetailRow",
     "DetailSection",
     "EditStateBanner",
+    # Feedback / operation state patterns
+    "FeedbackTone",
+    "FeedbackRequest",
+    "FeedbackController",
+    "FeedbackHost",
+    "ConfirmationDialog",
+    "EmptySearchState",
+    "PermissionState",
     # Legacy component exports retained until workspace migration.
     "StatisticCard",
     "InfoCard",
