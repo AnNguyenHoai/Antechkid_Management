@@ -49,7 +49,9 @@ class VisualRegressionGallery(QWidget):
         self.visual_state = state
         self.setObjectName("UIProd10VisualGallery")
         self.setFixedSize(1280, 720)
-        self.setStyleSheet(f"background: {COLORS['surface_app']};")
+        self.setStyleSheet(
+            f"QWidget#UIProd10VisualGallery {{ background: {COLORS['surface_app']}; }}"
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -158,6 +160,24 @@ def _sampled_color_count(image: QImage) -> int:
     return len(colors)
 
 
+def _emit_visual_artifact(gallery: VisualRegressionGallery, state: str) -> tuple[QImage, int, Path]:
+    """Capture before assertions so failed visual gates still leave review evidence."""
+    image = gallery.grab().toImage()
+    sampled_colors = _sampled_color_count(image) if not image.isNull() else 0
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    png_path = ARTIFACT_DIR / f"{state}.png"
+    if not image.isNull():
+        image.save(str(png_path), "PNG")
+    manifest = {
+        "state": state,
+        "semantic": _semantic_snapshot(gallery),
+        "image": {"width": image.width(), "height": image.height(), "sampled_colors": sampled_colors},
+        "png": png_path.name,
+    }
+    (ARTIFACT_DIR / f"{state}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return image, sampled_colors, png_path
+
+
 def test_visual_baseline_is_token_aligned():
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     assert baseline["geometry"]["top_bar_min_height"] == COMPONENT_METRICS["app_top_bar_height"]
@@ -172,6 +192,8 @@ def test_visual_gallery_matches_baseline_and_emits_png(app, state):
     gallery.show()
     app.processEvents()
 
+    image, sampled_colors, png_path = _emit_visual_artifact(gallery, state)
+
     assert gallery.size().width() == baseline["viewport"]["width"]
     assert gallery.size().height() == baseline["viewport"]["height"]
     assert gallery.top_bar.minimumHeight() == baseline["geometry"]["top_bar_min_height"]
@@ -179,25 +201,12 @@ def test_visual_gallery_matches_baseline_and_emits_png(app, state):
     assert gallery.header.page_title_label.text() == "Students"
     assert _semantic_snapshot(gallery) == baseline["states"][state]
 
-    image = gallery.grab().toImage()
     assert not image.isNull()
     assert image.width() == baseline["viewport"]["width"]
     assert image.height() == baseline["viewport"]["height"]
-    sampled_colors = _sampled_color_count(image)
     assert sampled_colors >= baseline["image_quality"]["min_sampled_colors"]
-
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    png_path = ARTIFACT_DIR / f"{state}.png"
-    assert image.save(str(png_path), "PNG")
+    assert png_path.is_file()
     assert png_path.stat().st_size >= baseline["image_quality"]["min_png_bytes"]
-
-    manifest = {
-        "state": state,
-        "semantic": _semantic_snapshot(gallery),
-        "image": {"width": image.width(), "height": image.height(), "sampled_colors": sampled_colors},
-        "png": png_path.name,
-    }
-    (ARTIFACT_DIR / f"{state}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     gallery.close()
 
 

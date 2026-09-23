@@ -21,6 +21,7 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+visual-regression-artifacts/
 
 # IDE
 .vscode/
