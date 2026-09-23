@@ -1,6 +1,7 @@
 """
 Enrollment repository - data access for Enrollment entity.
 """
+from datetime import date
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session, joinedload
@@ -25,6 +26,30 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         if active_only:
             query = query.filter(Enrollment.status == "ACTIVE")
         return query.first() is not None
+
+    def exists_on_date(
+        self,
+        student_id: int,
+        class_id: int,
+        on_date: date,
+    ) -> bool:
+        """Return whether an enrollment covered ``on_date``.
+
+        Historical finance validation is date based, not current-status based:
+        COMPLETED/CANCELLED rows remain valid for dates inside their recorded
+        start/end interval.
+        """
+        return (
+            self._session.query(Enrollment.id)
+            .filter(
+                Enrollment.student_id == student_id,
+                Enrollment.class_id == class_id,
+                or_(Enrollment.start_date.is_(None), Enrollment.start_date <= on_date),
+                or_(Enrollment.end_date.is_(None), Enrollment.end_date >= on_date),
+            )
+            .first()
+            is not None
+        )
 
     def get_active(self, student_id: int, class_id: int) -> Optional[Enrollment]:
         return self._session.query(Enrollment).filter(

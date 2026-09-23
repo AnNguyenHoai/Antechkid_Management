@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import String, Float, Date, Text, ForeignKey, DateTime
+from sqlalchemy import String, Float, Date, Text, ForeignKey, DateTime, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -42,6 +42,12 @@ class Income(Base, TimestampMixin):
     payment_method: Mapped[str] = mapped_column(String(50), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
     payment_period: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    finance_period_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("finance_periods.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     finance_period_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     received_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
