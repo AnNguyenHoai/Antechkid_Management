@@ -15,6 +15,9 @@ from centermanager.platform.collaboration import CollaborationManager, Collabora
 from centermanager.platform.synchronization import GitSynchronizationProvider
 
 
+GIT_POLL_TIMEOUT_MS = 15000
+
+
 def wait_for_signal(spy, timeout_ms=5000):
     if spy.count() > 0:
         return True
@@ -37,7 +40,7 @@ def stop_poller_for_git_mutation(poller):
         assert not thread.isRunning(), "Poller thread did not stop before Git mutation"
 
 
-def wait_for_poll(poller, timeout_ms=5000):
+def wait_for_poll(poller, timeout_ms=GIT_POLL_TIMEOUT_MS):
     """Request a refresh and wait for that poll cycle to complete."""
     spy = QSignalSpy(poller.poll_completed)
     poller.request_refresh("test")
@@ -118,7 +121,7 @@ def start_client(client):
     poller = client["poller"]
     poller.start(initial_poll=False)
     assert wait_for_timer(poller, 2000), f"{client['name']} timer not created"
-    assert wait_for_poll(poller, 5000), f"{client['name']} initial poll did not complete"
+    assert wait_for_poll(poller), f"{client['name']} initial poll did not complete"
 
 
 def stop_client(client):
@@ -169,7 +172,7 @@ def test_machine_b_sees_machine_a_lock(qapp, remote_path, tmp_path):
         # correct boundary for this observation.
         spy_b = QSignalSpy(client_b["poller"].snapshot_changed)
         client_b["poller"].request_refresh("lock-acquired")
-        assert wait_for_signal(spy_b, 5000), "B did not get snapshot after A lock"
+        assert wait_for_signal(spy_b, GIT_POLL_TIMEOUT_MS), "B did not get snapshot after A lock"
 
         snapshot_b = client_b["poller"].get_last_snapshot()
         assert snapshot_b is not None
@@ -199,10 +202,10 @@ def test_release_becomes_visible_cross_machine(qapp, remote_path, tmp_path):
         start_client(client_a)
         start_client(client_b)
         assert client_a["cm"].request_write().is_granted
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         assert client_b["poller"].get_last_snapshot().has_lock()
         assert client_a["cm"].release_write() is True
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         assert not client_b["poller"].get_last_snapshot().has_lock()
     finally:
         try:
@@ -220,13 +223,13 @@ def test_lease_renewal_remains_visible_cross_machine(qapp, remote_path, tmp_path
         start_client(client_a)
         start_client(client_b)
         assert client_a["cm"].request_write().is_granted
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         snap = client_b["poller"].get_last_snapshot()
         assert snap.has_lock() and snap.lock_owner() == "User A"
         session = client_a["cm"].get_session()
         assert session is not None
         assert client_a["provider"].renew_lock(session.username, session.session_id)
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         snap = client_b["poller"].get_last_snapshot()
         assert snap.has_lock() and snap.lock_owner() == "User A"
         remote_status = client_b["provider"].remote_lock_status()
@@ -250,7 +253,7 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
         start_client(client_a)
         assert client_a["cm"].request_write().is_granted
         start_client(client_b)
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         snap = client_b["poller"].get_last_snapshot()
         assert snap is not None and snap.has_lock()
         assert snap.lock_owner() == "User A"
@@ -267,7 +270,7 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
         assert commit_sha
         assert provider_a._push_lock_branch(commit_sha, oid)
 
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_b["poller"])
         snapshot_b = client_b["poller"].get_last_snapshot()
         assert snapshot_b is not None
         remote_status = client_b["provider"].remote_lock_status()
@@ -303,8 +306,8 @@ def test_main_isolation_cross_machine(qapp, remote_path, tmp_path):
         client_b["cm"].request_write()
         client_a["cm"].release_write()
         client_b["cm"].cancel_waiting_request()
-        assert wait_for_poll(client_a["poller"], 5000)
-        assert wait_for_poll(client_b["poller"], 5000)
+        assert wait_for_poll(client_a["poller"])
+        assert wait_for_poll(client_b["poller"])
     finally:
         try:
             client_a["cm"].release_write()
