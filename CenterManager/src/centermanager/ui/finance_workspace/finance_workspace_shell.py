@@ -222,10 +222,28 @@ class FinanceWorkspaceShell(QWidget):
         self.month_combo.currentIndexChanged.connect(self._on_period_selection_changed)
         self.year_combo.currentIndexChanged.connect(self._on_period_selection_changed)
 
+    @staticmethod
+    def _target_date_for_selection(
+        year: int,
+        month: int,
+        today: Optional[date] = None,
+    ) -> date:
+        """Return a representative date for the selected month.
+
+        For the current month, use today rather than the first of the month. A
+        FinancePeriod may start mid-month, so using day 1 can resolve the
+        previous period while create forms default to today's transaction date.
+        Historical/future month selections keep the long-standing day-1 anchor.
+        """
+        current = today or date.today()
+        if year == current.year and month == current.month:
+            return current
+        return date(year, month, 1)
+
     def _selected_target_date(self) -> date:
-        month = self.month_combo.currentData() or date.today().month
-        year = self.year_combo.currentData() or date.today().year
-        return date(int(year), int(month), 1)
+        month = int(self.month_combo.currentData() or date.today().month)
+        year = int(self.year_combo.currentData() or date.today().year)
+        return self._target_date_for_selection(year, month)
 
     def _resolve_shared_period(self):
         """Return target date plus canonical bounds for the shared selector."""
