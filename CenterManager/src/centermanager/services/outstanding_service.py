@@ -64,19 +64,21 @@ class OutstandingService:
             config = period_repo.get_active(period_start)
             if config is None:
                 return None
-            return FinancePeriodDefinition.period_for_date(
+            return FinancePeriodDefinition.period_for_configuration(
                 config.effective_from,
                 period_start,
                 config.duration_months,
+                config.effective_to,
             )
 
         config = period_repo.get_active(on_date)
         if config is None:
             return None
-        return FinancePeriodDefinition.period_for_date(
+        return FinancePeriodDefinition.period_for_configuration(
             config.effective_from,
             on_date,
             config.duration_months,
+            config.effective_to,
         )
 
     def _get_total_paid(
