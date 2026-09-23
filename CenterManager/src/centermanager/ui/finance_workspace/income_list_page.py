@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from centermanager.core.current_user import get_current_user
 from centermanager.models.income import Income
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.services.class_service import ClassService
@@ -103,6 +104,7 @@ class IncomeListPage(QWidget):
 
         self.add_btn = PrimaryButton("+ Thêm thu nhập")
         self.add_btn.clicked.connect(self._show_add_dialog)
+        self.add_btn.setEnabled(False)
         top_row.addWidget(self.add_btn)
         toolbar_layout.addLayout(top_row)
 
@@ -188,6 +190,25 @@ class IncomeListPage(QWidget):
             self._notification_service.notify(message, level)
         else:
             logger.warning("Finance notification fallback: %s", message)
+
+    @staticmethod
+    def _has_capability(capability: str) -> bool:
+        user = get_current_user()
+        if user is None:
+            return False
+        if getattr(user, "is_admin", False):
+            return True
+        checker = getattr(user, "has_permission", None)
+        return bool(callable(checker) and checker(capability))
+
+    def _can_mutate(self, capability: str) -> bool:
+        return self._write_enabled and self._has_capability(capability)
+
+    def _ensure_mutation(self, capability: str, action: str) -> bool:
+        if not self._has_capability(capability):
+            self._notify("Bạn không có quyền thực hiện thao tác này trong Finance.")
+            return False
+        return self._ensure_write(action)
 
     @staticmethod
     def _to_qdate(value: date) -> QDate:
@@ -384,14 +405,14 @@ class IncomeListPage(QWidget):
 
         if income.status == Income.STATUS_ACTIVE:
             edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(income.id))
-            edit_action.setEnabled(self._write_enabled)
+            edit_action.setEnabled(self._can_mutate("finance.income.update"))
             void_action = menu.addAction("Void", lambda: self._void_income(income.id))
-            void_action.setEnabled(self._write_enabled)
+            void_action.setEnabled(self._can_mutate("finance.income.delete"))
         elif income.status == Income.STATUS_VOIDED:
             delete_action = menu.addAction(
                 "Xóa (soft delete)", lambda: self._delete_income(income.id)
             )
-            delete_action.setEnabled(self._write_enabled)
+            delete_action.setEnabled(self._can_mutate("finance.income.delete"))
 
         menu.exec(pos)
 
@@ -402,7 +423,7 @@ class IncomeListPage(QWidget):
         return False
 
     def _show_add_dialog(self) -> None:
-        if not self._ensure_write("add"):
+        if not self._ensure_mutation("finance.income.create", "add"):
             return
         dialog = IncomeFormDialog(
             self._income_service,
@@ -416,7 +437,7 @@ class IncomeListPage(QWidget):
             self.refresh()
 
     def _show_edit_dialog(self, income_id: int) -> None:
-        if not self._ensure_write("edit"):
+        if not self._ensure_mutation("finance.income.update", "edit"):
             return
         dialog = IncomeFormDialog(
             self._income_service,
@@ -432,7 +453,7 @@ class IncomeListPage(QWidget):
         IncomeDetailDialog(self._income_service, income_id, parent=self).exec()
 
     def _void_income(self, income_id: int) -> None:
-        if not self._ensure_write("void"):
+        if not self._ensure_mutation("finance.income.delete", "void"):
             return
         reason, accepted = QInputDialog.getText(
             self,
@@ -453,7 +474,7 @@ class IncomeListPage(QWidget):
             QMessageBox.critical(self, "Lỗi", str(exc))
 
     def _delete_income(self, income_id: int) -> None:
-        if not self._ensure_write("delete"):
+        if not self._ensure_mutation("finance.income.delete", "delete"):
             return
         reply = QMessageBox.question(
             self,
@@ -528,4 +549,4 @@ class IncomeListPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
-        self.add_btn.setEnabled(self._write_enabled)
+        self.add_btn.setEnabled(self._can_mutate("finance.income.create"))
