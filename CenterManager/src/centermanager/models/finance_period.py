@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
@@ -9,6 +10,23 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from centermanager.database.base import Base
 from centermanager.models.mixins import TimestampMixin
+
+
+@dataclass(frozen=True)
+class ResolvedFinancePeriod:
+    """Canonical operating-period bounds resolved from one FinancePeriod config.
+
+    ``FinancePeriod`` remains configuration/lifecycle persistence. This value
+    object represents the exact operating bucket consumed by Wallet/Settlement
+    code and is deliberately not persisted as a second period table.
+    """
+
+    configuration_id: Optional[int]
+    period_start: date
+    period_end: date
+
+    def contains(self, target_date: date) -> bool:
+        return self.period_start <= target_date <= self.period_end
 
 
 class FinancePeriod(Base, TimestampMixin):
@@ -70,7 +88,7 @@ class FinancePeriod(Base, TimestampMixin):
 
 
 class FinancePeriodDefinition:
-    """Pure calculations for calendar-month finance periods."""
+    """Pure calculations for duration-based Finance operating periods."""
 
     @staticmethod
     def add_months(source_date: date, months: int) -> date:
@@ -94,7 +112,6 @@ class FinancePeriodDefinition:
     ) -> tuple[date, date]:
         FinancePeriod.validate_duration(duration_months)
         if target_date < anchor_date:
-            # Historical dates are assigned to the preceding full bucket.
             months = (
                 (anchor_date.year - target_date.year) * 12
                 + anchor_date.month
@@ -116,3 +133,36 @@ class FinancePeriodDefinition:
 
         period_start = cls.add_months(anchor_date, bucket * duration_months)
         return cls.bounds_for(period_start, duration_months)
+
+    @classmethod
+    def resolved_for_configuration(
+        cls, configuration: FinancePeriod, target_date: date
+    ) -> ResolvedFinancePeriod:
+        """Resolve one operating bucket and clamp it to configuration validity.
+
+        Clamping is essential at configuration transitions. For example, a
+        natural 15-Aug..14-Sep bucket becomes 15-Aug..31-Aug when a new
+        configuration takes effect on 1-Sep. Therefore two configurations can
+        never produce overlapping canonical operating periods at their boundary.
+        """
+        if not configuration.contains(target_date):
+            raise ValueError("target_date is outside the FinancePeriod effective range.")
+
+        natural_start, natural_end = cls.period_for_date(
+            configuration.effective_from,
+            target_date,
+            configuration.duration_months,
+        )
+        period_start = max(natural_start, configuration.effective_from)
+        period_end = natural_end
+        if configuration.effective_to is not None:
+            period_end = min(period_end, configuration.effective_to)
+
+        if period_start > period_end or not (period_start <= target_date <= period_end):
+            raise ValueError("Unable to resolve a canonical Finance period for target_date.")
+
+        return ResolvedFinancePeriod(
+            configuration_id=configuration.id,
+            period_start=period_start,
+            period_end=period_end,
+        )

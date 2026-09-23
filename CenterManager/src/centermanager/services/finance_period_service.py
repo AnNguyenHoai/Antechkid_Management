@@ -7,12 +7,16 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
-from centermanager.models.finance_period import FinancePeriod, FinancePeriodDefinition
+from centermanager.models.finance_period import (
+    FinancePeriod,
+    FinancePeriodDefinition,
+    ResolvedFinancePeriod,
+)
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 
 
 class FinancePeriodService:
-    """Admin-managed configuration and pure period calculations for Finance."""
+    """Admin configuration plus canonical Finance operating-period resolution."""
 
     def __init__(
         self,
@@ -24,16 +28,25 @@ class FinancePeriodService:
 
     @require_permission("finance.view")
     def get_active_period(self, on_date: Optional[date] = None) -> Optional[FinancePeriod]:
-        """Resolve the period needed by every Finance read surface.
-
-        Reading the active period is part of the canonical ``finance.view``
-        contract because Dashboard, Income, Expense, Outstanding and Settlement
-        all need it merely to render their data. Administrative period history
-        remains separately guarded by ``finance.period.view`` below.
-        """
+        """Compatibility API returning the configuration effective on a date."""
         target = on_date or date.today()
         with self._session_factory() as session:
             return self._repository_provider.finance_periods(session).get_effective(target)
+
+    @require_permission("finance.view")
+    def resolve_period(self, on_date: Optional[date] = None) -> Optional[ResolvedFinancePeriod]:
+        """Return the exact canonical operating-period bounds for ``on_date``.
+
+        Consumers should use this operation instead of treating a configuration's
+        ``effective_from/effective_to`` as one operating period or inferring
+        month/year boundaries independently.
+        """
+        target = on_date or date.today()
+        with self._session_factory() as session:
+            configuration = self._repository_provider.finance_periods(session).get_effective(target)
+            if configuration is None:
+                return None
+            return FinancePeriodDefinition.resolved_for_configuration(configuration, target)
 
     @require_permission("finance.period.view")
     def list_period_configurations(self) -> List[FinancePeriod]:
@@ -116,6 +129,7 @@ class FinancePeriodService:
 
     @staticmethod
     def get_period_bounds(anchor_date: date, target_date: date, duration_months: int) -> Tuple[date, date]:
+        """Legacy pure helper retained for backward compatibility."""
         return FinancePeriodDefinition.period_for_date(anchor_date, target_date, duration_months)
 
     @staticmethod
