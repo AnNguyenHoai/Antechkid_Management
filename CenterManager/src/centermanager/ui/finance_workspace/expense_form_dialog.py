@@ -27,6 +27,8 @@ class ExpenseFormDialog(QDialog):
         self._expense_id = expense_id
         self._is_edit = expense_id is not None
         self._initial_payment_date = initial_payment_date or date.today()
+        self._loaded_category: Optional[str] = None
+        self._loaded_description: Optional[str] = None
 
         self.setWindowTitle("Edit Expense" if self._is_edit else "Add Expense")
         self.setMinimumWidth(480)
@@ -124,10 +126,19 @@ class ExpenseFormDialog(QDialog):
     def _load_expense(self):
         try:
             exp = self._service.get_expense(self._expense_id)
+            self._loaded_category = exp.category
+            self._loaded_description = exp.description
+
             idx = self.category_combo.findText(exp.category)
-            if idx >= 0:
-                self.category_combo.setCurrentIndex(idx)
-            self.desc_edit.setPlainText(exp.description)
+            if idx < 0:
+                # Preserve unknown legacy categories instead of silently falling
+                # back to the first current category on unrelated edits.
+                self.category_combo.addItem(exp.category)
+                idx = self.category_combo.count() - 1
+            self.category_combo.setCurrentIndex(idx)
+
+            # Legacy rows may predate the current required-description contract.
+            self.desc_edit.setPlainText(exp.description or "")
             self.amount_spin.setValue(exp.amount)
             idx2 = self.method_combo.findData(
                 self._canonical_payment_method(exp.payment_method)
@@ -163,10 +174,23 @@ class ExpenseFormDialog(QDialog):
 
         try:
             if self._is_edit:
+                # Unknown legacy categories are displayable but are not part of
+                # the current validation vocabulary. If unchanged, omit the field
+                # so editing another value does not rewrite/reject the legacy row.
+                category_update = (
+                    None if category == self._loaded_category else category
+                )
+                # A legacy NULL description must remain editable. Preserve it when
+                # the user leaves the empty field untouched; any newly entered text
+                # is validated/persisted normally.
+                description_update = description
+                if self._loaded_description is None and not description:
+                    description_update = None
+
                 self._service.update_expense(
                     expense_id=self._expense_id,
-                    category=category,
-                    description=description,
+                    category=category_update,
+                    description=description_update,
                     amount=amount,
                     payment_method=payment_method,
                     payment_date=payment_date,
