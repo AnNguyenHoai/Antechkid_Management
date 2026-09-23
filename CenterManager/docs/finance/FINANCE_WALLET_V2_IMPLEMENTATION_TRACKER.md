@@ -6,11 +6,11 @@
 
 | Field | Value |
 |---|---|
-| Base | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
+| Base | `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
-| Current phase | `FW2-01 — Canonical FinancePeriod Foundation` |
-| Current task | `FW2-01.2 — Canonical resolved-period resolver` |
-| Last completed | `FW2-01.1 — Period model reconciliation` |
+| Current phase | `FW2-02 — Expense Period Assignment` |
+| Current task | `FW2-02 runtime verification / reconciliation follow-up` |
+| Last completed | `FW2-01 — Canonical FinancePeriod Foundation` |
 | Last updated | `2026-09-23` |
 
 Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] BLOCKED` · `[-] SKIPPED`.
@@ -20,7 +20,7 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 1. Canonical accounting bucket is the **existing FinancePeriod**, resolved to exact inclusive bounds. It is not necessarily a calendar month.
 2. Do not create a parallel `FinanceWalletPeriod` calendar-month table.
 3. Mid-month anchors and `duration_months > 1` remain valid domain behavior.
-4. Canonical resolver must clamp a natural bucket to the owning configuration's effective range so configuration transitions cannot overlap.
+4. Canonical resolver clamps a natural bucket to the owning configuration effective range so transitions cannot overlap.
 5. Every realized Income/Expense must resolve to exactly one covering FinancePeriod before persistence succeeds.
 6. Future ACTIVE Income and future COMPLETED Expense are prohibited. Planned money is not realized ledger money.
 7. `Settlement.CONFIRMED` closes the resolved FinancePeriod ledger for normal mutation. Do not overload `FinancePeriod.status` with OPEN/FINALIZED.
@@ -32,8 +32,8 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 
 | Status | ID | Outcome |
 |---|---|---|
-| `[>]` | FW2-01 | Canonical FinancePeriod resolution foundation |
-| `[ ]` | FW2-02 | Expense canonical period assignment + future realized validation |
+| `[x]` | FW2-01 | Canonical FinancePeriod resolution foundation |
+| `[>]` | FW2-02 | Expense canonical period assignment + future realized validation |
 | `[ ]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date |
 | `[ ]` | FW2-04 | Closed-period service guard |
 | `[ ]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
@@ -43,70 +43,44 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 | `[ ]` | FW2-09 | Backfill/reconciliation/migration exceptions |
 | `[ ]` | FW2-10 | Cross-surface regression and production release gate |
 
-## FW2-01 — Canonical FinancePeriod Foundation
+## FW2-01 — Canonical FinancePeriod Foundation — `[x] DONE`
 
-### `[x] FW2-01.1` Reconcile persistence/domain model
+### `[x] FW2-01.1` Persistence/domain reconciliation
+Existing `FinancePeriod` retained; no parallel Wallet-period table.
 
-Decision: reuse existing `FinancePeriod` / `finance_periods`; no new Wallet-period table.
+### `[x] FW2-01.2` Canonical resolved-period resolver
+`ResolvedFinancePeriod` + effective-range-clamped resolution implemented. Normal, mid-month, multi-month, leap/end-of-month and transition semantics covered.
 
-Evidence: `FW2_01_1_PERIOD_MODEL_RECONCILIATION.md`.
+### `[x] FW2-01.3` Runtime regression tests
+Runtime pytest reported PASS by repository owner on 2026-09-23.
 
-Acceptance:
+### `[x] FW2-01.4` Phase review
+- [x] exact selected bounds available through `FinancePeriodService.resolve_period()`;
+- [x] canonical identity no longer requires Month/Year inference;
+- [x] F-20 transition overlap closed by clamping;
+- [x] FW2-01 runtime tests green.
 
-- [x] current SQLAlchemy model mapped;
-- [x] Alembic lineage mapped (`1e10a009` foundation);
-- [x] repository/service architecture mapped;
-- [x] no destructive conflict with historical FinancePeriod;
-- [x] schema compatibility path documented;
-- [x] initial tracker errors identified and corrected.
+## FW2-02 — Expense Period Assignment — `[>] CURRENT`
 
-Implementation note: FW2-01.1 is a design/persistence reconciliation gate; intentionally no production schema/code mutation is required.
+### Implemented on `finance-wallet-v2-fw2-02`
 
-### `[>] FW2-01.2` Implement canonical resolved-period resolver
+- [x] add nullable `Expense.finance_period_id` FK bridge; nullable preserves legacy rows until FW2-09 reconciliation;
+- [x] Alembic `1e10a026` migration from current `1e10a025` head;
+- [x] require unique covering FinancePeriod for new/updated COMPLETED Expense;
+- [x] reject future COMPLETED Expense;
+- [x] allow future PENDING as non-realized;
+- [x] recompute assignment from final date/status on update;
+- [x] ambiguous overlapping configurations fail explicitly instead of silently choosing one;
+- [x] missing period fails realized posting;
+- [x] post-commit timeline/event failures are best-effort and no longer report committed money mutation as failed;
+- [x] focused rule regressions added.
 
-Target result:
+### Remaining before phase closure
 
-```text
-target date
-  → effective FinancePeriod configuration
-  → natural bucket from effective_from + duration_months
-  → clamp to owning configuration effective_from/effective_to
-  → exact canonical period_start/period_end
-```
-
-Required coverage:
-
-- [ ] normal bucket;
-- [ ] mid-month bucket;
-- [ ] duration > 1 month;
-- [ ] leap-year behavior;
-- [ ] configuration transition truncates previous bucket;
-- [ ] no overlap across transition;
-- [ ] historical INACTIVE configuration remains resolvable by date;
-- [ ] date with no configuration resolves none/validation failure according to caller contract.
-
-### `[ ] FW2-01.3` Runtime regression tests
-
-Tests must execute model/repository/service behavior; source-token assertions are insufficient.
-
-### `[ ] FW2-01.4` Phase review
-
-- [ ] all Finance period consumers can receive exact selected bounds;
-- [ ] Month/Year inference is no longer required as canonical identity;
-- [ ] F-20 overlap case is closed;
-- [ ] all FW2-01 tests green.
-
-## FW2-02 — Expense Period Assignment
-
-- [ ] add canonical period assignment bridge/FK according to approved migration shape;
-- [ ] require unique covering FinancePeriod for COMPLETED Expense;
-- [ ] reject future COMPLETED Expense;
-- [ ] allow future PENDING only as non-realized;
-- [ ] recompute assignment when date changes;
-- [ ] legacy deterministic backfill support;
-- [ ] ambiguous rows become migration exceptions;
-- [ ] fix post-commit false-failure boundary;
-- [ ] runtime regressions.
+- [>] run migration + focused/full pytest on branch;
+- [ ] verify repository integration with real SQLite/PostgreSQL test session;
+- [ ] leave bulk legacy deterministic backfill to FW2-09 as planned;
+- [ ] record runtime evidence and close FW2-02 if green.
 
 ## FW2-03 — Income Period & Realized Semantics
 
@@ -166,8 +140,7 @@ Tests must execute model/repository/service behavior; source-token assertions ar
 - [ ] export uses same period context;
 - [ ] capability projection matches service capability;
 - [ ] closed period disables normal mutation controls;
-- [ ] service remains authoritative;
-- [ ] legacy Finance UI production debt handled without changing accounting rules.
+- [ ] service remains authoritative.
 
 ## FW2-09 — Backfill & Reconciliation
 
@@ -196,15 +169,19 @@ Tests must execute model/repository/service behavior; source-token assertions ar
 |---|---|---|
 | 2026-09-23 | Existing `FinancePeriod` remains the canonical period domain. | FINAL |
 | 2026-09-23 | Do not create `FinanceWalletPeriod`. | FINAL |
-| 2026-09-23 | Resolved bucket must be clamped to configuration effective bounds. | FINAL |
+| 2026-09-23 | Resolved bucket is clamped to configuration effective bounds. | FINAL |
 | 2026-09-23 | Settlement confirmation owns ledger closure; `FinancePeriod.status` remains configuration lifecycle. | FINAL |
 | 2026-09-23 | `Class.fee` is per canonical FinancePeriod, not per calendar month. | FINAL |
 | 2026-09-23 | Future realized postings are rejected, not treated as planned actuals. | FINAL |
+| 2026-09-23 | Expense FK remains nullable during rollout; service requires it for new realized postings, FW2-09 owns legacy reconciliation. | FINAL |
+| 2026-09-23 | Ambiguous period coverage is a hard validation failure for new realized postings. | FINAL |
 
 ## Implementation journal
 
-### 2026-09-23 — FW2-01.1 completed
+### 2026-09-23 — FW2-02 implementation started from new main base
 
-Reviewed the approved Domain Spec against the actual `FinancePeriod` model, repository, service and Alembic foundation. The first tracker incorrectly proposed a separate calendar-month Wallet period. FW2-01.1 corrects that direction: reuse the existing effective-dated FinancePeriod architecture and make the resolved exact bucket canonical. No production schema change is required for this reconciliation task.
+Base rebased to `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4`, which is merge PR #332 and already contains FW2-01 implementation. Created `finance-wallet-v2-fw2-02`. Added Expense period FK/migration, deterministic unique-period assignment, future-realized guard, reassignment on date/status change, best-effort post-commit projections, and focused regressions. Runtime verification remains before marking FW2-02 DONE.
 
-**Next:** FW2-01.2 — implement effective-range-clamped canonical resolver and close audit F-20.
+### 2026-09-23 — FW2-01 completed
+
+FW2-01.1 reconciliation, FW2-01.2 resolver, and FW2-01.3 runtime regression were completed. Owner reported pytest PASS. Phase review confirms exact canonical bounds are available and F-20 is closed.

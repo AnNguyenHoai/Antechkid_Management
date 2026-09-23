@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import String, Float, Date, Text, DateTime
+from sqlalchemy import String, Float, Date, Text, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from centermanager.database.base import Base
@@ -20,6 +20,12 @@ class Expense(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="Pending")
     paid_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    finance_period_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("finance_periods.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
