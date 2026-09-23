@@ -217,13 +217,16 @@ class FinanceDashboardPage(QWidget):
 
     def _update_expense_table(self, expenses: list) -> None:
         self._expense_ids = [expense.id for expense in expenses]
-        data = [{
-            "payment_date": exp.payment_date.strftime("%d/%m/%Y"),
-            "category": exp.category,
-            "description": exp.description[:40] + ("..." if len(exp.description) > 40 else ""),
-            "amount": f"{exp.amount:,.0f}",
-            "status": exp.status,
-        } for exp in expenses]
+        data = []
+        for exp in expenses:
+            description = exp.description or ""
+            data.append({
+                "payment_date": exp.payment_date.strftime("%d/%m/%Y"),
+                "category": exp.category or "-",
+                "description": description[:40] + ("..." if len(description) > 40 else ""),
+                "amount": f"{exp.amount:,.0f}",
+                "status": exp.status or "-",
+            })
         self.expense_table.set_data(data, len(data))
 
     def _on_income_row_double_clicked(self, row: int) -> None:
