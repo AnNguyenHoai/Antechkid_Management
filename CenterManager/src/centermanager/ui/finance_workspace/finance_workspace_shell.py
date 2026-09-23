@@ -273,6 +273,7 @@ class FinanceWorkspaceShell(QWidget):
                 config.effective_from,
                 target_date,
                 config.duration_months,
+                config.effective_to,
             )
             self.period_label.setText(
                 f"{period_start:%d/%m/%Y} - {period_end:%d/%m/%Y}"
