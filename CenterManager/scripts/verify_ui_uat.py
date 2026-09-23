@@ -49,7 +49,12 @@ def _resolve_screenshot(evidence_file: Path, raw_path: str) -> Path:
 
 
 def verify_evidence(data: dict[str, Any], evidence_file: Path) -> list[str]:
-    """Return validation errors. An empty list means PASS."""
+    """Validate evidence structure and scenario screenshots.
+
+    Release provenance binding is intentionally handled separately by
+    :func:`verify_release_binding` so callers that only validate an evidence draft
+    can still reuse this structural checker. The CLI always runs both checks.
+    """
     errors: list[str] = []
 
     if data.get("schema") != SCHEMA:
@@ -145,9 +150,48 @@ def verify_evidence(data: dict[str, Any], evidence_file: Path) -> list[str]:
     return errors
 
 
+def verify_release_binding(
+    data: dict[str, Any],
+    *,
+    expected_source_commit: str,
+    expected_build_version: str,
+) -> list[str]:
+    """Bind UAT evidence to the exact release candidate being accepted."""
+    errors: list[str] = []
+
+    expected_commit = expected_source_commit.strip().lower()
+    if not _SHA40.fullmatch(expected_commit):
+        errors.append("expected_source_commit must be a lowercase 40-character Git SHA")
+
+    expected_version = expected_build_version.strip()
+    if not expected_version:
+        errors.append("expected_build_version is required")
+
+    evidence_commit = str(data.get("source_commit", "")).strip().lower()
+    if _SHA40.fullmatch(expected_commit) and _SHA40.fullmatch(evidence_commit):
+        if evidence_commit != expected_commit:
+            errors.append("source_commit does not match the expected release commit")
+
+    evidence_version = str(data.get("build_version", "")).strip()
+    if expected_version and evidence_version and evidence_version != expected_version:
+        errors.append("build_version does not match the expected release version")
+
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("evidence", type=Path, help="Path to completed UI-PROD-10 evidence JSON")
+    parser.add_argument(
+        "--expected-source-commit",
+        required=True,
+        help="Exact 40-character Git SHA for the release candidate under UAT",
+    )
+    parser.add_argument(
+        "--expected-build-version",
+        required=True,
+        help="Exact application build version for the release candidate under UAT",
+    )
     args = parser.parse_args()
 
     try:
@@ -157,6 +201,13 @@ def main() -> int:
         return 2
 
     errors = verify_evidence(data, args.evidence)
+    errors.extend(
+        verify_release_binding(
+            data,
+            expected_source_commit=args.expected_source_commit,
+            expected_build_version=args.expected_build_version,
+        )
+    )
     if errors:
         print("UI-PROD-10 UAT FAIL")
         for error in errors:

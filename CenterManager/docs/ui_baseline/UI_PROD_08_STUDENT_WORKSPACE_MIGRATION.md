@@ -6,6 +6,12 @@
 - Prerequisite: UI-PROD-07 Feedback & State UX is merged.
 - Scope: Student Workspace only. Other workspaces are intentionally unchanged.
 
+### Scope supersession
+
+This final UI-PROD-08 scope **supersedes** earlier planning copy in UI-PROD-06/UI-PROD-07 that described UI-PROD-08 as the migration task for every operational workspace. The implemented and accepted UI-PROD-08 vertical slice is Student-only.
+
+Teacher, Class, Finance, Employee and Admin page-body migrations are not implied to be complete by UI-PROD-08 or UI-PROD-10. They belong to a later workspace-migration wave and may reuse the Design System V2, shell, data-heavy, form/detail and feedback contracts established here.
+
 ## Goal
 
 Move the Student operational journey from mixed legacy presentation to Design System V2 and the UI-PROD-07 feedback/state contracts without changing Student domain ownership or service APIs.

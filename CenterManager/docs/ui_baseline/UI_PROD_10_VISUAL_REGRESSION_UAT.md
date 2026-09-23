@@ -45,13 +45,17 @@ Required scenarios:
 9. `loading-empty-error-permission`
 10. `window-restore-overflow-focus`
 
-Final verification:
+Final verification must bind the evidence to the **exact release candidate** being accepted:
 
 ```powershell
-python scripts/verify_ui_uat.py path\to\evidence.json
+python scripts/verify_ui_uat.py path\to\evidence.json `
+  --expected-source-commit <EXACT_40_CHAR_RELEASE_SHA> `
+  --expected-build-version <EXACT_RELEASE_VERSION>
 ```
 
-The verifier fails unless all ten scenario IDs appear exactly once, all are `PASS`, source/build provenance is present, required resolution/scale checks are satisfied, and every screenshot is a real in-directory PNG suitable for review.
+The verifier fails unless all ten scenario IDs appear exactly once, all are `PASS`, required resolution/scale checks are satisfied, every screenshot is a real in-directory PNG suitable for review, and the evidence `source_commit` / `build_version` exactly match the expected release values supplied by the operator.
+
+A structurally valid evidence file from a different build is therefore not acceptable release evidence.
 
 ## Defect handling
 A physical UAT failure is not hidden by updating the baseline. Classify it first as environment/data issue, intentional approved visual change, or production defect. A production defect gets a separate fix plus a regression test. An intentional UI change updates the baseline only in the same reviewed PR that explains the visual change.
@@ -68,5 +72,5 @@ A physical UAT failure is not hidden by updating the baseline. Classify it first
 - semantic baseline tests pass on Windows CI;
 - visual evidence artifact is uploaded by the pytest workflow;
 - physical UAT checklist and evidence template are explicit;
-- evidence verifier is fail-closed and regression tested;
+- evidence verifier is fail-closed, binds evidence to the exact expected source commit/build version, and is regression tested;
 - full pytest suite passes.
