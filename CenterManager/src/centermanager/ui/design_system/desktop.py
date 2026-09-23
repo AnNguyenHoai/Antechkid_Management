@@ -14,7 +14,7 @@ from PySide6.QtCore import QEvent, QObject, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QResizeEvent
 from PySide6.QtWidgets import QLabel, QMainWindow, QSizePolicy, QWidget
 
-from .tokens import COLORS, FONT_FAMILY, RADIUS, SPACING, TYPOGRAPHY
+from .tokens import COLORS, COMPONENT_METRICS, FONT_FAMILY, RADIUS, SPACING, TYPOGRAPHY
 
 _SETTINGS_ORGANIZATION = "AnTechKids"
 _SETTINGS_APPLICATION = "CenterManager"
@@ -97,7 +97,7 @@ def desktop_stylesheet() -> str:
         QMenu {{
             background: {COLORS['surface_page']};
             color: {COLORS['text_primary']};
-            border: 1px solid {COLORS['border_default']};
+            border: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
             border-radius: {RADIUS['md']}px;
             padding: {SPACING['xs']}px;
             font-family: {FONT_FAMILY};
@@ -115,7 +115,7 @@ def desktop_stylesheet() -> str:
             color: {COLORS['text_disabled']};
         }}
         QMenu::separator {{
-            height: 1px;
+            height: {COMPONENT_METRICS['border_width']}px;
             background: {COLORS['border_subtle']};
             margin: {SPACING['xs']}px {SPACING['sm']}px;
         }}
