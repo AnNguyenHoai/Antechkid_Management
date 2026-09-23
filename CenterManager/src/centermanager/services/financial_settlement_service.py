@@ -64,10 +64,11 @@ class FinancialSettlementService:
         config = self._repository_provider.finance_periods(session).get_effective(target_date)
         if config is None:
             raise ValueError("Finance period is not configured for the selected date.")
-        return FinancePeriodDefinition.period_for_date(
+        return FinancePeriodDefinition.period_for_configuration(
             config.effective_from,
             target_date,
             config.duration_months,
+            config.effective_to,
         )
 
     @staticmethod
