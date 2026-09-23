@@ -3,7 +3,8 @@
 
 UI-PROD-03 keeps application-wide state in one top bar and page-local context
 inside workspace headers. UI-PROD-07 adds the canonical application feedback
-region while preserving the existing shell/transaction compatibility aliases.
+region. UI-PROD-09 adds desktop overflow and window polish without changing the
+existing shell/transaction compatibility contracts.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.ui.design_system.desktop import ElidedLabel, install_desktop_polish
 from centermanager.ui.design_system.feedback import (
     FeedbackController,
     FeedbackHost,
@@ -52,8 +54,8 @@ class Breadcrumbs(QWidget):
         self.home_button.clicked.connect(self.home_clicked.emit)
         self._layout.addWidget(self.home_button)
 
-        self._workspace_label = QLabel()
-        self._page_label_widget = QLabel()
+        self._workspace_label = ElidedLabel()
+        self._page_label_widget = ElidedLabel()
         for label in (self._workspace_label, self._page_label_widget):
             label.setStyleSheet(
                 f"color: {COLORS['text_muted']}; font-family: {FONT_FAMILY}; "
@@ -91,6 +93,7 @@ class ApplicationTopBar(QFrame):
     The first row preserves the UI-PROD-03 top-bar contract. ``FeedbackHost``
     lives directly below that row and is hidden when idle, so existing layouts
     retain their 60px shell height until feedback or an operation is active.
+    Long desktop metadata is visually elided rather than forcing shell overflow.
     """
 
     start_edit_requested = Signal()
@@ -145,8 +148,10 @@ class ApplicationTopBar(QFrame):
         meta_separator.setStyleSheet(f"color: {COLORS['border_default']};")
         layout.addWidget(meta_separator)
 
-        self.version_label = QLabel(f"Runtime: {runtime_version}" if runtime_version else "Runtime")
-        self.sync_label = QLabel(f"Sync: {sync_status}")
+        self.version_label = ElidedLabel(
+            f"Runtime: {runtime_version}" if runtime_version else "Runtime"
+        )
+        self.sync_label = ElidedLabel(f"Sync: {sync_status}")
         for label in (self.version_label, self.sync_label):
             label.setStyleSheet(
                 f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;"
@@ -157,10 +162,12 @@ class ApplicationTopBar(QFrame):
 
         self.mode_badge = Badge("Mode: READ", tone="neutral")
         self.editor_badge = Badge("No active editor", tone="neutral")
+        self.mode_badge.setAccessibleName("Application editing mode")
+        self.editor_badge.setAccessibleName("Active editor status")
         layout.addWidget(self.mode_badge)
         layout.addWidget(self.editor_badge)
 
-        self.transaction_label = QLabel("Ready")
+        self.transaction_label = ElidedLabel("Ready")
         self.transaction_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;"
         )
@@ -169,6 +176,9 @@ class ApplicationTopBar(QFrame):
         self.start_edit_button = Button("Start editing", variant="primary", size="sm")
         self.finish_edit_button = Button("Finish editing", variant="accent", size="sm")
         self.cancel_edit_button = Button("Cancel request", variant="ghost", size="sm")
+        self.start_edit_button.setAccessibleName("Start editing")
+        self.finish_edit_button.setAccessibleName("Finish editing")
+        self.cancel_edit_button.setAccessibleName("Cancel editing request")
         self.finish_edit_button.setVisible(False)
         self.cancel_edit_button.setVisible(False)
         self.start_edit_button.clicked.connect(self.start_edit_requested.emit)
@@ -186,12 +196,12 @@ class ApplicationTopBar(QFrame):
         user_layout = QVBoxLayout()
         user_layout.setContentsMargins(0, 0, 0, 0)
         user_layout.setSpacing(0)
-        self.user_label = QLabel(user_name)
+        self.user_label = ElidedLabel(user_name)
         self.user_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body_small']}px; "
             f"font-weight: {FONT_WEIGHTS['semibold']};"
         )
-        self.role_label = QLabel(role_name or "User")
+        self.role_label = ElidedLabel(role_name or "User")
         self.role_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;"
         )
@@ -239,6 +249,12 @@ class ApplicationTopBar(QFrame):
         # contract without fixing the maximum height: FeedbackHost can still make
         # the shell grow naturally when feedback or busy state becomes visible.
         self.resize(self.width(), COMPONENT_METRICS["app_top_bar_height"])
+
+        # UI-PROD-09 is installed from the application shell so MainWindow's
+        # transaction/close behavior stays untouched. Standalone top-bar tests
+        # are intentionally a no-op because their top-level widget is not a
+        # QMainWindow.
+        install_desktop_polish(self.window())
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         self.mode_badge.setText(f"Mode: {mode}")
