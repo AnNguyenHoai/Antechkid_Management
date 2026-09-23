@@ -121,6 +121,15 @@ class FinancePeriodService:
         duration_months: int,
         effective_to: Optional[date] = None,
     ) -> Tuple[date, date]:
+        # Keep the historical three-argument helper as a pure bucket
+        # calculation. Production callers that own a FinancePeriod
+        # configuration pass effective_to to enforce lifecycle clipping.
+        if effective_to is None:
+            return FinancePeriodDefinition.period_for_date(
+                anchor_date,
+                target_date,
+                duration_months,
+            )
         return FinancePeriodDefinition.period_for_configuration(
             anchor_date,
             target_date,
