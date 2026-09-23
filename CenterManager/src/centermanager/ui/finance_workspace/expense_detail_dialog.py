@@ -68,15 +68,15 @@ class ExpenseDetailDialog(QDialog):
     def _load_data(self):
         try:
             exp = self._service.get_expense(self._expense_id)
-            self.category_label.setText(exp.category)
-            self.desc_label.setText(exp.description)
+            self.category_label.setText(exp.category or "-")
+            self.desc_label.setText(exp.description or "-")
             self.amount_label.setText(f"{exp.amount:,.0f} VND")
-            self.method_label.setText(exp.payment_method)
+            self.method_label.setText(exp.payment_method or "-")
             self.date_label.setText(exp.payment_date.strftime("%d/%m/%Y"))
             self.paid_by_label.setText(exp.paid_by or "-")
-            self.status_label.setText(exp.status)
+            self.status_label.setText(exp.status or "-")
             self.note_label.setText(exp.note or "-")
-        except Exception as e:
+        except Exception:
             logger.exception("Load detail error")
             QMessageBox.critical(self, "Error", "Could not load expense")
             self.reject()
