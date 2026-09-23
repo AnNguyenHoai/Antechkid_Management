@@ -23,6 +23,8 @@ class WorkspaceHeader(QWidget):
 
     Existing ``set_context`` and ``home_btn`` contracts are preserved so
     workspace navigation logic can migrate without behavioural changes.
+    UI-PROD-09 lets the header grow with desktop typography instead of clipping
+    it into a fixed-height prototype frame.
     """
 
     back_home_clicked = Signal()
@@ -40,7 +42,7 @@ class WorkspaceHeader(QWidget):
 
     def _setup_ui(self) -> None:
         self.setObjectName("WorkspacePageHeader")
-        self.setFixedHeight(COMPONENT_METRICS["page_header_height"])
+        self.setMinimumHeight(COMPONENT_METRICS["page_header_height"])
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             f"""
@@ -62,9 +64,10 @@ class WorkspaceHeader(QWidget):
         layout.addWidget(self.breadcrumbs)
 
         self.page_title_label = QLabel(self._current_page or self._workspace_name, self)
+        self.page_title_label.setAccessibleName("Current page")
         self.page_title_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-family: {FONT_FAMILY}; "
-            f"font-size: {TYPOGRAPHY['section_title']}px; font-weight: {FONT_WEIGHTS['semibold']}; border: none;"
+            f"font-size: {TYPOGRAPHY['page_title']}px; font-weight: {FONT_WEIGHTS['semibold']}; border: none;"
         )
         layout.addWidget(self.page_title_label)
 
