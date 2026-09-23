@@ -43,7 +43,7 @@ class WorkspaceHeader(QWidget):
     def _setup_ui(self) -> None:
         self.setObjectName("WorkspacePageHeader")
         self.setMinimumHeight(COMPONENT_METRICS["page_header_height"])
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             f"""
             QWidget#WorkspacePageHeader {{
