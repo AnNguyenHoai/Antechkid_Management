@@ -3,6 +3,13 @@
 ## Setup
 Run against the exact release candidate/source commit being accepted. Use disposable/demo data only. Record the exact source commit and build version in the evidence JSON. Keep screenshots in the same evidence directory; do not commit screenshots that contain real student information.
 
+Before testing, record two expected release values from the release candidate being accepted:
+
+- exact 40-character source commit SHA;
+- exact application build version.
+
+These values are supplied separately to the final verifier so an evidence file from another build cannot pass merely because its provenance fields are well-formed.
+
 For each scenario: perform the observations, capture one representative PNG, mark the scenario `PASS` only when every item succeeds, and add notes for anything unusual.
 
 ## 1. shell-1366x768 — 100%
@@ -60,6 +67,15 @@ For each scenario: perform the observations, capture one representative PNG, mar
 
 ## Final gate
 1. All ten evidence records are `PASS` and point to unique PNG screenshots.
-2. Run `python scripts/verify_ui_uat.py <evidence.json>` and obtain `UI-PROD-10 UAT PASS`.
-3. Full pytest / visual regression CI is green for the same source commit.
-4. Any production defect is fixed separately with regression coverage; do not simply move the visual baseline.
+2. Run:
+
+   ```powershell
+   python scripts/verify_ui_uat.py <evidence.json> `
+     --expected-source-commit <EXACT_40_CHAR_RELEASE_SHA> `
+     --expected-build-version <EXACT_RELEASE_VERSION>
+   ```
+
+   and obtain `UI-PROD-10 UAT PASS`.
+3. Confirm the verifier output source commit/build version are the exact release candidate being accepted.
+4. Full pytest / visual regression CI is green for the same source commit.
+5. Any production defect is fixed separately with regression coverage; do not simply move the visual baseline.
