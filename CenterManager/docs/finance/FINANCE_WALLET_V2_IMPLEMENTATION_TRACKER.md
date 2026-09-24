@@ -10,7 +10,7 @@
 | Current implementation base | `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
 | Current phase | `FW2-06 — Wallet Accounting` |
-| Current task | `FW2-06 implementation / full regression` |
+| Current task | `FW2-06 CI audit/fix and full regression` |
 | Last completed | `FW2-05 — Settlement Lifecycle` |
 | Last updated | `2026-09-24` |
 
@@ -124,12 +124,14 @@ Merged as `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` after GitHub Act
 - [x] unknown historical Wallet alias causes live accounting/reconciliation to fail explicitly instead of silently dropping money;
 - [x] Settlement consumes the same WalletService mapping/aggregation contract;
 - [x] Settlement keeps `realized_only=True` explicit to preserve FW2-05 regression/ownership boundary;
-- [x] focused FW2-06 regression tests added for aliases, canonical writes, balance equations, repository compatibility and unknown-alias failure.
+- [x] focused FW2-06 regression tests added for aliases, canonical writes, balance equations, repository compatibility and unknown-alias failure;
+- [x] architecture service inventory registers `wallet_service.py` as provider-backed PASS;
+- [x] legacy Settlement `_method_bucket()` compatibility surface delegates to the canonical Wallet resolver rather than duplicating alias mapping;
+- [x] stale Expense lifecycle regression expectation updated from presentation labels (`Cash`/`Bank`) to canonical persistence values (`CASH`/`BANK`).
 
 ### Remaining before DONE
 
-- [>] full GitHub Actions pytest suite;
-- [ ] audit any regression failure;
+- [>] rerun full GitHub Actions pytest suite after CI #176 fixes;
 - [ ] mark FW2-06 DONE only after green full suite and review.
 
 ## FW2-07 — Outstanding / Tuition Obligation
@@ -146,7 +148,8 @@ Merged as `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` after GitHub Act
 - [ ] selected period preserved across Finance surfaces;
 - [ ] export uses same period context;
 - [ ] fine-grained capability projection;
-- [ ] closed period disables normal mutation controls while service guard remains authoritative.
+- [ ] closed period disables normal mutation controls while service guard remains authoritative;
+- [ ] realized Expense UI must not offer unsupported `Other` wallet values; unknown historical aliases remain diagnostic/reconciliation concerns.
 
 ## FW2-09 — Backfill & Reconciliation
 
@@ -187,8 +190,13 @@ Merged as `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` after GitHub Act
 | 2026-09-24 | Wallet V2 canonical persistence values are `CASH` and `BANK`; approved legacy aliases remain readable. | FINAL |
 | 2026-09-24 | Unknown Wallet aliases fail live accounting and new-write validation; they are never silently guessed or dropped. | FINAL |
 | 2026-09-24 | Settlement consumes the centralized WalletService while retaining explicit realized-ledger ownership. | FINAL |
+| 2026-09-24 | Legacy Settlement bucket helper may remain temporarily only as a thin delegate to canonical Wallet resolution; duplicate alias tables are prohibited. | FINAL |
 
 ## Implementation journal
+
+### 2026-09-24 — FW2-06 CI audit #1
+
+GitHub Actions **Pytest Suite #176** completed with `4 failed / 1954 passed / 3 skipped`. All focused FW2-06 tests passed. Root causes were integration-contract drift rather than Wallet calculation failures: `wallet_service.py` was missing from the committed EP-ARCH service inventory (two architecture failures), an older Expense lifecycle test still expected presentation labels `Cash`/`Bank` instead of canonical persistence values `CASH`/`BANK`, and a legacy Settlement test still called the removed `_method_bucket()` helper. Fixes register WalletService as provider-backed `PASS`, update the stale persistence expectation, and restore `_method_bucket()` solely as a compatibility shim delegated to the centralized Wallet resolver. FW2-06 remains CURRENT until the rerun is green.
 
 ### 2026-09-24 — FW2-06 implementation started
 
