@@ -51,6 +51,7 @@ from centermanager.models.expense import Expense
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.models.finance_period import FinancePeriod, FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
+from centermanager.models.class_fee_history import ClassFeeHistory
 from centermanager.models.attendance import Attendance, AttendanceStatus
 
 __all__ = [
@@ -103,6 +104,7 @@ __all__ = [
     "FinancePeriod",
     "FinancePeriodDefinition",
     "FinancialSettlement",
+    "ClassFeeHistory",
     "Attendance",
     "AttendanceStatus",
     "ReportCache",

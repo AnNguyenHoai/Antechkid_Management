@@ -5,6 +5,7 @@ from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.models.class_ import Class
 from centermanager.models.student import Student
 from centermanager.models.class_timeline_event import ClassTimelineEventType
@@ -89,6 +90,30 @@ class ClassService:
         next_num = (highest or 0) + 1
         return f"CLS{next_num:03d}"
 
+    @staticmethod
+    def _repo_flush_if_supported(repo) -> None:
+        flush = getattr(repo, "flush", None)
+        if flush is not None:
+            flush()
+
+    @staticmethod
+    def _record_fee_version_if_supported(
+        repo,
+        class_id: int,
+        *,
+        effective_from: date,
+        fee: Optional[int],
+        source: str,
+    ) -> None:
+        recorder = getattr(repo, "add_fee_version", None)
+        if recorder is not None:
+            recorder(
+                class_id,
+                effective_from=effective_from,
+                fee=fee,
+                source=source,
+            )
+
     def _require_active_class(self, class_obj: Optional[Class], class_id: int) -> Class:
         if class_obj is None:
             raise ClassNotFoundError(f"Class {class_id} not found.")
@@ -140,6 +165,15 @@ class ClassService:
             )
             repo = self._repository_provider.classes(session)
             repo.add(class_obj)
+            self._repo_flush_if_supported(repo)
+            if class_obj.id is not None:
+                self._record_fee_version_if_supported(
+                    repo,
+                    class_obj.id,
+                    effective_from=class_obj.start_date or get_clock().today(),
+                    fee=class_obj.fee,
+                    source="CLASS_CREATE",
+                )
             session.commit()
             repo.refresh(class_obj)
 
@@ -206,6 +240,7 @@ class ClassService:
             class_obj = self._require_active_class(class_obj, class_id)
 
             changes = []
+            fee_changed = False
 
             if name is not UNSET:
                 new_val = self._validate_name(name)
@@ -250,12 +285,23 @@ class ClassService:
                 class_obj.status = new_val
             if fee is not UNSET:
                 new_val = fee
-                old_val = class_obj.fee if class_obj.fee is not None else "(none)"
+                old_fee = class_obj.fee
+                old_val = old_fee if old_fee is not None else "(none)"
                 if str(old_val) != str(new_val if new_val is not None else "(none)"):
                     changes.append(f"fee: '{old_val}' -> '{new_val if new_val is not None else '(none)'}'")
+                    fee_changed = True
                 class_obj.fee = new_val
             if not changes:
                 return class_obj
+
+            if fee_changed:
+                self._record_fee_version_if_supported(
+                    repo,
+                    class_obj.id,
+                    effective_from=get_clock().today(),
+                    fee=class_obj.fee,
+                    source="CLASS_FEE_CHANGE",
+                )
 
             session.commit()
             repo.refresh(class_obj)

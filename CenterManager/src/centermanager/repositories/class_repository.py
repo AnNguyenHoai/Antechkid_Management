@@ -2,6 +2,7 @@
 """
 Class repository - data access for Class entity.
 """
+from datetime import date
 from typing import List, Optional
 import re
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 
 from centermanager.models.class_ import Class
+from centermanager.models.class_fee_history import ClassFeeHistory
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.base import BaseRepository
 
@@ -21,46 +23,50 @@ class ClassRepository(BaseRepository[Class]):
         return self._session.query(Class).filter(Class.name == name).first()
 
     def list_active(self) -> List[Class]:
-        return self._session.query(Class).options(
-            joinedload(Class.teachers),
-            joinedload(Class.enrollments)
-        ).filter(
-            Class.deleted_at.is_(None)
-        ).order_by(Class.name).all()
+        return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).filter(Class.deleted_at.is_(None)).order_by(Class.name).all()
 
     def list_archived(self) -> List[Class]:
-        return self._session.query(Class).options(
-            joinedload(Class.teachers),
-            joinedload(Class.enrollments)
-        ).filter(
-            Class.deleted_at.is_not(None)
-        ).order_by(Class.name).all()
+        return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).filter(Class.deleted_at.is_not(None)).order_by(Class.name).all()
 
     def list_all(self) -> List[Class]:
-        return self._session.query(Class).options(
-            joinedload(Class.teachers),
-            joinedload(Class.enrollments)
-        ).order_by(Class.name).all()
+        return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).order_by(Class.name).all()
 
     def get_by_id_with_relations(self, class_id: int) -> Optional[Class]:
-        return self._session.query(Class).options(
-            joinedload(Class.teachers),
-            joinedload(Class.enrollments).joinedload(Enrollment.student)
-        ).filter(Class.id == class_id).first()
+        return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments).joinedload(Enrollment.student)).filter(Class.id == class_id).first()
+
+    def get_fee_version_for_date(self, class_id: int, on_date: date) -> Optional[ClassFeeHistory]:
+        return (
+            self._session.query(ClassFeeHistory)
+            .filter(ClassFeeHistory.class_id == class_id, ClassFeeHistory.effective_from <= on_date)
+            .order_by(ClassFeeHistory.effective_from.desc(), ClassFeeHistory.id.desc())
+            .first()
+        )
+
+    def add_fee_version(
+        self,
+        class_id: int,
+        *,
+        effective_from: date,
+        fee: Optional[int],
+        source: str,
+    ) -> ClassFeeHistory:
+        version = ClassFeeHistory(
+            class_id=class_id,
+            effective_from=effective_from,
+            fee=fee,
+            source=source,
+        )
+        self._session.add(version)
+        return version
+
+    def flush(self) -> None:
+        """Materialize pending Class identity inside the caller transaction."""
+        self._session.flush()
 
     def search_classes(self, query: str) -> List[Class]:
-        q = self._session.query(Class).options(
-            joinedload(Class.teachers),
-            joinedload(Class.enrollments)
-        ).filter(Class.deleted_at.is_(None))
+        q = self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).filter(Class.deleted_at.is_(None))
         if query:
-            q = q.filter(
-                or_(
-                    Class.name.ilike(f"%{query}%"),
-                    Class.course.ilike(f"%{query}%"),
-                    Class.teacher.ilike(f"%{query}%")
-                )
-            )
+            q = q.filter(or_(Class.name.ilike(f"%{query}%"), Class.course.ilike(f"%{query}%"), Class.teacher.ilike(f"%{query}%")))
         return q.all()
 
     def get_highest_class_number(self) -> Optional[int]:

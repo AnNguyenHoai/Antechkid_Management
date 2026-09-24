@@ -255,6 +255,40 @@ class IncomeRepository(BaseRepository[Income]):
             status=Income.STATUS_ACTIVE,
         )
 
+    def aggregate_active_tuition_by_student_class(
+        self,
+        *,
+        finance_period_start: date,
+        date_from: date,
+        date_to: date,
+        income_type: str = "Tuition",
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+    ):
+        """Return complete ACTIVE tuition totals grouped by student/class in SQL."""
+        query = (
+            self._session.query(
+                Income.student_id,
+                Income.class_id,
+                func.coalesce(func.sum(Income.amount), 0),
+            )
+            .filter(
+                Income.deleted_at.is_(None),
+                Income.status == Income.STATUS_ACTIVE,
+                Income.income_type == income_type,
+                Income.finance_period_start == finance_period_start,
+                Income.payment_date >= date_from,
+                Income.payment_date <= date_to,
+                Income.student_id.isnot(None),
+                Income.class_id.isnot(None),
+            )
+        )
+        if student_id is not None:
+            query = query.filter(Income.student_id == student_id)
+        if class_id is not None:
+            query = query.filter(Income.class_id == class_id)
+        return query.group_by(Income.student_id, Income.class_id).all()
+
     def aggregate_active_amounts_by_payment_method(
         self,
         *,
