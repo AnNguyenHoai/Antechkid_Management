@@ -78,26 +78,28 @@ class EnrollmentService:
         """Build an immutable tuition snapshot from the current Class contract.
 
         Mid-course enrollment is explicit: callers provide the first effective
-        session instead of inferring it from calendar dates or existing session
-        rows. The agreed fee is prorated by the effective session range while
-        preserving the Class unit-price basis.
+        class-session ordinal instead of inferring it from dates. Enrollment
+        ``planned_sessions`` is the number of sessions in that student's
+        effective contract, while ``enrolled_from_session``/``until`` retain the
+        corresponding Class session range. This preserves the invariant
+        ``unit_fee = agreed_course_fee / planned_sessions``.
         """
         if not class_obj.has_course_contract:
             raise EnrollmentValidationError(
                 "Class course contract is incomplete; complete tuition terms before enrolling students."
             )
 
-        planned_sessions = int(class_obj.planned_sessions)
+        class_planned_sessions = int(class_obj.planned_sessions)
         effective_until = (
-            planned_sessions if enrolled_until_session is None else enrolled_until_session
+            class_planned_sessions if enrolled_until_session is None else enrolled_until_session
         )
-        if enrolled_from_session < 1 or enrolled_from_session > planned_sessions:
+        if enrolled_from_session < 1 or enrolled_from_session > class_planned_sessions:
             raise EnrollmentValidationError(
-                f"Enrollment start session must be between 1 and {planned_sessions}."
+                f"Enrollment start session must be between 1 and {class_planned_sessions}."
             )
-        if effective_until < enrolled_from_session or effective_until > planned_sessions:
+        if effective_until < enrolled_from_session or effective_until > class_planned_sessions:
             raise EnrollmentValidationError(
-                f"Enrollment end session must be between {enrolled_from_session} and {planned_sessions}."
+                f"Enrollment end session must be between {enrolled_from_session} and {class_planned_sessions}."
             )
 
         try:
@@ -107,18 +109,18 @@ class EnrollmentService:
         if discount < 0:
             raise EnrollmentValidationError("Discount amount cannot be negative.")
 
-        class_fee = Decimal(class_obj.course_fee)
-        unit_fee = _money(class_fee / Decimal(planned_sessions))
         contracted_sessions = effective_until - enrolled_from_session + 1
+        class_fee = Decimal(class_obj.course_fee)
         agreed_course_fee = _money(
-            class_fee * Decimal(contracted_sessions) / Decimal(planned_sessions)
+            class_fee * Decimal(contracted_sessions) / Decimal(class_planned_sessions)
         )
+        unit_fee = _money(agreed_course_fee / Decimal(contracted_sessions))
         if discount > agreed_course_fee:
             raise EnrollmentValidationError("Discount amount cannot exceed the agreed course fee.")
 
         return {
             "agreed_course_fee": agreed_course_fee,
-            "planned_sessions": planned_sessions,
+            "planned_sessions": contracted_sessions,
             "unit_fee": unit_fee,
             "enrolled_from_session": enrolled_from_session,
             "enrolled_until_session": effective_until,
