@@ -84,6 +84,39 @@ class ClassService:
             raise ClassValidationError("Class name is required and cannot be blank.")
         return normalized
 
+    @staticmethod
+    def _validate_course_contract(
+        *,
+        start_date: Optional[date],
+        course_fee: Optional[int],
+        duration_months: Optional[int],
+        planned_sessions: Optional[int],
+        sessions_per_week: Optional[int],
+        require_complete: bool,
+    ) -> None:
+        """Validate the course contract without inventing missing historical data.
+
+        Legacy classes are allowed to remain unresolved while the UI migrates in
+        TUITION-02. As soon as a caller supplies course-contract metadata, the
+        contract must be complete and internally valid.
+        """
+        if course_fee is not None and course_fee < 0:
+            raise ClassValidationError("Course fee cannot be negative.")
+
+        if not require_complete:
+            return
+
+        if start_date is None:
+            raise ClassValidationError("Start date is required for a course contract.")
+        if course_fee is None:
+            raise ClassValidationError("Course fee is required for a course contract.")
+        if duration_months is None or duration_months <= 0:
+            raise ClassValidationError("Duration months must be greater than zero.")
+        if planned_sessions is None or planned_sessions <= 0:
+            raise ClassValidationError("Planned sessions must be greater than zero.")
+        if sessions_per_week is None or sessions_per_week <= 0:
+            raise ClassValidationError("Sessions per week must be greater than zero.")
+
     def _generate_class_code(self, session: Session) -> str:
         repo = self._repository_provider.classes(session)
         highest = repo.get_highest_class_number()
@@ -148,9 +181,31 @@ class ClassService:
         capacity: Optional[int] = None,
         status: str = "ACTIVE",
         fee: Optional[int] = None,
+        course_fee: Optional[int] = None,
+        duration_months: Optional[int] = None,
+        planned_sessions: Optional[int] = None,
+        sessions_per_week: Optional[int] = None,
     ) -> Class:
         norm_name = self._validate_name(name)
         norm_course = self._normalize_text(course)
+
+        # ``fee`` is a temporary compatibility alias. New callers use
+        # ``course_fee``. Keep the legacy shadow synchronized until #350.
+        if course_fee is not None and fee is not None and course_fee != fee:
+            raise ClassValidationError("Legacy fee and course fee cannot disagree.")
+        resolved_course_fee = course_fee if course_fee is not None else fee
+        has_new_contract_input = any(
+            value is not None
+            for value in (course_fee, duration_months, planned_sessions, sessions_per_week)
+        )
+        self._validate_course_contract(
+            start_date=start_date,
+            course_fee=resolved_course_fee,
+            duration_months=duration_months,
+            planned_sessions=planned_sessions,
+            sessions_per_week=sessions_per_week,
+            require_complete=has_new_contract_input,
+        )
 
         with self._session_factory() as session:
             class_code = self._generate_class_code(session)
@@ -161,7 +216,11 @@ class ClassService:
                 end_date=end_date,
                 capacity=capacity,
                 status=status,
-                fee=fee,
+                fee=resolved_course_fee,
+                course_fee=resolved_course_fee,
+                duration_months=duration_months,
+                planned_sessions=planned_sessions,
+                sessions_per_week=sessions_per_week,
             )
             repo = self._repository_provider.classes(session)
             repo.add(class_obj)
@@ -233,6 +292,10 @@ class ClassService:
         capacity: Any = UNSET,
         status: Any = UNSET,
         fee: Any = UNSET,
+        course_fee: Any = UNSET,
+        duration_months: Any = UNSET,
+        planned_sessions: Any = UNSET,
+        sessions_per_week: Any = UNSET,
     ) -> Class:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)
@@ -255,6 +318,36 @@ class ClassService:
                 if old_val != (new_val or "(none)"):
                     changes.append(f"course: '{old_val}' -> '{new_val or '(none)'}'")
                 class_obj.course = new_val
+
+            candidate_start_date = class_obj.start_date if start_date is UNSET else start_date
+            candidate_course_fee = class_obj.course_fee
+            if course_fee is not UNSET:
+                candidate_course_fee = course_fee
+            elif fee is not UNSET:
+                candidate_course_fee = fee
+            candidate_duration = class_obj.duration_months if duration_months is UNSET else duration_months
+            candidate_planned = class_obj.planned_sessions if planned_sessions is UNSET else planned_sessions
+            candidate_weekly = class_obj.sessions_per_week if sessions_per_week is UNSET else sessions_per_week
+
+            if fee is not UNSET and course_fee is not UNSET and fee != course_fee:
+                raise ClassValidationError("Legacy fee and course fee cannot disagree.")
+
+            course_contract_touched = any(
+                value is not UNSET
+                for value in (course_fee, duration_months, planned_sessions, sessions_per_week)
+            )
+            require_complete_contract = course_contract_touched or any(
+                value is not None
+                for value in (candidate_duration, candidate_planned, candidate_weekly)
+            )
+            self._validate_course_contract(
+                start_date=candidate_start_date,
+                course_fee=candidate_course_fee,
+                duration_months=candidate_duration,
+                planned_sessions=candidate_planned,
+                sessions_per_week=candidate_weekly,
+                require_complete=require_complete_contract,
+            )
 
             if start_date is not UNSET:
                 old = class_obj.start_date.strftime("%d/%m/%Y") if class_obj.start_date else "(none)"
@@ -283,14 +376,41 @@ class ClassService:
                 if old_val != new_val:
                     changes.append(f"status: '{old_val}' -> '{new_val}'")
                 class_obj.status = new_val
-            if fee is not UNSET:
-                new_val = fee
-                old_fee = class_obj.fee
+
+            if course_fee is not UNSET or fee is not UNSET:
+                new_val = candidate_course_fee
+                old_fee = class_obj.course_fee
                 old_val = old_fee if old_fee is not None else "(none)"
                 if str(old_val) != str(new_val if new_val is not None else "(none)"):
-                    changes.append(f"fee: '{old_val}' -> '{new_val if new_val is not None else '(none)'}'")
+                    changes.append(
+                        f"course_fee: '{old_val}' -> "
+                        f"'{new_val if new_val is not None else '(none)'}'"
+                    )
                     fee_changed = True
+                class_obj.course_fee = new_val
                 class_obj.fee = new_val
+
+            if duration_months is not UNSET:
+                if class_obj.duration_months != duration_months:
+                    changes.append(
+                        f"duration_months: '{class_obj.duration_months}' -> '{duration_months}'"
+                    )
+                class_obj.duration_months = duration_months
+
+            if planned_sessions is not UNSET:
+                if class_obj.planned_sessions != planned_sessions:
+                    changes.append(
+                        f"planned_sessions: '{class_obj.planned_sessions}' -> '{planned_sessions}'"
+                    )
+                class_obj.planned_sessions = planned_sessions
+
+            if sessions_per_week is not UNSET:
+                if class_obj.sessions_per_week != sessions_per_week:
+                    changes.append(
+                        f"sessions_per_week: '{class_obj.sessions_per_week}' -> '{sessions_per_week}'"
+                    )
+                class_obj.sessions_per_week = sessions_per_week
+
             if not changes:
                 return class_obj
 
