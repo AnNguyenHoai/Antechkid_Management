@@ -1,16 +1,17 @@
 # Finance Wallet V2 — Implementation Tracker
 
-> **Canonical progress/evidence tracker.** `FINANCE_WALLET_V2_DOMAIN_SPEC.md` is the Finance domain source of truth. GitHub Issues are implementation contracts for individual tasks.
+> **Canonical progress tracker.** `FINANCE_WALLET_V2_DOMAIN_SPEC.md` is the domain source of truth; this tracker records implementation state and evidence.
 
 ## Metadata
 
 | Field | Value |
 |---|---|
 | Original baseline | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
-| Last domain implementation merge | `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e` (FW2-07 / PR #339) |
+| Current implementation base | `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
-| Current phase | `FW2-08 — Canonical period selector + capability/state UI projection` |
-| Current implementation contract | GitHub Issue #340 |
+| Settlement auth clarification | `FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md` |
+| Current phase | `FW2-08 — UI Integration` |
+| Current task | `Issue #340 — Canonical FinancePeriod selector + capability/state UI projection` |
 | Last completed | `FW2-07 — Outstanding / Tuition Obligation` |
 | Last updated | `2026-09-24` |
 
@@ -30,21 +31,23 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[x] DONE` · `[!] BLOCKED`.
 10. Wallet V2 has exactly `CASH` and `BANK`; unknown aliases are errors, not guesses.
 11. Services remain authoritative for domain rules; UI only projects them.
 12. Financial totals must be complete and must not depend on arbitrary row caps.
+13. Settlement authorization uses the canonical `Capability` vocabulary; UI-only Settlement permission policy is forbidden.
+14. Settlement view/create/update are persisted capabilities; confirm/reopen are admin-only capabilities.
 
 ## Roadmap
 
-| Status | ID | Outcome | Evidence / Contract |
-|---|---|---|---|
-| `[x]` | FW2-01 | Canonical FinancePeriod resolution foundation | merged implementation |
-| `[x]` | FW2-02 | Expense canonical period assignment + future realized validation | merged implementation |
-| `[x]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date | PR #335 |
-| `[x]` | FW2-04 | Closed-period service guard | merged at `c8dbbeeb...` |
-| `[x]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation | PR #337 / CI #174 / merged at `44b6fb73...` |
-| `[x]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs | PR #338 / merged at `2cd30166...` |
-| `[x]` | FW2-07 | Outstanding/Class.fee historical correctness and obligation semantics | PR #339 / CI #187 / merged at `b2de00a2...` |
-| `[>]` | FW2-08 | Canonical period selector + capability/state UI projection | Issue #340 |
-| `[ ]` | FW2-09 | Backfill/reconciliation/migration exceptions | not started |
-| `[ ]` | FW2-10 | Cross-surface regression and production release gate | not started |
+| Status | ID | Outcome |
+|---|---|---|
+| `[x]` | FW2-01 | Canonical FinancePeriod resolution foundation |
+| `[x]` | FW2-02 | Expense canonical period assignment + future realized validation |
+| `[x]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date |
+| `[x]` | FW2-04 | Closed-period service guard |
+| `[x]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
+| `[x]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs |
+| `[x]` | FW2-07 | Outstanding/Class.fee historical correctness and obligation semantics |
+| `[>]` | FW2-08 | Canonical period selector + capability/state UI projection |
+| `[ ]` | FW2-09 | Backfill/reconciliation/migration exceptions |
+| `[ ]` | FW2-10 | Cross-surface regression and production release gate |
 
 ## Completed phases
 
@@ -61,72 +64,57 @@ Income canonical assignment, future ACTIVE rejection, enrollment-at-date validat
 Central closed-ledger guard implemented for Income/Expense source and destination periods; merged at `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1`.
 
 ### FW2-05 — `[x] DONE`
-Atomic Settlement confirm/reopen, complete aggregation, audit and repository-owned flush completed; PR #337 passed after CI audit and merged at `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570`.
+Atomic Settlement confirm/reopen, complete aggregation, audit and repository-owned flush completed; merged at `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` after Pytest Suite #174 passed.
 
 ### FW2-06 — `[x] DONE`
-Canonical `CASH/BANK` wallet mapping, Wallet DTO/service, legacy alias read compatibility, unknown-alias failure and Settlement integration completed; PR #338 merged at `main_repos@2cd3016631626b9a8f797380e0ce2f66bb8a83be`.
+Canonical `CASH/BANK` wallet mapping, Wallet DTO/service, legacy alias read compatibility, unknown-alias failure and Settlement integration completed. PR #338 passed full regression and merged at `main_repos@2cd3016631626b9a8f797380e0ce2f66bb8a83be`.
 
 ### FW2-07 — `[x] DONE`
-
-Completed behavior:
-
-- Outstanding uses the unique/clamped canonical FinancePeriod resolver and application Clock;
-- billability is enrollment-period overlap rather than current enrollment status;
-- `Class.fee` represents one obligation per student/class/canonical period and is never multiplied by `duration_months`;
-- only qualifying ACTIVE Tuition Income for the same student/class/period reduces obligation;
-- Tuition payment totals use complete SQL aggregation rather than row-count/list loading;
-- append-only `ClassFeeHistory` preserves effective-dated tuition pricing;
-- Class creation/fee edits persist fee history explicitly through service/repository boundaries in the same transaction;
-- migration `1e10a028` establishes fee-history schema and explicit cutover provenance;
-- unknown pre-cutover tuition price history remains an FW2-09 reconciliation concern rather than being back-priced silently;
-- architecture boundary regression was hardened to inspect actual imports instead of false-positive class names in comments.
-
-Evidence:
-
-- PR #339;
-- Pytest Suite #184 exposed one false-positive architecture test, which was corrected;
-- Pytest Suite #187 passed;
-- merged into `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e`.
+Outstanding canonical period semantics, enrollment-overlap billing, complete Tuition Income aggregation and effective-dated `ClassFeeHistory` completed. CI #184 exposed one false-positive architecture text scan; the guard was corrected to inspect real imports. Pytest Suite #187 passed and PR #339 merged at `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e`.
 
 ## FW2-08 — UI Integration — `[>] CURRENT`
 
-Implementation contract: **GitHub Issue #340 — Canonical FinancePeriod Selector & Capability/State UI Projection**.
+Implementation contract: GitHub Issue #340.
 
-Scope includes:
+Approved Settlement authorization clarification:
 
-- selector uses actual FinancePeriod bounds rather than Month/Year identity;
-- selected canonical period is preserved across Finance surfaces/navigation/export;
-- selector changes refresh period-dependent projections coherently;
-- fine-grained capability + collaboration WRITE + domain-state projection;
-- closed periods disable normal realized mutation controls while service guard remains authoritative;
-- Settlement confirm/reopen state is projected correctly;
-- realized write UI exposes canonical `CASH/BANK` wallet values only;
-- realized Expense UI does not offer unsupported `Other` Wallet values;
-- UI does not duplicate canonical Finance business calculations.
+- `finance.settlement.view` — persisted; Finance/Manager/Admin;
+- `finance.settlement.create` — persisted; Finance/Manager/Admin;
+- `finance.settlement.update` — persisted; Finance/Manager/Admin;
+- `finance.settlement.confirm` — admin-only;
+- `finance.settlement.reopen` — admin-only;
+- `FinancialSettlementService` remains authoritative; UI only projects the same decisions;
+- confirm requires the appropriate create/update permission path plus admin-only confirm;
+- reopen requires admin-only reopen plus existing CONFIRMED/reason/audit rules.
 
-Status rule: FW2-08 remains CURRENT until implementation PR, GitHub Actions, independent review and human review are complete.
+Remaining FW2-08 outcomes:
+
+- [ ] selector uses actual FinancePeriod bounds;
+- [ ] selected period preserved across Finance surfaces and export;
+- [ ] fine-grained capability projection;
+- [ ] Settlement service/UI use the approved canonical capabilities;
+- [ ] closed period disables normal mutation controls while service guard remains authoritative;
+- [ ] realized Expense UI does not offer unsupported `Other` Wallet values;
+- [ ] full local regression + GitHub Actions green;
+- [ ] independent review + human review before DONE.
 
 ## FW2-09 — Backfill & Reconciliation
 
-Planned:
-
-- Income/Expense deterministic period assignment backfill;
-- unresolved/ambiguous transaction report;
-- pre-cutover tuition fee-history reconciliation;
-- idempotent reconciliation rerun;
-- confirmed periods never silently mutated;
-- historical Settlement snapshots preserved.
+- [ ] Income/Expense deterministic period assignment backfilled;
+- [ ] unresolved/ambiguous transaction rows reported;
+- [ ] pre-cutover tuition fee history exceptions reconciled explicitly;
+- [ ] reconciliation rerun is idempotent;
+- [ ] confirmed periods are never silently mutated;
+- [ ] historical Settlement snapshots preserved.
 
 ## FW2-10 — Production Gate
 
-Planned:
-
-- cross-surface totals agree;
-- period transition/future posting/closure/reopen regression passes;
-- capability matrix regression passes;
-- high-volume totals prove no truncation;
-- legacy compatibility tests pass;
-- final Finance audit/release gate.
+- [ ] cross-surface totals agree;
+- [ ] period transition/future posting/closure/reopen tests pass;
+- [ ] capability matrix tests pass;
+- [ ] high-volume totals prove no truncation;
+- [ ] legacy compatibility tests pass;
+- [ ] final Finance audit completed.
 
 ## Decision log
 
@@ -143,19 +131,19 @@ Planned:
 | 2026-09-24 | Fee-history writes are explicit application persistence, not ORM mapper side effects. | FINAL |
 | 2026-09-24 | Legacy fee baseline is authoritative from cutover only; it is never silently projected backward. | FINAL |
 | 2026-09-24 | Pre-cutover fee-history ambiguity is an FW2-09 reconciliation concern, not an excuse to rewrite history. | FINAL |
-| 2026-09-24 | Architecture boundary tests should inspect actual dependencies, not comments/string spelling. | FINAL |
-| 2026-09-24 | From FW2-08 onward, implementation is Issue-driven: ChatGPT/Product+Architecture → Issue → Codex developer → CI → independent review → human review. | FINAL |
+| 2026-09-24 | Architecture boundary tests inspect actual imports; class names in comments are not dependencies. | FINAL |
+| 2026-09-24 | Settlement view/create/update are canonical persisted capabilities; confirm/reopen are canonical admin-only capabilities. | FINAL |
 
 ## Implementation journal
 
-### 2026-09-24 — Workflow transition / FW2-08 prepared
+### 2026-09-24 — FW2-08 authorization conflict resolved
 
-PR #339 passed Pytest Suite #187 and merged. Repository-root `AGENTS.md` now defines standing Codex engineering rules. Issue #340 defines FW2-08 implementation scope, acceptance criteria, tests and DoD. ChatGPT/Product+Architecture no longer directly implements normal feature tasks by default; Codex owns developer execution and the resulting PR is independently reviewed before human merge.
+Codex correctly stopped before editing because R6 required fine-grained Settlement capabilities while the canonical registry had none and `FinancialSettlementService` relied on Admin checks. Product/Architecture approved `FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md`: Settlement view/create/update become persisted canonical capabilities, while confirm/reopen become `ADMIN_ONLY_CAPABILITIES`. Finance and Manager can view/save drafts; only Admin can confirm ledger closure or reopen. Service authorization remains authoritative and the UI must project the same decisions.
+
+### 2026-09-24 — FW2-08 workflow transition
+
+The project moved to the Issue-driven flow: Product/Architecture defines the contract, Codex implements from the exact base, local tests and self-review precede PR, GitHub Actions is an independent gate, then independent review and human review precede merge. Root `AGENTS.md` contains the standing developer rules and Issue #340 is the implementation contract.
 
 ### 2026-09-24 — FW2-07 completed
 
-FW2-07 closed after its only CI regression was identified as a false-positive raw-text architecture test. The guard was changed to inspect actual Python imports, full CI #187 passed, and PR #339 merged at `b2de00a2fe934fc43309623266f97f27a7e7da5e`.
-
-### 2026-09-24 — FW2-06 completed
-
-PR #338 passed the full pytest suite after CI audit fixed architecture inventory and legacy compatibility contracts, then merged at `main_repos@2cd3016631626b9a8f797380e0ce2f66bb8a83be`.
+Pytest Suite #187 passed after the CI #184 architecture false-positive fix. PR #339 merged into `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e`.
