@@ -48,16 +48,19 @@ def test_expense_update_is_audited():
     assert 'event_type="ExpenseDeleted"' in source
 
 
-def test_expense_ui_disables_edit_delete_without_write():
+def test_expense_ui_projects_edit_delete_from_write_capability_and_period_state():
     source = Path("src/centermanager/ui/finance_workspace/expense_list_page.py").read_text(encoding="utf-8")
-    assert "edit_action.setEnabled(self._write_enabled)" in source
-    assert "delete_action.setEnabled(self._write_enabled)" in source
+    assert "write_enabled=self._write_enabled" in source
+    assert "domain_allowed=not self._period_closed" in source
+    assert "edit_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))" in source
+    assert "delete_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_DELETE))" in source
 
 
 def test_expense_form_uses_canonical_payment_contract():
     source = Path("src/centermanager/ui/finance_workspace/expense_form_dialog.py").read_text(encoding="utf-8")
-    assert '"Cash"' in source
-    assert '"Bank"' in source
+    assert 'addItem("Cash", "CASH")' in source
+    assert 'addItem("Bank", "BANK")' in source
+    assert 'addItem("Other", "Other")' not in source
     assert "currentData()" in source
 
 

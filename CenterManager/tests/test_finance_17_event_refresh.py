@@ -26,8 +26,8 @@ def test_expense_publishes_after_all_mutations():
 def test_finance_shell_registers_and_refreshes():
     source = Path("src/centermanager/ui/finance_workspace/finance_workspace_shell.py").read_text(encoding="utf-8")
     assert "self._event_bus.register(FinanceDataChanged" in source
-    # EP-FIN-05 refreshes all Finance pages through the shared-period helper so
-    # a finance event cannot accidentally reset one page to a different period.
+    # FW2-08 refreshes all Finance pages through one exact canonical-period
+    # context so a finance event cannot reset one page to a different period.
     assert "def _on_finance_data_changed" in source
     assert "self._refresh_pages([" in source
     assert "self.dashboard_page," in source
@@ -35,10 +35,13 @@ def test_finance_shell_registers_and_refreshes():
     assert "self.expense_page," in source
     assert "self.outstanding_page," in source
     assert "self.settlement_page," in source
-    assert "target_date=target_date" in source
-    assert "period_start=period_start" in source
-    assert "period_end=period_end" in source
-    assert "period_configured=period_configured" in source
+    assert "def _period_context" in source
+    assert '"target_date": target_date' in source
+    assert '"period_start": period_start' in source
+    assert '"period_end": period_end' in source
+    assert '"period_configured": configured' in source
+    assert '"period_closed": closed' in source
+    assert "page.refresh(**context)" in source
 
 
 def test_app_wires_single_event_bus_to_finance_services():

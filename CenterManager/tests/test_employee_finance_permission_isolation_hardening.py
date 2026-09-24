@@ -30,9 +30,12 @@ def test_finance_pages_have_no_constructor_data_refresh():
 def test_finance_shell_authorization_precedes_dashboard_load():
     root = Path(__file__).parents[1]
     text = _source(root / "src/centermanager/ui/finance_workspace/finance_workspace_shell.py")
-    assert "self._authorized = self._has_finance_access()" in text
-    # Unauthorized construction must not navigate to a protected page.
-    assert 'if self._authorized:\n            self.navigate_to("dashboard")' in text
+    authorization = text.index("self._authorized = self._has_finance_access()")
+    guard = text.index("if self._authorized:", authorization)
+    navigation = text.index('self.navigate_to("dashboard")', guard)
+    # Unauthorized construction must not navigate to a protected page. Period
+    # selector initialization may occur inside the same authorized block.
+    assert authorization < guard < navigation
 
 
 def test_employee_attachment_publish_mirror_is_recoverable(tmp_path):

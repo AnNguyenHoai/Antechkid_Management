@@ -10,10 +10,13 @@ from PySide6.QtWidgets import (
     QMenu, QComboBox, QDateEdit, QFileDialog,
 )
 
+from centermanager.core.capabilities import Capability
+from centermanager.core.clock import get_clock
 from centermanager.services.expense_service import ExpenseService
 from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
 from centermanager.ui.finance_workspace.expense_detail_dialog import ExpenseDetailDialog
 from centermanager.platform.collaboration import CollaborationManager
@@ -37,7 +40,8 @@ class ExpenseListPage(QWidget):
         self._sort_by = "payment_date"
         self._sort_ascending = False
         self._write_enabled = False
-        self._target_date = date.today()
+        self._period_closed = False
+        self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
         self._period_end: Optional[date] = None
         self._period_configured = None
@@ -79,12 +83,11 @@ class ExpenseListPage(QWidget):
         filters.addWidget(QLabel("Danh mục:")); filters.addWidget(self.category_combo)
 
         self.method_combo = QComboBox()
-        self.method_combo.addItem("Tất cả hình thức", "")
-        self.method_combo.addItem("TÀI KHOẢN CÁ NHÂN", "Cash")
-        self.method_combo.addItem("TÀI KHOẢN CÔNG TY", "Bank")
-        self.method_combo.addItem("Khác", "Other")
+        self.method_combo.addItem("Tất cả wallet", "")
+        self.method_combo.addItem("Cash", "CASH")
+        self.method_combo.addItem("Bank", "BANK")
         self.method_combo.currentIndexChanged.connect(self._filters_changed)
-        filters.addWidget(QLabel("Hình thức chi:")); filters.addWidget(self.method_combo)
+        filters.addWidget(QLabel("Wallet:")); filters.addWidget(self.method_combo)
 
         self.status_combo = QComboBox()
         self.status_combo.addItem("Tất cả trạng thái", "")
@@ -109,7 +112,7 @@ class ExpenseListPage(QWidget):
             {"key": "category", "label": "Danh mục", "sortable": True},
             {"key": "description", "label": "Nội dung", "sortable": True},
             {"key": "amount", "label": "Số tiền", "sortable": True},
-            {"key": "payment_method", "label": "Hình thức", "sortable": True},
+            {"key": "payment_method", "label": "Wallet", "sortable": True},
             {"key": "paid_by", "label": "Người chi", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
@@ -120,6 +123,7 @@ class ExpenseListPage(QWidget):
         self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
         self.loading = LoadingWidget(); self.loading.setVisible(False); layout.addWidget(self.loading)
+        self._apply_action_state()
 
     def _notify(self, message: str, level: str = "warning") -> None:
         if self._notification_service is not None and hasattr(self._notification_service, "notify"):
@@ -138,7 +142,7 @@ class ExpenseListPage(QWidget):
             previous = widget.blockSignals(True); widget.setDate(self._to_qdate(value)); widget.blockSignals(previous)
 
     def refresh(self, *_args, target_date=None, period_start=None, period_end=None,
-                period_configured=None, **_kwargs) -> None:
+                period_configured=None, period_closed=None, **_kwargs) -> None:
         if target_date is not None:
             self._target_date = target_date
         period_changed = period_start is not None and period_end is not None and (
@@ -146,12 +150,15 @@ class ExpenseListPage(QWidget):
         )
         if period_configured is not None:
             self._period_configured = period_configured
+        if period_closed is not None:
+            self._period_closed = bool(period_closed)
         if period_start is not None and period_end is not None:
             self._period_start, self._period_end = period_start, period_end
             if period_changed:
                 self._reset_date_filters_to_period(); self._current_page = 1
         elif period_configured is False:
-            self._period_start = None; self._period_end = None; self._current_page = 1
+            self._period_start = None; self._period_end = None; self._period_closed = False; self._current_page = 1
+        self._apply_action_state()
         self.loading.setVisible(True)
         try:
             self._load_page()
@@ -162,8 +169,7 @@ class ExpenseListPage(QWidget):
             self.loading.setVisible(False)
 
     def _default_transaction_date(self) -> date:
-        """Choose a create date that belongs to the Finance period being viewed."""
-        today = date.today()
+        today = get_clock().today()
         if self._period_start is None or self._period_end is None:
             return self._target_date or today
         if self._period_start <= today <= self._period_end:
@@ -262,16 +268,35 @@ class ExpenseListPage(QWidget):
     def _on_row_double_clicked(self, row: int) -> None:
         if 0 <= row < len(self._expenses): self._show_detail_dialog(self._expenses[row].id)
 
+    def _can(self, capability) -> bool:
+        return can_mutate(
+            write_enabled=self._write_enabled,
+            capability=capability,
+            domain_allowed=not self._period_closed,
+        )
+
     def _on_context_menu(self, pos, row: int) -> None:
         if row < 0 or row >= len(self._expenses): return
         exp = self._expenses[row]; menu = QMenu(self)
         menu.addAction("Xem", lambda: self._show_detail_dialog(exp.id))
-        edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id)); edit_action.setEnabled(self._write_enabled)
-        delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id)); delete_action.setEnabled(self._write_enabled)
+        edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id)); edit_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
+        delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id)); delete_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_DELETE))
         menu.exec(pos)
 
+    def _ensure_action(self, capability, action: str) -> bool:
+        if not self._can(capability):
+            self._notify(
+                f"Cannot {action} expense: WRITE mode, capability, and an open Finance period are required."
+            )
+            return False
+        if self._collaboration_manager is not None and not self._collaboration_manager.ensure_write():
+            self._notify(f"You must be in WRITE mode to {action} expense.")
+            return False
+        return True
+
     def _show_add_dialog(self) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to add expense."); return
+        if not self._ensure_action(Capability.FINANCE_EXPENSE_CREATE, "add"):
+            return
         dialog = ExpenseFormDialog(
             self._service,
             initial_payment_date=self._default_transaction_date(),
@@ -282,7 +307,8 @@ class ExpenseListPage(QWidget):
             self.refresh()
 
     def _show_edit_dialog(self, expense_id: int) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to edit expense."); return
+        if not self._ensure_action(Capability.FINANCE_EXPENSE_UPDATE, "edit"):
+            return
         dialog = ExpenseFormDialog(self._service, expense_id=expense_id, parent=self)
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted: self.refresh()
 
@@ -290,7 +316,8 @@ class ExpenseListPage(QWidget):
         ExpenseDetailDialog(self._service, expense_id, parent=self).exec()
 
     def _delete_expense(self, expense_id: int) -> None:
-        if not self._collaboration_manager.ensure_write(): self._notify("You must be in WRITE mode to delete expense."); return
+        if not self._ensure_action(Capability.FINANCE_EXPENSE_DELETE, "delete"):
+            return
         if QMessageBox.question(self, "Xác nhận xóa", "Bạn có chắc muốn xóa chi phí này?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self._service.delete_expense(expense_id); self.refresh()
 
@@ -303,5 +330,9 @@ class ExpenseListPage(QWidget):
             self.date_from.setDate(QDate.currentDate().addDays(-30)); self.date_to.setDate(QDate.currentDate())
         self._current_page = 1; self._load_page()
 
+    def _apply_action_state(self) -> None:
+        self.add_btn.setEnabled(self._can(Capability.FINANCE_EXPENSE_CREATE))
+
     def set_write_enabled(self, enabled: bool) -> None:
-        self._write_enabled = bool(enabled); self.add_btn.setEnabled(self._write_enabled)
+        self._write_enabled = bool(enabled)
+        self._apply_action_state()

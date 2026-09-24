@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from centermanager.core.capabilities import Capability
+from centermanager.core.clock import get_clock
 from centermanager.models.income import Income
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.services.class_service import ClassService
@@ -31,6 +33,7 @@ from centermanager.ui.design_system import (
     SecondaryButton,
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.income_detail_dialog import IncomeDetailDialog
 from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
 from centermanager.ui.shared import DataTable, LoadingWidget
@@ -59,7 +62,8 @@ class IncomeListPage(QWidget):
 
         self._incomes = []
         self._write_enabled = False
-        self._target_date = date.today()
+        self._period_closed = False
+        self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
         self._period_end: Optional[date] = None
         self._period_configured = None
@@ -117,11 +121,11 @@ class IncomeListPage(QWidget):
         filters.addWidget(self.type_combo)
 
         self.method_combo = QComboBox()
-        self.method_combo.addItem("Tất cả hình thức", "")
-        for value in ["Cash", "Bank Transfer"]:
-            self.method_combo.addItem(value, value)
+        self.method_combo.addItem("Tất cả wallet", "")
+        self.method_combo.addItem("Cash", "CASH")
+        self.method_combo.addItem("Bank", "BANK")
         self.method_combo.currentIndexChanged.connect(self._filters_changed)
-        filters.addWidget(QLabel("Hình thức:"))
+        filters.addWidget(QLabel("Wallet:"))
         filters.addWidget(self.method_combo)
 
         self.status_combo = QComboBox()
@@ -132,8 +136,6 @@ class IncomeListPage(QWidget):
         filters.addWidget(QLabel("Trạng thái:"))
         filters.addWidget(self.status_combo)
 
-        # The canonical Finance period comes from FinanceWorkspaceShell.
-        # These controls only narrow dates *inside* that shared period.
         self.date_from_edit = QDateEdit()
         self.date_from_edit.setCalendarPopup(True)
         self.date_from_edit.setDisplayFormat("dd/MM/yyyy")
@@ -164,7 +166,7 @@ class IncomeListPage(QWidget):
             {"key": "class_name", "label": "Lớp", "sortable": False},
             {"key": "income_type", "label": "Loại", "sortable": True},
             {"key": "amount", "label": "Số tiền", "sortable": True},
-            {"key": "payment_method", "label": "Hình thức", "sortable": True},
+            {"key": "payment_method", "label": "Wallet", "sortable": True},
             {"key": "payment_period", "label": "Kỳ ghi chú", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": False},
             {"key": "received_by", "label": "Người thu", "sortable": True},
@@ -180,6 +182,7 @@ class IncomeListPage(QWidget):
         self.loading = LoadingWidget()
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
+        self._apply_action_state()
 
     def _notify(self, message: str, level: str = "warning") -> None:
         if self._notification_service is not None and hasattr(
@@ -211,6 +214,7 @@ class IncomeListPage(QWidget):
         period_start=None,
         period_end=None,
         period_configured=None,
+        period_closed=None,
         **_kwargs,
     ) -> None:
         if target_date is not None:
@@ -225,6 +229,8 @@ class IncomeListPage(QWidget):
         )
         if period_configured is not None:
             self._period_configured = period_configured
+        if period_closed is not None:
+            self._period_closed = bool(period_closed)
         if period_start is not None and period_end is not None:
             self._period_start = period_start
             self._period_end = period_end
@@ -234,8 +240,10 @@ class IncomeListPage(QWidget):
         elif period_configured is False:
             self._period_start = None
             self._period_end = None
+            self._period_closed = False
             self._current_page = 1
 
+        self._apply_action_state()
         self.loading.setVisible(True)
         try:
             self._load_page()
@@ -246,8 +254,7 @@ class IncomeListPage(QWidget):
             self.loading.setVisible(False)
 
     def _default_transaction_date(self) -> date:
-        """Choose a create date that belongs to the Finance period being viewed."""
-        today = date.today()
+        today = get_clock().today()
         if self._period_start is None or self._period_end is None:
             return self._target_date or today
         if self._period_start <= today <= self._period_end:
@@ -374,6 +381,13 @@ class IncomeListPage(QWidget):
         if 0 <= row < len(self._incomes):
             self._show_detail_dialog(self._incomes[row].id)
 
+    def _can(self, capability) -> bool:
+        return can_mutate(
+            write_enabled=self._write_enabled,
+            capability=capability,
+            domain_allowed=not self._period_closed,
+        )
+
     def _on_context_menu(self, pos, row: int) -> None:
         if row < 0 or row >= len(self._incomes):
             return
@@ -384,25 +398,30 @@ class IncomeListPage(QWidget):
 
         if income.status == Income.STATUS_ACTIVE:
             edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(income.id))
-            edit_action.setEnabled(self._write_enabled)
+            edit_action.setEnabled(self._can(Capability.FINANCE_INCOME_UPDATE))
             void_action = menu.addAction("Void", lambda: self._void_income(income.id))
-            void_action.setEnabled(self._write_enabled)
+            void_action.setEnabled(self._can(Capability.FINANCE_INCOME_DELETE))
         elif income.status == Income.STATUS_VOIDED:
             delete_action = menu.addAction(
                 "Xóa (soft delete)", lambda: self._delete_income(income.id)
             )
-            delete_action.setEnabled(self._write_enabled)
+            delete_action.setEnabled(self._can(Capability.FINANCE_INCOME_DELETE))
 
         menu.exec(pos)
 
-    def _ensure_write(self, action: str) -> bool:
-        if self._collaboration_manager.ensure_write():
-            return True
-        self._notify(f"You must be in WRITE mode to {action} income.")
-        return False
+    def _ensure_action(self, capability, action: str) -> bool:
+        if not self._can(capability):
+            self._notify(
+                f"Cannot {action} income: WRITE mode, capability, and an open Finance period are required."
+            )
+            return False
+        if self._collaboration_manager is not None and not self._collaboration_manager.ensure_write():
+            self._notify(f"You must be in WRITE mode to {action} income.")
+            return False
+        return True
 
     def _show_add_dialog(self) -> None:
-        if not self._ensure_write("add"):
+        if not self._ensure_action(Capability.FINANCE_INCOME_CREATE, "add"):
             return
         dialog = IncomeFormDialog(
             self._income_service,
@@ -416,7 +435,7 @@ class IncomeListPage(QWidget):
             self.refresh()
 
     def _show_edit_dialog(self, income_id: int) -> None:
-        if not self._ensure_write("edit"):
+        if not self._ensure_action(Capability.FINANCE_INCOME_UPDATE, "edit"):
             return
         dialog = IncomeFormDialog(
             self._income_service,
@@ -432,7 +451,7 @@ class IncomeListPage(QWidget):
         IncomeDetailDialog(self._income_service, income_id, parent=self).exec()
 
     def _void_income(self, income_id: int) -> None:
-        if not self._ensure_write("void"):
+        if not self._ensure_action(Capability.FINANCE_INCOME_DELETE, "void"):
             return
         reason, accepted = QInputDialog.getText(
             self,
@@ -453,7 +472,7 @@ class IncomeListPage(QWidget):
             QMessageBox.critical(self, "Lỗi", str(exc))
 
     def _delete_income(self, income_id: int) -> None:
-        if not self._ensure_write("delete"):
+        if not self._ensure_action(Capability.FINANCE_INCOME_DELETE, "delete"):
             return
         reply = QMessageBox.question(
             self,
@@ -526,6 +545,9 @@ class IncomeListPage(QWidget):
         self._current_page = 1
         self._load_page()
 
+    def _apply_action_state(self) -> None:
+        self.add_btn.setEnabled(self._can(Capability.FINANCE_INCOME_CREATE))
+
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
-        self.add_btn.setEnabled(self._write_enabled)
+        self._apply_action_state()

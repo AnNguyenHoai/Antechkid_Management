@@ -42,6 +42,11 @@ class Capability(str, Enum):
     FINANCE_EXPENSE_DELETE = "finance.expense.delete"
     FINANCE_PERIOD_VIEW = "finance.period.view"
     FINANCE_PERIOD_MANAGE = "finance.period.manage"
+    FINANCE_SETTLEMENT_VIEW = "finance.settlement.view"
+    FINANCE_SETTLEMENT_CREATE = "finance.settlement.create"
+    FINANCE_SETTLEMENT_UPDATE = "finance.settlement.update"
+    FINANCE_SETTLEMENT_CONFIRM = "finance.settlement.confirm"
+    FINANCE_SETTLEMENT_REOPEN = "finance.settlement.reopen"
     REPORT_VIEW = "report.view"
     SETTING_UPDATE = "setting.update"
 
@@ -142,6 +147,8 @@ ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.WORK_REGISTRATION_DELETE.value,
     Capability.EMPLOYEE_DELETE.value,
     Capability.FINANCE_PERIOD_MANAGE.value,
+    Capability.FINANCE_SETTLEMENT_CONFIRM.value,
+    Capability.FINANCE_SETTLEMENT_REOPEN.value,
 })
 
 IMPLICIT_ROLE_CAPABILITIES = {

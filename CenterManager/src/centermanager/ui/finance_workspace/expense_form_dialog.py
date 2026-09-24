@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QMessageBox, QWidget
 )
 
+from centermanager.core.clock import get_clock
+from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.expense_service import ExpenseService, ExpenseValidationError
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class ExpenseFormDialog(QDialog):
         self._service = expense_service
         self._expense_id = expense_id
         self._is_edit = expense_id is not None
-        self._initial_payment_date = initial_payment_date or date.today()
+        self._initial_payment_date = initial_payment_date or get_clock().today()
         self._loaded_category: Optional[str] = None
         self._loaded_description: Optional[str] = None
 
@@ -64,12 +66,10 @@ class ExpenseFormDialog(QDialog):
         self.amount_spin.setRange(0.01, 999999999.99)
         form.addRow("Amount *", self.amount_spin)
 
-        # Display labels are localized; item data is the canonical persisted value.
         self.method_combo = QComboBox()
-        self.method_combo.addItem("TÀI KHOẢN CÁ NHÂN", "Cash")
-        self.method_combo.addItem("TÀI KHOẢN CÔNG TY", "Bank")
-        self.method_combo.addItem("Khác", "Other")
-        form.addRow("Payment Method *", self.method_combo)
+        self.method_combo.addItem("Cash", "CASH")
+        self.method_combo.addItem("Bank", "BANK")
+        form.addRow("Wallet *", self.method_combo)
 
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
@@ -108,14 +108,6 @@ class ExpenseFormDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
 
     @staticmethod
-    def _canonical_payment_method(value: str) -> str:
-        return {
-            "TÀI KHOẢN CÁ NHÂN": "Cash",
-            "TÀI KHOẢN CÔNG TY": "Bank",
-            "Bank Transfer": "Bank",
-        }.get(value, value)
-
-    @staticmethod
     def _canonical_status(value: str) -> str:
         return {
             "ĐÃ HOÀN TRẢ": "Completed",
@@ -131,18 +123,21 @@ class ExpenseFormDialog(QDialog):
 
             idx = self.category_combo.findText(exp.category)
             if idx < 0:
-                # Preserve unknown legacy categories instead of silently falling
-                # back to the first current category on unrelated edits.
                 self.category_combo.addItem(exp.category)
                 idx = self.category_combo.count() - 1
             self.category_combo.setCurrentIndex(idx)
 
-            # Legacy rows may predate the current required-description contract.
             self.desc_edit.setPlainText(exp.description or "")
             self.amount_spin.setValue(exp.amount)
-            idx2 = self.method_combo.findData(
-                self._canonical_payment_method(exp.payment_method)
-            )
+            try:
+                wallet = resolve_wallet(exp.payment_method).value
+                idx2 = self.method_combo.findData(wallet)
+            except WalletMappingError:
+                self.method_combo.addItem(
+                    f"Legacy value requires selection: {exp.payment_method}",
+                    None,
+                )
+                idx2 = self.method_combo.count() - 1
             if idx2 >= 0:
                 self.method_combo.setCurrentIndex(idx2)
             qdate = QDate(exp.payment_date.year, exp.payment_date.month, exp.payment_date.day)
@@ -165,24 +160,23 @@ class ExpenseFormDialog(QDialog):
             QMessageBox.warning(self, "Error", "Amount must be greater than 0.")
             return
         payment_method = self.method_combo.currentData()
+        if payment_method is None:
+            QMessageBox.warning(
+                self,
+                "Wallet required",
+                "Select CASH or BANK before saving this transaction.",
+            )
+            return
         payment_date = self.date_edit.date().toPython()
-        # Keep explicit empty strings in edit mode so nullable fields can be
-        # cleared instead of being interpreted as "leave unchanged".
         paid_by = self.paid_by_edit.text().strip()
         status = self.status_combo.currentData()
         note = self.note_edit.toPlainText().strip()
 
         try:
             if self._is_edit:
-                # Unknown legacy categories are displayable but are not part of
-                # the current validation vocabulary. If unchanged, omit the field
-                # so editing another value does not rewrite/reject the legacy row.
                 category_update = (
                     None if category == self._loaded_category else category
                 )
-                # A legacy NULL description must remain editable. Preserve it when
-                # the user leaves the empty field untouched; any newly entered text
-                # is validated/persisted normally.
                 description_update = description
                 if self._loaded_description is None and not description:
                     description_update = None

@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.wallet import resolve_wallet
@@ -13,6 +14,7 @@ from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.audit_service import AuditService
+from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.wallet_service import WalletService
 
 
@@ -59,18 +61,19 @@ class FinancialSettlementService:
 
     @staticmethod
     def _method_bucket(payment_method: Optional[str]) -> str:
-        """Legacy compatibility shim backed by the canonical Wallet resolver.
-
-        Older finance callers/tests still use this private helper. Keep the
-        surface temporarily without duplicating payment-method mapping logic.
-        """
+        """Legacy compatibility shim backed by the canonical Wallet resolver."""
         return resolve_wallet(payment_method).value.lower()
 
     @staticmethod
+    def _require_capability(capability: Capability) -> None:
+        AuthorizationService.require(get_current_user(), capability)
+
+    @staticmethod
     def _require_admin() -> None:
+        """Defense-in-depth for ledger close/reopen after capability checks."""
         user = get_current_user()
         if user is None or not getattr(user, "is_admin", False):
-            raise PermissionError("Only administrators can save, confirm or reopen financial settlements.")
+            raise PermissionError("Only administrators can confirm or reopen financial settlements.")
 
     @staticmethod
     def _require_difference_comment(
@@ -182,12 +185,14 @@ class FinancialSettlementService:
         )
 
     def get_settlement(self, target_date: Optional[date] = None) -> Optional[FinancialSettlement]:
+        self._require_capability(Capability.FINANCE_SETTLEMENT_VIEW)
         target = target_date or get_clock().today()
         with self._session_factory() as session:
             period_start, _ = self._resolve_period(session, target)
             return self._repository_provider.financial_settlements(session).get_by_period_start(period_start)
 
     def get_preview(self, target_date: Optional[date] = None) -> dict[str, Any]:
+        self._require_capability(Capability.FINANCE_SETTLEMENT_VIEW)
         target = target_date or get_clock().today()
         with self._session_factory() as session:
             period_start, period_end = self._resolve_period(session, target)
@@ -232,11 +237,21 @@ class FinancialSettlementService:
         confirm: bool,
     ) -> FinancialSettlement:
         """Persist a DRAFT or atomically confirm a complete live-ledger snapshot."""
-        self._require_admin()
         with self._session_factory() as session:
             settlement_repo = self._repository_provider.financial_settlements(session)
             period_start, period_end = self._resolve_period(session, target_date)
             row = settlement_repo.get_by_period_start(period_start)
+
+            mutation_capability = (
+                Capability.FINANCE_SETTLEMENT_CREATE
+                if row is None
+                else Capability.FINANCE_SETTLEMENT_UPDATE
+            )
+            self._require_capability(mutation_capability)
+            if confirm:
+                self._require_capability(Capability.FINANCE_SETTLEMENT_CONFIRM)
+                self._require_admin()
+
             if row is not None and row.is_confirmed:
                 raise ValueError("Confirmed financial settlement is immutable.")
 
@@ -363,6 +378,7 @@ class FinancialSettlementService:
         reason: str,
     ) -> FinancialSettlement:
         """Explicitly reopen a CONFIRMED period and audit the transition atomically."""
+        self._require_capability(Capability.FINANCE_SETTLEMENT_REOPEN)
         self._require_admin()
         reason_value = (reason or "").strip()
         if not reason_value:

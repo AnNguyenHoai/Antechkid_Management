@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -17,13 +18,18 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QGroupBox,
+    QInputDialog,
 )
 
-from centermanager.core.current_user import get_current_user
+from centermanager.core.capabilities import Capability
+from centermanager.core.clock import get_clock
+from centermanager.ui.finance_workspace.action_state import can_mutate, has_capability
 
 
 class FinancialSettlementPage(QWidget):
     """FinancePeriod reconciliation UI driven by the workspace shared period."""
+
+    settlement_changed = Signal()
 
     def __init__(self, settlement_service, notification_service=None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -31,7 +37,8 @@ class FinancialSettlementPage(QWidget):
         self._notification_service = notification_service
         self._write_enabled = False
         self._loaded_status = "DRAFT"
-        self._target_date = date.today()
+        self._loaded_id = None
+        self._target_date = get_clock().today()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -39,8 +46,6 @@ class FinancialSettlementPage(QWidget):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(14)
 
-        # The FinanceWorkspaceShell owns period navigation. This row only shows
-        # the exact canonical period resolved by the Settlement service.
         period_row = QHBoxLayout()
         period_row.addWidget(QLabel("Settlement period:"))
         self.period_label = QLabel("")
@@ -106,10 +111,13 @@ class FinancialSettlementPage(QWidget):
         buttons.addStretch()
         self.save_btn = QPushButton("Save Draft")
         self.confirm_btn = QPushButton("Confirm Settlement")
+        self.reopen_btn = QPushButton("Reopen Settlement")
         self.save_btn.clicked.connect(self._save_draft)
         self.confirm_btn.clicked.connect(self._confirm)
+        self.reopen_btn.clicked.connect(self._reopen)
         buttons.addWidget(self.save_btn)
         buttons.addWidget(self.confirm_btn)
+        buttons.addWidget(self.reopen_btn)
         layout.addLayout(buttons)
         layout.addStretch()
         self._apply_write_state()
@@ -149,6 +157,29 @@ class FinancialSettlementPage(QWidget):
         else:
             QMessageBox.warning(self, "Financial Settlement", message)
 
+    def _clear_projection(self, message: str) -> None:
+        self.period_label.setText(message)
+        self._loaded_status = "UNAVAILABLE"
+        self._loaded_id = None
+        self.status_label.setText("UNAVAILABLE")
+        for label in (
+            self.income_cash,
+            self.income_bank,
+            self.expense_cash,
+            self.expense_bank,
+            self.expected_cash,
+            self.expected_bank,
+            self.difference_cash,
+            self.difference_bank,
+        ):
+            label.setText("-")
+        self.opening_cash.setValue(0)
+        self.opening_bank.setValue(0)
+        self.actual_cash.clear()
+        self.actual_bank.clear()
+        self.comment_edit.clear()
+        self._apply_write_state()
+
     def refresh(
         self,
         *_args,
@@ -162,28 +193,23 @@ class FinancialSettlementPage(QWidget):
         if target_date is not None:
             self._target_date = target_date
         if period_configured is False:
-            self.period_label.setText("Finance period not configured")
-            self._loaded_status = "UNAVAILABLE"
-            self.status_label.setText("UNAVAILABLE")
-            self._apply_write_state()
+            self._clear_projection("Finance period not configured")
             return
         if self._settlement_service is None:
-            self.period_label.setText("Settlement service unavailable")
-            self._loaded_status = "UNAVAILABLE"
-            self.status_label.setText("UNAVAILABLE")
-            self._apply_write_state()
+            self._clear_projection("Settlement service unavailable")
+            return
+        if not has_capability(Capability.FINANCE_SETTLEMENT_VIEW):
+            self._clear_projection("Settlement access restricted")
             return
         try:
             data = self._settlement_service.get_preview(target_date=self._target_date)
         except Exception as exc:
-            self.period_label.setText(str(exc))
-            self._loaded_status = "UNAVAILABLE"
-            self.status_label.setText("UNAVAILABLE")
-            self._apply_write_state()
+            self._clear_projection(str(exc))
             return
 
         self.period_label.setText(data["period_label"])
         self._loaded_status = data["status"]
+        self._loaded_id = data.get("id")
         self.status_label.setText(data["status"])
         if data.get("confirmed_at") is not None:
             self.status_label.setToolTip(f"Confirmed: {data['confirmed_at']}")
@@ -218,39 +244,63 @@ class FinancialSettlementPage(QWidget):
     def _save_draft(self) -> None:
         try:
             self._settlement_service.save_draft(**self._request_payload())
-            self.refresh()
+            self.settlement_changed.emit()
         except Exception as exc:
             self._notify(str(exc))
 
     def _confirm(self) -> None:
         try:
             payload = self._request_payload()
-            if payload["actual_closing_cash"] is None or payload["actual_closing_bank"] is None:
-                raise ValueError("Enter both actual closing balances before confirmation.")
             answer = QMessageBox.question(
                 self,
                 "Confirm Settlement",
-                "Confirm this FinancePeriod settlement? Confirmed settlements cannot be edited.",
+                "Confirm this FinancePeriod settlement? Confirmed settlements close the period for normal ledger mutation.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
             self._settlement_service.confirm(**payload)
-            self.refresh()
+            self.settlement_changed.emit()
         except Exception as exc:
             self._notify(str(exc))
 
-    @staticmethod
-    def _current_user_is_admin() -> bool:
-        user = get_current_user()
-        return bool(user and getattr(user, "is_admin", False))
+    def _reopen(self) -> None:
+        reason, accepted = QInputDialog.getText(
+            self,
+            "Reopen Settlement",
+            "Reason *:",
+        )
+        if not accepted:
+            return
+        try:
+            self._settlement_service.reopen(
+                target_date=self._target_date,
+                reason=reason,
+            )
+            self.settlement_changed.emit()
+        except Exception as exc:
+            self._notify(str(exc))
 
     def _apply_write_state(self) -> None:
-        editable = (
-            self._write_enabled
-            and self._loaded_status == "DRAFT"
-            and self._current_user_is_admin()
+        is_draft = self._loaded_status == "DRAFT"
+        save_capability = (
+            Capability.FINANCE_SETTLEMENT_CREATE
+            if self._loaded_id is None
+            else Capability.FINANCE_SETTLEMENT_UPDATE
+        )
+        editable = can_mutate(
+            write_enabled=self._write_enabled,
+            capability=save_capability,
+            domain_allowed=is_draft,
+        )
+        confirmable = editable and has_capability(
+            Capability.FINANCE_SETTLEMENT_CONFIRM
+        )
+        reopenable = can_mutate(
+            write_enabled=self._write_enabled,
+            capability=Capability.FINANCE_SETTLEMENT_REOPEN,
+            domain_allowed=self._loaded_status == "CONFIRMED",
         )
         for widget in (
             self.opening_cash,
@@ -261,7 +311,9 @@ class FinancialSettlementPage(QWidget):
         ):
             widget.setEnabled(editable)
         self.save_btn.setEnabled(editable)
-        self.confirm_btn.setEnabled(editable)
+        self.confirm_btn.setEnabled(confirmable)
+        self.reopen_btn.setVisible(self._loaded_status == "CONFIRMED")
+        self.reopen_btn.setEnabled(reopenable)
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)

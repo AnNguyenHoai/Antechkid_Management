@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import CurrentUserContext
 from centermanager.database.engine import create_engine_for_path
 from centermanager.events.event_bus import EventBus
@@ -95,12 +96,26 @@ class _Dashboard:
     _finance_period_service = None
 
 
-class _NonAdmin:
+class _FinanceDraftEditor:
     is_admin = False
+    is_active = True
+    role = SimpleNamespace(name="finance")
+    permissions = [
+        Capability.FINANCE_SETTLEMENT_VIEW.value,
+        Capability.FINANCE_SETTLEMENT_CREATE.value,
+        Capability.FINANCE_SETTLEMENT_UPDATE.value,
+    ]
 
 
 class _Admin:
     is_admin = True
+    is_active = True
+    role = SimpleNamespace(name="admin")
+    permissions = [
+        Capability.FINANCE_SETTLEMENT_VIEW.value,
+        Capability.FINANCE_SETTLEMENT_CREATE.value,
+        Capability.FINANCE_SETTLEMENT_UPDATE.value,
+    ]
 
 
 def test_income_edit_can_clear_optional_fields(qtbot):
@@ -193,12 +208,12 @@ def test_settlement_buckets_legacy_expense_payment_methods():
     assert FinancialSettlementService._method_bucket("Bank Transfer") == "bank"
 
 
-def test_settlement_ui_is_admin_only_even_in_write_mode(qtbot):
-    with CurrentUserContext(_NonAdmin()):
+def test_settlement_ui_projects_draft_and_admin_only_transition_capabilities(qtbot):
+    with CurrentUserContext(_FinanceDraftEditor()):
         page = FinancialSettlementPage(settlement_service=object())
         qtbot.addWidget(page)
         page.set_write_enabled(True)
-        assert not page.save_btn.isEnabled()
+        assert page.save_btn.isEnabled()
         assert not page.confirm_btn.isEnabled()
 
     with CurrentUserContext(_Admin()):

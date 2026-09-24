@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
+from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.class_service import ClassService
 from centermanager.services.income_service import (
     IncomeService,
@@ -46,7 +48,7 @@ class IncomeFormDialog(QDialog):
         self._class_service = class_service
         self._income_id = income_id
         self._is_edit = income_id is not None
-        self._initial_payment_date = initial_payment_date or date.today()
+        self._initial_payment_date = initial_payment_date or get_clock().today()
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(550)
@@ -97,8 +99,9 @@ class IncomeFormDialog(QDialog):
         form.addRow("Số tiền *", self.amount_spin)
 
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["Cash", "Bank Transfer"])
-        form.addRow("Hình thức thanh toán *", self.method_combo)
+        self.method_combo.addItem("Cash", "CASH")
+        self.method_combo.addItem("Bank", "BANK")
+        form.addRow("Wallet *", self.method_combo)
 
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
@@ -111,7 +114,7 @@ class IncomeFormDialog(QDialog):
         # resolved by IncomeService from payment_date.
         self.period_combo = QComboBox()
         self.period_combo.addItem("", "")
-        current_year = date.today().year
+        current_year = get_clock().today().year
         for year in range(current_year - 1, current_year + 1):
             for month in range(1, 13):
                 period = f"Tháng {month}/{year}"
@@ -193,8 +196,6 @@ class IncomeFormDialog(QDialog):
             logger.exception("Error loading classes")
 
     def _lock_identity_fields(self) -> None:
-        # Source/student/class/type are transaction identity. EP-FIN-06 keeps
-        # them immutable after creation.
         self.source_combo.setEnabled(False)
         self.student_combo.setEnabled(False)
         self.class_combo.setEnabled(False)
@@ -221,7 +222,15 @@ class IncomeFormDialog(QDialog):
                 self.type_combo.setCurrentIndex(type_index)
             self.amount_spin.setValue(income.amount)
 
-            method_index = self.method_combo.findText(income.payment_method)
+            try:
+                wallet = resolve_wallet(income.payment_method).value
+                method_index = self.method_combo.findData(wallet)
+            except WalletMappingError:
+                self.method_combo.addItem(
+                    f"Legacy value requires selection: {income.payment_method}",
+                    None,
+                )
+                method_index = self.method_combo.count() - 1
             if method_index >= 0:
                 self.method_combo.setCurrentIndex(method_index)
 
@@ -283,17 +292,21 @@ class IncomeFormDialog(QDialog):
             )
             return
 
-        payment_method = self.method_combo.currentText()
+        payment_method = self.method_combo.currentData()
+        if payment_method is None:
+            QMessageBox.warning(
+                self,
+                "Wallet required",
+                "Select CASH or BANK before saving this transaction.",
+            )
+            return
         payment_date = self.date_edit.date().toPython()
-        # Preserve explicit empty values in edit mode so the service can clear
-        # nullable fields instead of interpreting None as "leave unchanged".
         payment_period = self.period_combo.currentData()
         received_by = self.received_by_edit.text().strip()
         note = self.note_edit.text().strip()
 
         try:
             if self._is_edit:
-                # Identity fields are intentionally not passed to update_income.
                 self._income_service.update_income(
                     income_id=self._income_id,
                     amount=amount,

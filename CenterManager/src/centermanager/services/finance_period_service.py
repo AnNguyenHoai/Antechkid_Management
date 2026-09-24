@@ -45,6 +45,51 @@ class FinancePeriodService:
                 return None
             return FinancePeriodDefinition.resolved_for_configuration(configuration, target)
 
+    @require_permission("finance.view")
+    def list_resolved_periods(
+        self,
+        through_date: Optional[date] = None,
+    ) -> List[ResolvedFinancePeriod]:
+        """Enumerate real canonical period buckets through the business date.
+
+        The selector must consume exact resolved buckets rather than manufacture
+        Month/Year choices. The current bucket is included with its full canonical
+        end date even when that end date is after ``through_date``.
+        """
+        horizon = through_date or get_clock().today()
+        with self._session_factory() as session:
+            configurations = list(
+                self._repository_provider.finance_periods(session).list_all()
+            )
+
+        resolved: list[ResolvedFinancePeriod] = []
+        seen: set[tuple[date, date]] = set()
+        for configuration in sorted(
+            configurations,
+            key=lambda item: item.effective_from,
+        ):
+            if configuration.effective_from > horizon:
+                continue
+            last_target = horizon
+            if configuration.effective_to is not None:
+                last_target = min(last_target, configuration.effective_to)
+            if last_target < configuration.effective_from:
+                continue
+
+            cursor = configuration.effective_from
+            while cursor <= last_target:
+                bucket = FinancePeriodDefinition.resolved_for_configuration(
+                    configuration,
+                    cursor,
+                )
+                key = (bucket.period_start, bucket.period_end)
+                if key not in seen:
+                    resolved.append(bucket)
+                    seen.add(key)
+                cursor = bucket.period_end + timedelta(days=1)
+
+        return sorted(resolved, key=lambda item: item.period_start, reverse=True)
+
     def ensure_period_is_mutable(
         self,
         on_date: Optional[date] = None,
