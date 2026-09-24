@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.dto.outstanding_dto import (
     OutstandingDTO,
     StudentOutstandingSummary,
@@ -59,25 +60,123 @@ class OutstandingService:
         on_date: date,
         period_start: Optional[date] = None,
     ) -> Optional[Tuple[date, date]]:
+        target = period_start or on_date
         period_repo = self._repository_provider.finance_periods(session)
-        if period_start is not None:
-            config = period_repo.get_active(period_start)
-            if config is None:
-                return None
-            return FinancePeriodDefinition.period_for_date(
-                config.effective_from,
-                period_start,
-                config.duration_months,
-            )
-
-        config = period_repo.get_active(on_date)
+        config = period_repo.get_unique_effective(target)
         if config is None:
             return None
-        return FinancePeriodDefinition.period_for_date(
-            config.effective_from,
-            on_date,
-            config.duration_months,
+
+        resolved = FinancePeriodDefinition.resolved_for_configuration(config, target)
+        if period_start is not None and resolved.period_start != period_start:
+            raise ValueError(
+                f"{period_start.isoformat()} is not a canonical FinancePeriod start; "
+                f"resolved start is {resolved.period_start.isoformat()}."
+            )
+        return resolved.period_start, resolved.period_end
+
+    @staticmethod
+    def _overlaps_period(
+        enrollment: Enrollment,
+        period_start: date,
+        period_end: date,
+    ) -> bool:
+        if enrollment.start_date and enrollment.start_date > period_end:
+            return False
+        if enrollment.end_date and enrollment.end_date < period_start:
+            return False
+        return True
+
+    @staticmethod
+    def _billing_date(
+        enrollment: Enrollment,
+        class_obj,
+        period_start: date,
+    ) -> date:
+        candidates = [period_start]
+        if enrollment.start_date is not None:
+            candidates.append(enrollment.start_date)
+        if getattr(class_obj, "start_date", None) is not None:
+            candidates.append(class_obj.start_date)
+        return max(candidates)
+
+    def _historical_fee(
+        self,
+        session,
+        *,
+        enrollment: Enrollment,
+        class_obj,
+        period_start: date,
+    ) -> Tuple[int, bool]:
+        class_repo = self._repository_provider.classes(session)
+        billing_date = self._billing_date(enrollment, class_obj, period_start)
+        resolver = getattr(class_repo, "get_fee_version_for_date", None)
+        if resolver is None:
+            # Compatibility for isolated pre-FW2-07 unit fakes only. Production
+            # ClassRepository always has the historical resolver.
+            fee = getattr(class_obj, "fee", None)
+            configured = fee is not None and fee > 0
+            return (int(fee) if configured else 0), configured
+
+        version = resolver(enrollment.class_id, billing_date)
+        if version is None:
+            logger.warning(
+                "No Class fee history for class %s on %s; historical tuition remains unresolved.",
+                enrollment.class_id,
+                billing_date,
+            )
+            return 0, False
+
+        fee = version.fee
+        configured = fee is not None and fee > 0
+        return (int(fee) if configured else 0), configured
+
+    def _aggregate_payment_totals(
+        self,
+        repo,
+        period_start: date,
+        period_end: date,
+        *,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+    ) -> Dict[Tuple[int, int], int]:
+        aggregator = getattr(repo, "aggregate_active_tuition_by_student_class", None)
+        if aggregator is not None:
+            rows = aggregator(
+                income_type=self.TUITION_INCOME_TYPE,
+                finance_period_start=period_start,
+                date_from=period_start,
+                date_to=period_end,
+                student_id=student_id,
+                class_id=class_id,
+            )
+            return {
+                (int(row_student_id), int(row_class_id)): int(amount)
+                for row_student_id, row_class_id, amount in rows
+            }
+
+        # Compatibility for isolated pre-FW2-07 repository fakes only.
+        filters = dict(
+            income_type=self.TUITION_INCOME_TYPE,
+            finance_period_start=period_start,
+            date_from=period_start,
+            date_to=period_end,
         )
+        if student_id is not None:
+            filters["student_id"] = student_id
+        if class_id is not None:
+            filters["class_id"] = class_id
+
+        total = repo.count_active(**filters)
+        if total <= 0:
+            return {}
+        incomes = repo.list_active(offset=0, limit=total, **filters)
+        grouped: Dict[Tuple[int, int], int] = {}
+        for income in incomes:
+            if income.student_id is None or income.class_id is None:
+                continue
+            key = (income.student_id, income.class_id)
+            grouped[key] = grouped.get(key, 0) + int(income.amount)
+        return grouped
 
     def _get_total_paid(
         self,
@@ -89,27 +188,14 @@ class OutstandingService:
     ) -> int:
         """Calculate valid Tuition income for one student/class/Finance period."""
         repo = self._repository_provider.incomes(session)
-        total = repo.count_active(
+        totals = self._aggregate_payment_totals(
+            repo,
+            period_start,
+            period_end,
             student_id=student_id,
             class_id=class_id,
-            income_type=self.TUITION_INCOME_TYPE,
-            finance_period_start=period_start,
-            date_from=period_start,
-            date_to=period_end,
         )
-        if total <= 0:
-            return 0
-        incomes = repo.list_active(
-            student_id=student_id,
-            class_id=class_id,
-            income_type=self.TUITION_INCOME_TYPE,
-            finance_period_start=period_start,
-            date_from=period_start,
-            date_to=period_end,
-            offset=0,
-            limit=total,
-        )
-        return int(sum(inc.amount for inc in incomes))
+        return totals.get((student_id, class_id), 0)
 
     def _load_payment_totals(
         self,
@@ -117,35 +203,9 @@ class OutstandingService:
         period_start: date,
         period_end: date,
     ) -> Dict[Tuple[int, int], int]:
-        """Load all valid Tuition income once and group by student/class.
-
-        The income repository active-list boundary is the canonical live-money
-        source, so VOIDED and soft-deleted Income are excluded automatically.
-        """
+        """Load complete qualifying Tuition totals grouped by student/class."""
         repo = self._repository_provider.incomes(session)
-        total = repo.count_active(
-            income_type=self.TUITION_INCOME_TYPE,
-            finance_period_start=period_start,
-            date_from=period_start,
-            date_to=period_end,
-        )
-        if total <= 0:
-            return {}
-        incomes = repo.list_active(
-            income_type=self.TUITION_INCOME_TYPE,
-            finance_period_start=period_start,
-            date_from=period_start,
-            date_to=period_end,
-            offset=0,
-            limit=total,
-        )
-        grouped: Dict[Tuple[int, int], int] = {}
-        for income in incomes:
-            if income.student_id is None or income.class_id is None:
-                continue
-            key = (income.student_id, income.class_id)
-            grouped[key] = grouped.get(key, 0) + int(income.amount)
-        return grouped
+        return self._aggregate_payment_totals(repo, period_start, period_end)
 
     def _calculate_from_enrollment(
         self,
@@ -157,9 +217,11 @@ class OutstandingService:
     ) -> Optional[OutstandingDTO]:
         if enrollment.class_id is None:
             return None
-        if enrollment.start_date and enrollment.start_date > resolved_period_end:
-            return None
-        if enrollment.end_date and enrollment.end_date < resolved_period_start:
+        if not self._overlaps_period(
+            enrollment,
+            resolved_period_start,
+            resolved_period_end,
+        ):
             return None
 
         class_obj = enrollment.class_
@@ -178,8 +240,12 @@ class OutstandingService:
             logger.warning("Student %s not found", enrollment.student_id)
             return None
 
-        configured = class_obj.fee is not None and class_obj.fee > 0
-        expected = int(class_obj.fee) if configured else 0
+        expected, configured = self._historical_fee(
+            session,
+            enrollment=enrollment,
+            class_obj=class_obj,
+            period_start=resolved_period_start,
+        )
         key = (enrollment.student_id, enrollment.class_id)
         if payment_totals is None:
             paid = self._get_total_paid(
@@ -215,7 +281,7 @@ class OutstandingService:
         on_date: Optional[date] = None,
     ) -> Optional[OutstandingDTO]:
         """Calculate outstanding for one student-class enrollment."""
-        target_date = on_date or date.today()
+        target_date = on_date or get_clock().today()
         with self._session_factory() as session:
             period = self._resolve_period(session, target_date, period_start)
             if period is None:
@@ -229,10 +295,21 @@ class OutstandingService:
             if enrollment is None:
                 enrollment_repo = self._repository_provider.enrollments(session)
                 matches = enrollment_repo.get_by_student_and_class(student_id, class_id)
-                enrollment = matches[0] if matches else None
+                enrollment = next(
+                    (
+                        item
+                        for item in matches
+                        if self._overlaps_period(
+                            item,
+                            resolved_period_start,
+                            resolved_period_end,
+                        )
+                    ),
+                    None,
+                )
                 if enrollment is None:
                     logger.warning(
-                        "No enrollment found for student %s / class %s",
+                        "No enrollment found for student %s / class %s in FinancePeriod",
                         student_id,
                         class_id,
                     )
@@ -337,7 +414,7 @@ class OutstandingService:
         Status is a derived value, therefore status filtering is intentionally
         completed before offset/limit are applied.
         """
-        target_date = on_date or date.today()
+        target_date = on_date or get_clock().today()
         with self._session_factory() as session:
             period = self._resolve_period(session, target_date, period_start)
             if period is None:
@@ -400,7 +477,7 @@ class OutstandingService:
         on_date: Optional[date] = None,
     ) -> List[Tuple[int, str]]:
         """Return classes participating in the selected Finance period."""
-        target_date = on_date or date.today()
+        target_date = on_date or get_clock().today()
         with self._session_factory() as session:
             period = self._resolve_period(session, target_date, period_start)
             if period is None:

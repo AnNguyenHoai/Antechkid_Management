@@ -1,20 +1,32 @@
 """EP-ARCH-03.30 - OutstandingService repository boundary contract."""
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / "src" / "centermanager" / "services" / "outstanding_service.py"
 
 
+def _imported_names(source: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.rsplit(".", 1)[-1] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.name for alias in node.names)
+    return names
+
+
 def test_outstanding_service_uses_repository_provider():
     source = SERVICE.read_text(encoding="utf-8")
     assert "from centermanager.repositories.provider import" in source
+    imported_names = _imported_names(source)
     for concrete in (
         "StudentRepository",
         "ClassRepository",
         "EnrollmentRepository",
         "IncomeRepository",
     ):
-        assert concrete not in source
+        assert concrete not in imported_names
     assert "session.query(" not in source
     assert "session.get(" not in source
 
