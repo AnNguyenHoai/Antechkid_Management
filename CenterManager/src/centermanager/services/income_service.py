@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
 from centermanager.events.event_bus import EventBus
@@ -25,6 +27,9 @@ from centermanager.services.class_service import ClassService
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class IncomeServiceError(Exception):
@@ -126,24 +131,58 @@ class IncomeService:
             )
         return None if normalized == "ALL" else normalized
 
-    def _check_student_enrolled(self, student_id: int, class_id: int) -> bool:
-        with self._session_factory() as session:
-            repo = self._repository_provider.enrollments(session)
-            return repo.exists(student_id, class_id)
+    @staticmethod
+    def is_realized(
+        income: Income,
+        *,
+        as_of: Optional[date] = None,
+    ) -> bool:
+        """Return whether an Income belongs to the realized ledger at ``as_of``.
 
-    def _resolve_finance_period_start(self, session, payment_date: date) -> date:
-        config = self._repository_provider.finance_periods(session).get_active(payment_date)
+        ACTIVE is necessary but not sufficient: legacy rows may contain future
+        payment dates. Those rows remain readable but are not realized until the
+        payment date is reached. VOIDED/deleted rows never contribute.
+        """
+        if income.deleted_at is not None or income.status != Income.STATUS_ACTIVE:
+            return False
+        if income.payment_date is None:
+            return False
+        cutoff = as_of or get_clock().today()
+        return income.payment_date <= cutoff
+
+    def _check_student_enrolled_on(
+        self,
+        session,
+        student_id: int,
+        class_id: int,
+        payment_date: date,
+    ) -> bool:
+        repo = self._repository_provider.enrollments(session)
+        return repo.exists_on_date(student_id, class_id, payment_date)
+
+    def _resolve_finance_period(self, session, payment_date: date):
+        try:
+            config = self._repository_provider.finance_periods(
+                session
+            ).get_unique_effective(payment_date)
+        except ValueError as exc:
+            raise IncomeValidationError(str(exc)) from exc
         if config is None:
             raise IncomeValidationError(
-                "No active Finance period configuration covers payment date "
+                "No Finance period configuration covers payment date "
                 f"{payment_date.isoformat()}."
             )
-        period_start, _ = FinancePeriodDefinition.period_for_date(
-            config.effective_from,
-            payment_date,
-            config.duration_months,
+        resolved = FinancePeriodDefinition.resolved_for_configuration(
+            config, payment_date
         )
-        return period_start
+        return config, resolved.period_start
+
+    @staticmethod
+    def _validate_realized_posting_date(payment_date: date) -> None:
+        if payment_date > get_clock().today():
+            raise IncomeValidationError(
+                "ACTIVE income cannot be posted with a future payment date."
+            )
 
     @staticmethod
     def _audit_snapshot(income: Income) -> dict:
@@ -157,6 +196,7 @@ class IncomeService:
                 income.payment_date.isoformat() if income.payment_date else None
             ),
             "payment_period": income.payment_period,
+            "finance_period_id": income.finance_period_id,
             "finance_period_start": (
                 income.finance_period_start.isoformat()
                 if income.finance_period_start
@@ -197,6 +237,17 @@ class IncomeService:
             summary=f"{action}: Income#{income.id}",
         )
 
+    def _best_effort_timeline_event(self, **kwargs) -> None:
+        """Project a timeline event without invalidating a committed mutation."""
+        try:
+            self._timeline_service.log_event(**kwargs)
+        except Exception:
+            _LOGGER.exception(
+                "Income mutation committed but timeline projection failed "
+                "(income_id=%s).",
+                kwargs.get("metadata", {}).get("income_id"),
+            )
+
     @require_permission("finance.income.create")
     def create_income(
         self,
@@ -216,28 +267,35 @@ class IncomeService:
         self._validate_income_ownership(income_type, student_id, class_id)
         if payment_date is None:
             raise IncomeValidationError("Payment date is required.")
+        self._validate_realized_posting_date(payment_date)
 
         payment_period = self._normalize_text(payment_period)
         _, actor_name = self._actor()
         received_by = self._normalize_text(received_by) or actor_name
         note = self._normalize_text(note)
 
+        class_name = "N/A"
         if student_id is not None:
             self._student_service.get_student(student_id)
         if class_id is not None:
-            self._class_service.get_class(class_id)
-        if (
-            student_id is not None
-            and class_id is not None
-            and not self._check_student_enrolled(student_id, class_id)
-        ):
-            raise IncomeValidationError(
-                "Student is not enrolled in the selected class."
-            )
+            class_record = self._class_service.get_class(class_id)
+            class_name = class_record.name
 
         with self._session_factory() as session:
+            if (
+                student_id is not None
+                and class_id is not None
+                and not self._check_student_enrolled_on(
+                    session, student_id, class_id, payment_date
+                )
+            ):
+                raise IncomeValidationError(
+                    "Student was not enrolled in the selected class "
+                    "on the payment date."
+                )
+
             repo = self._repository_provider.incomes(session)
-            finance_period_start = self._resolve_finance_period_start(
+            finance_period, finance_period_start = self._resolve_finance_period(
                 session, payment_date
             )
             income = Income(
@@ -248,6 +306,7 @@ class IncomeService:
                 payment_method=payment_method,
                 payment_date=payment_date,
                 payment_period=payment_period,
+                finance_period_id=finance_period.id,
                 finance_period_start=finance_period_start,
                 received_by=received_by,
                 note=note,
@@ -265,10 +324,7 @@ class IncomeService:
             repo.refresh(income)
 
             if student_id is not None:
-                class_name = (
-                    self._class_service.get_class(class_id).name if class_id else "N/A"
-                )
-                self._timeline_service.log_event(
+                self._best_effort_timeline_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_CREATED,
                     title=f"Income Created: {income_type}",
@@ -283,6 +339,7 @@ class IncomeService:
                         "income_type": income_type,
                         "payment_method": payment_method,
                         "payment_period": payment_period,
+                        "finance_period_id": finance_period.id,
                         "finance_period_start": finance_period_start.isoformat(),
                     },
                 )
@@ -393,14 +450,38 @@ class IncomeService:
                     income.payment_method = payment_method
 
             if payment_date is not None and income.payment_date != payment_date:
+                self._validate_realized_posting_date(payment_date)
                 changed.append(
                     f"payment_date: {income.payment_date} -> {payment_date}"
                 )
                 income.payment_date = payment_date
+            else:
+                self._validate_realized_posting_date(income.payment_date)
 
-            new_period_start = self._resolve_finance_period_start(
+            if (
+                income.student_id is not None
+                and income.class_id is not None
+                and not self._check_student_enrolled_on(
+                    session,
+                    income.student_id,
+                    income.class_id,
+                    income.payment_date,
+                )
+            ):
+                raise IncomeValidationError(
+                    "Student was not enrolled in the selected class "
+                    "on the payment date."
+                )
+
+            finance_period, new_period_start = self._resolve_finance_period(
                 session, income.payment_date
             )
+            if income.finance_period_id != finance_period.id:
+                changed.append(
+                    "finance_period_id: "
+                    f"{income.finance_period_id} -> {finance_period.id}"
+                )
+                income.finance_period_id = finance_period.id
             if income.finance_period_start != new_period_start:
                 changed.append(
                     "finance_period_start: "
@@ -449,7 +530,7 @@ class IncomeService:
             repo.refresh(income)
 
             if income.student_id is not None:
-                self._timeline_service.log_event(
+                self._best_effort_timeline_event(
                     student_id=income.student_id,
                     event_type=TimelineEventType.INCOME_UPDATED,
                     title="Income Updated",
@@ -494,7 +575,7 @@ class IncomeService:
             repo.refresh(income)
 
             if income.student_id is not None:
-                self._timeline_service.log_event(
+                self._best_effort_timeline_event(
                     student_id=income.student_id,
                     event_type=TimelineEventType.INCOME_UPDATED,
                     title="Income Voided",
@@ -537,7 +618,7 @@ class IncomeService:
             session.commit()
 
             if student_id is not None:
-                self._timeline_service.log_event(
+                self._best_effort_timeline_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_DELETED,
                     title="Income Deleted",
