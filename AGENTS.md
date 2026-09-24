@@ -5,6 +5,12 @@ This file defines the standing engineering rules for coding agents working in th
 Task-specific requirements belong in the relevant GitHub Issue.
 Architecture and domain documents remain authoritative for the areas they govern.
 
+For human/ChatGPT/Codex handoff and blocker communication, also follow:
+
+```text
+CenterManager/docs/AI_COLLABORATION_PROTOCOL.md
+```
+
 ---
 
 ## 1. Role
@@ -53,12 +59,15 @@ For issue-driven development, treat the assigned GitHub Issue as the implementat
 
 Before editing:
 
-- read the complete Issue;
+- read the complete Issue body;
+- read all newer Issue comments before starting or resuming work;
 - identify scope and non-goals;
 - identify acceptance criteria;
 - identify required tests;
 - identify the required base branch or commit;
 - inspect only the project documentation and code relevant to those requirements.
+
+Binding task clarifications may appear in Issue comments using the prefixes defined in `CenterManager/docs/AI_COLLABORATION_PROTOCOL.md`.
 
 Do not expand the task merely because adjacent code could be improved.
 
@@ -363,6 +372,8 @@ The PR description should state:
 
 Do not claim CI passed before GitHub Actions actually passes.
 
+After a PR exists, read the current PR conversation before resuming implementation or responding to review. Follow `CenterManager/docs/AI_COLLABORATION_PROTOCOL.md` for review/status messages.
+
 ---
 
 ## 17. Review Readiness
@@ -441,6 +452,8 @@ A normal test failure is not a stop condition. Investigate and fix it.
 
 An implementation detail that can be safely resolved from existing architecture is not a reason to stop.
 
+When a stop condition is caused by a product/architecture ambiguity and GitHub write access is available, post a structured `[CODEX BLOCKER]` comment to the assigned Issue before returning control to the human. The human must not be required to copy the blocker text to another agent.
+
 ---
 
 ## 20. Security and Repository Hygiene
@@ -474,7 +487,7 @@ If the OpenAI developer documentation MCP server is configured, use it for those
 Unless the GitHub Issue specifies otherwise, use this development loop:
 
 ```text
-Read Issue
+Read Issue + latest comments
     ↓
 Inspect relevant code/spec
     ↓
@@ -528,3 +541,23 @@ The goal is not merely:
 The goal is:
 
 > implement the approved behavior, preserve the architecture, prove it with tests, and leave a change that a human reviewer can understand and trust.
+
+---
+
+## 24. Agent Coordination
+
+GitHub is the durable shared communication channel between the human, ChatGPT/Product-Architecture, and Codex.
+
+Follow `CenterManager/docs/AI_COLLABORATION_PROTOCOL.md`.
+
+The required behavior is:
+
+- before a PR exists, communicate through the assigned Issue;
+- after a PR exists, communicate implementation/CI/review status through the PR while keeping the Issue as the task contract;
+- always read the latest Issue/PR conversation before resuming work;
+- post `[CODEX BLOCKER]` for genuine product/architecture stop conditions;
+- post `[CODEX READY]` when implementation is ready for review;
+- respond to `[REVIEW BLOCKER]` findings with `[CODEX RESPONSE]` after fixing them;
+- do not ask the human to relay technical context that already exists in GitHub.
+
+When the human says only `Continue Issue #N` or `Continue PR #N`, recover the complete technical context from GitHub and repository documents before acting.
