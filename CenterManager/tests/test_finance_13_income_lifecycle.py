@@ -50,10 +50,13 @@ def test_income_form_locks_source_by_income_type():
     assert 'if income_type == "Other"' in source
 
 
-def test_income_ui_disables_edit_delete_without_write():
+def test_income_ui_projects_edit_delete_from_write_capability_and_period_state():
     source = Path("src/centermanager/ui/finance_workspace/income_list_page.py").read_text(encoding="utf-8")
-    assert "edit_action.setEnabled(self._write_enabled)" in source
-    assert "delete_action.setEnabled(self._write_enabled)" in source
+    assert "write_enabled=self._write_enabled" in source
+    assert "domain_allowed=not self._period_closed" in source
+    assert "edit_action.setEnabled(self._can(Capability.FINANCE_INCOME_UPDATE))" in source
+    assert "void_action.setEnabled(self._can(Capability.FINANCE_INCOME_DELETE))" in source
+    assert "delete_action.setEnabled(self._can(Capability.FINANCE_INCOME_DELETE))" in source
 
 
 def test_app_constructs_outstanding_before_dashboard():
