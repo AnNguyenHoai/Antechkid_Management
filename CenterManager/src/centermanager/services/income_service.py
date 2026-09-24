@@ -24,6 +24,10 @@ from centermanager.repositories.provider import (
 )
 from centermanager.services.audit_service import AuditService
 from centermanager.services.class_service import ClassService
+from centermanager.services.finance_ledger_guard import (
+    FinanceLedgerGuard,
+    FinancePeriodClosedError,
+)
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
@@ -137,12 +141,7 @@ class IncomeService:
         *,
         as_of: Optional[date] = None,
     ) -> bool:
-        """Return whether an Income belongs to the realized ledger at ``as_of``.
-
-        ACTIVE is necessary but not sufficient: legacy rows may contain future
-        payment dates. Those rows remain readable but are not realized until the
-        payment date is reached. VOIDED/deleted rows never contribute.
-        """
+        """Return whether an Income belongs to the realized ledger at ``as_of``."""
         if income.deleted_at is not None or income.status != Income.STATUS_ACTIVE:
             return False
         if income.payment_date is None:
@@ -177,6 +176,25 @@ class IncomeService:
         )
         return config, resolved.period_start
 
+    def _ensure_period_start_mutable(self, session, period_start: date) -> None:
+        try:
+            FinanceLedgerGuard.ensure_period_start_mutable(
+                session, self._repository_provider, period_start
+            )
+        except FinancePeriodClosedError as exc:
+            raise IncomeValidationError(str(exc)) from exc
+
+    def _ensure_income_period_mutable(self, session, income: Income) -> None:
+        if income.finance_period_start is not None:
+            self._ensure_period_start_mutable(session, income.finance_period_start)
+            return
+        try:
+            FinanceLedgerGuard.ensure_date_mutable(
+                session, self._repository_provider, income.payment_date
+            )
+        except (FinancePeriodClosedError, ValueError) as exc:
+            raise IncomeValidationError(str(exc)) from exc
+
     @staticmethod
     def _validate_realized_posting_date(payment_date: date) -> None:
         if payment_date > get_clock().today():
@@ -192,16 +210,10 @@ class IncomeService:
             "amount": income.amount,
             "income_type": income.income_type,
             "payment_method": income.payment_method,
-            "payment_date": (
-                income.payment_date.isoformat() if income.payment_date else None
-            ),
+            "payment_date": income.payment_date.isoformat() if income.payment_date else None,
             "payment_period": income.payment_period,
             "finance_period_id": income.finance_period_id,
-            "finance_period_start": (
-                income.finance_period_start.isoformat()
-                if income.finance_period_start
-                else None
-            ),
+            "finance_period_start": income.finance_period_start.isoformat() if income.finance_period_start else None,
             "received_by": income.received_by,
             "note": income.note,
             "status": income.status,
@@ -211,15 +223,7 @@ class IncomeService:
             "deleted_at": income.deleted_at.isoformat() if income.deleted_at else None,
         }
 
-    def _record_audit(
-        self,
-        session,
-        income: Income,
-        action: str,
-        *,
-        old_values: Optional[dict] = None,
-        new_values: Optional[dict] = None,
-    ) -> None:
+    def _record_audit(self, session, income: Income, action: str, *, old_values: Optional[dict] = None, new_values: Optional[dict] = None) -> None:
         self._audit_service.record_in_session(
             session,
             action=action,
@@ -227,10 +231,7 @@ class IncomeService:
             target_type="income",
             target_id=income.id,
             target_name=f"Income #{income.id}",
-            details={
-                "old_values": old_values,
-                "new_values": new_values,
-            },
+            details={"old_values": old_values, "new_values": new_values},
             actor=get_current_user(),
             entity_type="Income",
             entity_id=income.id,
@@ -238,29 +239,19 @@ class IncomeService:
         )
 
     def _best_effort_timeline_event(self, **kwargs) -> None:
-        """Project a timeline event without invalidating a committed mutation."""
         try:
             self._timeline_service.log_event(**kwargs)
         except Exception:
             _LOGGER.exception(
-                "Income mutation committed but timeline projection failed "
-                "(income_id=%s).",
+                "Income mutation committed but timeline projection failed (income_id=%s).",
                 kwargs.get("metadata", {}).get("income_id"),
             )
 
     @require_permission("finance.income.create")
-    def create_income(
-        self,
-        amount: float,
-        income_type: str,
-        payment_method: str,
-        payment_date: date,
-        student_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        payment_period: Optional[str] = None,
-        received_by: Optional[str] = None,
-        note: Optional[str] = None,
-    ) -> Income:
+    def create_income(self, amount: float, income_type: str, payment_method: str, payment_date: date,
+                      student_id: Optional[int] = None, class_id: Optional[int] = None,
+                      payment_period: Optional[str] = None, received_by: Optional[str] = None,
+                      note: Optional[str] = None) -> Income:
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
         payment_method = self._validate_payment_method(payment_method)
@@ -268,7 +259,6 @@ class IncomeService:
         if payment_date is None:
             raise IncomeValidationError("Payment date is required.")
         self._validate_realized_posting_date(payment_date)
-
         payment_period = self._normalize_text(payment_period)
         _, actor_name = self._actor()
         received_by = self._normalize_text(received_by) or actor_name
@@ -282,66 +272,34 @@ class IncomeService:
             class_name = class_record.name
 
         with self._session_factory() as session:
-            if (
-                student_id is not None
-                and class_id is not None
-                and not self._check_student_enrolled_on(
-                    session, student_id, class_id, payment_date
-                )
-            ):
-                raise IncomeValidationError(
-                    "Student was not enrolled in the selected class "
-                    "on the payment date."
-                )
-
+            if student_id is not None and class_id is not None and not self._check_student_enrolled_on(session, student_id, class_id, payment_date):
+                raise IncomeValidationError("Student was not enrolled in the selected class on the payment date.")
             repo = self._repository_provider.incomes(session)
-            finance_period, finance_period_start = self._resolve_finance_period(
-                session, payment_date
-            )
+            finance_period, finance_period_start = self._resolve_finance_period(session, payment_date)
+            self._ensure_period_start_mutable(session, finance_period_start)
             income = Income(
-                student_id=student_id,
-                class_id=class_id,
-                amount=amount,
-                income_type=income_type,
-                payment_method=payment_method,
-                payment_date=payment_date,
-                payment_period=payment_period,
+                student_id=student_id, class_id=class_id, amount=amount,
+                income_type=income_type, payment_method=payment_method,
+                payment_date=payment_date, payment_period=payment_period,
                 finance_period_id=finance_period.id,
                 finance_period_start=finance_period_start,
-                received_by=received_by,
-                note=note,
-                status=Income.STATUS_ACTIVE,
+                received_by=received_by, note=note, status=Income.STATUS_ACTIVE,
             )
             repo.add(income)
             repo.flush()
-            self._record_audit(
-                session,
-                income,
-                "CREATE",
-                new_values=self._audit_snapshot(income),
-            )
+            self._record_audit(session, income, "CREATE", new_values=self._audit_snapshot(income))
             session.commit()
             repo.refresh(income)
-
             if student_id is not None:
                 self._best_effort_timeline_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_CREATED,
                     title=f"Income Created: {income_type}",
-                    description=(
-                        f"Amount: {amount:,.0f} VND, Method: {payment_method}, "
-                        f"Class: {class_name}, Period: {finance_period_start.isoformat()}"
-                    ),
-                    metadata={
-                        "income_id": income.id,
-                        "class_id": class_id,
-                        "amount": amount,
-                        "income_type": income_type,
-                        "payment_method": payment_method,
-                        "payment_period": payment_period,
-                        "finance_period_id": finance_period.id,
-                        "finance_period_start": finance_period_start.isoformat(),
-                    },
+                    description=f"Amount: {amount:,.0f} VND, Method: {payment_method}, Class: {class_name}, Period: {finance_period_start.isoformat()}",
+                    metadata={"income_id": income.id, "class_id": class_id, "amount": amount,
+                              "income_type": income_type, "payment_method": payment_method,
+                              "payment_period": payment_period, "finance_period_id": finance_period.id,
+                              "finance_period_start": finance_period_start.isoformat()},
                 )
             self._publish_finance_change("created", income.id)
             return income
@@ -349,186 +307,99 @@ class IncomeService:
     @require_permission("finance.view")
     def get_income(self, income_id: int) -> Income:
         with self._session_factory() as session:
-            repo = self._repository_provider.incomes(session)
-            income = repo.get_by_id(income_id)
+            income = self._repository_provider.incomes(session).get_by_id(income_id)
             if income is None:
-                raise IncomeNotFoundError(
-                    f"Income with id {income_id} not found."
-                )
+                raise IncomeNotFoundError(f"Income with id {income_id} not found.")
             return income
 
     @require_permission("finance.view")
-    def list_incomes(
-        self,
-        student_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        income_type: Optional[str] = None,
-        payment_method: Optional[str] = None,
-        payment_period: Optional[str] = None,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        search_text: Optional[str] = None,
-        page: int = 1,
-        per_page: int = 20,
-        finance_period_start: Optional[date] = None,
-        status: Optional[str] = Income.STATUS_ACTIVE,
-        sort_by: str = "payment_date",
-        ascending: bool = False,
-    ) -> Tuple[List[Income], int]:
+    def list_incomes(self, student_id: Optional[int] = None, class_id: Optional[int] = None,
+                     income_type: Optional[str] = None, payment_method: Optional[str] = None,
+                     payment_period: Optional[str] = None, date_from: Optional[date] = None,
+                     date_to: Optional[date] = None, search_text: Optional[str] = None,
+                     page: int = 1, per_page: int = 20,
+                     finance_period_start: Optional[date] = None,
+                     status: Optional[str] = Income.STATUS_ACTIVE,
+                     sort_by: str = "payment_date", ascending: bool = False) -> Tuple[List[Income], int]:
         if page < 1:
             raise IncomeValidationError("Page must be >= 1.")
         if per_page < 1:
             raise IncomeValidationError("Per-page value must be >= 1.")
         normalized_status = self._validate_status(status)
         offset = (page - 1) * per_page
-
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
-            common = dict(
-                student_id=student_id,
-                class_id=class_id,
-                income_type=income_type,
-                payment_method=payment_method,
-                payment_period=payment_period,
-                finance_period_start=finance_period_start,
-                date_from=date_from,
-                date_to=date_to,
-                search_text=search_text,
-                status=normalized_status,
+            common = dict(student_id=student_id, class_id=class_id, income_type=income_type,
+                          payment_method=payment_method, payment_period=payment_period,
+                          finance_period_start=finance_period_start, date_from=date_from,
+                          date_to=date_to, search_text=search_text, status=normalized_status)
+            return (
+                repo.list_records(**common, offset=offset, limit=per_page, sort_by=sort_by, ascending=ascending),
+                repo.count_records(**common),
             )
-            items = repo.list_records(
-                **common,
-                offset=offset,
-                limit=per_page,
-                sort_by=sort_by,
-                ascending=ascending,
-            )
-            total = repo.count_records(**common)
-            return items, total
 
     @require_permission("finance.income.update")
-    def update_income(
-        self,
-        income_id: int,
-        amount: Optional[float] = None,
-        payment_method: Optional[str] = None,
-        payment_date: Optional[date] = None,
-        payment_period: Optional[str] = None,
-        note: Optional[str] = None,
-        received_by: Optional[str] = None,
-    ) -> Income:
-        """Edit mutable transaction fields.
-
-        Source/student/class/income_type are intentionally absent: they are
-        transaction identity and cannot be silently changed after creation.
-        """
+    def update_income(self, income_id: int, amount: Optional[float] = None,
+                      payment_method: Optional[str] = None, payment_date: Optional[date] = None,
+                      payment_period: Optional[str] = None, note: Optional[str] = None,
+                      received_by: Optional[str] = None) -> Income:
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
-                raise IncomeNotFoundError(
-                    f"Income with id {income_id} not found or deleted."
-                )
+                raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be edited.")
-
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             changed = []
-
             if amount is not None:
                 amount = self._validate_amount(amount)
                 if income.amount != amount:
                     changed.append(f"amount: {income.amount} -> {amount}")
                     income.amount = amount
-
             if payment_method is not None:
                 payment_method = self._validate_payment_method(payment_method)
                 if income.payment_method != payment_method:
-                    changed.append(
-                        f"payment_method: {income.payment_method} -> {payment_method}"
-                    )
+                    changed.append(f"payment_method: {income.payment_method} -> {payment_method}")
                     income.payment_method = payment_method
-
             if payment_date is not None and income.payment_date != payment_date:
                 self._validate_realized_posting_date(payment_date)
-                changed.append(
-                    f"payment_date: {income.payment_date} -> {payment_date}"
-                )
+                changed.append(f"payment_date: {income.payment_date} -> {payment_date}")
                 income.payment_date = payment_date
             else:
                 self._validate_realized_posting_date(income.payment_date)
-
-            if (
-                income.student_id is not None
-                and income.class_id is not None
-                and not self._check_student_enrolled_on(
-                    session,
-                    income.student_id,
-                    income.class_id,
-                    income.payment_date,
-                )
-            ):
-                raise IncomeValidationError(
-                    "Student was not enrolled in the selected class "
-                    "on the payment date."
-                )
-
-            finance_period, new_period_start = self._resolve_finance_period(
-                session, income.payment_date
-            )
+            if income.student_id is not None and income.class_id is not None and not self._check_student_enrolled_on(session, income.student_id, income.class_id, income.payment_date):
+                raise IncomeValidationError("Student was not enrolled in the selected class on the payment date.")
+            finance_period, new_period_start = self._resolve_finance_period(session, income.payment_date)
+            self._ensure_period_start_mutable(session, new_period_start)
             if income.finance_period_id != finance_period.id:
-                changed.append(
-                    "finance_period_id: "
-                    f"{income.finance_period_id} -> {finance_period.id}"
-                )
+                changed.append(f"finance_period_id: {income.finance_period_id} -> {finance_period.id}")
                 income.finance_period_id = finance_period.id
             if income.finance_period_start != new_period_start:
-                changed.append(
-                    "finance_period_start: "
-                    f"{income.finance_period_start} -> {new_period_start}"
-                )
+                changed.append(f"finance_period_start: {income.finance_period_start} -> {new_period_start}")
                 income.finance_period_start = new_period_start
-
             if payment_period is not None:
                 new_period = self._normalize_text(payment_period)
                 if income.payment_period != new_period:
-                    changed.append(
-                        "payment_period: "
-                        f"{income.payment_period or '(none)'} -> "
-                        f"{new_period or '(none)'}"
-                    )
+                    changed.append(f"payment_period: {income.payment_period or '(none)'} -> {new_period or '(none)'}")
                     income.payment_period = new_period
-
             if received_by is not None:
                 new_received_by = self._normalize_text(received_by) or "System"
                 if income.received_by != new_received_by:
-                    changed.append(
-                        f"received_by: {income.received_by} -> {new_received_by}"
-                    )
+                    changed.append(f"received_by: {income.received_by} -> {new_received_by}")
                     income.received_by = new_received_by
-
             if note is not None:
                 new_note = self._normalize_text(note)
                 if income.note != new_note:
-                    changed.append(
-                        f"note: {income.note or '(none)'} -> {new_note or '(none)'}"
-                    )
+                    changed.append(f"note: {income.note or '(none)'} -> {new_note or '(none)'}")
                     income.note = new_note
-
             if not changed:
                 return income
-
             after = self._audit_snapshot(income)
-            self._record_audit(
-                session,
-                income,
-                "UPDATE",
-                old_values=before,
-                new_values=after,
-            )
+            self._record_audit(session, income, "UPDATE", old_values=before, new_values=after)
             session.commit()
             repo.refresh(income)
-
             if income.student_id is not None:
                 self._best_effort_timeline_event(
                     student_id=income.student_id,
@@ -545,17 +416,14 @@ class IncomeService:
         reason = self._normalize_text(reason)
         if not reason:
             raise IncomeValidationError("Void reason is required.")
-
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
-                raise IncomeNotFoundError(
-                    f"Income with id {income_id} not found or deleted."
-                )
+                raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be voided.")
-
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             _, actor_name = self._actor()
             income.status = Income.STATUS_VOIDED
@@ -563,158 +431,77 @@ class IncomeService:
             income.voided_by = actor_name
             income.void_reason = reason
             after = self._audit_snapshot(income)
-
-            self._record_audit(
-                session,
-                income,
-                "VOID",
-                old_values=before,
-                new_values=after,
-            )
+            self._record_audit(session, income, "VOID", old_values=before, new_values=after)
             session.commit()
             repo.refresh(income)
-
             if income.student_id is not None:
                 self._best_effort_timeline_event(
                     student_id=income.student_id,
                     event_type=TimelineEventType.INCOME_UPDATED,
                     title="Income Voided",
                     description=f"Income voided. Reason: {reason}",
-                    metadata={
-                        "income_id": income.id,
-                        "reason": reason,
-                        "voided_by": actor_name,
-                    },
+                    metadata={"income_id": income.id, "reason": reason, "voided_by": actor_name},
                 )
             self._publish_finance_change("voided", income.id)
             return income
 
     @require_permission("finance.income.delete")
     def delete_income(self, income_id: int) -> None:
-        """Soft-delete a transaction without destroying its audit history.
-
-        UI exposes Delete for VOIDED rows. The service remains backward compatible
-        with legacy callers that soft-delete an ACTIVE row, but it never hard-deletes.
-        """
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
             income = repo.get_by_id_including_deleted(income_id)
             if income is None or income.deleted_at is not None:
-                raise IncomeNotFoundError(
-                    f"Income with id {income_id} not found or already deleted."
-                )
-
+                raise IncomeNotFoundError(f"Income with id {income_id} not found or already deleted.")
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             student_id = income.student_id
             income.deleted_at = datetime.now()
             after = self._audit_snapshot(income)
-            self._record_audit(
-                session,
-                income,
-                "DELETE",
-                old_values=before,
-                new_values=after,
-            )
+            self._record_audit(session, income, "DELETE", old_values=before, new_values=after)
             session.commit()
-
             if student_id is not None:
                 self._best_effort_timeline_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_DELETED,
                     title="Income Deleted",
-                    description=(
-                        f"Income {income.income_type} amount "
-                        f"{income.amount:,.0f} VND deleted."
-                    ),
+                    description=f"Income {income.income_type} amount {income.amount:,.0f} VND deleted.",
                     metadata={"income_id": income_id},
                 )
             self._publish_finance_change("deleted", income_id)
 
     @require_permission("finance.view")
-    def export_incomes_csv(
-        self,
-        *,
-        student_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        income_type: Optional[str] = None,
-        payment_method: Optional[str] = None,
-        payment_period: Optional[str] = None,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        search_text: Optional[str] = None,
-        finance_period_start: Optional[date] = None,
-        status: Optional[str] = Income.STATUS_ACTIVE,
-        sort_by: str = "payment_date",
-        ascending: bool = False,
-    ) -> str:
+    def export_incomes_csv(self, *, student_id: Optional[int] = None, class_id: Optional[int] = None,
+                           income_type: Optional[str] = None, payment_method: Optional[str] = None,
+                           payment_period: Optional[str] = None, date_from: Optional[date] = None,
+                           date_to: Optional[date] = None, search_text: Optional[str] = None,
+                           finance_period_start: Optional[date] = None,
+                           status: Optional[str] = Income.STATUS_ACTIVE,
+                           sort_by: str = "payment_date", ascending: bool = False) -> str:
         normalized_status = self._validate_status(status)
         with self._session_factory() as session:
             repo = self._repository_provider.incomes(session)
-            common = dict(
-                student_id=student_id,
-                class_id=class_id,
-                income_type=income_type,
-                payment_method=payment_method,
-                payment_period=payment_period,
-                finance_period_start=finance_period_start,
-                date_from=date_from,
-                date_to=date_to,
-                search_text=search_text,
-                status=normalized_status,
-            )
+            common = dict(student_id=student_id, class_id=class_id, income_type=income_type,
+                          payment_method=payment_method, payment_period=payment_period,
+                          finance_period_start=finance_period_start, date_from=date_from,
+                          date_to=date_to, search_text=search_text, status=normalized_status)
             total = repo.count_records(**common)
-            records = repo.list_records(
-                **common,
-                offset=0,
-                limit=max(1, total),
-                sort_by=sort_by,
-                ascending=ascending,
-            )
-
+            records = repo.list_records(**common, offset=0, limit=max(1, total), sort_by=sort_by, ascending=ascending)
         output = io.StringIO(newline="")
         writer = csv.writer(output)
-        writer.writerow(
-            [
-                "Payment Date",
-                "Source",
-                "Student",
-                "Class",
-                "Income Type",
-                "Amount",
-                "Payment Method",
-                "Payment Period",
-                "Finance Period Start",
-                "Received By",
-                "Note",
-                "Status",
-                "Voided At",
-                "Voided By",
-                "Void Reason",
-            ]
-        )
+        writer.writerow(["Payment Date", "Source", "Student", "Class", "Income Type", "Amount",
+                         "Payment Method", "Payment Period", "Finance Period Start", "Received By",
+                         "Note", "Status", "Voided At", "Voided By", "Void Reason"])
         for income in records:
             linked = income.student_id is not None
-            writer.writerow(
-                [
-                    income.payment_date.isoformat(),
-                    "STUDENT_PAYMENT" if linked else "OTHER_INCOME",
-                    income.student.full_name if linked and income.student else "",
-                    income.class_.name if linked and income.class_ else "",
-                    income.income_type,
-                    income.amount,
-                    income.payment_method,
-                    income.payment_period or "",
-                    (
-                        income.finance_period_start.isoformat()
-                        if income.finance_period_start
-                        else ""
-                    ),
-                    income.received_by or "",
-                    income.note or "",
-                    income.status,
-                    income.voided_at.isoformat() if income.voided_at else "",
-                    income.voided_by or "",
-                    income.void_reason or "",
-                ]
-            )
+            writer.writerow([
+                income.payment_date.isoformat(),
+                "STUDENT_PAYMENT" if linked else "OTHER_INCOME",
+                income.student.full_name if linked and income.student else "",
+                income.class_.name if linked and income.class_ else "",
+                income.income_type, income.amount, income.payment_method, income.payment_period or "",
+                income.finance_period_start.isoformat() if income.finance_period_start else "",
+                income.received_by or "", income.note or "", income.status,
+                income.voided_at.isoformat() if income.voided_at else "",
+                income.voided_by or "", income.void_reason or "",
+            ])
         return output.getvalue()
