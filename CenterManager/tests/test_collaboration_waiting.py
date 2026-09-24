@@ -12,6 +12,27 @@ from centermanager.events.event_bus import EventBus
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 
 
+@pytest.fixture(autouse=True)
+def cleanup_collaboration_managers(monkeypatch):
+    """Ensure every manager initialized by this module is shut down after the test."""
+    managers = []
+    original_initialize = CollaborationManager.initialize
+
+    def tracked_initialize(manager, *args, **kwargs):
+        session = original_initialize(manager, *args, **kwargs)
+        managers.append(manager)
+        return session
+
+    monkeypatch.setattr(CollaborationManager, "initialize", tracked_initialize)
+    yield
+
+    for manager in reversed(managers):
+        try:
+            manager.shutdown()
+        except Exception:
+            pass
+
+
 @pytest.fixture
 def temp_collab(tmp_path):
     """Create collaboration manager with temp runtime."""
