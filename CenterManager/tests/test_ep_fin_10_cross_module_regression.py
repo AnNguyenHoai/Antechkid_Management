@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.capabilities import Capability
 from centermanager.database.engine import create_engine_for_path
 from centermanager.models.expense import Expense
 from centermanager.models.finance_period import FinancePeriod
@@ -18,12 +19,25 @@ TARGET_DATE = date(2026, 5, 1)
 PERIOD_START = date(2026, 4, 1)
 
 
+def _admin_principal():
+    return SimpleNamespace(
+        is_admin=True,
+        is_active=True,
+        role=SimpleNamespace(name="admin"),
+        permissions=[
+            Capability.FINANCE_SETTLEMENT_VIEW.value,
+            Capability.FINANCE_SETTLEMENT_CREATE.value,
+            Capability.FINANCE_SETTLEMENT_UPDATE.value,
+        ],
+    )
+
+
 def _service_with_period(test_db_path, monkeypatch):
     engine = create_engine_for_path(test_db_path)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(
         "centermanager.services.financial_settlement_service.get_current_user",
-        lambda: SimpleNamespace(is_admin=True),
+        _admin_principal,
     )
     with factory() as session:
         session.add(
@@ -287,10 +301,13 @@ def test_cross_module_refresh_period_and_student_read_only_contracts():
         "self.settlement_page,",
     ):
         assert page_name in shell
-    assert "target_date=target_date" in shell
-    assert "period_start=period_start" in shell
-    assert "period_end=period_end" in shell
-    assert "period_configured=period_configured" in shell
+    assert "def _period_context" in shell
+    assert '"target_date": target_date' in shell
+    assert '"period_start": period_start' in shell
+    assert '"period_end": period_end' in shell
+    assert '"period_configured": configured' in shell
+    assert '"period_closed": closed' in shell
+    assert "page.refresh(**context)" in shell
 
     # Income and Expense are mutation publishers feeding that shared refresh.
     assert "FinanceDataChanged(entity=\"income\"" in income_service
