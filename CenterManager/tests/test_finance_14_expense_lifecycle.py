@@ -23,9 +23,9 @@ def test_expense_payment_date_is_required():
 
 def test_expense_payment_method_normalizes_legacy_values():
     service = make_service()
-    assert service._validate_payment_method("TÀI KHOẢN CÁ NHÂN") == "Cash"
-    assert service._validate_payment_method("TÀI KHOẢN CÔNG TY") == "Bank"
-    assert service._validate_payment_method("Bank Transfer") == "Bank"
+    assert service._validate_payment_method("TÀI KHOẢN CÁ NHÂN") == "CASH"
+    assert service._validate_payment_method("TÀI KHOẢN CÔNG TY") == "BANK"
+    assert service._validate_payment_method("Bank Transfer") == "BANK"
 
 
 def test_expense_status_normalizes_legacy_values():
