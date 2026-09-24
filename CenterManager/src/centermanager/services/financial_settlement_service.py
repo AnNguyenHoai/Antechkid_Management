@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
+from centermanager.core.wallet import resolve_wallet
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -55,6 +56,15 @@ class FinancialSettlementService:
         if value is None:
             return None
         return FinancialSettlementService._money(value)
+
+    @staticmethod
+    def _method_bucket(payment_method: Optional[str]) -> str:
+        """Legacy compatibility shim backed by the canonical Wallet resolver.
+
+        Older finance callers/tests still use this private helper. Keep the
+        surface temporarily without duplicating payment-method mapping logic.
+        """
+        return resolve_wallet(payment_method).value.lower()
 
     @staticmethod
     def _require_admin() -> None:
@@ -238,8 +248,6 @@ class FinancialSettlementService:
             if confirm and (actual_cash_value is None or actual_bank_value is None):
                 raise ValueError("Actual closing cash and bank balances are required before confirmation.")
 
-            # Recalculate from the live ledger inside the same transaction that
-            # persists the final snapshot and the CONFIRMED state.
             totals = self._aggregate_activity(session, period_start, period_end)
             calculated = self._calculate(
                 opening_cash_value,
@@ -284,8 +292,6 @@ class FinancialSettlementService:
             row.confirmed_at = get_clock().now() if confirm else None
 
             if confirm:
-                # Repository-owned flush materializes the settlement identity;
-                # closure and audit remain in the caller-owned transaction.
                 settlement_repo.flush()
                 self._record_transition_audit(
                     session,
