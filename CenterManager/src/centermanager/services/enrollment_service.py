@@ -236,8 +236,15 @@ class EnrollmentService:
 
             effective_from = enrolled_from_session
             if effective_from is None:
-                sessions = self._repository_provider.sessions(session).get_by_class(class_id)
-                effective_from, _ = self._resolved_start_session(class_obj, sessions)
+                session_factory = getattr(self._repository_provider, "sessions", None)
+                if callable(session_factory):
+                    sessions = session_factory(session).get_by_class(class_id)
+                    effective_from, _ = self._resolved_start_session(class_obj, sessions)
+                else:
+                    # Compatibility for narrow injected providers used by older
+                    # application boundaries. Production provider always exposes
+                    # Sessions and UI uses preview_enrollment_pricing first.
+                    effective_from = 1
 
             tuition_snapshot = self._snapshot_tuition_contract(
                 class_obj,
