@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Callable, List, Optional
 
+from centermanager.core.clock import get_clock
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.events.event_bus import EventBus
@@ -26,13 +28,19 @@ class EnrollmentCapacityError(EnrollmentError): pass
 class EnrollmentValidationError(EnrollmentError): pass
 
 
+_MONEY_QUANTUM = Decimal("0.0001")
+
+
+def _money(value: Decimal) -> Decimal:
+    return value.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
 class EnrollmentService:
     """Owns Enrollment lifecycle while preserving historical rows.
 
-    Repository construction is delegated to ``RepositoryProvider``. The
-    service continues to own the session/transaction lifecycle so the
-    migration changes dependency selection without changing business
-    transaction semantics.
+    Tuition terms are snapshotted when a new enrollment is created. Historical
+    rows created before the tuition-contract migration deliberately remain
+    unresolved rather than inheriting today's Class contract retroactively.
     """
 
     def __init__(
@@ -59,7 +67,74 @@ class EnrollmentService:
             current_status=enrollment.status,
         ))
 
-    def enroll(self, student_id: int, class_id: int, start_date: Optional[date] = None) -> Enrollment:
+    @staticmethod
+    def _snapshot_tuition_contract(
+        class_obj,
+        *,
+        enrolled_from_session: int,
+        enrolled_until_session: Optional[int],
+        discount_amount: Decimal | int,
+    ) -> dict:
+        """Build an immutable tuition snapshot from the current Class contract.
+
+        Mid-course enrollment is explicit: callers provide the first effective
+        session instead of inferring it from calendar dates or existing session
+        rows. The agreed fee is prorated by the effective session range while
+        preserving the Class unit-price basis.
+        """
+        if not class_obj.has_course_contract:
+            raise EnrollmentValidationError(
+                "Class course contract is incomplete; complete tuition terms before enrolling students."
+            )
+
+        planned_sessions = int(class_obj.planned_sessions)
+        effective_until = (
+            planned_sessions if enrolled_until_session is None else enrolled_until_session
+        )
+        if enrolled_from_session < 1 or enrolled_from_session > planned_sessions:
+            raise EnrollmentValidationError(
+                f"Enrollment start session must be between 1 and {planned_sessions}."
+            )
+        if effective_until < enrolled_from_session or effective_until > planned_sessions:
+            raise EnrollmentValidationError(
+                f"Enrollment end session must be between {enrolled_from_session} and {planned_sessions}."
+            )
+
+        try:
+            discount = _money(Decimal(str(discount_amount)))
+        except Exception as exc:
+            raise EnrollmentValidationError("Discount amount must be a valid number.") from exc
+        if discount < 0:
+            raise EnrollmentValidationError("Discount amount cannot be negative.")
+
+        class_fee = Decimal(class_obj.course_fee)
+        unit_fee = _money(class_fee / Decimal(planned_sessions))
+        contracted_sessions = effective_until - enrolled_from_session + 1
+        agreed_course_fee = _money(
+            class_fee * Decimal(contracted_sessions) / Decimal(planned_sessions)
+        )
+        if discount > agreed_course_fee:
+            raise EnrollmentValidationError("Discount amount cannot exceed the agreed course fee.")
+
+        return {
+            "agreed_course_fee": agreed_course_fee,
+            "planned_sessions": planned_sessions,
+            "unit_fee": unit_fee,
+            "enrolled_from_session": enrolled_from_session,
+            "enrolled_until_session": effective_until,
+            "discount_amount": discount,
+        }
+
+    def enroll(
+        self,
+        student_id: int,
+        class_id: int,
+        start_date: Optional[date] = None,
+        *,
+        enrolled_from_session: int = 1,
+        enrolled_until_session: Optional[int] = None,
+        discount_amount: Decimal | int = 0,
+    ) -> Enrollment:
         with self._session_factory() as session:
             class_obj = self._repository_provider.classes(session).get_by_id(class_id)
             if class_obj is None or class_obj.deleted_at is not None:
@@ -74,14 +149,24 @@ class EnrollmentService:
             if class_obj.capacity is not None and len(repo.get_active_by_class(class_id)) >= class_obj.capacity:
                 raise EnrollmentCapacityError(f"Class capacity ({class_obj.capacity}) reached.")
 
+            tuition_snapshot = self._snapshot_tuition_contract(
+                class_obj,
+                enrolled_from_session=enrolled_from_session,
+                enrolled_until_session=enrolled_until_session,
+                discount_amount=discount_amount,
+            )
             enrollment = Enrollment(
-                student_id=student_id, class_id=class_id,
-                class_name=class_obj.name, course_name=class_obj.course,
-                start_date=start_date or class_obj.start_date or date.today(),
+                student_id=student_id,
+                class_id=class_id,
+                class_name=class_obj.name,
+                course_name=class_obj.course,
+                start_date=start_date or class_obj.start_date or get_clock().today(),
                 status=EnrollmentStatus.ACTIVE.value,
+                **tuition_snapshot,
             )
             repo.add(enrollment)
-            session.commit(); repo.refresh(enrollment)
+            session.commit()
+            repo.refresh(enrollment)
             self._publish_change(enrollment, "ENROLLED", None)
             return enrollment
 
@@ -108,8 +193,9 @@ class EnrollmentService:
                 )
             previous_status = enrollment.status
             enrollment.status = target.value
-            enrollment.end_date = end_date or date.today()
-            session.commit(); repo.refresh(enrollment)
+            enrollment.end_date = end_date or get_clock().today()
+            session.commit()
+            repo.refresh(enrollment)
             self._publish_change(
                 enrollment,
                 "COMPLETED" if target == EnrollmentStatus.COMPLETED else "WITHDRAWN",
