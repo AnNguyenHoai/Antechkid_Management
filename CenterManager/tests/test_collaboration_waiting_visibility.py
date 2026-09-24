@@ -125,7 +125,10 @@ def start_client(client):
 
 
 def stop_client(client):
-    safe_stop_poller(client["poller"])
+    try:
+        safe_stop_poller(client["poller"])
+    finally:
+        client["cm"].shutdown()
 
 
 def get_main_head(repo_path):
@@ -258,7 +261,7 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
         assert snap is not None and snap.has_lock()
         assert snap.lock_owner() == "User A"
 
-        stop_client(client_a)
+        stop_poller_for_git_mutation(client_a["poller"])
         provider_a = client_a["provider"]
         oid = provider_a._remote_lock_oid()
         assert oid is not None
@@ -288,6 +291,8 @@ def test_expired_lease_becomes_visible_cross_machine(qapp, remote_path, tmp_path
             client_a["cm"].release_write()
         except Exception:
             pass
+        # Poller A may already be stopped for the direct Git mutation above;
+        # safe_stop_poller is idempotent and shutdown closes its heartbeat.
         stop_client(client_a)
 
 
