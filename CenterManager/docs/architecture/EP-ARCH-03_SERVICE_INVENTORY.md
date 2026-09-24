@@ -63,10 +63,15 @@ This inventory is the committed architecture classification for application serv
 | `teacher_service.py` | PASS | repository-owned | — |
 | `teacher_timeline_service.py` | PASS | repository-owned | — |
 | `timeline_service.py` | PASS | repository-owned | — |
+| `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
 
 ## EP-FIN-04 Financial Settlement
 
 `financial_settlement_service.py` — **FinancialSettlementService** is provider-backed and classified as `PASS`. It resolves FinancePeriod through `RepositoryProvider.finance_periods(...)`, reads Income/Expense through `RepositoryProvider.incomes(...)` and `RepositoryProvider.expenses(...)`, and persists settlement snapshots through `RepositoryProvider.financial_settlements(...)`. The service owns reconciliation calculations, authorization and transaction completion; repositories own SQLAlchemy query/persistence operations.
+
+## FW2-06 Wallet Accounting
+
+`wallet_service.py` — **WalletService** is provider-backed and classified as `PASS`. It composes repository-owned grouped Income/Expense aggregates into the canonical `CASH`/`BANK` read model. Wallet alias resolution, balance equations and DTO projection are service-owned; SQL queries and persistence remain repository-owned.
 
 ## Inventory maintenance
 
