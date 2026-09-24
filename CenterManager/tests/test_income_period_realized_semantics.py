@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from centermanager.core.clock import Clock, reset_clock, set_clock
 from centermanager.models.finance_period import FinancePeriod
 from centermanager.models.income import Income
 from centermanager.services.income_service import IncomeService, IncomeValidationError
@@ -79,11 +80,22 @@ def test_realized_income_requires_active_non_deleted_and_posted_to_cutoff():
     )
 
 
-def test_future_active_income_posting_is_rejected():
-    with pytest.raises(IncomeValidationError, match="future payment date"):
-        IncomeService._validate_realized_posting_date(
-            date.today() + timedelta(days=1)
+def test_default_realized_cutoff_and_posting_guard_use_application_clock():
+    business_date = date(2026, 9, 23)
+    fixed_now = datetime(2026, 9, 23, 8, 0, 0)
+    set_clock(Clock(now_fn=lambda: fixed_now, today_fn=lambda: business_date))
+    try:
+        assert IncomeService.is_realized(_income(payment_date=business_date))
+        assert not IncomeService.is_realized(
+            _income(payment_date=business_date + timedelta(days=1))
         )
+        IncomeService._validate_realized_posting_date(business_date)
+        with pytest.raises(IncomeValidationError, match="future payment date"):
+            IncomeService._validate_realized_posting_date(
+                business_date + timedelta(days=1)
+            )
+    finally:
+        reset_clock()
 
 
 def test_period_resolution_uses_unique_covering_configuration_and_bucket_start():
