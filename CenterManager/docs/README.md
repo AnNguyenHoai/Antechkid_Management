@@ -37,10 +37,11 @@ High-level platform vision does not automatically override a more specific appro
 
 A domain-specific approved spec is authoritative for that domain.
 
-Example:
+Finance examples:
 
 - `finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md` — Finance Wallet V2 domain contract;
-- `finance/FINANCE_WALLET_V2_IMPLEMENTATION_TRACKER.md` — progress/evidence only, not a replacement for the Domain Spec.
+- `finance/FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md` — approved R6 clarification defining Settlement capability identifiers, role grants, service enforcement and UI projection;
+- `finance/FINANCE_WALLET_V2_IMPLEMENTATION_TRACKER.md` — progress/evidence only, not a replacement for the Domain Spec or an approved clarification contract.
 
 When code/tests conflict with an approved domain spec because the spec intentionally changed behavior, the spec defines the target contract.
 
@@ -76,7 +77,7 @@ These files are useful evidence/history, but they should not automatically be tr
 
 When a historical task document conflicts with:
 
-1. an approved current domain spec;
+1. an approved current domain spec or clarification;
 2. `ARCHITECTURE.md` current implementation description;
 3. current code/architecture gates;
 
@@ -103,6 +104,7 @@ When implementation materially changes a documented contract:
 | What is the long-term platform direction? | `Deployment_Docs/000_PLATFORM_VISION.md` |
 | What is the exact database schema? | ORM models + Alembic migrations |
 | What are Finance business rules? | `finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
+| What are Settlement authorization rules? | `finance/FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md` |
 | What is the next Finance task? | Finance tracker + assigned GitHub Issue |
 | What should Codex implement? | assigned GitHub Issue + `AGENTS.md` |
 | How should an end user recover from an error? | `TROUBLESHOOTING.md` |
