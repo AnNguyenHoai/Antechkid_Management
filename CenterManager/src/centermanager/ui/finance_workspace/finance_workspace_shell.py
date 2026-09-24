@@ -280,7 +280,7 @@ class FinanceWorkspaceShell(QWidget):
         period = self._selected_period()
         if period is None:
             self.period_label.setText("Finance period not configured")
-            return business_date, None, None, False, False
+            return business_date, None, None, False, True
 
         target_date = self._target_date_for_period(period, business_date)
         self.period_label.setText(
@@ -291,7 +291,7 @@ class FinanceWorkspaceShell(QWidget):
             try:
                 closed = self._finance_period_service.is_period_closed(target_date)
             except Exception:
-                closed = False
+                closed = True
         return target_date, period.period_start, period.period_end, True, closed
 
     def _period_context(self) -> dict:
