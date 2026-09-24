@@ -1,30 +1,42 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
+from centermanager.services.audit_service import AuditService
 
 
 _MONEY_QUANTUM = Decimal("0.01")
 
 
 class FinancialSettlementService:
-    """Reconcile Finance activity against actual cash and bank balances."""
+    """Reconcile Finance activity against actual cash and bank balances.
+
+    Settlement confirmation is the authoritative ledger-close transition. The
+    CONFIRMED snapshot and its audit record are persisted in one database
+    transaction; reopening is an explicit audited Admin command.
+    """
 
     def __init__(
         self,
         session_factory: sessionmaker,
         repository_provider: Optional[RepositoryProvider] = None,
+        audit_service: Optional[AuditService] = None,
     ) -> None:
         self._session_factory = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
+        self._audit_service = audit_service or AuditService(
+            session_factory,
+            repository_provider=self._repository_provider,
+        )
 
     @staticmethod
     def _money(value: Any) -> Decimal:
@@ -42,7 +54,7 @@ class FinancialSettlementService:
     def _require_admin() -> None:
         user = get_current_user()
         if user is None or not getattr(user, "is_admin", False):
-            raise PermissionError("Only administrators can save or confirm financial settlements.")
+            raise PermissionError("Only administrators can save, confirm or reopen financial settlements.")
 
     @staticmethod
     def _require_difference_comment(
@@ -61,14 +73,16 @@ class FinancialSettlementService:
             )
 
     def _resolve_period(self, session, target_date: date) -> tuple[date, date]:
-        config = self._repository_provider.finance_periods(session).get_effective(target_date)
+        """Resolve exact canonical bounds using the FW2-01 unique resolver contract."""
+        repo = self._repository_provider.finance_periods(session)
+        try:
+            config = repo.get_unique_effective(target_date)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         if config is None:
             raise ValueError("Finance period is not configured for the selected date.")
-        return FinancePeriodDefinition.period_for_date(
-            config.effective_from,
-            target_date,
-            config.duration_months,
-        )
+        resolved = FinancePeriodDefinition.resolved_for_configuration(config, target_date)
+        return resolved.period_start, resolved.period_end
 
     @staticmethod
     def _method_bucket(payment_method: Optional[str]) -> Optional[str]:
@@ -79,7 +93,13 @@ class FinancialSettlementService:
             return "bank"
         return None
 
-    def _aggregate_activity(self, session, period_start: date, period_end: date) -> dict[str, Decimal]:
+    def _aggregate_activity(
+        self,
+        session,
+        period_start: date,
+        period_end: date,
+    ) -> dict[str, Decimal]:
+        """Aggregate the complete live ledger in SQL, without paging/row caps."""
         totals = {
             "income_cash": Decimal("0.00"),
             "income_bank": Decimal("0.00"),
@@ -87,29 +107,29 @@ class FinancialSettlementService:
             "expense_bank": Decimal("0.00"),
         }
 
-        incomes = self._repository_provider.incomes(session).list_active(
+        income_rows = self._repository_provider.incomes(
+            session
+        ).aggregate_active_amounts_by_payment_method(
             finance_period_start=period_start,
             date_from=period_start,
             date_to=period_end,
-            offset=0,
-            limit=100000,
         )
-        for income in incomes:
-            bucket = self._method_bucket(income.payment_method)
+        for payment_method, amount in income_rows:
+            bucket = self._method_bucket(payment_method)
             if bucket is not None:
-                totals[f"income_{bucket}"] += self._money(income.amount)
+                totals[f"income_{bucket}"] += self._money(amount)
 
-        expenses = self._repository_provider.expenses(session).list_active(
+        expense_rows = self._repository_provider.expenses(
+            session
+        ).aggregate_realized_amounts_by_payment_method(
             date_from=period_start,
             date_to=period_end,
-            offset=0,
-            limit=100000,
             realized_only=True,
         )
-        for expense in expenses:
-            bucket = self._method_bucket(expense.payment_method)
+        for payment_method, amount in expense_rows:
+            bucket = self._method_bucket(payment_method)
             if bucket is not None:
-                totals[f"expense_{bucket}"] += self._money(expense.amount)
+                totals[f"expense_{bucket}"] += self._money(amount)
 
         return {key: self._money(value) for key, value in totals.items()}
 
@@ -153,14 +173,35 @@ class FinancialSettlementService:
             "confirmed_at": row.confirmed_at,
         }
 
+    def _record_transition_audit(
+        self,
+        session,
+        row: FinancialSettlement,
+        action: str,
+        details: dict[str, Any],
+    ) -> None:
+        self._audit_service.record_in_session(
+            session,
+            action=action,
+            module="finance",
+            target_type="financial_settlement",
+            target_id=row.id,
+            target_name=f"Settlement #{row.id}",
+            details=details,
+            actor=get_current_user(),
+            entity_type="FinancialSettlement",
+            entity_id=row.id,
+            summary=f"{action}: FinancialSettlement#{row.id}",
+        )
+
     def get_settlement(self, target_date: Optional[date] = None) -> Optional[FinancialSettlement]:
-        target = target_date or date.today()
+        target = target_date or get_clock().today()
         with self._session_factory() as session:
             period_start, _ = self._resolve_period(session, target)
             return self._repository_provider.financial_settlements(session).get_by_period_start(period_start)
 
     def get_preview(self, target_date: Optional[date] = None) -> dict[str, Any]:
-        target = target_date or date.today()
+        target = target_date or get_clock().today()
         with self._session_factory() as session:
             period_start, period_end = self._resolve_period(session, target)
             row = self._repository_provider.financial_settlements(session).get_by_period_start(period_start)
@@ -203,6 +244,7 @@ class FinancialSettlementService:
         comment: Optional[str] = None,
         confirm: bool,
     ) -> FinancialSettlement:
+        """Persist a DRAFT or atomically confirm a complete live-ledger snapshot."""
         self._require_admin()
         with self._session_factory() as session:
             settlement_repo = self._repository_provider.financial_settlements(session)
@@ -211,6 +253,7 @@ class FinancialSettlementService:
             if row is not None and row.is_confirmed:
                 raise ValueError("Confirmed financial settlement is immutable.")
 
+            previous_status = row.status if row is not None else None
             opening_cash_value = self._money(opening_cash)
             opening_bank_value = self._money(opening_bank)
             actual_cash_value = self._optional_money(actual_closing_cash)
@@ -218,6 +261,8 @@ class FinancialSettlementService:
             if confirm and (actual_cash_value is None or actual_bank_value is None):
                 raise ValueError("Actual closing cash and bank balances are required before confirmation.")
 
+            # Recalculate from the live ledger inside the same transaction that
+            # persists the final snapshot and the CONFIRMED state.
             totals = self._aggregate_activity(session, period_start, period_end)
             calculated = self._calculate(
                 opening_cash_value,
@@ -254,8 +299,35 @@ class FinancialSettlementService:
             row.difference_cash = calculated["difference_cash"]
             row.difference_bank = calculated["difference_bank"]
             row.comment = (comment or "").strip() or None
-            row.status = FinancialSettlement.STATUS_CONFIRMED if confirm else FinancialSettlement.STATUS_DRAFT
-            row.confirmed_at = datetime.utcnow() if confirm else None
+            row.status = (
+                FinancialSettlement.STATUS_CONFIRMED
+                if confirm
+                else FinancialSettlement.STATUS_DRAFT
+            )
+            row.confirmed_at = get_clock().now() if confirm else None
+
+            if confirm:
+                # Repository-owned flush materializes the settlement identity;
+                # closure and audit remain in the caller-owned transaction.
+                settlement_repo.flush()
+                self._record_transition_audit(
+                    session,
+                    row,
+                    "CONFIRM",
+                    {
+                        "period_start": period_start.isoformat(),
+                        "period_end": period_end.isoformat(),
+                        "settlement_id": row.id,
+                        "previous_status": previous_status,
+                        "status": FinancialSettlement.STATUS_CONFIRMED,
+                        "expected_closing_cash": str(row.expected_closing_cash),
+                        "expected_closing_bank": str(row.expected_closing_bank),
+                        "actual_closing_cash": str(row.actual_closing_cash),
+                        "actual_closing_bank": str(row.actual_closing_bank),
+                        "difference_cash": str(row.difference_cash),
+                        "difference_bank": str(row.difference_bank),
+                    },
+                )
 
             session.commit()
             settlement_repo.refresh(row)
@@ -272,7 +344,7 @@ class FinancialSettlementService:
         comment: Optional[str] = None,
     ) -> FinancialSettlement:
         return self._save(
-            target_date=target_date or date.today(),
+            target_date=target_date or get_clock().today(),
             opening_cash=opening_cash,
             opening_bank=opening_bank,
             actual_closing_cash=actual_closing_cash,
@@ -292,7 +364,7 @@ class FinancialSettlementService:
         comment: Optional[str] = None,
     ) -> FinancialSettlement:
         return self._save(
-            target_date=target_date or date.today(),
+            target_date=target_date or get_clock().today(),
             opening_cash=opening_cash,
             opening_bank=opening_bank,
             actual_closing_cash=actual_closing_cash,
@@ -300,3 +372,55 @@ class FinancialSettlementService:
             comment=comment,
             confirm=True,
         )
+
+    def reopen(
+        self,
+        *,
+        target_date: Optional[date] = None,
+        reason: str,
+    ) -> FinancialSettlement:
+        """Explicitly reopen a CONFIRMED period and audit the transition atomically."""
+        self._require_admin()
+        reason_value = (reason or "").strip()
+        if not reason_value:
+            raise ValueError("Reopen reason is required.")
+
+        target = target_date or get_clock().today()
+        with self._session_factory() as session:
+            settlement_repo = self._repository_provider.financial_settlements(session)
+            period_start, period_end = self._resolve_period(session, target)
+            row = settlement_repo.get_by_period_start(period_start)
+            if row is None:
+                raise ValueError("No financial settlement exists for the selected period.")
+            if not row.is_confirmed:
+                raise ValueError("Only a CONFIRMED financial settlement can be reopened.")
+
+            previous_status = row.status
+            previous_confirmed_at = row.confirmed_at
+            reopened_at = get_clock().now()
+            row.status = FinancialSettlement.STATUS_DRAFT
+            row.confirmed_at = None
+
+            self._record_transition_audit(
+                session,
+                row,
+                "REOPEN",
+                {
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                    "settlement_id": row.id,
+                    "previous_settlement_id": row.id,
+                    "previous_status": previous_status,
+                    "previous_confirmed_at": (
+                        previous_confirmed_at.isoformat()
+                        if previous_confirmed_at is not None
+                        else None
+                    ),
+                    "status": FinancialSettlement.STATUS_DRAFT,
+                    "reason": reason_value,
+                    "reopened_at": reopened_at.isoformat(),
+                },
+            )
+            session.commit()
+            settlement_repo.refresh(row)
+            return row

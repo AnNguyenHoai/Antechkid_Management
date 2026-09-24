@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from centermanager.models.class_ import Class
@@ -241,6 +241,30 @@ class IncomeRepository(BaseRepository[Income]):
             search_text=search_text,
             finance_period_start=finance_period_start,
             status=Income.STATUS_ACTIVE,
+        )
+
+    def aggregate_active_amounts_by_payment_method(
+        self,
+        *,
+        finance_period_start: date,
+        date_from: date,
+        date_to: date,
+    ):
+        """Return complete ACTIVE Income totals grouped by payment method in SQL."""
+        return (
+            self._session.query(
+                Income.payment_method,
+                func.coalesce(func.sum(Income.amount), 0),
+            )
+            .filter(
+                Income.deleted_at.is_(None),
+                Income.status == Income.STATUS_ACTIVE,
+                Income.finance_period_start == finance_period_start,
+                Income.payment_date >= date_from,
+                Income.payment_date <= date_to,
+            )
+            .group_by(Income.payment_method)
+            .all()
         )
 
     def delete(self, income: Income) -> None:

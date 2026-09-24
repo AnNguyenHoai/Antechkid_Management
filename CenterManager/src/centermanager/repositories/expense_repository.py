@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
 
 from centermanager.models.expense import Expense
@@ -141,6 +141,31 @@ class ExpenseRepository(BaseRepository[Expense]):
             finance_period_start=finance_period_start,
             realized_only=realized_only,
         ).count()
+
+    def aggregate_realized_amounts_by_payment_method(
+        self,
+        *,
+        date_from: date,
+        date_to: date,
+        realized_only: bool = True,
+    ):
+        """Return complete Expense totals grouped by payment method in SQL.
+
+        Settlement callers pass ``realized_only=True`` explicitly so the
+        service boundary owns the realized-ledger policy while aggregation
+        remains uncapped and database-side.
+        """
+        query = self._session.query(
+            Expense.payment_method,
+            func.coalesce(func.sum(Expense.amount), 0),
+        ).filter(
+            Expense.deleted_at.is_(None),
+            Expense.payment_date >= date_from,
+            Expense.payment_date <= date_to,
+        )
+        if realized_only:
+            query = query.filter(Expense.status.in_(self.REALIZED_STATUSES))
+        return query.group_by(Expense.payment_method).all()
 
     def soft_delete(self, expense: Expense) -> None:
         expense.deleted_at = datetime.now()
