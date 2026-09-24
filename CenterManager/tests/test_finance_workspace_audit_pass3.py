@@ -35,7 +35,7 @@ def test_expense_edit_preserves_unknown_legacy_category_and_null_description(qtb
 
     assert dialog.category_combo.currentText() == "Rent"
     assert dialog.desc_edit.toPlainText() == ""
-    assert dialog.method_combo.currentData() == "Bank"
+    assert dialog.method_combo.currentData() == "BANK"
     assert dialog.status_combo.currentData() == "Completed"
 
     dialog._save()
@@ -43,6 +43,7 @@ def test_expense_edit_preserves_unknown_legacy_category_and_null_description(qtb
     assert service.updated is not None
     assert service.updated["category"] is None
     assert service.updated["description"] is None
+    assert service.updated["payment_method"] == "BANK"
 
 
 def test_expense_detail_accepts_legacy_null_description(qtbot):
