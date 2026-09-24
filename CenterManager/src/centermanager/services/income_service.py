@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
 from centermanager.events.event_bus import EventBus
@@ -146,7 +147,7 @@ class IncomeService:
             return False
         if income.payment_date is None:
             return False
-        cutoff = as_of or date.today()
+        cutoff = as_of or get_clock().today()
         return income.payment_date <= cutoff
 
     def _check_student_enrolled_on(
@@ -178,7 +179,7 @@ class IncomeService:
 
     @staticmethod
     def _validate_realized_posting_date(payment_date: date) -> None:
-        if payment_date > date.today():
+        if payment_date > get_clock().today():
             raise IncomeValidationError(
                 "ACTIVE income cannot be posted with a future payment date."
             )
@@ -273,10 +274,12 @@ class IncomeService:
         received_by = self._normalize_text(received_by) or actor_name
         note = self._normalize_text(note)
 
+        class_name = "N/A"
         if student_id is not None:
             self._student_service.get_student(student_id)
         if class_id is not None:
-            self._class_service.get_class(class_id)
+            class_record = self._class_service.get_class(class_id)
+            class_name = class_record.name
 
         with self._session_factory() as session:
             if (
@@ -321,9 +324,6 @@ class IncomeService:
             repo.refresh(income)
 
             if student_id is not None:
-                class_name = (
-                    self._class_service.get_class(class_id).name if class_id else "N/A"
-                )
                 self._best_effort_timeline_event(
                     student_id=student_id,
                     event_type=TimelineEventType.INCOME_CREATED,
