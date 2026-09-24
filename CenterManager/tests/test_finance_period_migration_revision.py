@@ -13,6 +13,7 @@ def test_finance_period_migrations_use_unique_revisions_and_current_chain():
         "1e10a020_finance_period_integrity.py",
         "1e10a021_financial_settlement.py",
         "1e10a026_expense_finance_period.py",
+        "1e10a027_add_income_finance_period_id.py",
     ]
 
     period_content = finance_migrations[0].read_text(encoding="utf-8")
@@ -20,6 +21,7 @@ def test_finance_period_migrations_use_unique_revisions_and_current_chain():
     integrity_content = finance_migrations[2].read_text(encoding="utf-8")
     settlement_content = finance_migrations[3].read_text(encoding="utf-8")
     expense_content = finance_migrations[4].read_text(encoding="utf-8")
+    income_fk_content = finance_migrations[5].read_text(encoding="utf-8")
 
     assert 'revision = "1e10a018"' in period_content
     assert 'down_revision = "1e10a017"' in period_content
@@ -36,3 +38,7 @@ def test_finance_period_migrations_use_unique_revisions_and_current_chain():
     # migration head rather than the previous finance-named migration.
     assert 'revision = "1e10a026"' in expense_content
     assert 'down_revision = "1e10a025"' in expense_content
+
+    # FW2-03 adds the canonical FinancePeriod FK to Income directly after FW2-02.
+    assert 'revision = "1e10a027"' in income_fk_content
+    assert 'down_revision = "1e10a026"' in income_fk_content
