@@ -1,659 +1,204 @@
-# 300_WORKSPACE_MODEL.md
+# CenterManager — Workspace Model
 
-Version: 1.0
+Version: 1.1  
+Status: **APPROVED WORKSPACE MODEL**  
+Updated: 2026-09-24
 
-Status: DRAFT
+Depends on:
 
-Document Type: Platform Domain Specification
+- `000_PLATFORM_VISION.md`
+- `100_ARCHITECTURE_PRINCIPLES.md`
+- `200_COLLABORATIVE_ARCHITECTURE.md`
 
-Owner: OpenAI & AnTechKids
+This document defines what a Workspace means in CenterManager. It does not mandate a universal runtime state machine that every UI package must literally implement.
 
-Depends On
+## 1. Definition
 
-000_PLATFORM_VISION.md
+A Workspace is a bounded operational/presentation context for one coherent business area.
 
-100_ARCHITECTURE_PRINCIPLES.md
+Examples in the current product include Student, Class/Teaching, Finance, Employee/Teacher and Administration workspaces.
 
-200_COLLABORATIVE_ARCHITECTURE.md
+A Workspace is more than a single page, but it is not the owner of persistence, synchronization or another domain's business rules.
 
----
+## 2. Responsibilities
 
-# Table of Contents
+A Workspace may own:
 
-1. Purpose
-2. Why Workspace Exists
-3. Definition
-4. Workspace Responsibilities
-5. Workspace Ownership
-6. Workspace Lifecycle
-7. Workspace State Machine
-8. Workspace Communication
-9. Workspace Isolation
-10. Workspace Registration
-11. Future Workspace Types
-12. Architectural Rules
-13. Examples
+- navigation within its business area;
+- views/dialogs/forms;
+- dashboard/read projections;
+- user interaction flow;
+- selected-object/filter/presentation state;
+- projection of collaboration/capability/domain state;
+- refresh behavior.
 
----
+A Workspace does not own:
 
-# 1. Purpose
+- SQLAlchemy persistence;
+- Git synchronization;
+- global collaboration/edit-session protocol;
+- another domain's canonical rules;
+- permission definitions that already belong to the authorization system.
 
-This document defines the Workspace Model of CenterManager.
+## 3. Current implementation
 
-Workspace is one of the fundamental concepts of the Collaboration Platform.
+Current workspace UI packages live under `src/centermanager/ui/`.
 
-Every business capability exposed to users exists through a Workspace.
+The repository currently includes workspace packages such as:
 
-Workspace is not merely a UI page.
+- `student_workspace/`;
+- `class_workspace/`;
+- `finance_workspace/`;
+- `employee_workspace/`;
+- `admin_workspace/`;
+- `home/` and shared application-shell/design-system components.
 
-Workspace is a bounded operational context.
+Services and repositories are currently mostly shared/flat packages. Workspace ownership is a product/domain concept, not a requirement to duplicate every layer under each workspace folder.
 
----
+## 4. Application shell and activation
 
-# 2. Why Workspace Exists
+The application shell/MainWindow coordinates top-level navigation and current workspace presentation.
 
-Traditional desktop software often organizes functionality around windows or dialogs.
+A workspace should not instantiate or directly manipulate another workspace's internal widgets/state as a way to perform business operations.
 
-CenterManager intentionally avoids this model.
+Cross-workspace refresh/navigation should use established shell/application/event/service contracts.
 
-Instead,
+## 5. Collaboration participation
 
-the application is divided into independent Workspaces.
+Workspaces consume collaboration/platform state; they do not own collaboration.
 
-Examples
+A workspace can:
 
-Student Workspace
+- reflect read/write mode;
+- participate in the established edit-session/write workflow;
+- refresh after relevant events/version changes;
+- display synchronization/locked/error state;
+- disable/hide mutation controls when capability/domain state requires it.
 
-Finance Workspace
+A workspace must not:
 
-Teaching Workspace
+- run its own Git sync loop;
+- manage platform metadata directly;
+- treat WRITE state as sufficient authorization.
 
-Class Workspace
+## 6. Workspace state
 
-Teacher Workspace
+Not every workspace is required to implement the old conceptual sequence `UNINITIALIZED → INITIALIZING → READY → ACTIVE → EDITING → SYNCING → DISPOSED` as a concrete enum/state machine.
 
-Reporting Workspace
+The durable requirement is that a workspace handles relevant UI/application states explicitly and consistently, such as:
 
-Administration Workspace
+- initialization/loading;
+- ready/active presentation;
+- read vs write collaboration state where applicable;
+- permission-denied state;
+- domain-locked state;
+- synchronization/refresh state;
+- error/empty state;
+- disposal/lifecycle cleanup when required by the shell.
 
-Each Workspace represents
+Exact state implementation belongs to the application shell/workspace code and task-specific contracts.
 
-one operational responsibility.
+## 7. Workspace communication
 
----
+Avoid direct workspace-to-workspace mutation.
 
-# 3. Definition
+Preferred communication paths:
 
-A Workspace is
+```text
+Workspace UI
+   ↓
+Application Service / Shared Read Model
+   ↓
+Domain / Repository
+```
 
-> A bounded operational environment responsible for one business capability.
+and for decoupled updates:
 
-A Workspace owns
+```text
+Domain/Application change
+   ↓
+Event / refresh signal
+   ↓
+Workspace projection refresh
+```
 
-User Interaction
+A direct import is not automatically forbidden when it is a shared UI component or shell contract; the prohibited pattern is using another workspace's internals as a business API.
 
-Business Flow
+## 8. Domain ownership
 
-Workspace State
+A workspace presents a domain; it does not redefine the domain.
 
-Navigation
+Examples:
 
-Session Participation
+- Finance Workspace uses Finance services/specs for FinancePeriod/ledger rules;
+- Student Workspace uses Student services for student lifecycle/history;
+- Class Workspace uses Class/Enrollment/Session services;
+- Employee Workspace uses Employee/Teacher services;
+- Admin Workspace uses administration/authorization/configuration services.
 
-A Workspace does NOT own
+## 9. Refresh policy
 
-Database
+Refresh should be event/state driven where possible and may also support explicit user refresh.
 
-Synchronization
+Do not implement continuous storage/Git polling inside workspaces. Platform owns synchronization/version monitoring.
 
-Deployment
+Workspace-specific refresh may respond to application events or shell/navigation lifecycle when that is the established pattern.
 
-Storage
+## 10. Workspace context
 
-Versioning
+Workspace context can include presentation-relevant state such as:
 
-These belong to the Collaboration Platform.
+- current authenticated user/capabilities;
+- collaboration/read-write state;
+- selected entity/filter/context;
+- domain-specific selected context (for example canonical FinancePeriod);
+- refresh/version signals.
 
----
+Do not duplicate authoritative domain entities/calculations into ad-hoc UI context objects. Context should carry identity/state needed to call authoritative services.
 
-# 4. Workspace Responsibilities
+## 11. Finance example
 
-Every Workspace is responsible for
+Finance Workspace is a useful example of the intended model.
 
-Displaying business information
+The UI can preserve a selected canonical FinancePeriod across Dashboard, Income, Expense, Outstanding and Settlement, but it must not calculate a new Month/Year accounting period itself.
 
-Receiving user interaction
+Likewise, the UI can disable mutation for a closed period, while the service/domain guard remains authoritative.
 
-Requesting Edit Session
+## 12. Workspace registration
 
-Executing business commands
+Platform/bootstrap/application shell may register or construct workspace definitions as needed by current implementation.
 
-Displaying synchronization status
+Do not assume an old conceptual `WorkspaceManager.register(StudentWorkspace)` API exists unless verified in current code.
 
-Refreshing data
+The architectural requirement is centralized shell/platform ownership of workspace availability/navigation, not a specific historical class name.
 
-Nothing more.
+## 13. Extension
 
----
+Future workspace candidates may include CRM, Inventory, Parent Portal or specialized Reporting.
 
-# 5. Workspace Ownership
+Before adding one, establish:
 
-Each Workspace owns exactly one business capability.
+- clear business/domain owner;
+- whether it is truly a workspace rather than a page within an existing workspace;
+- service/read-model dependencies;
+- authorization boundaries;
+- how it participates in collaboration/refresh without owning infrastructure.
 
-Example
+## 14. Architectural rules
 
-Student Workspace
+1. Workspace owns business-area presentation/workflow context.
+2. Workspace does not own database/synchronization infrastructure.
+3. Workspace does not duplicate another domain's business rules.
+4. Cross-workspace business behavior uses services/read models/events.
+5. Platform owns collaboration/synchronization.
+6. UI state projection does not replace service authorization/domain guards.
+7. Conceptual workspace boundaries do not require artificial package nesting.
+8. Exact lifecycle/state enums must reflect actual implementation, not stale diagrams.
 
-↓
+## 15. Related documents
 
-Student Management
-
-Finance Workspace
-
-↓
-
-Financial Management
-
-Teaching Workspace
-
-↓
-
-Teaching Activities
-
-Reporting Workspace
-
-↓
-
-Reports
-
-Administration Workspace
-
-↓
-
-System Administration
-
-Workspace boundaries must remain clear.
-
-Business responsibilities may never overlap.
-
----
-
-# 6. Workspace Lifecycle
-
-Every Workspace follows the same lifecycle.
-
-Application Start
-
-↓
-
-Workspace Registration
-
-↓
-
-Initialization
-
-↓
-
-Load Data
-
-↓
-
-Ready
-
-↓
-
-Active
-
-↓
-
-Inactive
-
-↓
-
-Disposed
-
-No Workspace should invent its own lifecycle.
-
----
-
-# 7. Workspace State Machine
-
-Each Workspace exists in one of the following states.
-
-UNINITIALIZED
-
-↓
-
-INITIALIZING
-
-↓
-
-READY
-
-↓
-
-ACTIVE
-
-↓
-
-EDIT_REQUESTED
-
-↓
-
-EDITING
-
-↓
-
-SYNCHRONIZING
-
-↓
-
-READY
-
-↓
-
-DISPOSED
-
-Descriptions
-
-UNINITIALIZED
-
-Workspace object does not exist.
-
-INITIALIZING
-
-Dependencies are created.
-
-READY
-
-Workspace is available.
-
-ACTIVE
-
-User is interacting.
-
-EDIT_REQUESTED
-
-Waiting for Collaboration Platform.
-
-EDITING
-
-Edit Session active.
-
-SYNCHRONIZING
-
-Publishing changes.
-
-DISPOSED
-
-Workspace released.
-
----
-
-# 8. Workspace Communication
-
-Workspace must never communicate directly with another Workspace.
-
-Forbidden
-
-Student Workspace
-
-↓
-
-Finance Workspace
-
-Instead
-
-Student Workspace
-
-↓
-
-Application Service
-
-↓
-
-Business Service
-
-↓
-
-Repository
-
-↓
-
-Collaboration Platform
-
-↓
-
-Application Service
-
-↓
-
-Finance Workspace
-
-Communication occurs only through services or platform events.
-
----
-
-# 9. Workspace Isolation
-
-Every Workspace is isolated.
-
-Workspace may not
-
-Modify another Workspace's UI
-
-Access another Workspace's state
-
-Control another Workspace's lifecycle
-
-Import another Workspace directly
-
-Isolation guarantees maintainability.
-
----
-
-# 10. Workspace Registration
-
-All Workspaces register through Workspace Manager.
-
-Example
-
-WorkspaceManager
-
-↓
-
-register(StudentWorkspace)
-
-↓
-
-register(FinanceWorkspace)
-
-↓
-
-register(ClassWorkspace)
-
-↓
-
-register(TeachingWorkspace)
-
-Workspace Manager becomes the single source of truth.
-
-No Workspace creates another Workspace.
-
----
-
-# 11. Workspace Participation
-
-When Collaboration Mode is enabled,
-
-each Workspace participates in the Collaboration Platform.
-
-Responsibilities include
-
-Observe platform version
-
-Observe Edit Session
-
-Observe synchronization status
-
-React to platform notifications
-
-Workspace never controls collaboration.
-
-It only reacts.
-
----
-
-# 12. Workspace Refresh Policy
-
-Workspace refresh must follow consistent rules.
-
-Automatic Refresh
-
-When
-
-Platform Version changes.
-
-Manual Refresh
-
-When
-
-User requests.
-
-Forbidden
-
-Continuous polling inside Workspace.
-
-Version monitoring belongs to Collaboration Platform.
-
----
-
-# 13. Workspace Activation Policy
-
-Only one Workspace is active.
-
-Multiple Workspaces may exist.
-
-Only one receives user interaction.
-
-State transitions
-
-READY
-
-↓
-
-ACTIVE
-
-↓
-
-READY
-
-Activation never creates or destroys Workspace.
-
-Activation only changes focus.
-
----
-
-# 14. Workspace Context
-
-Every Workspace owns a Workspace Context.
-
-Workspace Context contains
-
-Current User
-
-Deployment Profile
-
-Platform Version
-
-Edit Session
-
-Permissions
-
-Selected Object
-
-Workspace State
-
-Workspace Context is immutable from outside.
-
----
-
-# 15. Workspace Events
-
-Workspace communicates through events.
-
-Examples
-
-WorkspaceActivated
-
-WorkspaceDeactivated
-
-WorkspaceLoaded
-
-WorkspaceRefreshed
-
-EditRequested
-
-EditStarted
-
-EditFinished
-
-SynchronizationCompleted
-
-Events reduce coupling.
-
----
-
-# 16. Future Workspace Types
-
-The model supports future Workspaces.
-
-Examples
-
-Employee Workspace
-
-Payroll Workspace
-
-Inventory Workspace
-
-CRM Workspace
-
-Parent Portal Workspace
-
-Online Classroom Workspace
-
-No architectural changes are required.
-
----
-
-# 17. Architectural Rules
-
-Rule W1
-
-One Workspace
-
-↓
-
-One Business Capability
-
-Rule W2
-
-Workspace never owns infrastructure.
-
-Rule W3
-
-Workspace never communicates directly with another Workspace.
-
-Rule W4
-
-Workspace lifecycle is standardized.
-
-Rule W5
-
-Workspace state is managed by Workspace Manager.
-
-Rule W6
-
-Workspace participates in collaboration,
-
-but never controls it.
-
-Rule W7
-
-Workspace owns presentation,
-
-not persistence.
-
----
-
-# 18. Example
-
-Student Workspace
-
-↓
-
-Display Student List
-
-↓
-
-User clicks Edit
-
-↓
-
-Request Edit Session
-
-↓
-
-Collaboration Platform
-
-↓
-
-Approved
-
-↓
-
-Student Workspace enters EDITING
-
-↓
-
-User modifies student
-
-↓
-
-Business Service
-
-↓
-
-Repository
-
-↓
-
-Persistence
-
-↓
-
-Synchronization
-
-↓
-
-Platform publishes
-
-↓
-
-Workspace returns READY
-
-Student Workspace never knows
-
-whether deployment uses
-
-SQLite
-
-Git
-
-Server
-
-or future storage.
-
----
-
-# Summary
-
-Workspace is the operational boundary of CenterManager.
-
-It represents business responsibility,
-
-not application windows.
-
-All Workspaces follow
-
-one lifecycle,
-
-one communication model,
-
-one collaboration model,
-
-and one architectural contract.
-
-This standardization enables the platform to grow
-
-without increasing architectural complexity.
+- `docs/Bussiness/ARCHITECTURE_V2.md` — product/workspace architecture;
+- `docs/ARCHITECTURE.md` — current implementation architecture;
+- `200_COLLABORATIVE_ARCHITECTURE.md` — platform collaboration responsibilities;
+- domain specs — authoritative business/domain semantics;
+- root `AGENTS.md` — developer/agent workflow.
