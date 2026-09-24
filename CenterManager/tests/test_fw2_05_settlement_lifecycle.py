@@ -129,6 +129,9 @@ def _service(provider, session=None, audit=None):
         repository_provider=provider,
         audit_service=audit or _Audit(),
     )
+    # FW2-05 tests isolate lifecycle/accounting behavior. FW2-08 owns the
+    # independent capability matrix and exercises it in its dedicated suite.
+    service._require_capability = lambda _capability: None
     service._require_admin = lambda: None
     return service, session
 

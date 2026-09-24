@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from centermanager.core.clock import get_clock
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 from centermanager.ui.shared import StatisticGrid, DataTable, LoadingWidget, ChartCard
 from centermanager.ui.design_system.tokens import COLORS, SPACING
@@ -38,7 +39,7 @@ class FinanceDashboardPage(QWidget):
         self._service = dashboard_service
         self._income_ids: list[int] = []
         self._expense_ids: list[int] = []
-        self._target_date = date.today()
+        self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
         self._period_end: Optional[date] = None
         self._period_configured: Optional[bool] = None

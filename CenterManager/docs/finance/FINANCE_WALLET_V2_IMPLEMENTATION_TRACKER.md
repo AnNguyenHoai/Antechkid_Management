@@ -7,7 +7,7 @@
 | Field | Value |
 |---|---|
 | Original baseline | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
-| Current implementation base | `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e` |
+| Current implementation base | `main_repos@8e95ed8855a7bfe799fceefd82f6ef0b58643439` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
 | Settlement auth clarification | `FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md` |
 | Current phase | `FW2-08 — UI Integration` |
@@ -87,16 +87,22 @@ Approved Settlement authorization clarification:
 - confirm requires the appropriate create/update permission path plus admin-only confirm;
 - reopen requires admin-only reopen plus existing CONFIRMED/reason/audit rules.
 
-Remaining FW2-08 outcomes:
+Implementation evidence on `finance-wallet-v2-fw2-08`:
 
-- [ ] selector uses actual FinancePeriod bounds;
-- [ ] selected period preserved across Finance surfaces and export;
-- [ ] fine-grained capability projection;
-- [ ] Settlement service/UI use the approved canonical capabilities;
-- [ ] closed period disables normal mutation controls while service guard remains authoritative;
-- [ ] realized Expense UI does not offer unsupported `Other` Wallet values;
-- [ ] full local regression + GitHub Actions green;
+- [x] selector enumerates actual resolved FinancePeriod bounds, including mid-month and multi-month buckets;
+- [x] selected canonical period is shared by Dashboard, Income, Expense, Outstanding and Settlement and is preserved across Finance navigation;
+- [x] export/list filters consume the selected exact bounds rather than independently inferring Month/Year;
+- [x] Income/Expense mutation controls project WRITE + canonical capability + open-period state;
+- [x] Settlement service and UI enforce/project the approved view/create/update/confirm/reopen capabilities;
+- [x] persisted Settlement view/create/update permissions are seeded and migrated for Admin/Finance/Manager; confirm/reopen remain role-derived admin-only capabilities;
+- [x] confirmed period disables normal Income/Expense mutation controls while existing service ledger guards remain authoritative;
+- [x] realized Income/Expense write forms expose only canonical `CASH`/`BANK`; unsupported `Other` is removed and unknown historical values require explicit resolution;
+- [x] application Clock is used for Finance workspace business-date defaults touched by this phase;
+- [x] focused FW2-08 regression coverage added and FW2-05 lifecycle tests isolated from the new independent authorization matrix;
+- [ ] full GitHub Actions regression green;
 - [ ] independent review + human review before DONE.
+
+Recovery evidence: an interrupted Codex working-tree upload accidentally included runtime snapshots/heartbeats. It was preserved at `recovery/fw2-08-codex-token-cutoff`; the implementation branch was reset to the exact approved base and reconstructed with source-only changes. Runtime artifacts are not part of the FW2-08 diff.
 
 ## FW2-09 — Backfill & Reconciliation
 
@@ -133,8 +139,17 @@ Remaining FW2-08 outcomes:
 | 2026-09-24 | Pre-cutover fee-history ambiguity is an FW2-09 reconciliation concern, not an excuse to rewrite history. | FINAL |
 | 2026-09-24 | Architecture boundary tests inspect actual imports; class names in comments are not dependencies. | FINAL |
 | 2026-09-24 | Settlement view/create/update are canonical persisted capabilities; confirm/reopen are canonical admin-only capabilities. | FINAL |
+| 2026-09-24 | Finance UI accounting identity is the selected resolved FinancePeriod bounds, never Month/Year. | FINAL |
 
 ## Implementation journal
+
+### 2026-09-24 — FW2-08 interrupted-work recovery
+
+The Codex session ended after token/usage exhaustion with uncommitted work. A manual recovery upload also captured runtime snapshots, heartbeats and local runtime metadata. The checkpoint was preserved on `recovery/fw2-08-codex-token-cutoff`, then the feature branch was reset to the exact approved base and reconstructed with only Issue #340 source/test/migration changes. This prevents local runtime state from entering the review diff.
+
+### 2026-09-24 — FW2-08 implementation
+
+The Finance shell now enumerates canonical resolved periods and shares one exact selected period context across all Finance surfaces. Income/Expense UI mutation state uses collaboration WRITE + canonical capability + open-period state. Settlement authorization is enforced in `FinancialSettlementService` and projected by the UI. Migration `1e10a029` installs persisted Settlement draft capabilities without persisting admin-only close/reopen authority. Realized transaction wallet controls now expose only `CASH` and `BANK`; legacy read aliases remain supported without guessing unknown values.
 
 ### 2026-09-24 — FW2-08 authorization conflict resolved
 
