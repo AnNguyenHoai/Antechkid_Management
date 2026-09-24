@@ -8,13 +8,20 @@ SERVICE = Path("src/centermanager/services/enrollment_service.py").read_text(enc
 EVENTS = Path("src/centermanager/events/student_events.py").read_text(encoding="utf-8")
 
 def test_24_event_is_published_only_after_database_commit():
-    enroll_commit = SERVICE.index("session.commit(); repo.refresh(enrollment)")
-    enroll_event = SERVICE.index('self._publish_change(enrollment, "ENROLLED", None)')
-    assert enroll_commit < enroll_event
+    enroll_start = SERVICE.index("def enroll(")
+    transition_start = SERVICE.index("def _transition(", enroll_start)
+    enroll_section = SERVICE[enroll_start:transition_start]
+    enroll_commit = enroll_section.index("session.commit()")
+    enroll_refresh = enroll_section.index("repo.refresh(enrollment)")
+    enroll_event = enroll_section.index('self._publish_change(enrollment, "ENROLLED", None)')
+    assert enroll_commit < enroll_refresh < enroll_event
 
-    transition_commit = SERVICE.index("session.commit(); repo.refresh(enrollment)", enroll_commit + 1)
-    transition_event = SERVICE.index("self._publish_change(", transition_commit)
-    assert transition_commit < transition_event
+    transition_end = SERVICE.index("def get_student_history(", transition_start)
+    transition_section = SERVICE[transition_start:transition_end]
+    transition_commit = transition_section.index("session.commit()")
+    transition_refresh = transition_section.index("repo.refresh(enrollment)")
+    transition_event = transition_section.index("self._publish_change(")
+    assert transition_commit < transition_refresh < transition_event
 
 def test_24_enrollment_event_tracks_owning_student_aggregate():
     start = MAIN.index("def _on_student_enrollment_changed_event")
