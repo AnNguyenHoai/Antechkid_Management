@@ -32,6 +32,9 @@ class Capability(str, Enum):
     CLASS_DELETE = "class.delete"
     CLASS_TEACHER_ASSIGNMENT_MANAGE = "class.teacher_assignment.manage"
 
+    # Tuition
+    TUITION_ENROLLMENT_OVERRIDE = "tuition.enrollment.override"
+
     # Finance / reports / settings
     FINANCE_VIEW = "finance.view"
     FINANCE_INCOME_CREATE = "finance.income.create"
@@ -121,6 +124,8 @@ class Capability(str, Enum):
             return "teacher"
         if value.startswith("class."):
             return "class"
+        if value.startswith("tuition."):
+            return "tuition"
         if value.startswith("finance."):
             return "finance"
         if value.startswith("report."):
@@ -149,6 +154,7 @@ ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.FINANCE_PERIOD_MANAGE.value,
     Capability.FINANCE_SETTLEMENT_CONFIRM.value,
     Capability.FINANCE_SETTLEMENT_REOPEN.value,
+    Capability.TUITION_ENROLLMENT_OVERRIDE.value,
 })
 
 IMPLICIT_ROLE_CAPABILITIES = {
