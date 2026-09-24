@@ -154,5 +154,9 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         self._session.add(enrollment)
         return enrollment
 
+    def flush(self) -> None:
+        """Flush pending Enrollment writes without owning the transaction."""
+        self._session.flush()
+
     def delete(self, enrollment: Enrollment) -> None:
         self._session.delete(enrollment)
