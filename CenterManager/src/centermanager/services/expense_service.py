@@ -6,9 +6,11 @@ import tempfile
 from datetime import date
 from typing import Any, Optional, List, Tuple
 
+from centermanager.core.clock import get_clock
 from centermanager.models.expense import Expense
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
+from centermanager.services.finance_ledger_guard import FinanceLedgerGuard, FinancePeriodClosedError
 from centermanager.services.permission_service import PermissionService
 from centermanager.core.permission_guard import require_permission
 from centermanager.core.current_user import get_current_user
@@ -31,7 +33,7 @@ class ExpenseService:
 
     Pending records are planned/non-realized outflows. Completed records are
     realized ledger postings and therefore require a unique canonical
-    FinancePeriod and may not be future-dated.
+    FinancePeriod, may not be future-dated, and cannot mutate a closed period.
     """
 
     def __init__(self, session_factory: Any, timeline_service: ExpenseTimelineService,
@@ -97,13 +99,7 @@ class ExpenseService:
         return value
 
     def _resolve_posting_period_id(self, session, payment_date: date, status: str) -> Optional[int]:
-        """Return deterministic period assignment for an Expense state.
-
-        Pending may be future/planned and therefore may remain unassigned when no
-        configuration covers its date. Completed is realized money: future dates,
-        missing coverage and ambiguous coverage are hard validation failures.
-        """
-        if status == "Completed" and payment_date > date.today():
+        if status == "Completed" and payment_date > get_clock().today():
             raise ExpenseValidationError("Completed expense cannot have a future payment date.")
         repo = self._repository_provider.finance_periods(session)
         try:
@@ -115,6 +111,14 @@ class ExpenseService:
                 f"No FinancePeriod configuration covers {payment_date.isoformat()}."
             )
         return period.id if period is not None else None
+
+    def _ensure_date_mutable(self, session, payment_date: date) -> None:
+        try:
+            FinanceLedgerGuard.ensure_date_mutable(
+                session, self._repository_provider, payment_date
+            )
+        except (FinancePeriodClosedError, ValueError) as exc:
+            raise ExpenseValidationError(str(exc)) from exc
 
     @require_permission("finance.expense.create")
     def create_expense(self, category: str, description: str, amount: float, payment_method: str,
@@ -132,6 +136,8 @@ class ExpenseService:
         note = self._normalize_text(note)
         with self._session_factory() as session:
             period_id = self._resolve_posting_period_id(session, payment_date, status)
+            if status == "Completed":
+                self._ensure_date_mutable(session, payment_date)
             repo = self._repository_provider.expenses(session)
             expense = Expense(category=category, description=description, amount=amount, payment_method=payment_method,
                               payment_date=payment_date, finance_period_id=period_id,
@@ -213,6 +219,12 @@ class ExpenseService:
             expense = repo.get_by_id_including_deleted(expense_id)
             if not expense or expense.deleted_at is not None:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
+
+            original_date = expense.payment_date
+            original_status = expense.status
+            if original_status == "Completed":
+                self._ensure_date_mutable(session, original_date)
+
             changes = []
             updates = [("category", category, self._validate_category), ("description", description, self._normalize_text),
                        ("amount", amount, self._validate_amount), ("payment_method", payment_method, self._validate_payment_method),
@@ -229,9 +241,10 @@ class ExpenseService:
                     setattr(expense, field, new_value)
             if not changes:
                 return expense
-            # Re-evaluate assignment from the final transaction state even when
-            # only status changes (Pending -> Completed) or date crosses a period.
+
             new_period_id = self._resolve_posting_period_id(session, expense.payment_date, expense.status)
+            if expense.status == "Completed":
+                self._ensure_date_mutable(session, expense.payment_date)
             if expense.finance_period_id != new_period_id:
                 changes.append(f"finance_period_id: {expense.finance_period_id} -> {new_period_id}")
                 expense.finance_period_id = new_period_id
@@ -249,6 +262,8 @@ class ExpenseService:
             expense = repo.get_by_id_including_deleted(expense_id)
             if not expense or expense.deleted_at is not None:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found or already deleted")
+            if expense.status == "Completed":
+                self._ensure_date_mutable(session, expense.payment_date)
             category, amount = expense.category, expense.amount
             repo.soft_delete(expense)
             session.commit()

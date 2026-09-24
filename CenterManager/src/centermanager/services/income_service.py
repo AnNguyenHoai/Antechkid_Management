@@ -24,6 +24,10 @@ from centermanager.repositories.provider import (
 )
 from centermanager.services.audit_service import AuditService
 from centermanager.services.class_service import ClassService
+from centermanager.services.finance_ledger_guard import (
+    FinanceLedgerGuard,
+    FinancePeriodClosedError,
+)
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
@@ -177,6 +181,27 @@ class IncomeService:
         )
         return config, resolved.period_start
 
+    def _ensure_period_start_mutable(self, session, period_start: date) -> None:
+        try:
+            FinanceLedgerGuard.ensure_period_start_mutable(
+                session, self._repository_provider, period_start
+            )
+        except FinancePeriodClosedError as exc:
+            raise IncomeValidationError(str(exc)) from exc
+
+    def _ensure_income_period_mutable(self, session, income: Income) -> None:
+        """Protect persisted and date-resolved source period identities."""
+        if income.finance_period_start is not None:
+            self._ensure_period_start_mutable(session, income.finance_period_start)
+        try:
+            resolved = FinanceLedgerGuard.resolve_period(
+                session, self._repository_provider, income.payment_date
+            )
+            if income.finance_period_start != resolved.period_start:
+                self._ensure_period_start_mutable(session, resolved.period_start)
+        except (FinancePeriodClosedError, ValueError) as exc:
+            raise IncomeValidationError(str(exc)) from exc
+
     @staticmethod
     def _validate_realized_posting_date(payment_date: date) -> None:
         if payment_date > get_clock().today():
@@ -298,6 +323,7 @@ class IncomeService:
             finance_period, finance_period_start = self._resolve_finance_period(
                 session, payment_date
             )
+            self._ensure_period_start_mutable(session, finance_period_start)
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -432,6 +458,7 @@ class IncomeService:
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be edited.")
 
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             changed = []
 
@@ -476,6 +503,7 @@ class IncomeService:
             finance_period, new_period_start = self._resolve_finance_period(
                 session, income.payment_date
             )
+            self._ensure_period_start_mutable(session, new_period_start)
             if income.finance_period_id != finance_period.id:
                 changed.append(
                     "finance_period_id: "
@@ -556,6 +584,7 @@ class IncomeService:
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be voided.")
 
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             _, actor_name = self._actor()
             income.status = Income.STATUS_VOIDED
@@ -604,6 +633,7 @@ class IncomeService:
                     f"Income with id {income_id} not found or already deleted."
                 )
 
+            self._ensure_income_period_mutable(session, income)
             before = self._audit_snapshot(income)
             student_id = income.student_id
             income.deleted_at = datetime.now()

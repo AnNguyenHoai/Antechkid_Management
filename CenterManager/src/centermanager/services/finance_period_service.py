@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
 from centermanager.models.finance_period import (
@@ -13,6 +14,7 @@ from centermanager.models.finance_period import (
     ResolvedFinancePeriod,
 )
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
+from centermanager.services.finance_ledger_guard import FinanceLedgerGuard
 
 
 class FinancePeriodService:
@@ -29,24 +31,47 @@ class FinancePeriodService:
     @require_permission("finance.view")
     def get_active_period(self, on_date: Optional[date] = None) -> Optional[FinancePeriod]:
         """Compatibility API returning the configuration effective on a date."""
-        target = on_date or date.today()
+        target = on_date or get_clock().today()
         with self._session_factory() as session:
             return self._repository_provider.finance_periods(session).get_effective(target)
 
     @require_permission("finance.view")
     def resolve_period(self, on_date: Optional[date] = None) -> Optional[ResolvedFinancePeriod]:
-        """Return the exact canonical operating-period bounds for ``on_date``.
-
-        Consumers should use this operation instead of treating a configuration's
-        ``effective_from/effective_to`` as one operating period or inferring
-        month/year boundaries independently.
-        """
-        target = on_date or date.today()
+        """Return the exact canonical operating-period bounds for ``on_date``."""
+        target = on_date or get_clock().today()
         with self._session_factory() as session:
             configuration = self._repository_provider.finance_periods(session).get_effective(target)
             if configuration is None:
                 return None
             return FinancePeriodDefinition.resolved_for_configuration(configuration, target)
+
+    def ensure_period_is_mutable(
+        self,
+        on_date: Optional[date] = None,
+    ) -> ResolvedFinancePeriod:
+        """Reject mutation when the resolved period has a CONFIRMED Settlement.
+
+        This is the public Wallet V2 closure boundary for maintenance/reconciliation
+        callers. Income/Expense use the same FinanceLedgerGuard inside their own
+        transactions so source and destination checks are atomic with mutation.
+        """
+        target = on_date or get_clock().today()
+        with self._session_factory() as session:
+            return FinanceLedgerGuard.ensure_date_mutable(
+                session, self._repository_provider, target
+            )
+
+    def is_period_closed(self, on_date: Optional[date] = None) -> bool:
+        """Return closure projected from Settlement.CONFIRMED, not config status."""
+        target = on_date or get_clock().today()
+        with self._session_factory() as session:
+            resolved = FinanceLedgerGuard.resolve_period(
+                session, self._repository_provider, target
+            )
+            settlement = self._repository_provider.financial_settlements(
+                session
+            ).get_by_period_start(resolved.period_start)
+            return settlement is not None and settlement.is_confirmed
 
     @require_permission("finance.period.view")
     def list_period_configurations(self) -> List[FinancePeriod]:
@@ -111,7 +136,7 @@ class FinancePeriodService:
             if period is None:
                 raise ValueError(f"Finance period {period_id} not found.")
 
-            end_date = effective_to or date.today()
+            end_date = effective_to or get_clock().today()
             if end_date < period.effective_from:
                 raise ValueError("effective_to cannot be earlier than effective_from.")
 
