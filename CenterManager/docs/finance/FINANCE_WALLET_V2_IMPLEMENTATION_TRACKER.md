@@ -1,41 +1,42 @@
 # Finance Wallet V2 — Implementation Tracker
 
-> **Canonical progress tracker.** This file supersedes the earlier `FINANCE_WALLET_V2_IMPLEMENTATION_PLAN.md` wherever that file conflicts with `FINANCE_WALLET_V2_DOMAIN_SPEC.md` or `FW2_01_1_PERIOD_MODEL_RECONCILIATION.md`.
+> **Canonical progress tracker.** This file supersedes `FINANCE_WALLET_V2_IMPLEMENTATION_PLAN.md` wherever that older plan conflicts with `FINANCE_WALLET_V2_DOMAIN_SPEC.md`.
 
 ## Metadata
 
 | Field | Value |
 |---|---|
-| Base | `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d` |
+| Original baseline | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
+| Current implementation base | `main_repos@71f8b73634e1ad19b9399cf9e00b48e19fb5fd4b` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
-| Current phase | `FW2-02 — Expense Period Assignment` |
-| Current task | `FW2-02 CI rerun after migration-contract regression fix` |
-| Last completed | `FW2-01 — Canonical FinancePeriod Foundation` |
-| Last updated | `2026-09-23` |
+| Current phase | `FW2-04 — Closed-period Guard` |
+| Current task | `FW2-04 full regression / audit` |
+| Last completed | `FW2-03 — Income Period & Realized Semantics` |
+| Last updated | `2026-09-24` |
 
-Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] BLOCKED` · `[-] SKIPPED`.
+Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] BLOCKED`.
 
 ## Domain guardrails
 
-1. Canonical accounting bucket is the **existing FinancePeriod**, resolved to exact inclusive bounds. It is not necessarily a calendar month.
-2. Do not create a parallel `FinanceWalletPeriod` calendar-month table.
-3. Mid-month anchors and `duration_months > 1` remain valid domain behavior.
-4. Canonical resolver clamps a natural bucket to the owning configuration effective range so transitions cannot overlap.
+1. Canonical accounting bucket is the existing **FinancePeriod resolved to exact inclusive bounds**; it is not necessarily a calendar month.
+2. Do not create a parallel `FinanceWalletPeriod` table.
+3. Mid-month anchors and `duration_months > 1` are valid.
+4. Resolved buckets are clamped to configuration effective bounds so transitions cannot overlap.
 5. Every realized Income/Expense must resolve to exactly one covering FinancePeriod before persistence succeeds.
-6. Future ACTIVE Income and future COMPLETED Expense are prohibited. Planned money is not realized ledger money.
-7. `Settlement.CONFIRMED` closes the resolved FinancePeriod ledger for normal mutation. Do not overload `FinancePeriod.status` with OPEN/FINALIZED.
-8. `Class.fee` is the per-student tuition charge for **one canonical FinancePeriod**, not automatically monthly and not multiplied by `duration_months`.
-9. Fine-grained Finance capability + WRITE mode + domain-state precondition govern mutation UI; services remain authoritative.
-10. Historical data must never be silently reclassified when resolution is ambiguous.
+6. Future ACTIVE Income and future COMPLETED Expense are prohibited; planned money is not realized money.
+7. `Settlement.CONFIRMED` closes the resolved FinancePeriod ledger. `FinancePeriod.status` remains configuration lifecycle only.
+8. `Class.fee` is per student per canonical FinancePeriod and is not automatically multiplied by duration.
+9. Services are authoritative for authorization/domain state; UI projects those rules.
+10. Historical data must never be silently reclassified when period resolution is ambiguous.
 
 ## Roadmap
 
 | Status | ID | Outcome |
 |---|---|---|
 | `[x]` | FW2-01 | Canonical FinancePeriod resolution foundation |
-| `[>]` | FW2-02 | Expense canonical period assignment + future realized validation |
-| `[ ]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date |
-| `[ ]` | FW2-04 | Closed-period service guard |
+| `[x]` | FW2-02 | Expense canonical period assignment + future realized validation |
+| `[x]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date |
+| `[>]` | FW2-04 | Closed-period service guard |
 | `[ ]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
 | `[ ]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs |
 | `[ ]` | FW2-07 | Outstanding/Class.fee historical correctness and obligation semantics |
@@ -45,87 +46,75 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 
 ## FW2-01 — Canonical FinancePeriod Foundation — `[x] DONE`
 
-### `[x] FW2-01.1` Persistence/domain reconciliation
-Existing `FinancePeriod` retained; no parallel Wallet-period table.
+- [x] existing FinancePeriod retained; no parallel Wallet-period table;
+- [x] canonical `ResolvedFinancePeriod` implemented;
+- [x] mid-month, duration > 1, leap/end-of-month and transition clamping covered;
+- [x] owner-reported runtime suite green.
 
-### `[x] FW2-01.2` Canonical resolved-period resolver
-`ResolvedFinancePeriod` + effective-range-clamped resolution implemented. Normal, mid-month, multi-month, leap/end-of-month and transition semantics covered.
+## FW2-02 — Expense Period Assignment — `[x] DONE`
 
-### `[x] FW2-01.3` Runtime regression tests
-Runtime pytest reported PASS by repository owner on 2026-09-23.
+- [x] nullable `Expense.finance_period_id` compatibility FK;
+- [x] Alembic `1e10a026`;
+- [x] unique covering period required for COMPLETED Expense;
+- [x] future COMPLETED Expense rejected;
+- [x] PENDING remains non-realized and may be future-dated;
+- [x] assignment recomputed on date/status change;
+- [x] ambiguous coverage fails explicitly;
+- [x] post-commit timeline/event projection is best-effort;
+- [x] migration-chain regression guard updated;
+- [x] full pytest rerun reported PASS by repository owner.
 
-### `[x] FW2-01.4` Phase review
-- [x] exact selected bounds available through `FinancePeriodService.resolve_period()`;
-- [x] canonical identity no longer requires Month/Year inference;
-- [x] F-20 transition overlap closed by clamping;
-- [x] FW2-01 runtime tests green.
+## FW2-03 — Income Period & Realized Semantics — `[x] DONE`
 
-## FW2-02 — Expense Period Assignment — `[>] CURRENT`
+Merged PR #335 into `main_repos@71f8b73634e1ad19b9399cf9e00b48e19fb5fd4b`.
 
-### Implemented
+- [x] canonical `Income.finance_period_id` compatibility FK via Alembic `1e10a027`;
+- [x] unique covering FinancePeriod required for ACTIVE Income;
+- [x] future ACTIVE Income rejected on create/update;
+- [x] application business clock used for posting/realized semantics;
+- [x] VOIDED/deleted Income excluded from realized semantics;
+- [x] canonical assignment recomputed when payment date changes;
+- [x] enrollment validated at transaction date, not current status only;
+- [x] post-commit timeline projection cannot turn a committed mutation into a false save failure;
+- [x] post-commit ClassService lookup removed;
+- [x] migration-chain regression updated through `1e10a027`;
+- [x] full Windows pytest reported PASS by repository owner on 2026-09-24.
 
-- [x] add nullable `Expense.finance_period_id` FK bridge; nullable preserves legacy rows until FW2-09 reconciliation;
-- [x] Alembic `1e10a026` migration from repository head `1e10a025`;
-- [x] require unique covering FinancePeriod for new/updated COMPLETED Expense;
-- [x] reject future COMPLETED Expense;
-- [x] allow future PENDING as non-realized;
-- [x] recompute assignment from final date/status on update;
-- [x] ambiguous overlapping configurations fail explicitly instead of silently choosing one;
-- [x] missing period fails realized posting;
-- [x] post-commit timeline/event failures are best-effort and no longer report committed money mutation as failed;
-- [x] focused rule regressions added.
+## FW2-04 — Closed-period Guard — `[>] CURRENT`
 
-### Runtime evidence
+### Implemented on `finance-wallet-v2-fw2-04`
 
-GitHub Actions `Pytest Suite #159` on merged PR #333 / `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d` executed 1,923 tests:
+- [x] central `FinanceLedgerGuard` derives closure from `FinancialSettlement.STATUS_CONFIRMED`;
+- [x] closure identity is resolved canonical `period_start`, not Month/Year and not FinancePeriod configuration status;
+- [x] public `FinancePeriodService.ensure_period_is_mutable()` / `is_period_closed()` projection added;
+- [x] Income create guarded against closed destination period;
+- [x] Income update guards source period and resolved destination period;
+- [x] Income void/delete guard current canonical period;
+- [x] realized Expense create guarded;
+- [x] realized Expense update guards source and destination, including COMPLETED↔PENDING transitions;
+- [x] realized Expense delete guarded;
+- [x] PENDING Expense remains editable because it is non-realized ledger data;
+- [x] Expense future-date validation aligned to application business clock;
+- [x] maintenance/reconciliation has a reusable public guard instead of duplicating closure logic;
+- [x] focused regression tests added for DRAFT/CONFIRMED, mid-month period, config lifecycle independence, service error translation, and move source/destination rule.
 
-- [x] all FW2-01 resolver tests passed;
-- [x] all FW2-02 Expense assignment tests passed;
-- [x] FinancePeriod repository round-trip passed;
-- [x] Alembic migration upgrade/downgrade integration tests passed;
-- [x] 1,919 tests passed and 3 skipped;
-- [!] exactly one test failed: `test_finance_period_migrations_use_unique_revisions_and_current_chain` because its hard-coded finance-migration filename list predated `1e10a026_expense_finance_period.py`.
+### Remaining before DONE
 
-The failure was a stale test contract, not a production migration or FW2-02 domain failure. The fix keeps the strict migration inventory check and adds `1e10a026` plus its expected `down_revision = "1e10a025"`; production behavior was intentionally not relaxed.
-
-### Remaining before phase closure
-
-- [x] audit full failed run and isolate root cause;
-- [x] fix stale migration revision contract on `finance-wallet-v2-fw2-02-ci-fix`;
-- [>] rerun full pytest after the test-contract fix;
-- [ ] mark FW2-02 DONE only after green rerun;
-- [ ] leave bulk legacy deterministic backfill to FW2-09 as planned.
-
-## FW2-03 — Income Period & Realized Semantics
-
-- [ ] require unique covering FinancePeriod for ACTIVE Income;
-- [ ] reject future ACTIVE Income on create/update;
-- [ ] VOIDED excluded from live ledger;
-- [ ] recompute canonical assignment when payment date changes;
-- [ ] date-aware enrollment validation;
-- [ ] fix post-commit false-failure boundary;
-- [ ] runtime regressions.
-
-## FW2-04 — Closed-period Guard
-
-- [ ] central guard derives closure from confirmed Settlement for selected resolved period;
-- [ ] Income create/update/void/delete guarded;
-- [ ] realized Expense create/update/delete guarded;
-- [ ] moving transactions into/out of closed period guarded;
-- [ ] maintenance/backfill cannot silently bypass closure;
-- [ ] runtime regressions.
+- [>] full GitHub Actions pytest suite;
+- [ ] audit any regression failures;
+- [ ] merge only after green full suite;
+- [ ] mark FW2-04 DONE and advance tracker to FW2-05.
 
 ## FW2-05 — Settlement Lifecycle
 
-- [ ] confirmation recalculates live ledger;
+- [ ] confirmation recalculates complete live ledger;
 - [ ] expected Cash/Bank closing calculated;
 - [ ] actual Cash/Bank required;
 - [ ] differences calculated;
-- [ ] configured non-zero difference requires comment;
+- [ ] non-zero difference comment rule enforced;
 - [ ] confirmation snapshot atomic;
-- [ ] confirmed period closes only after successful transaction;
 - [ ] explicit Admin reopen workflow if implemented;
-- [ ] remove aggregation caps;
+- [ ] remove arbitrary aggregation caps (`limit=100000`);
 - [ ] runtime regressions.
 
 ## FW2-06 — Wallet Accounting
@@ -134,37 +123,31 @@ The failure was a stale test contract, not a production migration or FW2-02 doma
 - [ ] legacy aliases normalized safely;
 - [ ] unknown wallet aliases reported, never guessed;
 - [ ] opening + income - expense = expected closing;
-- [ ] Settlement difference = actual - expected;
-- [ ] no arbitrary row-limit totals;
-- [ ] reserve transfer semantics without modeling transfers as fake Income/Expense.
+- [ ] no arbitrary row-limit totals.
 
 ## FW2-07 — Outstanding / Tuition Obligation
 
-- [ ] `Class.fee` applied once per billable enrollment per canonical FinancePeriod;
-- [ ] no automatic multiplication by `duration_months`;
+- [ ] `Class.fee` once per billable enrollment per canonical FinancePeriod;
+- [ ] no multiplication by `duration_months`;
 - [ ] enrollment overlap determines billability;
-- [ ] ACTIVE qualifying tuition Income reduces obligation;
-- [ ] Not Yet / Partial / Paid / Overpaid / No Tuition Configured semantics;
-- [ ] define historical fee source so changing current Class.fee does not silently rewrite finalized history.
+- [ ] qualifying ACTIVE tuition Income reduces obligation;
+- [ ] historical fee source prevents retroactive rewrite.
 
 ## FW2-08 — UI Integration
 
-- [ ] selector uses actual FinancePeriod bounds, not Month/Year inference;
-- [ ] selected period preserved across Dashboard/Income/Expense/Outstanding/Settlement;
+- [ ] selector uses actual FinancePeriod bounds;
+- [ ] selected period preserved across Finance surfaces;
 - [ ] export uses same period context;
-- [ ] capability projection matches service capability;
-- [ ] closed period disables normal mutation controls;
-- [ ] service remains authoritative.
+- [ ] fine-grained capability projection;
+- [ ] closed period disables normal mutation controls while service guard remains authoritative.
 
 ## FW2-09 — Backfill & Reconciliation
 
-- [ ] Income compatibility assignment reconciled;
-- [ ] Expense deterministic assignment backfilled;
+- [ ] Income/Expense deterministic assignment backfilled;
 - [ ] unresolved/ambiguous rows reported;
 - [ ] idempotent rerun;
-- [ ] historical Settlement snapshots preserved;
-- [ ] no silent retroactive reclassification;
-- [ ] reconciliation metrics recorded.
+- [ ] confirmed periods cannot be silently mutated by reconciliation;
+- [ ] historical Settlement snapshots preserved.
 
 ## FW2-10 — Production Gate
 
@@ -181,26 +164,29 @@ The failure was a stale test contract, not a production migration or FW2-02 doma
 
 | Date | Decision | Status |
 |---|---|---|
-| 2026-09-23 | Existing `FinancePeriod` remains the canonical period domain. | FINAL |
-| 2026-09-23 | Do not create `FinanceWalletPeriod`. | FINAL |
+| 2026-09-23 | Existing FinancePeriod remains canonical; no `FinanceWalletPeriod`. | FINAL |
 | 2026-09-23 | Resolved bucket is clamped to configuration effective bounds. | FINAL |
-| 2026-09-23 | Settlement confirmation owns ledger closure; `FinancePeriod.status` remains configuration lifecycle. | FINAL |
-| 2026-09-23 | `Class.fee` is per canonical FinancePeriod, not per calendar month. | FINAL |
-| 2026-09-23 | Future realized postings are rejected, not treated as planned actuals. | FINAL |
-| 2026-09-23 | Expense FK remains nullable during rollout; service requires it for new realized postings, FW2-09 owns legacy reconciliation. | FINAL |
-| 2026-09-23 | Ambiguous period coverage is a hard validation failure for new realized postings. | FINAL |
-| 2026-09-23 | CI fix updates the strict migration revision contract; it must not weaken FW2-02 posting invariants to make tests green. | FINAL |
+| 2026-09-23 | Settlement confirmation owns ledger closure; FinancePeriod.status is configuration lifecycle. | FINAL |
+| 2026-09-23 | Class.fee is per canonical FinancePeriod. | FINAL |
+| 2026-09-23 | Future realized postings are rejected. | FINAL |
+| 2026-09-24 | Closed-period mutation checks must protect both source and destination when a transaction moves periods. | FINAL |
+| 2026-09-24 | PENDING Expense is non-realized and therefore is not blocked solely because its date lies inside a confirmed period. | FINAL |
+| 2026-09-24 | All business-date defaults in FW2 posting guards use the application clock. | FINAL |
 
 ## Implementation journal
 
-### 2026-09-23 — FW2-02 CI failure audited and fixed
+### 2026-09-24 — FW2-04 implementation started
 
-PR #333 merged to `main_repos@263692c6c5ff8a65c9314b45742e18d0aa052f7d`. Pytest Suite #159 completed with `1 failed, 1919 passed, 3 skipped`. The only failure was the legacy strict filename inventory in `test_finance_period_migration_revision.py`, which did not include the intentionally added `1e10a026_expense_finance_period.py`. All FW2-01, FW2-02, FinancePeriod repository, and migration upgrade/downgrade runtime tests passed. Created `finance-wallet-v2-fw2-02-ci-fix`; updated the migration contract to include revision `1e10a026` chained from global head `1e10a025`. Awaiting green full-suite rerun before closing FW2-02.
+Created branch `finance-wallet-v2-fw2-04` from merged FW2-03 head `main_repos@71f8b73634e1ad19b9399cf9e00b48e19fb5fd4b`. Added central Settlement-derived ledger closure guard, wired Income and realized Expense mutation paths, exposed public FinancePeriod mutability APIs, aligned Expense to application business clock, and added focused closed-period regressions. Full CI pending.
 
-### 2026-09-23 — FW2-02 implementation merged
+### 2026-09-24 — FW2-03 completed
 
-Base was `main_repos@30f7ccd38adca90f2b67dfbd4dc75ad2e64265d4`. FW2-02 added Expense period FK/migration, deterministic unique-period assignment, future-realized guard, reassignment on date/status change, best-effort post-commit projections, and focused regressions. PR #333 merged into main_repos.
+PR #335 passed the full Windows pytest suite and was merged into main_repos. Audit fixes included migration-chain guard, deterministic application clock usage, and removal of residual post-commit ClassService lookup.
+
+### 2026-09-23 — FW2-02 completed
+
+Expense canonical assignment, future-realized validation, migration `1e10a026`, best-effort post-commit projection, and migration regression fix completed; full rerun later reported green.
 
 ### 2026-09-23 — FW2-01 completed
 
-FW2-01.1 reconciliation, FW2-01.2 resolver, and FW2-01.3 runtime regression were completed. Owner reported pytest PASS. Phase review confirms exact canonical bounds are available and F-20 is closed.
+Canonical resolved-period model and transition clamping completed; owner reported runtime regression PASS.
