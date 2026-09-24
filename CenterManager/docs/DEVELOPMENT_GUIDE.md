@@ -1,167 +1,319 @@
-# DEVELOPMENT_GUIDE – CenterManager
+# CenterManager — Development Guide
 
-This guide provides everything a developer needs to set up, run, test, and extend CenterManager.
+Status: **CURRENT DEVELOPER GUIDE**  
+Updated: 2026-09-24
 
----
+This guide describes how to work on the current CenterManager repository. Standing Codex/agent rules live in the repository-root `AGENTS.md`. Task-specific implementation requirements belong in GitHub Issues.
 
-## Environment Setup
+## 1. Supported development environment
 
-### Prerequisites
-- Python 3.9 or higher
-- pip (package installer)
+CI is the reference environment:
 
-### Create Virtual Environment
-```
+- Windows (`windows-latest`)
+- Python 3.10
+- PySide6 desktop UI
+- SQLite + SQLAlchemy 2.x
+- Alembic
+- pytest
+
+Other Python versions may work locally, but new code must remain compatible with the CI baseline unless an explicit task changes it.
+
+## 2. Setup
+
+From `CenterManager/`:
+
+```bash
 python -m venv .venv
-Activate it:
+```
 
-Linux/macOS: source .venv/bin/activate
+Windows:
 
-Windows: .venv\Scripts\activate
+```bash
+.venv\Scripts\activate
+```
 
-Install Dependencies
-Runtime Dependencies
+Linux/macOS development environments:
 
-pip install -r requirements.txt
-Development Dependencies
+```bash
+source .venv/bin/activate
+```
 
-pip install -r requirements-dev.txt
-Run the Application
+Install dependencies:
 
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+```
+
+## 3. Run the application
+
+Use the repository's current launcher from `CenterManager/`:
+
+```bash
 python run.py
-A minimal PySide6 window titled "CenterManager" should appear.
+```
 
-Run Tests
-All tests are written with pytest.
+The application bootstrap is implemented in `src/centermanager/app.py`.
 
+Important startup behavior:
 
-pytest
-Expected output:
+- runtime/config/logging initialize first;
+- the platform bootstrap initializes runtime context;
+- configured Git synchronization occurs before the production DB is opened;
+- true local/offline mode initializes the local runtime DB when no valid Git config exists;
+- Alembic upgrades the runtime DB to head;
+- login/permission context is established before workspace services become active.
 
+Do not bypass this startup sequence in production code.
 
-============================= test session starts ==============================
-collected 12 items
+## 4. Tests
 
-tests/test_config.py ....                                                 [ 33%]
-tests/test_paths.py ...                                                   [ 58%]
-tests/test_smoke.py .....                                                 [100%]
+Run focused tests while developing:
 
-============================== 12 passed in 0.45s ==============================
-For verbose output:
+```bash
+python -m pytest tests/test_some_feature.py -q
+```
 
+Run the full suite before handoff when required by the Issue:
 
-pytest -v
-To run a specific test file:
+```bash
+python -m pytest
+```
 
+GitHub Actions runs the full suite on Windows/Python 3.10 with JUnit reporting and timeout protection. Architecture gates are implemented as pytest tests and run in the same suite.
 
-pytest tests/test_paths.py
-Coding Rules
-Must Use
-Python type hints for all function signatures.
+Do not hard-code expected global test counts in documentation; the suite changes continuously.
 
-pathlib.Path for all filesystem operations.
+For Qt tests in headless environments, use the same environment assumptions as CI where applicable (`QT_QPA_PLATFORM=offscreen`).
 
-Clear naming: functions should be verbs (get_student), classes nouns (StudentService).
+## 5. Required development flow
 
-Small, focused classes/functions: Single Responsibility Principle.
+Feature work follows the issue-driven flow documented in `AGENTS.md`:
 
-Docstrings for public APIs (Google or NumPy style).
+```text
+Product/Architecture
+    ↓
+GitHub Issue
+    ↓
+feature branch from specified base SHA
+    ↓
+implementation
+    ↓
+focused tests → fix until green
+    ↓
+full relevant/local tests
+    ↓
+architecture/lint gates
+    ↓
+git diff self-review
+    ↓
+commit + push
+    ↓
+Pull Request to main_repos
+    ↓
+GitHub Actions
+    ↓
+independent review
+    ↓
+human review/merge
+```
 
-Avoid
-God classes – keep classes under ~300 lines (guideline).
+Never implement feature work directly on `main_repos` unless the human explicitly requests a direct documentation/administrative update.
 
-Global mutable state – except for the approved singletons in core/.
+## 6. Source-of-truth hierarchy
 
-Hardcoded absolute paths – always use core.paths.
+For implementation work:
 
-Business logic inside UI – delegate to Services.
+1. explicit human instruction;
+2. approved domain/specification documents;
+3. assigned GitHub Issue;
+4. architecture/repository conventions;
+5. existing implementation/tests.
 
-SQL inside UI – use Repositories.
+Existing code is not automatically the target behavior when an approved specification intentionally changes it.
 
-Catch‑all exception swallowing – except Exception: pass is forbidden.
+## 7. Current package structure
 
-Premature abstraction – YAGNI.
+Key packages under `src/centermanager/`:
 
-Principles
-KISS: Keep It Simple, Stupid.
+- `ui/` — PySide6 application shell, workspace UI and design system;
+- `services/` — application/domain use cases and policies;
+- `repositories/` — query/persistence layer and repository provider;
+- `models/` — SQLAlchemy persisted models;
+- `dto/` — read/projection contracts;
+- `database/` — engine, migration/bootstrap helpers and seed behavior;
+- `platform/` — runtime bootstrap, collaboration, synchronization and platform services;
+- `core/` — paths, configuration, clock, current-user context and logging;
+- `events/` — event bus and handlers;
+- `export/` — export-oriented support.
 
-YAGNI: You Ain't Gonna Need It.
+`modules/` is not the current home of feature implementations. Do not create a new domain package there merely because older documentation suggested a future module layout.
 
-Separation of Concerns.
+## 8. Architecture rules
 
-Architecture Rules
-Layer Violations
-❌ UI → Database (direct)
+Normal dependency direction:
 
-❌ UI → Repository
+```text
+UI → Service → Repository abstraction/provider → ORM → SQLite
+```
 
-✅ UI → Service
+Rules:
 
-❌ Service → Database (direct)
+- no SQLAlchemy session/query logic in UI;
+- no business validation duplicated in views;
+- service authorization remains authoritative even when UI projects permissions;
+- repositories own persistence/query mechanics;
+- services should use repository-provider abstractions where established;
+- do not introduce direct concrete repository imports when an architecture gate requires provider ownership;
+- avoid direct service-level `session.add/flush/delete/query` when repository-owned persistence is the established contract;
+- do not duplicate canonical domain resolvers/normalizers across layers.
 
-✅ Service → Repository
+See `docs/ARCHITECTURE.md` and architecture tests for enforceable boundaries.
 
-✅ Repository → Database (SQLAlchemy)
+## 9. Workspaces
 
-Accessing Paths
-Always use the global paths:
+The current UI is workspace-oriented (`student_workspace`, `class_workspace`, `finance_workspace`, `employee_workspace`, `admin_workspace`, etc.). Workspaces own presentation/workflow context, but application services/repositories remain shared packages today.
 
-python
-from centermanager.core.paths import get_paths, database_dir, export_dir
+Do not perform broad package reorganization as part of an unrelated feature task.
 
-paths = get_paths()
-db_path = paths.database_dir / "center.db"
-# or
-db_path = database_dir() / "center.db"
-Accessing Configuration
-python
+## 10. Collaboration and synchronization
+
+Git-backed synchronization/edit-session behavior is owned by `platform/`.
+
+Business services must not:
+
+- shell out to Git for domain workflows;
+- implement their own synchronization;
+- modify collaboration metadata directly;
+- treat WRITE mode as a substitute for capability authorization.
+
+When Git collaboration is configured, startup synchronization is authoritative; the application must not silently continue with a stale local DB after authoritative synchronization fails.
+
+## 11. Database changes
+
+Schema changes require Alembic migrations.
+
+Before adding a migration:
+
+- inspect the current migration head/chain;
+- inspect affected models/repositories/services;
+- preserve historical data;
+- make backfill rules deterministic;
+- do not guess ambiguous historical financial/domain values;
+- add/update migration regression tests when the project has a chain contract.
+
+Do not edit historical applied migrations solely to make a new feature easier.
+
+## 12. Finance work
+
+Finance Wallet V2 business rules are governed by:
+
+```text
+src: docs/finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md
+```
+
+Progress/evidence is tracked in:
+
+```text
+docs/finance/FINANCE_WALLET_V2_IMPLEMENTATION_TRACKER.md
+```
+
+The Domain Spec wins over stale legacy behavior/tests when the spec explicitly changes the contract. Historical financial data must not be silently reclassified.
+
+## 13. Paths and files
+
+Use `centermanager.core.paths` rather than hard-coded absolute filesystem paths.
+
+Use the owning service/platform API for attachments, exports, runtime metadata and synchronized assets. Do not assume an old Google Drive Desktop synchronization flow.
+
+## 14. Configuration
+
+Use the existing configuration APIs rather than reading arbitrary config files directly from business code.
+
+Example:
+
+```python
 from centermanager.core.config import get_config
 
 config = get_config()
-app_name = config.get("application.name")
-Logging
-Use logging.getLogger(__name__) and log appropriately:
+```
 
-python
+## 15. Logging
+
+Use module loggers:
+
+```python
 import logging
 logger = logging.getLogger(__name__)
+```
 
-logger.info("Student saved")
-logger.error("Failed to export PDF", exc_info=True)
-Adding a Future Module
-To add a new business feature (e.g., attendance):
+Preserve diagnostic context. Do not swallow exceptions with `except Exception: pass`.
 
-Create a new package under src/centermanager/modules/attendance/.
+## 16. Clock and deterministic tests
 
-Inside, create the typical layers if needed:
+Where the application already exposes an application clock (`centermanager.core.clock`), use it for business-date semantics instead of `date.today()`/`datetime.now()` directly. This keeps tests deterministic and aligns domain behavior across services.
 
-models.py (SQLAlchemy models)
+## 17. Coding conventions
 
-services.py (business logic)
+Prefer:
 
-repositories.py (data access)
+- type hints on public/new interfaces;
+- small cohesive functions;
+- explicit domain concepts;
+- existing DTOs/services/repository abstractions;
+- comments explaining decisions rather than restating code;
+- minimal, reviewable diffs.
 
-ui/ (PySide6 widgets)
+Avoid:
 
-Register the module in the main UI (e.g., add a menu item in MainWindow).
+- speculative abstractions;
+- unrelated refactors/format churn;
+- duplicated business logic;
+- broad catch-all exception suppression;
+- hard-coded row caps for financial totals;
+- test-only production hacks.
 
-Update the database schema (add migrations – future sprint).
+## 18. Git hygiene
 
-Write tests in tests/modules/test_attendance.py.
+Before committing:
 
-Never modify core/ for business‑specific logic.
+```bash
+git status
+git diff
+git diff --stat
+```
 
-PyInstaller Packaging (Future)
-When the application is ready for distribution, run:
+Verify:
 
+- branch started from the Issue-specified base;
+- no generated/debug files are included;
+- no secrets are included;
+- no unrelated formatting churn exists;
+- migrations/docs/tests match the implementation;
+- PR targets `main_repos` unless the Issue says otherwise.
 
-pyinstaller centermanager.spec
-The runtime/ directory will be created relative to the executable. Ensure all paths are resolved dynamically using core.paths – no hardcoded paths.
+## 19. CI failures
 
-Troubleshooting
-Issue	Solution
-ModuleNotFoundError: No module named 'centermanager'	Ensure you are running python run.py from the project root, or check that src/ is in sys.path.
-PermissionError on runtime directories	Check write permissions for the project folder.
-PySide6 import errors	Reinstall PySide6: pip install --force-reinstall PySide6
-Tests fail with "config.json not found"	The tests use a temporary runtime; ensure you have pytest installed and are running from the root.
-Logging does not write to file	Check that runtime/Logs/ exists and is writable. setup_logging creates it.
+When GitHub Actions fails, inspect the exact failing test/log. Classify the failure before changing code:
+
+- implementation defect;
+- integration regression;
+- stale compatibility expectation;
+- legitimate architecture violation;
+- false-positive test.
+
+Fix the underlying contract, not merely the symptom.
+
+## 20. Documentation
+
+Documentation has distinct roles:
+
+- `ARCHITECTURE.md` — current implementation architecture;
+- `Bussiness/ARCHITECTURE_V2.md` — product/workspace architecture and mapping;
+- `Deployment_Docs/` — platform direction/principles/protocols;
+- domain specs — authoritative business/domain contracts;
+- GitHub Issues — task implementation contracts;
+- root `AGENTS.md` — standing coding-agent rules.
+
+When a feature materially changes one of these contracts, update the owning document rather than adding another competing architecture description.
