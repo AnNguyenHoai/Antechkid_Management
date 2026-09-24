@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.core.capabilities import Capability
 from centermanager.database.engine import create_engine_for_path
 from centermanager.models.expense import Expense
 from centermanager.models.finance_period import FinancePeriod
@@ -14,12 +15,25 @@ from centermanager.models.income import Income
 from centermanager.services.financial_settlement_service import FinancialSettlementService
 
 
+def _admin_principal():
+    return SimpleNamespace(
+        is_admin=True,
+        is_active=True,
+        role=SimpleNamespace(name="admin"),
+        permissions=[
+            Capability.FINANCE_SETTLEMENT_VIEW.value,
+            Capability.FINANCE_SETTLEMENT_CREATE.value,
+            Capability.FINANCE_SETTLEMENT_UPDATE.value,
+        ],
+    )
+
+
 def _service_with_period(test_db_path, monkeypatch):
     engine = create_engine_for_path(test_db_path)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(
         "centermanager.services.financial_settlement_service.get_current_user",
-        lambda: SimpleNamespace(is_admin=True),
+        _admin_principal,
     )
     with factory() as session:
         session.add(
