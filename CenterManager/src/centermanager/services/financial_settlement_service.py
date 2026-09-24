@@ -8,10 +8,12 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
+from centermanager.core.wallet import resolve_wallet
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.audit_service import AuditService
+from centermanager.services.wallet_service import WalletService
 
 
 _MONEY_QUANTUM = Decimal("0.01")
@@ -30,10 +32,15 @@ class FinancialSettlementService:
         session_factory: sessionmaker,
         repository_provider: Optional[RepositoryProvider] = None,
         audit_service: Optional[AuditService] = None,
+        wallet_service: Optional[WalletService] = None,
     ) -> None:
         self._session_factory = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
         self._audit_service = audit_service or AuditService(
+            session_factory,
+            repository_provider=self._repository_provider,
+        )
+        self._wallet_service = wallet_service or WalletService(
             session_factory,
             repository_provider=self._repository_provider,
         )
@@ -49,6 +56,15 @@ class FinancialSettlementService:
         if value is None:
             return None
         return FinancialSettlementService._money(value)
+
+    @staticmethod
+    def _method_bucket(payment_method: Optional[str]) -> str:
+        """Legacy compatibility shim backed by the canonical Wallet resolver.
+
+        Older finance callers/tests still use this private helper. Keep the
+        surface temporarily without duplicating payment-method mapping logic.
+        """
+        return resolve_wallet(payment_method).value.lower()
 
     @staticmethod
     def _require_admin() -> None:
@@ -84,54 +100,25 @@ class FinancialSettlementService:
         resolved = FinancePeriodDefinition.resolved_for_configuration(config, target_date)
         return resolved.period_start, resolved.period_end
 
-    @staticmethod
-    def _method_bucket(payment_method: Optional[str]) -> Optional[str]:
-        normalized = (payment_method or "").strip().lower().replace("_", " ")
-        if normalized in {"cash", "tài khoản cá nhân"}:
-            return "cash"
-        if normalized in {"bank transfer", "bank", "tài khoản công ty"}:
-            return "bank"
-        return None
-
     def _aggregate_activity(
         self,
         session,
         period_start: date,
         period_end: date,
     ) -> dict[str, Decimal]:
-        """Aggregate the complete live ledger in SQL, without paging/row caps."""
-        totals = {
-            "income_cash": Decimal("0.00"),
-            "income_bank": Decimal("0.00"),
-            "expense_cash": Decimal("0.00"),
-            "expense_bank": Decimal("0.00"),
-        }
-
-        income_rows = self._repository_provider.incomes(
-            session
-        ).aggregate_active_amounts_by_payment_method(
-            finance_period_start=period_start,
-            date_from=period_start,
-            date_to=period_end,
-        )
-        for payment_method, amount in income_rows:
-            bucket = self._method_bucket(payment_method)
-            if bucket is not None:
-                totals[f"income_{bucket}"] += self._money(amount)
-
-        expense_rows = self._repository_provider.expenses(
-            session
-        ).aggregate_realized_amounts_by_payment_method(
-            date_from=period_start,
-            date_to=period_end,
+        """Consume the canonical Wallet read model inside this transaction."""
+        summary = self._wallet_service._calculate_in_session(
+            session,
+            period_start=period_start,
+            period_end=period_end,
             realized_only=True,
         )
-        for payment_method, amount in expense_rows:
-            bucket = self._method_bucket(payment_method)
-            if bucket is not None:
-                totals[f"expense_{bucket}"] += self._money(amount)
-
-        return {key: self._money(value) for key, value in totals.items()}
+        return {
+            "income_cash": summary.cash.realized_income,
+            "income_bank": summary.bank.realized_income,
+            "expense_cash": summary.cash.realized_expense,
+            "expense_bank": summary.bank.realized_expense,
+        }
 
     @staticmethod
     def _calculate(
@@ -261,8 +248,6 @@ class FinancialSettlementService:
             if confirm and (actual_cash_value is None or actual_bank_value is None):
                 raise ValueError("Actual closing cash and bank balances are required before confirmation.")
 
-            # Recalculate from the live ledger inside the same transaction that
-            # persists the final snapshot and the CONFIRMED state.
             totals = self._aggregate_activity(session, period_start, period_end)
             calculated = self._calculate(
                 opening_cash_value,
@@ -307,8 +292,6 @@ class FinancialSettlementService:
             row.confirmed_at = get_clock().now() if confirm else None
 
             if confirm:
-                # Repository-owned flush materializes the settlement identity;
-                # closure and audit remain in the caller-owned transaction.
                 settlement_repo.flush()
                 self._record_transition_audit(
                     session,

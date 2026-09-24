@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
+from centermanager.core.wallet import WalletMappingError, canonical_wallet_value
 from centermanager.events.event_bus import EventBus
 from centermanager.events.finance_events import FinanceDataChanged
 from centermanager.models.finance_period import FinancePeriodDefinition
@@ -120,12 +121,10 @@ class IncomeService:
         return income_type
 
     def _validate_payment_method(self, payment_method: str) -> str:
-        valid = ["Cash", "Bank Transfer"]
-        if payment_method not in valid:
-            raise IncomeValidationError(
-                f"Payment method must be one of: {', '.join(valid)}"
-            )
-        return payment_method
+        try:
+            return canonical_wallet_value(payment_method)
+        except WalletMappingError as exc:
+            raise IncomeValidationError(str(exc)) from exc
 
     def _validate_status(self, status: Optional[str]) -> Optional[str]:
         normalized = (status or Income.STATUS_ACTIVE).upper()

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any, Optional, List, Tuple
 
 from centermanager.core.clock import get_clock
+from centermanager.core.wallet import WalletMappingError, canonical_wallet_value
 from centermanager.models.expense import Expense
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
@@ -85,11 +86,10 @@ class ExpenseService:
         return payment_date
 
     def _validate_payment_method(self, method: str) -> str:
-        mapping = {"TÀI KHOẢN CÁ NHÂN": "Cash", "TÀI KHOẢN CÔNG TY": "Bank", "Bank Transfer": "Bank", "Cash": "Cash", "Bank": "Bank", "Other": "Other"}
-        value = mapping.get(method, method)
-        if value not in {"Cash", "Bank", "Other"}:
-            raise ExpenseValidationError("Invalid payment method.")
-        return value
+        try:
+            return canonical_wallet_value(method)
+        except WalletMappingError as exc:
+            raise ExpenseValidationError(str(exc)) from exc
 
     def _validate_status(self, status: str) -> str:
         mapping = {"ĐÃ HOÀN TRẢ": "Completed", "CHƯA HOÀN TRẢ": "Pending", "Completed": "Completed", "Pending": "Pending"}

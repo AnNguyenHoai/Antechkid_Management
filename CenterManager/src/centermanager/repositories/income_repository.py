@@ -6,6 +6,7 @@ from typing import List, Optional
 from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from centermanager.core.wallet import WalletMappingError, wallet_aliases
 from centermanager.models.class_ import Class
 from centermanager.models.income import Income
 from centermanager.models.student import Student
@@ -50,6 +51,15 @@ class IncomeRepository(BaseRepository[Income]):
             .filter(Income.id == income_id)
             .first()
         )
+
+    @staticmethod
+    def _payment_method_values(payment_method: str):
+        try:
+            return wallet_aliases(payment_method)
+        except WalletMappingError:
+            # Raw filtering remains available for migration/diagnostic views of
+            # unknown historical values; accounting never guesses their Wallet.
+            return (payment_method,)
 
     def _apply_search(self, query, search_text: str):
         search = f"%{search_text}%"
@@ -97,7 +107,9 @@ class IncomeRepository(BaseRepository[Income]):
         if income_type:
             query = query.filter(Income.income_type == income_type)
         if payment_method:
-            query = query.filter(Income.payment_method == payment_method)
+            query = query.filter(
+                Income.payment_method.in_(self._payment_method_values(payment_method))
+            )
         if payment_period:
             query = query.filter(Income.payment_period == payment_period)
         if finance_period_start:

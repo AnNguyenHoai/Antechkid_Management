@@ -7,11 +7,11 @@
 | Field | Value |
 |---|---|
 | Original baseline | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
-| Current implementation base | `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1` |
+| Current implementation base | `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` |
 | Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
-| Current phase | `FW2-05 — Settlement Lifecycle` |
-| Current task | `FW2-05 CI audit fix / full regression rerun` |
-| Last completed | `FW2-04 — Closed-period Guard` |
+| Current phase | `FW2-06 — Wallet Accounting` |
+| Current task | `FW2-06 CI audit/fix and full regression` |
+| Last completed | `FW2-05 — Settlement Lifecycle` |
 | Last updated | `2026-09-24` |
 
 Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] BLOCKED`.
@@ -29,6 +29,7 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 9. Services are authoritative for authorization/domain state; UI projects those rules.
 10. Historical data must never be silently reclassified when period resolution is ambiguous.
 11. Financial totals must use complete aggregation and must never depend on arbitrary row limits.
+12. Wallet V2 has exactly two canonical money locations: `CASH` and `BANK`; unknown aliases are errors, never guesses.
 
 ## Roadmap
 
@@ -38,8 +39,8 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[~] IN PROGRESS` · `[x] DONE` · `[!] B
 | `[x]` | FW2-02 | Expense canonical period assignment + future realized validation |
 | `[x]` | FW2-03 | Income canonical assignment + future realized validation + enrollment-at-date |
 | `[x]` | FW2-04 | Closed-period service guard |
-| `[>]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
-| `[ ]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs |
+| `[x]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
+| `[>]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs |
 | `[ ]` | FW2-07 | Outstanding/Class.fee historical correctness and obligation semantics |
 | `[ ]` | FW2-08 | Canonical period selector + capability/state UI projection |
 | `[ ]` | FW2-09 | Backfill/reconciliation/migration exceptions |
@@ -86,9 +87,9 @@ Merged as `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1` after owner-repo
 - [x] business-date guards use the application clock;
 - [x] full regression reported PASS on 2026-09-24.
 
-## FW2-05 — Settlement Lifecycle — `[>] CURRENT`
+## FW2-05 — Settlement Lifecycle — `[x] DONE`
 
-### Implemented on `finance-wallet-v2-fw2-05`
+Merged as `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570` after GitHub Actions **Pytest Suite #174 SUCCESS** on 2026-09-24.
 
 - [x] Settlement resolves the same unique/clamped canonical FinancePeriod contract as FW2-01;
 - [x] confirmation recalculates complete live Income/Expense activity in the confirmation transaction;
@@ -101,27 +102,37 @@ Merged as `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1` after owner-repo
 - [x] explicit Admin `reopen()` command requires a reason and writes an audit record in the same transaction;
 - [x] reopen transitions `CONFIRMED -> DRAFT`, which reopens the ledger through the existing FW2-04 guard without introducing another period state;
 - [x] reopen audit captures period identity, settlement identity, actor through AuditService, previous status/timestamp, reason and reopen timestamp;
-- [x] `limit=100000` aggregation removed;
-- [x] repository-level SQL `SUM ... GROUP BY payment_method` provides complete totals without paging;
+- [x] arbitrary row-limit aggregation removed in favor of SQL grouped sums;
 - [x] Settlement date defaults use application `Clock`;
-- [x] focused FW2-05 regression tests added;
-- [x] CI audit #1: service persistence boundary restored by routing identity flush through repository API;
-- [x] CI audit #1: Settlement explicitly requests `realized_only=True` while retaining uncapped SQL aggregation.
+- [x] repository-owned flush preserves the service persistence boundary;
+- [x] Settlement states `realized_only=True` explicitly at its aggregation boundary;
+- [x] full GitHub Actions regression passed.
+
+## FW2-06 — Wallet Accounting — `[>] CURRENT`
+
+### Implemented on `finance-wallet-v2-fw2-06`
+
+- [x] canonical Wallet enum defines exactly `CASH` / `BANK`;
+- [x] one centralized resolver maps canonical values plus approved legacy aliases;
+- [x] Income create/update payment-method validation normalizes known aliases to canonical persistence values;
+- [x] Expense create/update payment-method validation normalizes known aliases to canonical persistence values;
+- [x] unknown new-write aliases are rejected instead of stored as guessed Wallets;
+- [x] Income/Expense repository filters treat canonical and legacy aliases as equivalent for read compatibility;
+- [x] raw unknown historical values remain directly filterable for diagnostics/migration rather than being reclassified;
+- [x] `WalletBalanceDTO` / `WalletPeriodSummaryDTO` expose per-Wallet opening, realized income, realized expense, expected closing and net movement;
+- [x] `WalletService` performs complete uncapped SQL-backed Cash/Bank aggregation;
+- [x] unknown historical Wallet alias causes live accounting/reconciliation to fail explicitly instead of silently dropping money;
+- [x] Settlement consumes the same WalletService mapping/aggregation contract;
+- [x] Settlement keeps `realized_only=True` explicit to preserve FW2-05 regression/ownership boundary;
+- [x] focused FW2-06 regression tests added for aliases, canonical writes, balance equations, repository compatibility and unknown-alias failure;
+- [x] architecture service inventory registers `wallet_service.py` as provider-backed PASS;
+- [x] legacy Settlement `_method_bucket()` compatibility surface delegates to the canonical Wallet resolver rather than duplicating alias mapping;
+- [x] stale Expense lifecycle regression expectation updated from presentation labels (`Cash`/`Bank`) to canonical persistence values (`CASH`/`BANK`).
 
 ### Remaining before DONE
 
-- [>] rerun full GitHub Actions pytest suite after CI audit fixes;
-- [ ] audit any further regression failure;
-- [ ] mark FW2-05 DONE only after green full suite and review.
-
-## FW2-06 — Wallet Accounting
-
-- [ ] canonical wallets `CASH` / `BANK`;
-- [ ] legacy aliases normalized safely;
-- [ ] unknown wallet aliases reported, never guessed;
-- [ ] opening + income - expense = expected closing;
-- [ ] Settlement difference = actual - expected;
-- [ ] no arbitrary row-limit totals.
+- [>] rerun full GitHub Actions pytest suite after CI #176 fixes;
+- [ ] mark FW2-06 DONE only after green full suite and review.
 
 ## FW2-07 — Outstanding / Tuition Obligation
 
@@ -137,7 +148,8 @@ Merged as `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1` after owner-repo
 - [ ] selected period preserved across Finance surfaces;
 - [ ] export uses same period context;
 - [ ] fine-grained capability projection;
-- [ ] closed period disables normal mutation controls while service guard remains authoritative.
+- [ ] closed period disables normal mutation controls while service guard remains authoritative;
+- [ ] realized Expense UI must not offer unsupported `Other` wallet values; unknown historical aliases remain diagnostic/reconciliation concerns.
 
 ## FW2-09 — Backfill & Reconciliation
 
@@ -175,16 +187,24 @@ Merged as `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1` after owner-repo
 | 2026-09-24 | Settlement totals use database aggregation, not paged row reads or arbitrary caps. | FINAL |
 | 2026-09-24 | Services never call ORM flush directly; settlement identity materialization goes through repository persistence API. | FINAL |
 | 2026-09-24 | Settlement makes realized Expense filtering explicit at the service/repository boundary while aggregation remains database-side. | FINAL |
+| 2026-09-24 | Wallet V2 canonical persistence values are `CASH` and `BANK`; approved legacy aliases remain readable. | FINAL |
+| 2026-09-24 | Unknown Wallet aliases fail live accounting and new-write validation; they are never silently guessed or dropped. | FINAL |
+| 2026-09-24 | Settlement consumes the centralized WalletService while retaining explicit realized-ledger ownership. | FINAL |
+| 2026-09-24 | Legacy Settlement bucket helper may remain temporarily only as a thin delegate to canonical Wallet resolution; duplicate alias tables are prohibited. | FINAL |
 
 ## Implementation journal
 
-### 2026-09-24 — FW2-05 CI audit #1
+### 2026-09-24 — FW2-06 CI audit #1
 
-Pytest Suite #169 failed with **3 failures / 1939 passes / 3 skips**. All focused FW2-05 lifecycle tests passed. Two failures were the same architecture violation: `FinancialSettlementService` called `session.flush()` directly. The third was the established Finance closure contract requiring Settlement to state `realized_only=True` explicitly. The fix routes flush through `FinancialSettlementRepository`/`BaseRepository.flush()` and passes `realized_only=True` into the uncapped SQL Expense aggregation API. Full rerun is pending; FW2-05 remains CURRENT until green.
+GitHub Actions **Pytest Suite #176** completed with `4 failed / 1954 passed / 3 skipped`. All focused FW2-06 tests passed. Root causes were integration-contract drift rather than Wallet calculation failures: `wallet_service.py` was missing from the committed EP-ARCH service inventory (two architecture failures), an older Expense lifecycle test still expected presentation labels `Cash`/`Bank` instead of canonical persistence values `CASH`/`BANK`, and a legacy Settlement test still called the removed `_method_bucket()` helper. Fixes register WalletService as provider-backed `PASS`, update the stale persistence expectation, and restore `_method_bucket()` solely as a compatibility shim delegated to the centralized Wallet resolver. FW2-06 remains CURRENT until the rerun is green.
 
-### 2026-09-24 — FW2-05 implementation started
+### 2026-09-24 — FW2-06 implementation started
 
-Created `finance-wallet-v2-fw2-05` from `main_repos@c8dbbeebbc9b6227f722e6f9611c839d8ecea1d1`. Settlement resolution was aligned with the FW2-01 unique/clamped canonical resolver. Confirmation now recomputes the complete live ledger, persists the confirmed snapshot and transition audit atomically, while explicit Admin reopen requires a reason and reopens through the existing Settlement-derived FW2-04 guard. Arbitrary 100k row aggregation caps were replaced by SQL grouped sums. Full CI pending.
+Created `finance-wallet-v2-fw2-06` from merged FW2-05 base `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570`. Added the canonical `CASH`/`BANK` resolver, Wallet DTOs and WalletService. Income/Expense new writes normalize approved aliases to canonical values while repository filters continue to read canonical and legacy values. Settlement now consumes the same Wallet accounting service, and unknown historical aliases fail reconciliation explicitly rather than disappearing from totals. Focused regression coverage added; full CI pending.
+
+### 2026-09-24 — FW2-05 completed
+
+PR #337 passed GitHub Actions **Pytest Suite #174** and merged into `main_repos@44b6fb730b516b2eaa61fa29bc87ac7699aa7570`. CI audit #1 had previously fixed the service persistence boundary and restored the explicit `realized_only=True` Settlement contract.
 
 ### 2026-09-24 — FW2-04 completed
 

@@ -5,6 +5,7 @@ from typing import List, Optional
 from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
 
+from centermanager.core.wallet import WalletMappingError, wallet_aliases
 from centermanager.models.expense import Expense
 from centermanager.repositories.base import BaseRepository
 
@@ -14,11 +15,6 @@ class ExpenseRepository(BaseRepository[Expense]):
 
     # ``Paid`` is retained as a legacy realized state for existing databases/tests.
     REALIZED_STATUSES = ("Completed", "Paid")
-    PAYMENT_METHOD_EQUIVALENTS = {
-        "Cash": ("Cash", "TÀI KHOẢN CÁ NHÂN"),
-        "Bank": ("Bank", "Bank Transfer", "TÀI KHOẢN CÔNG TY"),
-        "Other": ("Other",),
-    }
     SORT_COLUMNS = {
         "payment_date": Expense.payment_date,
         "category": Expense.category,
@@ -46,6 +42,13 @@ class ExpenseRepository(BaseRepository[Expense]):
     def get_by_id_including_deleted(self, expense_id: int) -> Optional[Expense]:
         return self._session.query(Expense).filter(Expense.id == expense_id).first()
 
+    @staticmethod
+    def _payment_method_values(payment_method: str):
+        try:
+            return wallet_aliases(payment_method)
+        except WalletMappingError:
+            return (payment_method,)
+
     def _filtered_query(
         self,
         category: Optional[str] = None,
@@ -63,10 +66,9 @@ class ExpenseRepository(BaseRepository[Expense]):
         if category:
             query = query.filter(Expense.category == category)
         if payment_method:
-            equivalents = self.PAYMENT_METHOD_EQUIVALENTS.get(
-                payment_method, (payment_method,)
+            query = query.filter(
+                Expense.payment_method.in_(self._payment_method_values(payment_method))
             )
-            query = query.filter(Expense.payment_method.in_(equivalents))
         if realized_only:
             query = query.filter(Expense.status.in_(self.REALIZED_STATUSES))
         elif status:
