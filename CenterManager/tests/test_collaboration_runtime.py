@@ -247,36 +247,39 @@ class TestCollaborationManager:
     def test_request_write_granted(self, tmp_path):
         event_bus = EventBus()
         cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
-
         cm.initialize("user1", "testuser", "admin")
-        
-        assert cm._lock.is_locked() is False
-        
-        result = cm.request_write()
-        assert result.is_granted is True
-        assert cm.is_writing() is True
-        assert cm._lock.is_locked() is True
-        assert cm._lock.get_owner() == cm._session.session_id
+        try:
+            assert cm._lock.is_locked() is False
 
-        cm.release_write()
-        assert cm.is_writing() is False
-        assert cm._lock.is_locked() is False
+            result = cm.request_write()
+            assert result.is_granted is True
+            assert cm.is_writing() is True
+            assert cm._lock.is_locked() is True
+            assert cm._lock.get_owner() == cm._session.session_id
+
+            cm.release_write()
+            assert cm.is_writing() is False
+            assert cm._lock.is_locked() is False
+        finally:
+            cm.shutdown()
 
     def test_request_write_queued(self, tmp_path):
         event_bus = EventBus()
         cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
-
-        cm.initialize("user1", "testuser", "admin")
-        result = cm.request_write()
-        assert result.is_granted is True
-
         cm2 = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
+        cm.initialize("user1", "testuser", "admin")
         cm2.initialize("user2", "testuser2", "teacher")
+        try:
+            result = cm.request_write()
+            assert result.is_granted is True
 
-        cm.release_write()
+            cm.release_write()
 
-        queue = cm2.get_queue()
-        assert queue["length"] == 0
+            queue = cm2.get_queue()
+            assert queue["length"] == 0
+        finally:
+            cm2.shutdown()
+            cm.shutdown()
 
     def test_heartbeat(self, tmp_path):
         """Test heartbeat with proper synchronization."""
@@ -285,17 +288,17 @@ class TestCollaborationManager:
 
         # Initialize collaboration (starts heartbeat thread)
         cm.initialize("user1", "testuser", "admin")
-        
+
         # Đợi heartbeat thread hoàn thành chu kỳ đầu tiên
         time.sleep(0.5)
-        
+
         # Gọi heartbeat manually
         result = cm.heartbeat()
         assert result is True
-        
+
         # Đợi một chút để thread ghi xong
         time.sleep(0.3)
-        
+
         # Shutdown để cleanup
         cm.shutdown()
         assert cm.is_initialized() is False
@@ -303,11 +306,13 @@ class TestCollaborationManager:
     def test_get_presence(self, tmp_path):
         event_bus = EventBus()
         cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
-
         cm.initialize("user1", "testuser", "admin")
-        presence = cm.get_presence()
-        assert "online_count" in presence
-        assert "current_writer" in presence
+        try:
+            presence = cm.get_presence()
+            assert "online_count" in presence
+            assert "current_writer" in presence
+        finally:
+            cm.shutdown()
 
     def test_not_initialized_error(self, tmp_path):
         cm = CollaborationManager(runtime_root=tmp_path)
