@@ -1,38 +1,41 @@
 # Finance Wallet V2 — Implementation Tracker
 
-> **Canonical progress tracker.** `FINANCE_WALLET_V2_DOMAIN_SPEC.md` is the domain source of truth; this tracker records implementation state and evidence.
+> **Canonical progress tracker.** `FINANCE_WALLET_V2_DOMAIN_SPEC.md` remains the accounting-domain source of truth. `FINANCE_WALLET_V2_TUITION_BOUNDARY.md` is the approved FW2-09 amendment that supersedes the old per-FinancePeriod tuition semantics. This tracker records implementation state and evidence.
 
 ## Metadata
 
 | Field | Value |
 |---|---|
 | Original baseline | `main_repos@c4fec158d8956d631bb8ce50f9f5b12938dd37a8` |
-| Current implementation base | `main_repos@8e95ed8855a7bfe799fceefd82f6ef0b58643439` |
-| Domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
+| FW2-08 stacked base | `finance-wallet-v2-fw2-08@d510d233d7e2a1616e8179594d23d6650c851019` |
+| Accounting domain source | `FINANCE_WALLET_V2_DOMAIN_SPEC.md` |
+| Tuition boundary amendment | `FINANCE_WALLET_V2_TUITION_BOUNDARY.md` |
 | Settlement auth clarification | `FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md` |
-| Current phase | `FW2-08 — UI Integration` |
-| Current task | `Issue #340 — Canonical FinancePeriod selector + capability/state UI projection` |
-| Last completed | `FW2-07 — Outstanding / Tuition Obligation` |
+| Current phase | `FW2-09 — AccountingPeriod Semantic Boundary` |
+| Current task | `Issue #342 — AccountingPeriod semantic boundary + tuition decoupling guard` |
+| FW2-08 state | `CI green; PR #341 still awaiting merge/human gate` |
+| Last merged phase | `FW2-07 — Outstanding / Tuition Obligation (transitional tuition semantics)` |
 | Last updated | `2026-09-24` |
 
 Legend: `[ ] TODO` · `[>] CURRENT` · `[x] DONE` · `[!] BLOCKED`.
 
 ## Domain guardrails
 
-1. Existing `FinancePeriod` remains canonical; no parallel Wallet-period table.
-2. Canonical period uses exact inclusive, unique/clamped bounds and may be mid-month or multi-month.
+1. Existing `FinancePeriod` remains canonical for **accounting/settlement time**; no parallel Wallet-period table.
+2. Canonical accounting period uses exact inclusive, unique/clamped bounds and may be mid-month or multi-month.
 3. Every realized Income/Expense resolves to exactly one FinancePeriod.
 4. Future ACTIVE Income and future COMPLETED Expense are prohibited.
-5. `Settlement.CONFIRMED` closes the ledger; `FinancePeriod.status` is configuration lifecycle only.
-6. `Class.fee` is one tuition charge per billable enrollment per canonical FinancePeriod; never multiply it by `duration_months`.
-7. Billability is enrollment overlap with the selected FinancePeriod.
-8. Only qualifying ACTIVE Tuition Income for the same student/class/period reduces the obligation.
-9. Historical accounting data must never be silently reclassified or back-priced without provenance.
+5. `Settlement.CONFIRMED` closes the accounting ledger; `FinancePeriod.status` is configuration lifecycle only.
+6. **FinancePeriod is not a course duration, tuition period, enrollment billing cycle, or tuition-obligation source.**
+7. Tuition obligation is owned by the academic chain: Class course contract → Enrollment tuition snapshot → billable Sessions → Tuition Accrual → balance.
+8. The existing `OutstandingService` Class.fee/FinancePeriod formula is a transitional compatibility exception only until TUITION-08 (#350); no new tuition feature may extend that dependency.
+9. Historical accounting or tuition data must never be silently reclassified or back-priced without provenance.
 10. Wallet V2 has exactly `CASH` and `BANK`; unknown aliases are errors, not guesses.
 11. Services remain authoritative for domain rules; UI only projects them.
 12. Financial totals must be complete and must not depend on arbitrary row caps.
 13. Settlement authorization uses the canonical `Capability` vocabulary; UI-only Settlement permission policy is forbidden.
 14. Settlement view/create/update are persisted capabilities; confirm/reopen are admin-only capabilities.
+15. Accounting payment timing and tuition attribution are separate concerns: Tuition Income posts to a FinancePeriod/Wallet and is later attributed to an Enrollment for tuition balance.
 
 ## Roadmap
 
@@ -44,10 +47,25 @@ Legend: `[ ] TODO` · `[>] CURRENT` · `[x] DONE` · `[!] BLOCKED`.
 | `[x]` | FW2-04 | Closed-period service guard |
 | `[x]` | FW2-05 | Settlement confirmation/reopen lifecycle + complete aggregation |
 | `[x]` | FW2-06 | Wallet CASH/BANK accounting aggregation and DTOs |
-| `[x]` | FW2-07 | Outstanding/Class.fee historical correctness and obligation semantics |
-| `[>]` | FW2-08 | Canonical period selector + capability/state UI projection |
-| `[ ]` | FW2-09 | Backfill/reconciliation/migration exceptions |
-| `[ ]` | FW2-10 | Cross-surface regression and production release gate |
+| `[x]` | FW2-07 | Historical Class.fee/Outstanding correctness under the pre-amendment contract; transitional until TUITION-08 |
+| `[>]` | FW2-08 | Canonical accounting-period selector + capability/state UI projection — CI green, PR #341 awaiting merge |
+| `[>]` | FW2-09 | AccountingPeriod semantic boundary + Tuition decoupling guard — Issue #342 |
+| `[ ]` | TUITION-01 | Class Course & Tuition Contract — #343 |
+| `[ ]` | TUITION-02 | Class Create/Edit Tuition UX — #344 |
+| `[ ]` | TUITION-03 | Enrollment Tuition Snapshot Contract — #345 |
+| `[ ]` | TUITION-04 | Mid-course Enrollment Pricing & Session Range — #346 |
+| `[ ]` | TUITION-05 | Billable Session Policy — #347 |
+| `[ ]` | TUITION-06 | Tuition Accrual Service — #348 |
+| `[ ]` | TUITION-07 | Link Tuition Payments to Enrollment — #349 |
+| `[ ]` | TUITION-08 | Outstanding V2 Core — #350 |
+| `[ ]` | TUITION-09 | Prepaid / Credit Balance Semantics — #351 |
+| `[ ]` | TUITION-10 | Student Tuition Detail UX — #352 |
+| `[ ]` | TUITION-11 | Attendance-aware Billing Policy — #353 |
+| `[ ]` | TUITION-12 | Enrollment Freeze / Tuition Pause — #354 |
+| `[ ]` | TUITION-13 | Enrollment Transfer Between Classes — #355 |
+| `[ ]` | TUITION-14 | Tuition Credit / Refund Workflow — #356 |
+| `[ ]` | TUITION-15 | Promotion & Discount Rules — #357 |
+| `[ ]` | Finance release gate | Cross-surface regression, reconciliation/backfill exceptions and production audit after the affected domain migrations stabilize |
 
 ## Completed phases
 
@@ -69,95 +87,87 @@ Atomic Settlement confirm/reopen, complete aggregation, audit and repository-own
 ### FW2-06 — `[x] DONE`
 Canonical `CASH/BANK` wallet mapping, Wallet DTO/service, legacy alias read compatibility, unknown-alias failure and Settlement integration completed. PR #338 passed full regression and merged at `main_repos@2cd3016631626b9a8f797380e0ce2f66bb8a83be`.
 
-### FW2-07 — `[x] DONE`
-Outstanding canonical period semantics, enrollment-overlap billing, complete Tuition Income aggregation and effective-dated `ClassFeeHistory` completed. CI #184 exposed one false-positive architecture text scan; the guard was corrected to inspect real imports. Pytest Suite #187 passed and PR #339 merged at `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e`.
+### FW2-07 — `[x] DONE` under pre-amendment contract
+Outstanding canonical-period semantics, enrollment-overlap billing, complete Tuition Income aggregation and effective-dated `ClassFeeHistory` completed. Pytest Suite #187 passed and PR #339 merged at `main_repos@b2de00a2fe934fc43309623266f97f27a7e7da5e`.
 
-## FW2-08 — UI Integration — `[>] CURRENT`
+FW2-09 later changed the product tuition contract. FW2-07 remains valid historical/migration behavior, but its `Class.fee per FinancePeriod` obligation formula is explicitly transitional and is scheduled for replacement by TUITION-08 (#350).
 
-Implementation contract: GitHub Issue #340.
+## FW2-08 — UI Integration — `[>] CI GREEN / AWAITING MERGE`
 
-Approved Settlement authorization clarification:
-
-- `finance.settlement.view` — persisted; Finance/Manager/Admin;
-- `finance.settlement.create` — persisted; Finance/Manager/Admin;
-- `finance.settlement.update` — persisted; Finance/Manager/Admin;
-- `finance.settlement.confirm` — admin-only;
-- `finance.settlement.reopen` — admin-only;
-- `FinancialSettlementService` remains authoritative; UI only projects the same decisions;
-- confirm requires the appropriate create/update permission path plus admin-only confirm;
-- reopen requires admin-only reopen plus existing CONFIRMED/reason/audit rules.
+Implementation contract: GitHub Issue #340; PR #341.
 
 Implementation evidence on `finance-wallet-v2-fw2-08`:
 
 - [x] selector enumerates actual resolved FinancePeriod bounds, including mid-month and multi-month buckets;
-- [x] selected canonical period is shared by Dashboard, Income, Expense, Outstanding and Settlement and is preserved across Finance navigation;
-- [x] export/list filters consume the selected exact bounds rather than independently inferring Month/Year;
+- [x] selected canonical accounting period is shared by Dashboard, Income, Expense, Outstanding and Settlement and preserved across Finance navigation;
+- [x] export/list filters consume selected exact accounting bounds rather than independently inferring Month/Year;
 - [x] Income/Expense mutation controls project WRITE + canonical capability + open-period state;
-- [x] Settlement service and UI enforce/project the approved view/create/update/confirm/reopen capabilities;
-- [x] persisted Settlement view/create/update permissions are seeded and migrated for Admin/Finance/Manager; confirm/reopen remain role-derived admin-only capabilities;
-- [x] confirmed period disables normal Income/Expense mutation controls while existing service ledger guards remain authoritative;
-- [x] realized Income/Expense write forms expose only canonical `CASH`/`BANK`; unsupported `Other` is removed and unknown historical values require explicit resolution;
+- [x] Settlement service/UI enforce and project view/create/update/confirm/reopen capabilities;
+- [x] persisted Settlement view/create/update permissions are seeded/migrated; confirm/reopen remain role-derived admin-only;
+- [x] confirmed period disables normal Income/Expense mutation controls while service ledger guards remain authoritative;
+- [x] realized write forms expose only `CASH`/`BANK`; unknown historical values require explicit resolution;
 - [x] application Clock is used for Finance workspace business-date defaults touched by this phase;
-- [x] focused FW2-08 regression coverage added and FW2-05 lifecycle tests isolated from the new independent authorization matrix;
-- [ ] full GitHub Actions regression green;
-- [ ] independent review + human review before DONE.
+- [x] full GitHub Actions regression reported green;
+- [ ] PR #341 merged to `main_repos` / human final gate.
 
-Recovery evidence: an interrupted Codex working-tree upload accidentally included runtime snapshots/heartbeats. It was preserved at `recovery/fw2-08-codex-token-cutoff`; the implementation branch was reset to the exact approved base and reconstructed with source-only changes. Runtime artifacts are not part of the FW2-08 diff.
+FW2-08's period selector remains correct after the FW2-09 amendment because it is an **accounting workspace selector**. Outstanding currently consumes it only through the explicitly transitional pre-TUITION-08 implementation.
 
-## FW2-09 — Backfill & Reconciliation
+## FW2-09 — AccountingPeriod Semantic Boundary — `[>] CURRENT`
 
-- [ ] Income/Expense deterministic period assignment backfilled;
-- [ ] unresolved/ambiguous transaction rows reported;
-- [ ] pre-cutover tuition fee history exceptions reconciled explicitly;
-- [ ] reconciliation rerun is idempotent;
-- [ ] confirmed periods are never silently mutated;
-- [ ] historical Settlement snapshots preserved.
+Implementation contract: GitHub Issue #342.
 
-## FW2-10 — Production Gate
+Evidence on `finance-wallet-v2-fw2-09`:
 
-- [ ] cross-surface totals agree;
-- [ ] period transition/future posting/closure/reopen tests pass;
-- [ ] capability matrix tests pass;
-- [ ] high-volume totals prove no truncation;
-- [ ] legacy compatibility tests pass;
-- [ ] final Finance audit completed.
+- [x] approved `FINANCE_WALLET_V2_TUITION_BOUNDARY.md` amendment defines FinancePeriod as accounting/settlement only;
+- [x] old per-FinancePeriod tuition sections are explicitly superseded rather than silently reinterpreted;
+- [x] transitional `OutstandingService` exception is documented with an explicit removal target at TUITION-08 (#350);
+- [x] architecture tests prevent Class/Enrollment/Session academic core and future `*tuition*.py` modules from importing FinancePeriod semantics;
+- [ ] focused/full GitHub Actions green;
+- [ ] review/merge into `main_repos` after dependency PR #341 is resolved.
+
+## Deferred reconciliation / release work
+
+The original tracker called historical backfill/reconciliation “FW2-09”. That identifier is now re-scoped by Issue #342 to the semantic boundary required before Tuition work. The underlying reconciliation work is not discarded. It remains required before production release where relevant:
+
+- Income/Expense deterministic period backfill and unresolved/ambiguous transaction reporting;
+- pre-cutover tuition fee-history reconciliation without silently inventing historical contracts;
+- idempotent reconciliation reruns;
+- confirmed Settlement snapshots never silently mutated;
+- cross-surface totals/capability/high-volume/legacy compatibility production gates.
+
+These items should receive explicit issues when their target migration design is known, rather than being mixed into the Tuition contract change.
 
 ## Decision log
 
 | Date | Decision | Status |
 |---|---|---|
-| 2026-09-23 | Existing FinancePeriod remains canonical; no `FinanceWalletPeriod`. | FINAL |
-| 2026-09-23 | Resolved buckets are unique/clamped to configuration effective bounds. | FINAL |
-| 2026-09-23 | Settlement confirmation owns ledger closure. | FINAL |
-| 2026-09-23 | Class.fee is per canonical FinancePeriod, never multiplied by duration. | FINAL |
+| 2026-09-23 | Existing FinancePeriod remains canonical for accounting; no `FinanceWalletPeriod`. | FINAL |
+| 2026-09-23 | Resolved accounting buckets are unique/clamped to configuration effective bounds. | FINAL |
+| 2026-09-23 | Settlement confirmation owns accounting ledger closure. | FINAL |
 | 2026-09-24 | Business-date rules use the application Clock. | FINAL |
 | 2026-09-24 | Wallet persistence values are exactly `CASH` and `BANK`. | FINAL |
 | 2026-09-24 | Unknown Wallet aliases fail rather than being guessed or dropped. | FINAL |
-| 2026-09-24 | Historical tuition pricing uses append-only effective-dated Class fee versions. | FINAL |
-| 2026-09-24 | Fee-history writes are explicit application persistence, not ORM mapper side effects. | FINAL |
-| 2026-09-24 | Legacy fee baseline is authoritative from cutover only; it is never silently projected backward. | FINAL |
-| 2026-09-24 | Pre-cutover fee-history ambiguity is an FW2-09 reconciliation concern, not an excuse to rewrite history. | FINAL |
-| 2026-09-24 | Architecture boundary tests inspect actual imports; class names in comments are not dependencies. | FINAL |
-| 2026-09-24 | Settlement view/create/update are canonical persisted capabilities; confirm/reopen are canonical admin-only capabilities. | FINAL |
-| 2026-09-24 | Finance UI accounting identity is the selected resolved FinancePeriod bounds, never Month/Year. | FINAL |
+| 2026-09-24 | Historical fee writes remain provenance-bearing; history is never silently rewritten. | FINAL |
+| 2026-09-24 | Architecture boundary tests inspect real dependencies; comments are not production dependencies. | FINAL |
+| 2026-09-24 | Settlement view/create/update are canonical persisted capabilities; confirm/reopen are admin-only. | FINAL |
+| 2026-09-24 | Finance UI accounting identity is selected resolved FinancePeriod bounds, never Month/Year. | FINAL |
+| 2026-09-24 | **Superseded:** `Class.fee` as one tuition charge per FinancePeriod. | SUPERSEDED BY FW2-09 |
+| 2026-09-24 | **FinancePeriod is accounting/settlement only; Tuition obligation comes from Class + Enrollment + billable Sessions.** | FINAL |
+| 2026-09-24 | Existing period-based Outstanding is transitional until TUITION-08 (#350). | FINAL |
 
 ## Implementation journal
 
-### 2026-09-24 — FW2-08 interrupted-work recovery
+### 2026-09-24 — FW2-09 tuition-boundary amendment
 
-The Codex session ended after token/usage exhaustion with uncommitted work. A manual recovery upload also captured runtime snapshots, heartbeats and local runtime metadata. The checkpoint was preserved on `recovery/fw2-08-codex-token-cutoff`, then the feature branch was reset to the exact approved base and reconstructed with only Issue #340 source/test/migration changes. This prevents local runtime state from entering the review diff.
+Product audit established that the center charges by course/session contract rather than by accounting period. `FINANCE_WALLET_V2_TUITION_BOUNDARY.md` explicitly supersedes the old tuition-specific portions of the Finance Wallet V2 contract without changing Income/Expense/Wallet/Settlement accounting semantics. An architecture guard protects the academic core from acquiring FinancePeriod dependencies while tolerating the documented `OutstandingService` compatibility implementation until #350.
 
 ### 2026-09-24 — FW2-08 implementation
 
-The Finance shell now enumerates canonical resolved periods and shares one exact selected period context across all Finance surfaces. Income/Expense UI mutation state uses collaboration WRITE + canonical capability + open-period state. Settlement authorization is enforced in `FinancialSettlementService` and projected by the UI. Migration `1e10a029` installs persisted Settlement draft capabilities without persisting admin-only close/reopen authority. Realized transaction wallet controls now expose only `CASH` and `BANK`; legacy read aliases remain supported without guessing unknown values.
-
-### 2026-09-24 — FW2-08 authorization conflict resolved
-
-Codex correctly stopped before editing because R6 required fine-grained Settlement capabilities while the canonical registry had none and `FinancialSettlementService` relied on Admin checks. Product/Architecture approved `FINANCE_WALLET_V2_SETTLEMENT_AUTHORIZATION.md`: Settlement view/create/update become persisted canonical capabilities, while confirm/reopen become `ADMIN_ONLY_CAPABILITIES`. Finance and Manager can view/save drafts; only Admin can confirm ledger closure or reopen. Service authorization remains authoritative and the UI must project the same decisions.
+The Finance shell enumerates canonical resolved accounting periods and shares one selected period context across Finance surfaces. Income/Expense UI mutation state uses collaboration WRITE + canonical capability + open-period state. Settlement authorization is enforced in `FinancialSettlementService` and projected by UI. Realized transaction wallet controls expose only `CASH` and `BANK`.
 
 ### 2026-09-24 — FW2-08 workflow transition
 
-The project moved to the Issue-driven flow: Product/Architecture defines the contract, Codex implements from the exact base, local tests and self-review precede PR, GitHub Actions is an independent gate, then independent review and human review precede merge. Root `AGENTS.md` contains the standing developer rules and Issue #340 is the implementation contract.
+The project moved to the Issue-driven flow: Product/Architecture defines the contract, implementation starts from an exact base, tests and self-review precede PR, GitHub Actions is an independent gate, then human review/merge precedes issue closure.
 
 ### 2026-09-24 — FW2-07 completed
 
