@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.core.clock import get_clock
 from centermanager.services.class_service import ClassService, ClassValidationError
+from centermanager.ui.design_system.feedback import FeedbackController, FeedbackHost
 
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class ClassFormDialog(QDialog):
         self._is_edit = class_id is not None
         self._loaded_contract_complete = False
         self._loaded_course_fee: Optional[int] = None
+        self._feedback = FeedbackController(self)
 
         self.setWindowTitle("Edit Class" if self._is_edit else "Add Class")
         self.setMinimumWidth(520)
@@ -85,6 +87,9 @@ class ClassFormDialog(QDialog):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        self.feedback_host = FeedbackHost(self._feedback, parent=self)
+        layout.addWidget(self.feedback_host)
 
         form = QFormLayout()
         form.setSpacing(8)
@@ -130,7 +135,6 @@ class ClassFormDialog(QDialog):
         form.addRow("Course Fee *", self.course_fee_spin)
 
         self.unit_fee_value = QLabel("—")
-        self.unit_fee_value.setTextInteractionFlags(self.unit_fee_value.textInteractionFlags())
         form.addRow("Tuition / Session", self.unit_fee_value)
 
         self.planned_end_value = QLabel("—")
@@ -250,10 +254,10 @@ class ClassFormDialog(QDialog):
         if not self._course_contract_was_touched():
             return True
         if not self._course_contract_is_complete():
-            QMessageBox.warning(
-                self,
-                "Incomplete Course Contract",
+            self._feedback.warning(
                 "Duration, sessions per week and planned sessions must all be greater than zero.",
+                title="Incomplete course contract",
+                key="class-validation",
             )
             return False
         return True
@@ -262,6 +266,7 @@ class ClassFormDialog(QDialog):
         if not self._validate_form_contract():
             return
 
+        self._feedback.clear("class-validation")
         name = self.name_edit.text().strip()
         course = self.course_edit.text().strip() or None
         start_date = self.start_date_edit.date().toPython()
@@ -296,7 +301,15 @@ class ClassFormDialog(QDialog):
                 self._service.create_class(**kwargs)
             self.accept()
         except ClassValidationError as exc:
-            QMessageBox.warning(self, "Validation Error", str(exc))
-        except Exception:
+            self._feedback.warning(
+                str(exc),
+                title="Check class details",
+                key="class-validation",
+            )
+        except Exception as exc:
             logger.exception("Error saving class")
-            QMessageBox.critical(self, "Error", "An unexpected error occurred.")
+            self._feedback.system_error(
+                exc,
+                message="We couldn't save the class. Please review the details and try again.",
+                key="class-save",
+            )
