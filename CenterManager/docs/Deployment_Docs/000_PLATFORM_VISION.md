@@ -1,587 +1,156 @@
-# 000_PLATFORM_VISION.md
+# CenterManager Collaboration Platform — Vision
 
-Version: 1.0
+Version: 1.1  
+Status: **APPROVED VISION**  
+Updated: 2026-09-24
 
-Status: DRAFT
+## 1. Purpose
 
-Document Type: Platform Vision
+This document describes the long-term platform direction of CenterManager. It is a vision document, not a literal implementation specification.
 
-Owner: OpenAI & AnTechKids
+Current implementation architecture is documented in `docs/ARCHITECTURE.md`. Approved domain specifications remain authoritative for their domain. GitHub Issues define task scope. This vision must guide evolution but does not override a more specific approved contract merely because it is higher-level.
 
-Target Product: CenterManager Collaboration Platform (CCP)
+## 2. Background
 
-Target Release: Platform v2.0
+CenterManager evolved from a standalone desktop management application into a multi-workspace operational system used by different roles such as teachers, reception/administration, finance and managers.
 
----
+The current product remains a desktop application, but now includes a collaboration platform, controlled write ownership, synchronization, authorization and runtime-version concepts.
 
-# Table of Contents
+## 3. Product vision
 
-1. Purpose
-2. Background
-3. Why CenterManager Needs a Platform
-4. Product Vision
-5. Long-term Vision
-6. Design Philosophy
-7. Core Principles
-8. Product Boundaries
-9. Non Goals
-10. Success Criteria
-11. Evolution Roadmap
-12. Relationship with Other Specifications
+CenterManager is a **workspace-based education-center operations platform** that can support lightweight standalone use and controlled collaborative deployment without forcing a heavy server stack.
 
----
+The platform should provide:
 
-# 1. Purpose
+- shared operational data;
+- controlled editing/write ownership;
+- synchronization/version history;
+- authorization and auditability;
+- deployment flexibility;
+- deterministic behavior suitable for small/medium education centers.
 
-This document defines the long-term vision of the CenterManager Collaboration Platform (CCP).
+## 4. Current collaboration model
 
-It is the highest-level architectural document in the entire specification.
+The current implemented collaboration direction is deterministic rather than real-time multi-writer editing.
 
-Every future architectural decision must comply with the principles described here.
+When Git-backed collaboration is configured:
 
-If any lower-level document conflicts with this document, this document always takes precedence.
+- startup synchronization participates in the authoritative runtime-data lifecycle;
+- edit/write ownership is coordinated by Platform collaboration services;
+- synchronization/version behavior is owned by Platform infrastructure;
+- business domains do not run Git directly.
 
-This document does not describe implementation details.
+When collaboration is not configured, the application can operate in a true local/offline mode with a local runtime database.
 
-Instead, it explains:
+## 5. Design philosophy
 
-- Why the platform exists.
-- What problems it solves.
-- What principles guide its evolution.
-- What it intentionally does NOT attempt to solve.
+### Business/domain first
 
-This document is intended for:
+Business rules should have stable owners and should not be rewritten merely because deployment technology changes.
 
-- Architects
-- Technical Leaders
-- AI Development Agents
-- Future Contributors
+### Platform-owned collaboration
 
----
+Synchronization, runtime context, edit/write coordination and version infrastructure belong to the Platform layer rather than individual Student/Class/Finance modules.
 
-# 2. Background
+### Explicit boundaries
 
-CenterManager originally started as a traditional desktop application.
+UI projects state, services own application/domain orchestration, repositories own persistence mechanics, and Platform owns cross-cutting collaboration/deployment concerns.
 
-Architecture:
+### Incremental evolution
 
-Presentation
+CenterManager should evolve from the current desktop/collaboration architecture toward other deployment models only when product needs justify the complexity.
 
-↓
+### Deterministic collaboration
 
-Business Logic
+The product intentionally favors controlled editing and predictable consistency over CRDT/OT-style concurrent document editing.
 
-↓
+## 6. Technology independence — practical interpretation
 
-SQLite
+Business semantics should not depend on Git, network-provider details or UI framework behavior.
 
-This architecture worked well while the software was used by a single administrator.
+This does **not** mean all business code is abstracted from SQLite/SQLAlchemy at every level. The current architecture uses repositories as the persistence boundary and SQLAlchemy/SQLite as infrastructure behind that boundary.
 
-However, as the education center expanded, several new requirements emerged.
+Avoid speculative abstraction purely to satisfy a theoretical future backend.
 
-Multiple teachers needed access.
+## 7. Core principles
 
-Receptionists managed tuition.
+1. One business concept has one authoritative domain owner.
+2. UI does not own persistence or canonical business rules.
+3. Collaboration/synchronization belongs to Platform.
+4. WRITE ownership does not replace fine-grained authorization.
+5. Infrastructure is replaceable where an explicit boundary exists or a task justifies one.
+6. Historical/accounting meaning must not be silently rewritten by migration or UI convenience.
+7. Architecture evolves through reviewed contracts, not undocumented shortcuts.
+8. Deterministic behavior is preferred over maximum concurrency.
+9. Documentation must distinguish current implementation from future vision.
 
-Finance managed payments.
+## 8. Product boundaries
 
-Managers reviewed reports.
+CenterManager is optimized for education-center operations.
 
-The application gradually evolved from
+It is not intended to become:
 
-"a personal desktop tool"
+- Google Docs/Notion-style collaborative document editing;
+- a general distributed database;
+- a real-time CRDT collaboration platform;
+- a universal ERP for unrelated industries.
 
-into
+## 9. Current non-goals
 
-"a shared operational system."
+Unless a future product decision changes them, the platform does not target:
 
-Although SQLite remained sufficient as the storage engine,
+- simultaneous conflict-free editing of the same business record by many writers;
+- OT/CRDT document collaboration;
+- automatic semantic merge of conflicting business transactions;
+- mandatory cloud/server infrastructure for every deployment.
 
-deployment became increasingly difficult.
+## 10. Success criteria
 
-Traditional client/server deployment introduces additional complexity:
+The platform direction is successful when:
 
-- Database server
-- Network configuration
-- Maintenance
-- Backup
-- Security
-- Cost
+- workspace/domain behavior remains coherent as infrastructure evolves;
+- new features reuse existing service/repository/platform boundaries;
+- synchronization can evolve without duplicating Git logic in business modules;
+- deployments remain manageable for the center's operational scale;
+- agents/developers can implement tasks from approved specs + Issues + repository contracts;
+- documentation reflects reality instead of preserving obsolete architecture diagrams.
 
-For many small education centers,
+## 11. Evolution direction
 
-this complexity outweighs its benefits.
+Possible future evolution includes:
 
-The objective therefore becomes:
+```text
+Current collaborative desktop
+        ↓
+stronger deployment profiles / operational tooling
+        ↓
+optional LAN/server/hybrid backends where justified
+        ↓
+future enterprise integrations
+```
 
-Create a collaborative platform
+This is directional, not a committed release roadmap.
 
-without requiring server infrastructure.
+Do not build unused server/storage abstractions solely because a later generation is imaginable.
 
----
+## 12. Relationship with other specifications
 
-# 3. Problem Statement
+Current document roles:
 
-The platform must satisfy several constraints simultaneously.
+- `000_PLATFORM_VISION.md` — long-term direction;
+- `100_ARCHITECTURE_PRINCIPLES.md` — durable architecture rules;
+- `200_COLLABORATIVE_ARCHITECTURE.md` — implemented collaboration/platform shape and direction;
+- `300_WORKSPACE_MODEL.md` — workspace ownership model;
+- `400_EDIT_SESSION_PROTOCOL.md` and related protocol docs — collaboration protocol details;
+- `docs/ARCHITECTURE.md` — current implementation architecture;
+- domain specs — authoritative domain contracts;
+- root `AGENTS.md` — coding-agent workflow;
+- GitHub Issues — task implementation contracts.
 
-## Multiple Users
+No high-level vision statement should be used to override a specific approved domain invariant without an explicit architecture/product decision.
 
-Many users should be able to access information simultaneously.
+## Final statement
 
-Examples
+CenterManager is a desktop-first education-center operations platform with a growing collaboration/platform layer.
 
-Teacher
-
-Reception
-
-Finance
-
-Manager
-
----
-
-## Data Consistency
-
-Only one user may modify shared data at a time.
-
-The platform favors deterministic consistency over concurrent editing.
-
----
-
-## Simple Deployment
-
-The platform should not require:
-
-SQL Server
-
-PostgreSQL
-
-MySQL
-
-Redis
-
-Docker
-
-Kubernetes
-
-Cloud Infrastructure
-
-The deployment process should remain lightweight.
-
----
-
-## Offline Capability
-
-The application must continue to function as a desktop application.
-
-The collaboration mechanism must enhance,
-
-not replace,
-
-desktop usability.
-
----
-
-## Technology Independence
-
-Business modules must never depend on
-
-Git
-
-GitHub
-
-SQLite
-
-Server APIs
-
-Cloud Storage
-
-Business logic should remain stable
-
-even if infrastructure changes.
-
----
-
-# 4. Product Vision
-
-CenterManager is not merely a desktop application.
-
-It is a collaboration platform for education centers.
-
-The platform provides:
-
-Shared data
-
-Controlled editing
-
-Version history
-
-Synchronization
-
-Deployment flexibility
-
-without introducing unnecessary infrastructure.
-
-The long-term vision is:
-
-One Business Platform
-
-Multiple Deployment Models
-
----
-
-# 5. Long-term Vision
-
-The platform evolves through multiple generations.
-
-Generation 1
-
-Standalone Desktop
-
-↓
-
-Generation 2
-
-Collaborative Desktop
-
-↓
-
-Generation 3
-
-Local Network Deployment
-
-↓
-
-Generation 4
-
-Hybrid Deployment
-
-↓
-
-Generation 5
-
-Full Client/Server Platform
-
-Each generation builds on the same Business Layer.
-
-Business logic should never be rewritten during this evolution.
-
----
-
-# 6. Design Philosophy
-
-The platform is built upon six major philosophies.
-
----
-
-## Philosophy 1
-
-Business First
-
-Technology exists to serve business.
-
-Business rules must remain independent from infrastructure.
-
-Infrastructure may evolve.
-
-Business knowledge should not.
-
----
-
-## Philosophy 2
-
-Architecture Before Features
-
-New features are only added after the architectural impact is understood.
-
-The platform grows through architecture,
-
-not feature accumulation.
-
----
-
-## Philosophy 3
-
-Deployment Independence
-
-Deployment is considered an infrastructure concern.
-
-Business modules never know whether they operate on
-
-SQLite
-
-Git
-
-Cloud
-
-Server
-
-or future technologies.
-
----
-
-## Philosophy 4
-
-Replaceable Infrastructure
-
-Every infrastructure component must be replaceable.
-
-Synchronization engines
-
-Storage engines
-
-Authentication mechanisms
-
-Deployment strategies
-
-must all be isolated behind interfaces.
-
----
-
-## Philosophy 5
-
-Deterministic Collaboration
-
-The platform deliberately avoids real-time concurrent editing.
-
-Instead,
-
-it provides
-
-predictable,
-
-controlled,
-
-auditable
-
-editing sessions.
-
-Simplicity is preferred over sophistication.
-
----
-
-## Philosophy 6
-
-Evolution Without Rewrite
-
-Future architectural improvements should occur
-
-without redesigning existing business modules.
-
-Business Layer should survive multiple technology generations.
-
----
-
-# 7. Core Principles
-
-The following principles are mandatory.
-
-1.
-
-Business modules never communicate directly with deployment infrastructure.
-
-2.
-
-Collaboration is an infrastructure capability.
-
-3.
-
-Editing is represented by an Edit Session.
-
-4.
-
-Synchronization belongs to the platform,
-
-not to business modules.
-
-5.
-
-Version history is mandatory.
-
-6.
-
-Storage technology is replaceable.
-
-7.
-
-Deployment strategy is configurable.
-
-8.
-
-Architecture evolves incrementally.
-
-9.
-
-Deterministic behavior is preferred over maximum concurrency.
-
-10.
-
-Platform stability is more important than implementation convenience.
-
----
-
-# 8. Product Boundaries
-
-The platform intentionally focuses on
-
-Education Center Management.
-
-It is not intended to become
-
-Google Docs
-
-Microsoft Office
-
-Notion
-
-Realtime collaborative editing systems.
-
-CenterManager optimizes
-
-operational management,
-
-not collaborative document editing.
-
----
-
-# 9. Non Goals
-
-The platform intentionally excludes
-
-Real-time editing
-
-Operational Transformation (OT)
-
-CRDT
-
-Distributed database synchronization
-
-Automatic merge resolution
-
-Conflict-free concurrent editing
-
-These capabilities significantly increase architectural complexity
-
-while providing limited business value
-
-for small and medium education centers.
-
----
-
-# 10. Success Criteria
-
-The platform is considered successful if:
-
-Business modules remain unchanged
-
-while deployment strategy changes.
-
-A new synchronization backend
-
-can be introduced
-
-without modifying business logic.
-
-New AI agents
-
-can implement features
-
-using platform specifications alone.
-
-Deployment remains simple enough
-
-for small education centers.
-
----
-
-# 11. Evolution Roadmap
-
-Phase 1
-
-Architecture Freeze
-
-↓
-
-Phase 2
-
-Collaboration Foundation
-
-↓
-
-Phase 3
-
-Storage Adapters
-
-↓
-
-Phase 4
-
-Deployment Profiles
-
-↓
-
-Phase 5
-
-Server Deployment
-
-↓
-
-Phase 6
-
-Enterprise Extensions
-
----
-
-# 12. Relationship with Other Specifications
-
-This document serves as the root specification.
-
-All subsequent documents derive from this vision.
-
-100_ARCHITECTURE_PRINCIPLES.md
-
-↓
-
-200_COLLABORATIVE_ARCHITECTURE.md
-
-↓
-
-300_DOMAIN_BOUNDARIES.md
-
-↓
-
-400_DEPLOYMENT_MODEL.md
-
-↓
-
-500_EDIT_SESSION_PROTOCOL.md
-
-↓
-
-600_STORAGE_ADAPTER_SPEC.md
-
-↓
-
-700_IMPLEMENTATION_GUIDE.md
-
-No document may contradict the principles established here.
-
----
-
-# Final Statement
-
-CenterManager is no longer designed as a desktop application.
-
-It is designed as a deployment-independent collaboration platform.
-
-Its Business Layer represents long-term educational knowledge.
-
-Its infrastructure remains replaceable.
-
-Its deployment remains flexible.
-
-Its evolution is guided by architecture rather than technology.
-
-This document defines that vision.
-
-Every future architectural decision shall preserve these principles.
+Its architecture should preserve business/domain clarity while allowing deployment and infrastructure to evolve only as real product needs require.
