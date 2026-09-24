@@ -1,538 +1,218 @@
-# CenterManager Architecture V2
+# CenterManager Architecture V2 — Workspace/Product Architecture
 
-Version: 2.0
+Version: 2.1  
+Status: **APPROVED PRODUCT ARCHITECTURE**  
+Updated: 2026-09-24
 
-Status: APPROVED
+This document defines the workspace/product architecture and domain ownership model. It is **not** a literal package-layout specification. Current implementation details are documented in `docs/ARCHITECTURE.md`.
 
-Author: Architecture Team
+## 1. Vision
 
----
+CenterManager is a workspace platform for operating an education center, not merely a student-management screen set.
 
-# 1. Vision
+The Home surface launches business workspaces. Business workflows live inside their owning workspace/domain.
 
-CenterManager is **NOT** a Student Management System.
+## 2. Product topology
 
-CenterManager is a **Workspace Platform** for operating an education center.
-
-Every business area is represented by an independent Workspace.
-
-Users enter the system through the Home Page, choose a Workspace, and complete their work inside that Workspace.
-
----
-
-# 2. Core Philosophy
-
-The Home Page does NOT contain business logic.
-
-The Home Page is a Workspace Launcher.
-
-Business logic exists only inside Workspaces.
-
----
-
-# 3. Architecture Overview
-
-```
-                    CenterManager
-
-                       Home
-
-                         │
-
- ┌────────────┬────────────┬────────────┬────────────┐
-
- Student WS   Teacher WS   Finance WS    HR WS
-
- └────────────┴────────────┴────────────┴────────────┘
-
-                  Report WS
-
-                  Admin WS
-```
-
----
-
-# 4. Home Page
-
-Purpose
-
-- Entry point of the system
-- Launch Workspaces
-- No business workflow
-- No CRUD
-- No Student List
-- No Session List
-
-Example
-
-```
+```text
 CenterManager
+   │
+   ├── Home / Application Shell
+   │
+   ├── Student Workspace
+   ├── Class / Teaching Workspace
+   ├── Employee / Teacher Workspace
+   ├── Finance Workspace
+   └── Administration Workspace
 
--------------------------------------
-
-👨‍🎓 Student Workspace
-
--------------------------------------
-
-👨‍🏫 Teacher Workspace
-
--------------------------------------
-
-💰 Finance Workspace
-
--------------------------------------
-
-👥 Human Resources
-
--------------------------------------
-
-📊 Reports
-
--------------------------------------
-
-⚙ Administration
+Shared platform capabilities:
+Authentication · Authorization · Collaboration · Synchronization
+Runtime Context · Events · Notifications · Logging · Version/Deployment
 ```
 
-Home Page remains simple regardless of future expansion.
+Additional report/analytics capabilities may appear as dedicated workspaces or read-only projections when product requirements justify them.
 
----
+## 3. Home and application shell
 
-# 5. Workspace Definition
+Home is primarily a launcher/dashboard/navigation surface. It must not become the owner of unrelated business CRUD or domain rules.
 
-A Workspace is an independent business area.
+The application shell owns cross-workspace presentation concerns such as navigation, current-user context and shared workspace framing.
 
-Each Workspace owns:
+## 4. Workspace definition
 
-- Navigation
-- Dashboard
-- Business Flow
-- UI
-- Services
-- Domain
-- Repository
+A Workspace represents a coherent business context and owns its user workflow/presentation semantics.
 
-A Workspace should not own another Workspace.
+A Workspace may consume shared application/domain services, but it must not silently take ownership of another domain's business rules.
 
----
+Workspace boundaries are product/domain boundaries; they do not require each workspace to have an isolated Python package for every service/repository today.
 
-# 6. Student Workspace
+## 5. Current implementation mapping
 
-Purpose
+The current code already uses workspace-oriented UI packages under `src/centermanager/ui/`, including:
 
-Manage student information and learning history.
+- `student_workspace/`
+- `class_workspace/`
+- `finance_workspace/`
+- `employee_workspace/`
+- `admin_workspace/`
+- `home/`
+- shared `design_system/`
 
-Structure
+Application services and repositories are currently mostly flat under `services/` and `repositories/`.
 
-```
-Student List
+This is intentional current implementation state. Do not reorganize services/repositories into nested domain folders merely to match a conceptual diagram. Such a refactor requires an explicit architecture task and migration plan for imports/tests.
 
-↓
+## 6. Student Workspace
 
-Student Detail
+Purpose: manage student identity, family/contact context, learning history, assessments, timeline, products/documents and student-centric projections.
 
-    ├── Summary
+The Student domain is history-oriented. Other workspaces may reference student identity/history through services/read models but must not duplicate Student business rules.
 
-    ├── Assessment
+## 7. Class / Teaching Workspace
 
-    ├── Timeline
+Purpose: operate classes, enrollments, sessions, attendance and teaching workflows.
 
-    ├── Parents
+Typical flow:
 
-    ├── Products
-
-    └── Attachments
-```
-
-Responsibilities
-
-- Student Profile
-- Parent Management
-- Learning Review
-- Timeline
-- Portfolio
-
-This Workspace is history-oriented.
-
----
-
-# 7. Teacher Workspace
-
-Purpose
-
-Support daily teaching activities.
-
-Structure
-
-```
-Courses
-
-↓
-
-Classes
-
-↓
-
-Sessions
-
-↓
-
-Teaching Workspace
-
-      ├── Attendance
-
-      ├── Teaching Note
-
-      ├── Student Highlight
-
-      ├── Homework
-
-      ├── Lesson Material
-
-      └── Future Extensions
+```text
+Class
+  ↓
+Enrollment / Assignment
+  ↓
+Session
+  ↓
+Attendance / Teaching Notes / Highlights
 ```
 
-Responsibilities
+Class/Teaching owns operational learning activity; it does not become the owner of Student profile or Finance accounting semantics.
 
-- Daily teaching
-- Session management
-- Classroom activities
+## 8. Employee / Teacher Workspace
 
-This Workspace is operation-oriented.
+Purpose: manage employees/teachers, assignments, schedules, working-time/work-registration, documents and teacher/employee projections.
 
----
+Teacher identity may participate in class/session workflows, but HR/employee lifecycle rules remain owned by the Employee/Teacher domain.
 
-# 8. Finance Workspace
+## 9. Finance Workspace
 
-Purpose
+Purpose: operate the center's accounting-oriented workflows and projections.
 
-Manage financial operations.
+Current Finance Workspace concepts include:
 
-Example
+- Finance Dashboard;
+- Income;
+- Expense;
+- Outstanding tuition;
+- FinancePeriod configuration/context;
+- Settlement;
+- canonical Wallet projection (`CASH`, `BANK`).
 
-```
-Invoices
+Finance Wallet V2 business semantics are governed by:
 
-↓
+`docs/finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md`
 
-Payments
+That domain spec is authoritative for accounting rules. This document only defines workspace ownership.
 
-↓
+## 10. Administration Workspace
 
-Salary
+Purpose: system/user/role/permission/configuration/operational administration and platform-facing management workflows.
 
-↓
+Administration may configure platform/business capabilities but should not contain duplicated domain business logic from Student, Teaching or Finance.
 
-Expense
+## 11. Domain ownership
 
-↓
+Conceptually:
 
-Revenue
-```
-
----
-
-# 9. Human Resource Workspace
-
-Purpose
-
-Manage teachers and employees.
-
-Example
-
-```
-Employees
-
-↓
-
-Teachers
-
-↓
-
-Leave
-
-↓
-
-Payroll
-
-↓
-
-Contracts
+```text
+Student Domain
+Teaching/Class Domain
+Employee/Teacher Domain
+Finance Domain
+Administration Domain
 ```
 
----
+Each business concept has one owner. Cross-domain communication should occur through application services, DTO/read models or events rather than direct UI-to-UI mutation or copied rules.
 
-# 10. Report Workspace
+## 12. UI architecture
 
-Purpose
+UI code is workspace-oriented. The UI:
 
-Business analytics.
+- renders application/domain state;
+- invokes services;
+- projects capabilities and domain state;
+- coordinates navigation/refresh.
 
-Examples
+UI must not become an alternate domain layer.
 
-- Student Progress
-- Attendance Report
-- Financial Report
-- Teacher KPI
-- Center KPI
+Do not put canonical accounting, enrollment, authorization or persistence rules into widgets/views merely because a control needs to reflect them.
 
-Reports are read-only.
+## 13. Service architecture
 
----
+Services are application/domain use-case boundaries. They may be shared across workspaces when the underlying domain capability is genuinely shared.
 
-# 11. Administration Workspace
+The current implementation uses a mostly flat `services/` package. Domain ownership is semantic, not determined solely by folder nesting.
 
-Purpose
+## 14. Repository architecture
 
-System configuration.
+Repositories own persistence/query mechanics. The current implementation uses a mostly flat `repositories/` package plus repository-provider patterns.
 
-Examples
+Repositories must not become product-workflow owners or UI helpers.
 
-- User Management
-- Roles
-- Permissions
-- Backup
-- Settings
+## 15. Platform architecture
 
----
+Collaboration, synchronization, bootstrap, runtime context, notification/version and deployment concerns belong to the shared Platform layer (`src/centermanager/platform/`).
 
-# 12. Domain Architecture
+Business workspaces must not implement Git synchronization or edit-session protocols independently.
 
-```
-CenterManager
+## 16. Workspace independence
 
-├── Student Domain
+Examples of forbidden ownership drift:
 
-├── Teaching Domain
+- Finance UI directly editing Student profile rules;
+- Student UI implementing Session lifecycle;
+- Teaching UI implementing Finance settlement/accounting;
+- business services directly managing Git collaboration metadata.
 
-├── Finance Domain
+Referencing another domain through an approved service/read model is allowed; duplicating ownership is not.
 
-├── HR Domain
+## 17. Dashboard philosophy
 
-├── Report Domain
+A workspace dashboard is a read/projection surface for that workspace's domain.
 
-└── Administration Domain
-```
+Dashboards do not define separate business semantics. For example, Finance Dashboard must consume the same canonical FinancePeriod and ledger semantics as Income, Expense, Outstanding and Settlement.
 
-Every Domain is independent.
+## 18. Reports and analytics
 
-Communication happens only through Services or Domain Events.
+Reports are projections over authoritative domain data. They should remain read-oriented unless an explicit workflow owns a mutation.
 
----
+A future dedicated Report Workspace is allowed, but reports must not create duplicate business-rule implementations.
 
-# 13. UI Architecture
+## 19. Future expansion
 
-```
-ui/
+Possible future workspaces/capabilities include CRM, marketing, inventory, library, parent portal, equipment and AI assistance.
 
-    home/
+New capabilities should attach to a clear business owner and reuse Platform infrastructure rather than causing cross-domain coupling.
 
-    student/
+## 20. Architecture principles
 
-    teacher/
+1. Home/Application Shell does not own domain workflows.
+2. One business concept has one domain owner.
+3. Workspaces own user workflow/presentation context, not arbitrary persistence.
+4. UI calls services; services/repositories own domain/persistence boundaries.
+5. Cross-domain behavior uses services/read models/events.
+6. Shared platform infrastructure is not duplicated by business domains.
+7. Conceptual workspace architecture and physical package layout are separate concerns.
+8. Domain-specific approved specs override generic examples in this document.
 
-    finance/
+## 21. Relationship to other documents
 
-    hr/
+- `docs/ARCHITECTURE.md` — current implementation/layer architecture.
+- `docs/Deployment_Docs/100_ARCHITECTURE_PRINCIPLES.md` — long-term platform principles.
+- domain specs — authoritative detailed business contracts.
+- GitHub Issues — task implementation contracts.
+- root `AGENTS.md` — standing coding-agent workflow/rules.
 
-    report/
+## 22. Change policy
 
-    admin/
-```
+Architecture V2 remains the approved workspace/product direction, but it is not “frozen against reality”. When the implemented product intentionally evolves, this document must be updated through architecture review rather than left stale.
 
-Never mix different business domains inside one UI module.
-
----
-
-# 14. Service Architecture
-
-```
-services/
-
-    student/
-
-    teacher/
-
-    finance/
-
-    hr/
-
-    report/
-
-    admin/
-```
-
----
-
-# 15. Repository Architecture
-
-```
-repositories/
-
-    student/
-
-    teacher/
-
-    finance/
-
-    hr/
-
-    report/
-
-    admin/
-```
-
----
-
-# 16. Database Naming
-
-Current implementation may use one database.
-
-Tables should be grouped logically.
-
-Example
-
-```
-student_*
-
-teacher_*
-
-finance_*
-
-hr_*
-
-report_*
-```
-
-Avoid mixing unrelated tables.
-
----
-
-# 17. Workspace Independence
-
-Teacher Workspace should NOT directly edit Student Summary.
-
-Student Workspace should NOT manage Sessions.
-
-Finance should NOT manage Teaching Notes.
-
-Every Workspace owns its own business.
-
----
-
-# 18. Dashboard Philosophy
-
-Every Workspace has its own Dashboard.
-
-Example
-
-Teacher Workspace
-
-```
-Today's Classes
-
-Pending Attendance
-
-Pending Session Notes
-
-Upcoming Classes
-```
-
-Student Workspace
-
-```
-New Students
-
-Pending Reviews
-
-Recently Updated Students
-```
-
-Dashboard belongs to Workspace.
-
-NOT Home Page.
-
----
-
-# 19. Future Expansion
-
-Future Workspaces may include
-
-- Inventory
-- Library
-- CRM
-- Marketing
-- AI Assistant
-- Equipment Management
-- Parent Portal
-
-Adding a new Workspace should not require changing existing Workspaces.
-
----
-
-# 20. Architecture Principles
-
-Principle 1
-
-Home Page is only a Workspace Launcher.
-
----
-
-Principle 2
-
-One Workspace = One Business Context.
-
----
-
-Principle 3
-
-One Domain = One Responsibility.
-
----
-
-Principle 4
-
-Cross-domain communication must use Services or Events.
-
----
-
-Principle 5
-
-No Workspace owns another Workspace.
-
----
-
-Principle 6
-
-Workflows live inside Workspaces.
-
-Never on Home Page.
-
----
-
-# 21. Long-Term Goal
-
-CenterManager should evolve into a modular Education ERP.
-
-Every new capability should belong to exactly one Workspace.
-
-The architecture must support continuous expansion without major refactoring.
-
----
-
-# Architecture Status
-
-Architecture Version
-
-V2
-
-Status
-
-APPROVED
-
-Frozen
-
-YES
-
-Breaking Changes Allowed
-
-NO
+Breaking a domain ownership principle requires an explicit architecture decision; updating examples/package mappings to match the actual codebase does not.
