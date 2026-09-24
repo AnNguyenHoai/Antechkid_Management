@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -43,6 +44,9 @@ def test_enrollment_service_uses_injected_repository_provider():
         capacity=None,
         start_date=date(2026, 9, 1),
         deleted_at=None,
+        has_course_contract=True,
+        course_fee=Decimal("3600000"),
+        planned_sessions=24,
     )
     student = SimpleNamespace(id=7, deleted_at=None)
     enrollment_repo = MagicMock()
@@ -61,6 +65,9 @@ def test_enrollment_service_uses_injected_repository_provider():
     assert result.student_id == 7
     assert result.class_id == 10
     assert result.status == EnrollmentStatus.ACTIVE.value
+    assert result.agreed_course_fee == Decimal("3600000.0000")
+    assert result.planned_sessions == 24
+    assert result.unit_fee == Decimal("150000.0000")
     assert provider.calls == [
         ("classes", session),
         ("students", session),
