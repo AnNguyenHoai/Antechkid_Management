@@ -38,12 +38,16 @@ def event_bus():
 
 @pytest.fixture
 def collaboration_manager(temp_metadata, event_bus):
-    """Create collaboration manager with initialization."""
+    """Create collaboration manager with initialization and deterministic cleanup."""
     user = User(username="test_user", full_name="Test User")
     set_current_user(user)
     cm = CollaborationManager(runtime_root=temp_metadata.parent, event_bus=event_bus)
     cm.initialize("test_user", "test_user", "admin")
-    return cm
+    try:
+        yield cm
+    finally:
+        cm.shutdown()
+        set_current_user(None)
 
 
 def test_mode_manager():
@@ -99,23 +103,25 @@ def test_collaboration_manager_metadata_creation(temp_metadata, event_bus):
     """Test that collaboration directory is created and lock.json exists after acquire."""
     cm = CollaborationManager(runtime_root=temp_metadata.parent, event_bus=event_bus)
     cm.initialize("test_user", "test_user", "admin")
-    
-    # Collaboration directory should exist
-    collab_dir = temp_metadata.parent / "collaboration"
-    assert collab_dir.exists()
-    
-    # lock.json should not exist yet (no lock acquired)
-    assert not (collab_dir / "lock.json").exists()
-    
-    # Acquire lock to create lock.json
-    cm.request_write()
-    assert (collab_dir / "lock.json").exists()
-    
-    # Verify lock.json content
-    with open(collab_dir / "lock.json") as f:
-        data = json.load(f)
-        assert data["locked"] is True
-        assert data["session_id"] is not None
+    try:
+        # Collaboration directory should exist
+        collab_dir = temp_metadata.parent / "collaboration"
+        assert collab_dir.exists()
+
+        # lock.json should not exist yet (no lock acquired)
+        assert not (collab_dir / "lock.json").exists()
+
+        # Acquire lock to create lock.json
+        cm.request_write()
+        assert (collab_dir / "lock.json").exists()
+
+        # Verify lock.json content
+        with open(collab_dir / "lock.json") as f:
+            data = json.load(f)
+            assert data["locked"] is True
+            assert data["session_id"] is not None
+    finally:
+        cm.shutdown()
 
 
 def test_collaboration_manager_get_version(collaboration_manager):
