@@ -78,10 +78,13 @@ def test_finance_event_refresh_still_updates_all_shared_period_pages():
     assert "self._refresh_pages([" in source
     for page in ("dashboard_page", "income_page", "expense_page", "outstanding_page", "settlement_page"):
         assert f"self.{page}," in source
-    assert "target_date=target_date" in source
-    assert "period_start=period_start" in source
-    assert "period_end=period_end" in source
-    assert "period_configured=period_configured" in source
+    assert "def _period_context" in source
+    assert '"target_date": target_date' in source
+    assert '"period_start": period_start' in source
+    assert '"period_end": period_end' in source
+    assert '"period_configured": configured' in source
+    assert '"period_closed": closed' in source
+    assert "page.refresh(**context)" in source
 
 
 def test_student_financial_remains_read_only():
