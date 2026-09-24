@@ -1,606 +1,208 @@
-# 100_ARCHITECTURE_PRINCIPLES.md
+# CenterManager — Architecture Principles
 
-Version: 1.0
+Version: 1.1  
+Status: **APPROVED PLATFORM PRINCIPLES**  
+Updated: 2026-09-24
 
-Status: DRAFT
+Depends on: `000_PLATFORM_VISION.md`
 
-Document Type: Architecture Principles
+This document defines durable architecture principles. It is intentionally more stable than implementation documentation. For current code/package reality, use `docs/ARCHITECTURE.md`.
 
-Owner: OpenAI & AnTechKids
+## 1. Purpose
 
-Depends On
+CenterManager should remain understandable and evolvable as product scope, deployment, collaboration and infrastructure change.
 
-000_PLATFORM_VISION.md
+Architecture exists to preserve business meaning while allowing implementation technology to evolve.
 
----
+## 2. Architectural values
 
-# Table of Contents
+Prefer:
 
-1. Purpose
-2. Why Principles Matter
-3. Architectural Values
-4. Stable Architecture Rules
-5. Layering Rules
-6. Dependency Rules
-7. Domain Rules
-8. Infrastructure Rules
-9. Collaboration Rules
-10. Extension Rules
-11. Architectural Invariants
-12. Anti-Patterns
-13. Architecture Review Checklist
-14. Final Principles
+- stability over novelty;
+- predictability over cleverness;
+- maintainability over convenience;
+- explicit business semantics over hidden technical behavior;
+- reviewable changes over broad speculative refactors.
 
----
+## 3. Separation of concerns
 
-# 1. Purpose
+CenterManager separates these concerns conceptually:
 
-This document defines the immutable architectural principles of CenterManager.
+```text
+Presentation / Workspace UI
+        ↓
+Application Services / Policies / Read Models
+        ↓
+Persistence Abstractions / Repositories
+        ↓
+Database / Storage Implementations
 
-Unlike implementation guides,
+Shared Platform capabilities:
+Bootstrap · Authentication/Authorization · Collaboration
+Synchronization · Runtime Context · Events · Notifications
+```
 
-these principles are intended to remain valid for many years.
+This is a dependency/ownership model, not a requirement that every concept live in a separately nested package.
 
-Developers may change
+## 4. Dependency rules
 
-implementation,
+### UI
 
-libraries,
+UI must not bypass application/service boundaries for business mutations or ORM persistence.
 
-frameworks,
+### Application/services
 
-deployment,
+Services own use-case/domain orchestration and validation. Where a repository/provider boundary exists, services depend on that boundary rather than concrete persistence mechanics.
 
-or infrastructure.
+### Repositories/persistence
 
-However,
+Repositories own query and persistence mechanics and may depend on SQLAlchemy/database infrastructure.
 
-these architectural principles should remain stable.
+### Platform
 
-Every pull request,
+Platform owns runtime/bootstrap/collaboration/synchronization infrastructure. Business modules consume platform state/capabilities; they do not implement Git synchronization/edit-session protocols themselves.
 
-design proposal,
+Dependencies do not have to pass through an artificial “immediate neighbor” when an established shared abstraction (for example EventBus, Clock, current-user context or platform interface) is explicitly designed for cross-cutting use.
 
-and future feature
+The invariant is **clear ownership and no business-rule duplication**, not mechanical folder adjacency.
 
-must be evaluated against these principles.
+## 5. Domain ownership
 
----
+Each business concept has one authoritative owner.
 
-# 2. Why Principles Matter
+Examples:
 
-Most software systems become difficult to maintain not because of poor code quality,
+- Student profile/history → Student domain;
+- Class/session/attendance → Teaching/Class domain;
+- employee/teacher lifecycle → Employee/Teacher domain;
+- accounting/Income/Expense/Settlement → Finance domain;
+- identity/role/permission administration → Administration/Authorization domain.
 
-but because architectural consistency gradually disappears.
+Cross-domain behavior uses services, DTO/read models or events. It must not be implemented by copying another domain's rules.
 
-Developers continuously introduce
+## 6. Business semantics vs infrastructure
 
-small shortcuts
+Business language must not depend on deployment details.
 
-that eventually become technical debt.
+Business services should not express concepts such as Git branches, synchronization locks or filesystem paths unless that technical concept is itself the explicit application concern of the service.
 
-Architecture Principles exist to prevent this process.
+Conversely, infrastructure/platform code must not invent business accounting, enrollment or authorization rules.
 
-Instead of asking
+## 7. Collaboration and synchronization
 
-"Can we implement this?"
+Collaboration/synchronization is a Platform capability.
 
-the platform first asks
+Business modules must not directly:
 
-"Should we implement this?"
+- run Git commands for business workflows;
+- manage synchronization metadata;
+- implement edit-session ownership;
+- decide stale-vs-authoritative database behavior independently.
 
----
+Configured Git synchronization may be authoritative for runtime data lifecycle, but that authority is implemented by Platform/bootstrap, not Finance/Student/Class services.
 
-# 3. Architectural Values
+## 8. Authorization
 
-CenterManager prioritizes
+Authorization is defense in depth:
 
-Stability
+```text
+UI projection
+AND
+application/service capability enforcement
+AND
+applicable domain-state guards
+```
 
-over
+UI visibility/enabled state improves UX but is never the sole security/domain boundary.
 
-Novelty.
+WRITE/edit-session ownership is not equivalent to permission.
 
-Predictability
+## 9. Events
 
-over
+Events support decoupled projections, refresh and cross-feature reactions.
 
-Complexity.
+Events must not replace atomic persistence where correctness requires one transaction.
 
-Maintainability
+A critical transaction should commit first; non-critical post-commit projection/event work must not convert a committed operation into a false failure.
 
-over
+## 10. Persistence principles
 
-Convenience.
+- Schema evolution uses Alembic.
+- Historical/domain data is preserved according to its owning lifecycle.
+- Ambiguous historical financial data is never guessed silently.
+- Persistence side effects should be explicit and reviewable.
+- Database aggregation is preferred over arbitrary row-cap loading for complete totals.
+- Domain history/effective-dated values are stored when current values would otherwise rewrite historical meaning.
 
-Business Consistency
+## 11. Replaceability
 
-over
+Infrastructure should be replaceable without rewriting business semantics.
 
-Technical Optimization.
+This does not mean every implementation must be abstracted preemptively. Introduce an abstraction when a stable boundary already exists or a concrete task requires replaceability/testing.
 
-The objective is not to build the most advanced software.
+Avoid speculative adapter layers with no present architectural value.
 
-The objective is to build software that remains understandable after many years.
+## 12. Extension rules
 
----
+Prefer extension with clear ownership over modification that spreads one concern across many domains.
 
-# 4. Stable Architecture Rules
+However, “open for extension, closed for modification” is not a ban on changing existing code. Correctly evolving an existing owner is preferable to creating a parallel abstraction merely to avoid modification.
 
-Rule A1
+## 13. Architectural invariants
 
-Business knowledge changes slowly.
+The following should remain true:
 
-Technology changes rapidly.
+- UI does not own canonical business rules or ORM persistence.
+- Business concepts have one authoritative owner.
+- Services do not duplicate persistence/query mechanics already owned by repositories.
+- Business domains do not implement synchronization infrastructure.
+- Platform infrastructure does not redefine business semantics.
+- authorization remains enforced below UI projection;
+- domain-specific approved specs remain authoritative for their domain;
+- historical financial meaning is not silently rewritten;
+- architecture tests should verify actual dependencies/behavior, not fragile text patterns.
 
-Architecture must isolate business knowledge from technology.
+## 14. Anti-patterns
 
----
+Treat these as architecture debt:
 
-Rule A2
+- UI issuing SQLAlchemy queries;
+- service importing concrete repositories where provider abstraction is required;
+- business service directly managing Git collaboration state;
+- duplicated canonical resolver/normalizer logic;
+- authorization enforced only by hidden/disabled buttons;
+- arbitrary row limits used to compute financial totals;
+- ORM hooks creating hidden application side effects;
+- one domain mutating another domain through UI internals;
+- stale documentation presented as current implementation truth;
+- tests that enforce comments/string spelling instead of the actual architectural property.
 
-Business modules are considered long-term assets.
+## 15. Architecture review checklist
 
-Infrastructure is considered replaceable.
+For a significant change ask:
 
----
+1. Which domain owns the behavior?
+2. Is the change reusing the existing authoritative rule or creating another one?
+3. Is UI merely projecting state or becoming a business layer?
+4. Does persistence remain repository-owned where that boundary exists?
+5. Are authorization and domain-state guards still authoritative below UI?
+6. Does the change preserve historical data semantics?
+7. Does Platform remain the owner of synchronization/collaboration?
+8. Are new abstractions justified by the task rather than speculation?
+9. Are tests proving the intended behavior/boundary?
+10. Do affected architecture/domain docs still describe reality?
 
-Rule A3
+## 16. Documentation roles
 
-Every architectural decision should increase
+- `docs/ARCHITECTURE.md` — current implementation architecture.
+- `docs/Bussiness/ARCHITECTURE_V2.md` — workspace/product/domain ownership architecture.
+- this document — durable platform principles.
+- `docs/finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md` and other approved domain specs — detailed domain truth.
+- GitHub Issues — implementation contract for one task.
+- root `AGENTS.md` — standing coding-agent execution rules.
 
-replaceability,
-
-not dependency.
-
----
-
-Rule A4
-
-Infrastructure should never leak into business language.
-
-Examples
-
-GOOD
-
-Edit Session
-
-Workspace
-
-Student
-
-Attendance
-
-BAD
-
-Git Push
-
-SQLite Lock
-
-Database Transaction
-
-Repository Clone
-
-Business users never think in infrastructure terminology.
-
-Architecture should reflect business language.
-
----
-
-# 5. Layering Rules
-
-CenterManager consists of six layers.
-
-Presentation
-
-↓
-
-Application
-
-↓
-
-Business
-
-↓
-
-Persistence
-
-↓
-
-Collaboration Platform
-
-↓
-
-Infrastructure
-
-Dependencies are strictly downward.
-
-Reverse dependencies are forbidden.
-
-Presentation cannot bypass Application.
-
-Business cannot bypass Persistence.
-
-Persistence cannot bypass Collaboration Platform.
-
-Collaboration Platform cannot bypass Infrastructure.
-
----
-
-Rule L1
-
-Each layer communicates only with its immediate neighbor.
-
----
-
-Rule L2
-
-Business Layer never communicates with Infrastructure.
-
-Never.
-
----
-
-Rule L3
-
-Infrastructure may change
-
-without modifying Business Layer.
-
----
-
-# 6. Dependency Rules
-
-CenterManager follows
-
-Dependency Inversion Principle.
-
-High-level modules
-
-must not depend
-
-on low-level implementations.
-
-Example
-
-GOOD
-
-StudentService
-
-↓
-
-StorageAdapter
-
-↓
-
-GitStorageAdapter
-
-BAD
-
-StudentService
-
-↓
-
-GitPython
-
----
-
-Rule D1
-
-Business modules depend only on interfaces.
-
----
-
-Rule D2
-
-Concrete implementations belong to Infrastructure.
-
----
-
-Rule D3
-
-Business objects never import deployment libraries.
-
-Forbidden Examples
-
-gitpython
-
-sqlite3
-
-requests
-
-filesystem operations
-
-inside Business Layer.
-
----
-
-# 7. Domain Rules
-
-Each business concept has one owner.
-
-Example
-
-Student
-
-↓
-
-Student Domain
-
-Attendance
-
-↓
-
-Teaching Domain
-
-Payment
-
-↓
-
-Finance Domain
-
-No domain owns another domain's business logic.
-
-Cross-domain communication occurs only through services.
-
----
-
-Rule DM1
-
-One Business Concept
-
-↓
-
-One Owner
-
----
-
-Rule DM2
-
-Duplicated business logic is forbidden.
-
----
-
-Rule DM3
-
-Shared business behavior belongs to shared services,
-
-not duplicated implementations.
-
----
-
-# 8. Infrastructure Rules
-
-Infrastructure provides capabilities.
-
-Infrastructure never contains business decisions.
-
-Infrastructure includes
-
-Database
-
-Git
-
-File System
-
-Synchronization
-
-Authentication
-
-Logging
-
-Backup
-
-Notification
-
-Infrastructure answers
-
-HOW
-
-Business answers
-
-WHY
-
----
-
-# 9. Collaboration Rules
-
-Collaboration is an infrastructure capability.
-
-Business modules never manage
-
-Locks
-
-Versions
-
-Synchronization
-
-Sessions
-
-directly.
-
-Instead,
-
-they request
-
-an Edit Session
-
-through the Collaboration Platform.
-
----
-
-Rule C1
-
-Only one Edit Session exists globally.
-
----
-
-Rule C2
-
-Business modules never synchronize data.
-
----
-
-Rule C3
-
-Synchronization belongs exclusively to Collaboration Platform.
-
----
-
-# 10. Extension Rules
-
-Every future capability should be added through extension,
-
-never modification.
-
-Preferred
-
-StorageAdapter
-
-↓
-
-GitAdapter
-
-↓
-
-ServerAdapter
-
-instead of
-
-rewriting Business Layer.
-
----
-
-Rule E1
-
-Open for Extension.
-
-Closed for Modification.
-
----
-
-Rule E2
-
-New deployment strategies should require
-
-new adapters,
-
-not architecture changes.
-
----
-
-# 11. Architectural Invariants
-
-The following statements must always remain true.
-
-Business Layer is deployment independent.
-
-Business Layer is storage independent.
-
-Business Layer is synchronization independent.
-
-Business Layer is UI independent.
-
-Deployment is configurable.
-
-Synchronization is optional.
-
-Infrastructure is replaceable.
-
-Architecture is deterministic.
-
-If any future feature violates these statements,
-
-the architecture review automatically fails.
-
----
-
-# 12. Anti-Patterns
-
-The following practices are forbidden.
-
-❌ Business module imports Git.
-
-❌ Business module imports sqlite.
-
-❌ Business module modifies deployment state.
-
-❌ UI directly accesses repositories.
-
-❌ Infrastructure contains business rules.
-
-❌ Duplicate business logic.
-
-❌ Hidden dependencies.
-
-❌ Circular dependencies.
-
-❌ Feature-specific infrastructure.
-
-❌ Domain coupling.
-
-Whenever one of these appears,
-
-it should be treated as architectural debt.
-
----
-
-# 13. Architecture Review Checklist
-
-Every architectural review should answer
-
-Does this feature introduce new dependencies?
-
-Does Business Layer remain unchanged?
-
-Can infrastructure be replaced?
-
-Can deployment change without redesign?
-
-Does this feature duplicate business logic?
-
-Does this feature respect domain ownership?
-
-Does this feature preserve architectural invariants?
-
-If any answer is NO,
-
-the proposal should be reconsidered.
-
----
-
-# 14. Final Principles
-
-CenterManager is designed to evolve for many years.
-
-Technology will change.
-
-Programming languages may change.
-
-Deployment models will change.
-
-Synchronization methods will change.
-
-Infrastructure will change.
-
-Business knowledge should not.
-
-Architecture exists to preserve business knowledge
-
-while allowing infrastructure to evolve.
-
-That is the primary responsibility of the platform.
-
----
-
-# Summary
-
-Architecture is not the organization of code.
+## 17. Final principle
 
 Architecture is the organization of change.
 
-A successful architecture allows software to evolve
-
-without repeatedly redesigning its foundations.
-
-CenterManager adopts this philosophy as its long-term architectural direction.
+A good CenterManager architecture should let the product add or revise capabilities without creating duplicate business truths, hidden persistence behavior or infrastructure leakage into domain code.
