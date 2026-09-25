@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Income repository - data access for Income entity."""
 from datetime import date, datetime
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import asc, desc, func, or_
@@ -31,15 +32,26 @@ class IncomeRepository(BaseRepository[Income]):
         self._session.add(income)
         return income
 
+    def flush(self) -> None:
+        self._session.flush()
+
     def refresh(self, income: Income) -> Income:
         self._session.refresh(income)
         return income
+
+    @staticmethod
+    def _load_options():
+        return (
+            joinedload(Income.student),
+            joinedload(Income.class_),
+            joinedload(Income.enrollment),
+        )
 
     def get_by_id(self, income_id: int) -> Optional[Income]:
         """Return any non-deleted transaction, including VOIDED records."""
         return (
             self._session.query(Income)
-            .options(joinedload(Income.student), joinedload(Income.class_))
+            .options(*self._load_options())
             .filter(Income.id == income_id, Income.deleted_at.is_(None))
             .first()
         )
@@ -47,7 +59,7 @@ class IncomeRepository(BaseRepository[Income]):
     def get_by_id_including_deleted(self, income_id: int) -> Optional[Income]:
         return (
             self._session.query(Income)
-            .options(joinedload(Income.student), joinedload(Income.class_))
+            .options(*self._load_options())
             .filter(Income.id == income_id)
             .first()
         )
@@ -57,8 +69,6 @@ class IncomeRepository(BaseRepository[Income]):
         try:
             return wallet_aliases(payment_method)
         except WalletMappingError:
-            # Raw filtering remains available for migration/diagnostic views of
-            # unknown historical values; accounting never guesses their Wallet.
             return (payment_method,)
 
     def _apply_search(self, query, search_text: str):
@@ -87,6 +97,7 @@ class IncomeRepository(BaseRepository[Income]):
         *,
         student_id: Optional[int] = None,
         class_id: Optional[int] = None,
+        enrollment_id: Optional[int] = None,
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
@@ -104,6 +115,8 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.student_id == student_id)
         if class_id is not None:
             query = query.filter(Income.class_id == class_id)
+        if enrollment_id is not None:
+            query = query.filter(Income.enrollment_id == enrollment_id)
         if income_type:
             query = query.filter(Income.income_type == income_type)
         if payment_method:
@@ -127,6 +140,7 @@ class IncomeRepository(BaseRepository[Income]):
         *,
         student_id: Optional[int] = None,
         class_id: Optional[int] = None,
+        enrollment_id: Optional[int] = None,
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
@@ -140,14 +154,12 @@ class IncomeRepository(BaseRepository[Income]):
         sort_by: str = "payment_date",
         ascending: bool = False,
     ) -> List[Income]:
-        query = self._session.query(Income).options(
-            joinedload(Income.student),
-            joinedload(Income.class_),
-        )
+        query = self._session.query(Income).options(*self._load_options())
         query = self._apply_filters(
             query,
             student_id=student_id,
             class_id=class_id,
+            enrollment_id=enrollment_id,
             income_type=income_type,
             payment_method=payment_method,
             payment_period=payment_period,
@@ -168,6 +180,7 @@ class IncomeRepository(BaseRepository[Income]):
         *,
         student_id: Optional[int] = None,
         class_id: Optional[int] = None,
+        enrollment_id: Optional[int] = None,
         income_type: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_period: Optional[str] = None,
@@ -182,6 +195,7 @@ class IncomeRepository(BaseRepository[Income]):
             query,
             student_id=student_id,
             class_id=class_id,
+            enrollment_id=enrollment_id,
             income_type=income_type,
             payment_method=payment_method,
             payment_period=payment_period,
@@ -209,10 +223,6 @@ class IncomeRepository(BaseRepository[Income]):
         sort_by: str = "payment_date",
         ascending: bool = False,
     ) -> List[Income]:
-        """Compatibility API used by live Finance calculations.
-
-        ACTIVE means both not deleted and not voided.
-        """
         return self.list_records(
             student_id=student_id,
             class_id=class_id,
@@ -255,6 +265,46 @@ class IncomeRepository(BaseRepository[Income]):
             status=Income.STATUS_ACTIVE,
         )
 
+    def list_unattributed_tuition(
+        self,
+        *,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+    ) -> List[Income]:
+        """Historical Tuition rows that still need explicit Enrollment reconciliation."""
+        query = (
+            self._session.query(Income)
+            .options(*self._load_options())
+            .filter(
+                Income.deleted_at.is_(None),
+                Income.income_type == "Tuition",
+                Income.enrollment_id.is_(None),
+            )
+        )
+        if student_id is not None:
+            query = query.filter(Income.student_id == student_id)
+        if class_id is not None:
+            query = query.filter(Income.class_id == class_id)
+        return query.order_by(asc(Income.payment_date), asc(Income.id)).all()
+
+    def sum_active_tuition_for_enrollment(
+        self,
+        enrollment_id: int,
+        *,
+        as_of_date: Optional[date] = None,
+    ) -> Decimal:
+        """Paid tuition for one Enrollment contract, independent of FinancePeriod."""
+        query = self._session.query(func.coalesce(func.sum(Income.amount), 0)).filter(
+            Income.deleted_at.is_(None),
+            Income.status == Income.STATUS_ACTIVE,
+            Income.income_type == "Tuition",
+            Income.enrollment_id == enrollment_id,
+        )
+        if as_of_date is not None:
+            query = query.filter(Income.payment_date <= as_of_date)
+        value = query.scalar() or 0
+        return Decimal(str(value))
+
     def aggregate_active_tuition_by_student_class(
         self,
         *,
@@ -265,7 +315,7 @@ class IncomeRepository(BaseRepository[Income]):
         student_id: Optional[int] = None,
         class_id: Optional[int] = None,
     ):
-        """Return complete ACTIVE tuition totals grouped by student/class in SQL."""
+        """Legacy accounting-period aggregate retained until Outstanding V2."""
         query = (
             self._session.query(
                 Income.student_id,
@@ -296,7 +346,6 @@ class IncomeRepository(BaseRepository[Income]):
         date_from: date,
         date_to: date,
     ):
-        """Return complete ACTIVE Income totals grouped by payment method in SQL."""
         return (
             self._session.query(
                 Income.payment_method,
