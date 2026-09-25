@@ -34,8 +34,8 @@ class Class(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # Legacy tuition shadow retained until Outstanding V2 (#350) no longer reads
-    # the pre-amendment Class.fee contract. New tuition code must use course_fee.
+    # Legacy compatibility shadow. Outstanding V2 no longer reads this field;
+    # new tuition obligation is owned by the Enrollment snapshot/accrual model.
     fee: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
 
     # Course/Tuition contract. Nullable is intentional for migrated historical
