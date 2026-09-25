@@ -31,6 +31,7 @@ This inventory is the committed architecture classification for application serv
 | `employee_work_registration_service.py` | PASS | repository-owned | — |
 | `employee_working_time_service.py` | PASS | repository-owned | — |
 | `enrollment_service.py` | PASS | repository-owned | — |
+| `enrollment_transfer_service.py` | PASS | repository-owned | — |
 | `expense_service.py` | PASS | repository-owned | — |
 | `expense_timeline_service.py` | PASS | repository-owned | — |
 | `finance_dashboard_service.py` | NON_REPOSITORY | application-service aggregation | — |
@@ -66,6 +67,10 @@ This inventory is the committed architecture classification for application serv
 | `tuition_accrual_service.py` | PASS | repository-owned | — |
 | `tuition_detail_service.py` | PASS | repository-owned read model | — |
 | `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
+
+## TUITION-13 Enrollment Transfer
+
+`enrollment_transfer_service.py` — **EnrollmentTransferService** is provider-backed and classified as `PASS`. It coordinates source/target Enrollment contracts, transfer-ledger persistence, tuition settlement reads and audit recording through `RepositoryProvider`; repositories own database query/persistence operations while transfer validation and transaction completion remain service-owned.
 
 ## EP-FIN-04 Financial Settlement
 

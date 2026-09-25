@@ -7,6 +7,7 @@ from centermanager.repositories.attendance_repository import AttendanceRepositor
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.repositories.enrollment_freeze_repository import EnrollmentFreezeRepository
+from centermanager.repositories.enrollment_transfer_repository import EnrollmentTransferRepository
 from centermanager.repositories.session_repository import SessionRepository
 from centermanager.repositories.session_note_repository import SessionNoteRepository
 from centermanager.repositories.employee_repository import EmployeeRepository
@@ -44,6 +45,7 @@ class RepositoryProvider(Protocol):
     def attendance(self, session: Session) -> AttendanceRepository: ...
     def enrollments(self, session: Session) -> EnrollmentRepository: ...
     def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: ...
+    def enrollment_transfers(self, session: Session) -> EnrollmentTransferRepository: ...
     def sessions(self, session: Session) -> SessionRepository: ...
     def session_notes(self, session: Session) -> SessionNoteRepository: ...
     def employees(self, session: Session) -> EmployeeRepository: ...
@@ -81,6 +83,7 @@ class SqlAlchemyRepositoryProvider:
     def attendance(self, session: Session) -> AttendanceRepository: return AttendanceRepository(session)
     def enrollments(self, session: Session) -> EnrollmentRepository: return EnrollmentRepository(session)
     def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: return EnrollmentFreezeRepository(session)
+    def enrollment_transfers(self, session: Session) -> EnrollmentTransferRepository: return EnrollmentTransferRepository(session)
     def sessions(self, session: Session) -> SessionRepository: return SessionRepository(session)
     def session_notes(self, session: Session) -> SessionNoteRepository: return SessionNoteRepository(session)
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)
