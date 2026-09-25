@@ -6,6 +6,7 @@ from centermanager.repositories.audit_log_repository import AuditLogRepository
 from centermanager.repositories.attendance_repository import AttendanceRepository
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
+from centermanager.repositories.enrollment_freeze_repository import EnrollmentFreezeRepository
 from centermanager.repositories.session_repository import SessionRepository
 from centermanager.repositories.session_note_repository import SessionNoteRepository
 from centermanager.repositories.employee_repository import EmployeeRepository
@@ -42,6 +43,7 @@ class RepositoryProvider(Protocol):
     def class_timeline(self, session: Session) -> ClassTimelineRepository: ...
     def attendance(self, session: Session) -> AttendanceRepository: ...
     def enrollments(self, session: Session) -> EnrollmentRepository: ...
+    def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: ...
     def sessions(self, session: Session) -> SessionRepository: ...
     def session_notes(self, session: Session) -> SessionNoteRepository: ...
     def employees(self, session: Session) -> EmployeeRepository: ...
@@ -78,6 +80,7 @@ class SqlAlchemyRepositoryProvider:
     def class_timeline(self, session: Session) -> ClassTimelineRepository: return ClassTimelineRepository(session)
     def attendance(self, session: Session) -> AttendanceRepository: return AttendanceRepository(session)
     def enrollments(self, session: Session) -> EnrollmentRepository: return EnrollmentRepository(session)
+    def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: return EnrollmentFreezeRepository(session)
     def sessions(self, session: Session) -> SessionRepository: return SessionRepository(session)
     def session_notes(self, session: Session) -> SessionNoteRepository: return SessionNoteRepository(session)
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)

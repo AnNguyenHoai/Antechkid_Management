@@ -18,7 +18,6 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         super().__init__(session, Enrollment)
 
     def exists(self, student_id: int, class_id: int, active_only: bool = True) -> bool:
-        """Check enrollment existence. By default only ACTIVE rows are operational."""
         query = self._session.query(Enrollment).filter(
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
@@ -27,18 +26,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             query = query.filter(Enrollment.status == "ACTIVE")
         return query.first() is not None
 
-    def exists_on_date(
-        self,
-        student_id: int,
-        class_id: int,
-        on_date: date,
-    ) -> bool:
-        """Return whether an enrollment covered ``on_date``.
-
-        Historical finance validation is date based, not current-status based:
-        COMPLETED/CANCELLED rows remain valid for dates inside their recorded
-        start/end interval.
-        """
+    def exists_on_date(self, student_id: int, class_id: int, on_date: date) -> bool:
         return (
             self._session.query(Enrollment.id)
             .filter(
@@ -52,26 +40,34 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         )
 
     def get_active(self, student_id: int, class_id: int) -> Optional[Enrollment]:
-        return self._session.query(Enrollment).filter(
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
         ).first()
 
     def get_active_by_class(self, class_id: int) -> List[Enrollment]:
-        return self._session.query(Enrollment).filter(
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
         ).order_by(Enrollment.id).all()
 
     def get_by_student_and_class(self, student_id: int, class_id: int) -> List[Enrollment]:
-        return self._session.query(Enrollment).filter(
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
         ).order_by(desc(Enrollment.created_at)).all()
 
     def get_by_student(self, student_id: int) -> List[Enrollment]:
-        return self._session.query(Enrollment).filter(
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(
             Enrollment.student_id == student_id
         ).order_by(desc(Enrollment.created_at)).all()
 
@@ -86,18 +82,12 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         period_start=None,
         period_end=None,
     ) -> Tuple[List[Enrollment], int]:
-        """List enrollments used by the Finance outstanding read model.
-
-        Student and class relationships are eagerly loaded because Outstanding is a
-        read model that needs both for every row. ``limit=None`` is reserved for
-        service-side derived filtering/pagination, where status is only known after
-        tuition and payment values have been calculated.
-        """
         query = (
             self._session.query(Enrollment)
             .options(
                 joinedload(Enrollment.student),
                 joinedload(Enrollment.class_),
+                joinedload(Enrollment.freezes),
             )
             .join(Enrollment.student)
             .filter(Enrollment.class_id.isnot(None))
@@ -107,21 +97,14 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         if course_name:
             search_course = f"%{course_name.strip()}%"
             query = query.join(Enrollment.class_).filter(
-                or_(
-                    Enrollment.course_name.ilike(search_course),
-                    Class.course.ilike(search_course),
-                )
+                or_(Enrollment.course_name.ilike(search_course), Class.course.ilike(search_course))
             )
         if student_id is not None:
             query = query.filter(Enrollment.student_id == student_id)
         if period_start is not None:
-            query = query.filter(
-                or_(Enrollment.end_date.is_(None), Enrollment.end_date >= period_start)
-            )
+            query = query.filter(or_(Enrollment.end_date.is_(None), Enrollment.end_date >= period_start))
         if period_end is not None:
-            query = query.filter(
-                or_(Enrollment.start_date.is_(None), Enrollment.start_date <= period_end)
-            )
+            query = query.filter(or_(Enrollment.start_date.is_(None), Enrollment.start_date <= period_end))
         if search_text:
             search = f"%{search_text.strip()}%"
             query = query.filter(
@@ -132,22 +115,21 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
                     Enrollment.class_name.ilike(search),
                 )
             )
-
         total = query.count()
-        query = query.order_by(desc(Enrollment.created_at), desc(Enrollment.id))
-        query = query.offset(max(0, offset))
+        query = query.order_by(desc(Enrollment.created_at), desc(Enrollment.id)).offset(max(0, offset))
         if limit is not None:
             query = query.limit(max(1, limit))
         return query.all(), total
 
     def get_by_class(self, class_id: int) -> List[Enrollment]:
-        return self._session.query(Enrollment).filter(
-            Enrollment.class_id == class_id
-        ).order_by(Enrollment.id).all()
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
 
     def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).options(
-            joinedload(Enrollment.student)
+            joinedload(Enrollment.student),
+            joinedload(Enrollment.freezes),
         ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
 
     def add(self, enrollment: Enrollment) -> Enrollment:
@@ -155,7 +137,6 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         return enrollment
 
     def flush(self) -> None:
-        """Flush pending Enrollment writes without owning the transaction."""
         self._session.flush()
 
     def delete(self, enrollment: Enrollment) -> None:
