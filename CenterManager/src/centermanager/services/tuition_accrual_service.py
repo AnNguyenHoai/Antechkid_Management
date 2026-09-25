@@ -67,16 +67,34 @@ class TuitionAccrualService:
 
     @staticmethod
     def _attendance_map(attendances) -> dict[int, object]:
-        """Build deterministic session->attendance map for one student.
-
-        The database enforces one Attendance row per student/session. Keeping the
-        conversion here also makes custom repository inputs deterministic.
-        """
+        """Build deterministic session->attendance map for one student."""
         return {
             int(item.session_id): item
             for item in attendances
             if getattr(item, "session_id", None) is not None
         }
+
+    @classmethod
+    def _attendance_from_sessions(cls, enrollment, sessions) -> dict[int, object]:
+        """Resolve attendance already attached/lazy-loadable on Session records.
+
+        This keeps existing composed read models (Outstanding and Tuition Detail)
+        attendance-aware without moving policy arithmetic into those callers.
+        Repository-backed ``calculate`` still supplies an explicit map.
+        """
+        result: dict[int, object] = {}
+        student_id = getattr(enrollment, "student_id", None)
+        if student_id is None:
+            return result
+        for teaching_session in sessions:
+            session_id = getattr(teaching_session, "id", None)
+            if session_id is None:
+                continue
+            for attendance in (getattr(teaching_session, "attendances", None) or []):
+                if getattr(attendance, "student_id", None) == student_id:
+                    result[int(session_id)] = attendance
+                    break
+        return result
 
     @classmethod
     def calculate_from_records(
@@ -92,10 +110,12 @@ class TuitionAccrualService:
                 "Enrollment tuition contract is unresolved; accrual cannot be calculated safely."
             )
 
+        sessions = list(sessions)
         planned_sessions = int(enrollment.planned_sessions)
         unit_fee = _money(Decimal(enrollment.unit_fee))
         contract_discount = _money(Decimal(enrollment.discount_amount or 0))
-        attendance_by_session_id = attendance_by_session_id or {}
+        if attendance_by_session_id is None:
+            attendance_by_session_id = cls._attendance_from_sessions(enrollment, sessions)
 
         eligible = []
         for teaching_session in sessions:
