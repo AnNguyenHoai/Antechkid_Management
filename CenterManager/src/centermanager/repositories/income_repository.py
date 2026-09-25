@@ -193,11 +193,11 @@ class IncomeRepository(BaseRepository[Income]):
             cutoff = datetime.combine(as_of_date, time.max)
             incoming = incoming.filter(EnrollmentTransfer.transferred_at <= cutoff)
             outgoing = outgoing.filter(EnrollmentTransfer.transferred_at <= cutoff)
+        transfer_settlement = paid + Decimal(str(incoming.scalar() or 0)) - Decimal(str(outgoing.scalar() or 0))
         return (
             paid
             + non_cash_credit
-            + Decimal(str(incoming.scalar() or 0))
-            - Decimal(str(outgoing.scalar() or 0))
+            + (transfer_settlement - paid)
         )
 
     def aggregate_active_tuition_by_student_class(self, *, finance_period_start: date, date_from: date,
