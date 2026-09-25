@@ -75,7 +75,7 @@ def test_refund_is_cash_linked_but_credit_adjustment_has_no_income_or_wallet_mov
     assert "amount=-float(value)" in refund_body
     assert "linked_income_id=income.id" in refund_body
     assert "sum_refunds_for_origin(origin_income_id)" in refund_body
-    assert "with_for_update" not in refund_body  # locking remains repository-owned
+    assert "with_for_update" not in refund_body
 
     assert "Income(" not in credit_body
     assert "linked_income_id=None" in credit_body
@@ -114,3 +114,15 @@ def test_legacy_refund_api_routes_through_first_class_ledger():
     assert "self._adjustments.refund(" in source
     assert "legacy-refund-" in source
     assert "Income(" not in source
+
+
+def test_active_enrollment_ui_exposes_refund_and_non_cash_credit_actions():
+    source = (_root() / "src/centermanager/ui/student_workspace/enrollment_widget.py").read_text(encoding="utf-8")
+    assert 'Button("Refund tuition"' in source
+    assert 'Button("Tuition credit"' in source
+    assert "self._adjustment_service.preview(enrollment.id)" in source
+    assert "self._adjustment_service.refund(" in source
+    assert "self._adjustment_service.credit_adjustment(" in source
+    assert 'idempotency_key=f"ui-refund-{uuid4()}"' in source
+    assert 'idempotency_key=f"ui-credit-{uuid4()}"' in source
+    assert '["CASH", "BANK"]' in source
