@@ -3,8 +3,9 @@
 Income model - records income transactions.
 
 EP-FIN-06 adds an explicit lifecycle so voiding a financial transaction is
-separate from soft deletion. Transaction identity (student/class/type) remains
-stable after creation.
+separate from soft deletion. Transaction identity remains stable after creation.
+TUITION-07 adds explicit Enrollment attribution for tuition payments while
+payment_date continues to own accounting-period placement only.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from centermanager.models.mixins import TimestampMixin
 if TYPE_CHECKING:
     from centermanager.models.student import Student
     from centermanager.models.class_ import Class
+    from centermanager.models.enrollment import Enrollment
 
 
 class Income(Base, TimestampMixin):
@@ -35,6 +37,14 @@ class Income(Base, TimestampMixin):
     )
     class_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("classes.id"), nullable=True
+    )
+    # Canonical tuition-contract attribution. Historical Tuition rows remain NULL
+    # until an explicit reconciliation action links them to an Enrollment.
+    enrollment_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("enrollments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
 
     amount: Mapped[float] = mapped_column(Float, nullable=False)
@@ -68,6 +78,7 @@ class Income(Base, TimestampMixin):
 
     student: Mapped[Optional[Student]] = relationship("Student", lazy="selectin")
     class_: Mapped[Optional[Class]] = relationship("Class", lazy="selectin")
+    enrollment: Mapped[Optional[Enrollment]] = relationship("Enrollment", lazy="selectin")
 
     @property
     def is_active(self) -> bool:
@@ -77,8 +88,15 @@ class Income(Base, TimestampMixin):
     def is_voided(self) -> bool:
         return self.deleted_at is None and self.status == self.STATUS_VOIDED
 
+    @property
+    def tuition_attribution_status(self) -> str:
+        if self.income_type != "Tuition":
+            return "NOT_APPLICABLE"
+        return "LINKED" if self.enrollment_id is not None else "UNRESOLVED_LEGACY"
+
     def __repr__(self) -> str:
         return (
             f"<Income(id={self.id}, student_id={self.student_id}, "
-            f"amount={self.amount}, status={self.status})>"
+            f"enrollment_id={self.enrollment_id}, amount={self.amount}, "
+            f"status={self.status})>"
         )
