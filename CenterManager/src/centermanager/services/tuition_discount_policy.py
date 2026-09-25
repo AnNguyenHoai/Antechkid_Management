@@ -43,6 +43,7 @@ class TuitionDiscountPolicy:
 
     VERSION = "enrollment_discount_v1"
     SOURCE_MANUAL = "MANUAL"
+    APPROVED_SOURCES = frozenset({SOURCE_MANUAL})
 
     @classmethod
     def resolve(
@@ -88,6 +89,10 @@ class TuitionDiscountPolicy:
             raise TuitionDiscountPolicyError("Discount amount cannot exceed the agreed course fee.")
 
         normalized_source = (source or "").strip().upper() or None
+        if normalized_source is not None and normalized_source not in cls.APPROVED_SOURCES:
+            raise TuitionDiscountPolicyError(
+                "Only MANUAL discount source is approved; promotion engine rules are not enabled."
+            )
         normalized_reason = (reason or "").strip() or None
         return TuitionDiscountSnapshot(
             discount_type=kind.value,
