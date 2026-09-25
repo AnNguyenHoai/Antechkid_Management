@@ -15,6 +15,7 @@ from centermanager.services.audit_service import AuditService
 from centermanager.services.tuition_adjustment_service import (
     TuitionAdjustmentService,
     TuitionAdjustmentValidationError,
+    _money,
 )
 
 
@@ -49,6 +50,13 @@ class TuitionRefundService:
             event_bus=event_bus,
         )
 
+    @staticmethod
+    def _reason(value: str) -> str:
+        reason = (value or "").strip()
+        if not reason:
+            raise TuitionRefundValidationError("Refund reason is required.")
+        return reason
+
     def preview(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> dict:
         try:
             return self._adjustments.preview(enrollment_id, as_of_date=as_of_date)
@@ -67,6 +75,7 @@ class TuitionRefundService:
         prepaid_only: bool = False,
         idempotency_key: Optional[str] = None,
     ) -> Income:
+        resolved_reason = self._reason(reason)
         key = idempotency_key or f"legacy-refund-{uuid4()}"
         try:
             adjustment = self._adjustments.refund(
@@ -74,7 +83,7 @@ class TuitionRefundService:
                 amount,
                 payment_method,
                 refund_date,
-                reason=reason,
+                reason=resolved_reason,
                 idempotency_key=key,
                 origin_income_id=origin_income_id,
                 prepaid_only=prepaid_only,
