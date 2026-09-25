@@ -1,14 +1,15 @@
 """Deterministic tuition accrual read model.
 
-Accrual is derived from the immutable Enrollment tuition snapshot plus teaching
-sessions. It is intentionally not persisted and has no accounting-period input.
+Accrual is derived from the immutable Enrollment tuition snapshot, its snapshotted
+billing-policy version, teaching sessions, and optional attendance records. It is
+intentionally not persisted and has no accounting-period input.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Callable, Optional, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.tuition_policy import BillableSessionPolicy
@@ -45,6 +46,7 @@ class TuitionAccrualResult:
     discount: Decimal
     net_accrued: Decimal
     contract_discount: Decimal
+    billing_policy_version: str
 
 
 class TuitionAccrualService:
@@ -60,16 +62,31 @@ class TuitionAccrualService:
 
     @staticmethod
     def _session_effective_date(session) -> date:
-        """Completed-session date used by the as-of boundary.
-
-        Prefer the actual delivery date. Legacy/completed rows without one fall
-        back to their scheduled date, which is required by the Session model.
-        """
+        """Completed-session date used by the as-of boundary."""
         return getattr(session, "actual_date", None) or session.scheduled_date
 
+    @staticmethod
+    def _attendance_map(attendances) -> dict[int, object]:
+        """Build deterministic session->attendance map for one student.
+
+        The database enforces one Attendance row per student/session. Keeping the
+        conversion here also makes custom repository inputs deterministic.
+        """
+        return {
+            int(item.session_id): item
+            for item in attendances
+            if getattr(item, "session_id", None) is not None
+        }
+
     @classmethod
-    def calculate_from_records(cls, enrollment, sessions, as_of_date: date) -> TuitionAccrualResult:
-        """Pure calculation helper used by the repository-backed API and tests."""
+    def calculate_from_records(
+        cls,
+        enrollment,
+        sessions,
+        as_of_date: date,
+        attendance_by_session_id: Optional[Mapping[int, object]] = None,
+    ) -> TuitionAccrualResult:
+        """Pure calculation helper used by repository-backed API and tests."""
         if not getattr(enrollment, "has_tuition_contract", False):
             raise TuitionAccrualUnresolvedError(
                 "Enrollment tuition contract is unresolved; accrual cannot be calculated safely."
@@ -78,12 +95,20 @@ class TuitionAccrualService:
         planned_sessions = int(enrollment.planned_sessions)
         unit_fee = _money(Decimal(enrollment.unit_fee))
         contract_discount = _money(Decimal(enrollment.discount_amount or 0))
+        attendance_by_session_id = attendance_by_session_id or {}
 
         eligible = []
         for teaching_session in sessions:
             if cls._session_effective_date(teaching_session) > as_of_date:
                 continue
-            if BillableSessionPolicy.is_billable(teaching_session, enrollment):
+            attendance = attendance_by_session_id.get(
+                getattr(teaching_session, "id", None)
+            )
+            if BillableSessionPolicy.is_billable(
+                teaching_session,
+                enrollment,
+                attendance,
+            ):
                 eligible.append(teaching_session)
 
         # Protect the read model from duplicate session objects supplied by a
@@ -96,7 +121,6 @@ class TuitionAccrualService:
         discount_accrued = _money(
             contract_discount * Decimal(billable_count) / Decimal(planned_sessions)
         )
-        # Rounding must never make accrued discount exceed accrued gross.
         discount_accrued = min(discount_accrued, gross)
         net = _money(gross - discount_accrued)
 
@@ -111,6 +135,7 @@ class TuitionAccrualService:
             discount=discount_accrued,
             net_accrued=net,
             contract_discount=contract_discount,
+            billing_policy_version=BillableSessionPolicy.policy_version_for(enrollment),
         )
 
     def calculate(self, enrollment_id: int, as_of_date: date) -> TuitionAccrualResult:
@@ -126,4 +151,16 @@ class TuitionAccrualService:
                     "Enrollment has no class identity; accrual cannot be calculated safely."
                 )
             sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
-            return self.calculate_from_records(enrollment, sessions, as_of_date)
+            attendance_by_session_id = {}
+            attendance_factory = getattr(self._repository_provider, "attendances", None)
+            if callable(attendance_factory):
+                attendance_rows = attendance_factory(session).get_by_student(
+                    enrollment.student_id
+                )
+                attendance_by_session_id = self._attendance_map(attendance_rows)
+            return self.calculate_from_records(
+                enrollment,
+                sessions,
+                as_of_date,
+                attendance_by_session_id=attendance_by_session_id,
+            )
