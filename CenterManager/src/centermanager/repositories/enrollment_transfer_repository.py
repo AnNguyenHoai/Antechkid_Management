@@ -24,12 +24,11 @@ class EnrollmentTransferRepository(BaseRepository[EnrollmentTransfer]):
         self._session.flush()
 
     def flush_guarded(self) -> bool:
-        """Flush a transfer transaction and rollback cleanly on a DB uniqueness race."""
+        """Flush and report a uniqueness race; transaction lifecycle stays service-owned."""
         try:
             self._session.flush()
             return True
         except IntegrityError:
-            self._session.rollback()
             return False
 
     def refresh(self, transfer: EnrollmentTransfer) -> None:
