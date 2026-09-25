@@ -145,7 +145,7 @@ def test_detail_explains_accrual_payment_and_owed_balance():
     assert sum(row.billing_contribution for row in detail.sessions) == detail.gross_accrued
     assert len([row for row in detail.sessions if row.billable]) == 10
     assert detail.payments[0].accounting_reference == (
-        "Income #301 · FinancePeriod 2026-09-01"
+        "Income #301 · Accounting period 2026-09-01"
     )
     assert provider.payment_repo.list_kwargs["enrollment_id"] == 71
     assert provider.payment_repo.list_kwargs["income_type"] == "Tuition"
