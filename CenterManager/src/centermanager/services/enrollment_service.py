@@ -18,6 +18,10 @@ from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentEnrollmentChanged
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
+from centermanager.services.tuition_discount_policy import (
+    TuitionDiscountPolicy,
+    TuitionDiscountPolicyError,
+)
 
 
 class EnrollmentStatus(str, Enum):
@@ -79,12 +83,73 @@ class EnrollmentService:
         ))
 
     @staticmethod
+    def _resolve_discount_snapshot(
+        agreed_course_fee: Decimal,
+        *,
+        discount_amount: Decimal | int = 0,
+        discount_type: Optional[str] = None,
+        discount_value: Optional[Decimal | int] = None,
+        discount_source: Optional[str] = None,
+        discount_reason: Optional[str] = None,
+    ) -> dict:
+        """Resolve rule metadata into the canonical immutable discount amount.
+
+        ``discount_amount`` remains as a compatibility input for existing
+        callers. New fixed/percentage rules use discount_type/value and persist
+        their provenance alongside the canonical amount.
+        """
+        has_rule = discount_type is not None or discount_value not in (None, "")
+        try:
+            legacy_amount = _money(Decimal(str(discount_amount or 0)))
+        except Exception as exc:
+            raise EnrollmentValidationError("Discount amount must be a valid number.") from exc
+        if legacy_amount < 0:
+            raise EnrollmentValidationError("Discount amount cannot be negative.")
+        if has_rule and legacy_amount != 0:
+            raise EnrollmentValidationError(
+                "Use either discount_amount or discount_type/discount_value, not both."
+            )
+        if has_rule:
+            try:
+                snapshot = TuitionDiscountPolicy.resolve(
+                    agreed_course_fee,
+                    discount_type=discount_type,
+                    discount_value=discount_value,
+                    source=discount_source,
+                    reason=discount_reason,
+                )
+            except TuitionDiscountPolicyError as exc:
+                raise EnrollmentValidationError(str(exc)) from exc
+            return {
+                "discount_amount": snapshot.discount_amount,
+                "discount_type": snapshot.discount_type,
+                "discount_value": snapshot.discount_value,
+                "discount_source": snapshot.discount_source,
+                "discount_reason": snapshot.discount_reason,
+                "discount_policy_version": snapshot.discount_policy_version,
+            }
+        if legacy_amount > agreed_course_fee:
+            raise EnrollmentValidationError("Discount amount cannot exceed the agreed course fee.")
+        return {
+            "discount_amount": legacy_amount,
+            "discount_type": "FIXED" if legacy_amount > 0 else None,
+            "discount_value": legacy_amount if legacy_amount > 0 else None,
+            "discount_source": (discount_source or "").strip().upper() or None,
+            "discount_reason": (discount_reason or "").strip() or None,
+            "discount_policy_version": "legacy_fixed_v1" if legacy_amount > 0 else None,
+        }
+
+    @staticmethod
     def _snapshot_tuition_contract(
         class_obj,
         *,
         enrolled_from_session: int,
         enrolled_until_session: Optional[int],
-        discount_amount: Decimal | int,
+        discount_amount: Decimal | int = 0,
+        discount_type: Optional[str] = None,
+        discount_value: Optional[Decimal | int] = None,
+        discount_source: Optional[str] = None,
+        discount_reason: Optional[str] = None,
     ) -> dict:
         if not class_obj.has_course_contract:
             raise EnrollmentValidationError(
@@ -100,25 +165,25 @@ class EnrollmentService:
             raise EnrollmentValidationError(
                 f"Enrollment end session must be between {enrolled_from_session} and {class_planned_sessions}."
             )
-        try:
-            discount = _money(Decimal(str(discount_amount)))
-        except Exception as exc:
-            raise EnrollmentValidationError("Discount amount must be a valid number.") from exc
-        if discount < 0:
-            raise EnrollmentValidationError("Discount amount cannot be negative.")
         contracted_sessions = effective_until - enrolled_from_session + 1
         class_fee = Decimal(class_obj.course_fee)
         agreed_course_fee = _money(class_fee * Decimal(contracted_sessions) / Decimal(class_planned_sessions))
         unit_fee = _money(agreed_course_fee / Decimal(contracted_sessions))
-        if discount > agreed_course_fee:
-            raise EnrollmentValidationError("Discount amount cannot exceed the agreed course fee.")
+        discount_snapshot = EnrollmentService._resolve_discount_snapshot(
+            agreed_course_fee,
+            discount_amount=discount_amount,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            discount_source=discount_source,
+            discount_reason=discount_reason,
+        )
         return {
             "agreed_course_fee": agreed_course_fee,
             "planned_sessions": contracted_sessions,
             "unit_fee": unit_fee,
             "enrolled_from_session": enrolled_from_session,
             "enrolled_until_session": effective_until,
-            "discount_amount": discount,
+            **discount_snapshot,
         }
 
     @staticmethod
@@ -144,6 +209,10 @@ class EnrollmentService:
         enrolled_from_session: Optional[int] = None,
         enrolled_until_session: Optional[int] = None,
         discount_amount: Decimal | int = 0,
+        discount_type: Optional[str] = None,
+        discount_value: Optional[Decimal | int] = None,
+        discount_source: Optional[str] = None,
+        discount_reason: Optional[str] = None,
     ) -> dict:
         with self._session_factory() as session:
             class_obj = self._repository_provider.classes(session).get_by_id(class_id)
@@ -159,10 +228,15 @@ class EnrollmentService:
                 enrolled_from_session=int(effective_from),
                 enrolled_until_session=enrolled_until_session,
                 discount_amount=discount_amount,
+                discount_type=discount_type,
+                discount_value=discount_value,
+                discount_source=discount_source,
+                discount_reason=discount_reason,
             )
             return {
                 **snapshot,
                 "suggested_agreed_course_fee": snapshot["agreed_course_fee"],
+                "net_course_fee": _money(snapshot["agreed_course_fee"] - snapshot["discount_amount"]),
                 "class_planned_sessions": int(class_obj.planned_sessions),
                 "class_course_fee": _money(Decimal(class_obj.course_fee)),
                 "resolution": resolution,
@@ -176,9 +250,28 @@ class EnrollmentService:
             raise EnrollmentValidationError("Agreed fee override must be a valid number.") from exc
         if override_fee < 0:
             raise EnrollmentValidationError("Agreed fee override cannot be negative.")
-        if snapshot["discount_amount"] > override_fee:
-            raise EnrollmentValidationError("Discount amount cannot exceed the overridden agreed course fee.")
         result = dict(snapshot)
+        if result.get("discount_type") == "PERCENT":
+            try:
+                recalculated = TuitionDiscountPolicy.resolve(
+                    override_fee,
+                    discount_type=result["discount_type"],
+                    discount_value=result["discount_value"],
+                    source=result.get("discount_source"),
+                    reason=result.get("discount_reason"),
+                )
+            except TuitionDiscountPolicyError as exc:
+                raise EnrollmentValidationError(str(exc)) from exc
+            result.update({
+                "discount_amount": recalculated.discount_amount,
+                "discount_type": recalculated.discount_type,
+                "discount_value": recalculated.discount_value,
+                "discount_source": recalculated.discount_source,
+                "discount_reason": recalculated.discount_reason,
+                "discount_policy_version": recalculated.discount_policy_version,
+            })
+        elif result["discount_amount"] > override_fee:
+            raise EnrollmentValidationError("Discount amount cannot exceed the overridden agreed course fee.")
         result["agreed_course_fee"] = override_fee
         result["unit_fee"] = _money(override_fee / Decimal(result["planned_sessions"]))
         return result
@@ -192,6 +285,10 @@ class EnrollmentService:
         enrolled_from_session: Optional[int] = None,
         enrolled_until_session: Optional[int] = None,
         discount_amount: Decimal | int = 0,
+        discount_type: Optional[str] = None,
+        discount_value: Optional[Decimal | int] = None,
+        discount_source: Optional[str] = None,
+        discount_reason: Optional[str] = None,
         agreed_course_fee_override: Optional[Decimal | int] = None,
         override_reason: Optional[str] = None,
         actor=None,
@@ -221,6 +318,10 @@ class EnrollmentService:
                 enrolled_from_session=int(effective_from),
                 enrolled_until_session=enrolled_until_session,
                 discount_amount=discount_amount,
+                discount_type=discount_type,
+                discount_value=discount_value,
+                discount_source=discount_source,
+                discount_reason=discount_reason,
             )
             suggested_fee = tuition_snapshot["agreed_course_fee"]
             resolved_actor = actor if actor is not None else get_current_user()
@@ -232,6 +333,17 @@ class EnrollmentService:
                         "A reason is required when overriding the suggested agreed course fee."
                     )
                 tuition_snapshot = self._apply_agreed_fee_override(tuition_snapshot, agreed_course_fee_override)
+
+            discount_source_value = tuition_snapshot.get("discount_source")
+            discount_reason_value = tuition_snapshot.get("discount_reason")
+            if tuition_snapshot["discount_amount"] > 0 and discount_type is not None:
+                if not discount_source_value:
+                    raise EnrollmentValidationError("Discount source is required for a discount rule.")
+                if discount_source_value == TuitionDiscountPolicy.SOURCE_MANUAL:
+                    AuthorizationService.require(resolved_actor, Capability.TUITION_ENROLLMENT_OVERRIDE)
+                    if not discount_reason_value:
+                        raise EnrollmentValidationError("A reason is required for a manual discount.")
+
             enrollment = Enrollment(
                 student_id=student_id,
                 class_id=class_id,
@@ -242,10 +354,36 @@ class EnrollmentService:
                 **tuition_snapshot,
             )
             repo.add(enrollment)
-            if agreed_course_fee_override is not None:
+            needs_discount_audit = bool(
+                tuition_snapshot["discount_amount"] > 0 and tuition_snapshot.get("discount_source")
+            )
+            if agreed_course_fee_override is not None or needs_discount_audit:
                 flush = getattr(repo, "flush", None)
                 if callable(flush):
                     flush()
+            if needs_discount_audit:
+                self._audit_service.record_in_session(
+                    session,
+                    action="TUITION_ENROLLMENT_DISCOUNT",
+                    module="tuition",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=class_obj.name,
+                    actor=resolved_actor,
+                    details={
+                        "student_id": student_id,
+                        "class_id": class_id,
+                        "discount_type": tuition_snapshot.get("discount_type"),
+                        "discount_value": str(tuition_snapshot.get("discount_value")),
+                        "discount_amount": str(tuition_snapshot["discount_amount"]),
+                        "discount_source": tuition_snapshot.get("discount_source"),
+                        "discount_reason": tuition_snapshot.get("discount_reason"),
+                        "discount_policy_version": tuition_snapshot.get("discount_policy_version"),
+                        "gross_agreed_course_fee": str(tuition_snapshot["agreed_course_fee"]),
+                    },
+                    summary=f"Tuition discount for enrollment in {class_obj.name}",
+                )
+            if agreed_course_fee_override is not None:
                 self._audit_service.record_in_session(
                     session,
                     action="TUITION_ENROLLMENT_FEE_OVERRIDE",
