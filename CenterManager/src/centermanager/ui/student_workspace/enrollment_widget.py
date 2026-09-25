@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QInputDialog, QLabel, QVBoxLayout, QWidget
@@ -17,6 +18,10 @@ from centermanager.services.enrollment_service import (
 from centermanager.services.enrollment_transfer_service import (
     EnrollmentTransferError,
     EnrollmentTransferService,
+)
+from centermanager.services.tuition_adjustment_service import (
+    TuitionAdjustmentService,
+    TuitionAdjustmentValidationError,
 )
 from centermanager.ui.design_system.feedback import ConfirmationDialog, FeedbackController
 from centermanager.ui.design_system.form_detail import EditStateBanner
@@ -41,6 +46,12 @@ class EnrollmentWidget(QWidget):
         super().__init__(parent)
         self._enrollment_service = enrollment_service
         self._transfer_service = EnrollmentTransferService.from_enrollment_service(enrollment_service)
+        self._adjustment_service = TuitionAdjustmentService(
+            enrollment_service._session_factory,
+            repository_provider=enrollment_service._repository_provider,
+            audit_service=enrollment_service._audit_service,
+            event_bus=getattr(enrollment_service, "_event_bus", None),
+        )
         self._class_service = class_service
         self._collaboration_manager = collaboration_manager
         self._feedback = feedback_controller or FeedbackController(self)
@@ -243,6 +254,12 @@ class EnrollmentWidget(QWidget):
             transfer_btn = Button("Transfer class", variant=ButtonVariant.SECONDARY, parent=actions)
             transfer_btn.setEnabled(self._write_enabled and open_freeze is None)
             transfer_btn.clicked.connect(lambda _=False, item=enrollment: self._transfer(item))
+            refund_btn = Button("Refund tuition", variant=ButtonVariant.SECONDARY, parent=actions)
+            refund_btn.setEnabled(self._write_enabled)
+            refund_btn.clicked.connect(lambda _=False, item=enrollment: self._refund(item))
+            credit_btn = Button("Tuition credit", variant=ButtonVariant.SECONDARY, parent=actions)
+            credit_btn.setEnabled(self._write_enabled)
+            credit_btn.clicked.connect(lambda _=False, item=enrollment: self._credit_adjustment(item))
             freeze_btn = Button("Pause tuition", variant=ButtonVariant.SECONDARY, parent=actions)
             freeze_btn.setEnabled(self._write_enabled and open_freeze is None)
             freeze_btn.clicked.connect(lambda _=False, item=enrollment: self._freeze(item))
@@ -256,6 +273,8 @@ class EnrollmentWidget(QWidget):
             withdraw.setEnabled(self._write_enabled and open_freeze is None)
             withdraw.clicked.connect(lambda _=False, eid=enrollment.id: self._transition(eid, "withdraw"))
             actions_layout.addWidget(transfer_btn)
+            actions_layout.addWidget(refund_btn)
+            actions_layout.addWidget(credit_btn)
             actions_layout.addWidget(freeze_btn)
             actions_layout.addWidget(resume_btn)
             actions_layout.addWidget(complete)
@@ -314,6 +333,72 @@ class EnrollmentWidget(QWidget):
             self._feedback.warning(str(exc), title="Transfer unavailable", key="student-enrollment")
         except Exception as exc:
             self._feedback.system_error(exc, message="The enrollment could not be transferred.", key="student-enrollment")
+
+    def _refund(self, enrollment) -> None:
+        if not self._require_write():
+            return
+        try:
+            preview = self._adjustment_service.preview(enrollment.id)
+            available = float(preview["refundable_amount"])
+        except TuitionAdjustmentValidationError as exc:
+            self._feedback.warning(str(exc), title="Refund unavailable", key="student-enrollment")
+            return
+        if available <= 0:
+            self._feedback.info("This enrollment has no refundable tuition balance.", key="student-enrollment")
+            return
+        amount, ok = QInputDialog.getDouble(
+            self, "Refund tuition", f"Refund amount (available {available:,.0f}):",
+            available, 0.01, available, 2,
+        )
+        if not ok:
+            return
+        wallet, ok = QInputDialog.getItem(self, "Refund tuition", "Refund from wallet:", ["CASH", "BANK"], 0, False)
+        if not ok:
+            return
+        reason, ok = QInputDialog.getMultiLineText(self, "Refund tuition", "Refund reason:")
+        if not ok:
+            return
+        try:
+            self._adjustment_service.refund(
+                enrollment.id,
+                amount,
+                str(wallet),
+                get_clock().today(),
+                reason=reason,
+                idempotency_key=f"ui-refund-{uuid4()}",
+            )
+            self.enrollment_changed.emit()
+            self._feedback.success("Tuition refund recorded", key="student-enrollment")
+        except TuitionAdjustmentValidationError as exc:
+            self._feedback.warning(str(exc), title="Refund unavailable", key="student-enrollment")
+        except Exception as exc:
+            self._feedback.system_error(exc, message="The tuition refund could not be recorded.", key="student-enrollment")
+
+    def _credit_adjustment(self, enrollment) -> None:
+        if not self._require_write():
+            return
+        amount, ok = QInputDialog.getDouble(
+            self, "Tuition credit", "Non-cash credit amount:", 0.0, 0.01, 999999999.0, 2,
+        )
+        if not ok:
+            return
+        reason, ok = QInputDialog.getMultiLineText(self, "Tuition credit", "Credit reason:")
+        if not ok:
+            return
+        try:
+            self._adjustment_service.credit_adjustment(
+                enrollment.id,
+                amount,
+                get_clock().today(),
+                reason=reason,
+                idempotency_key=f"ui-credit-{uuid4()}",
+            )
+            self.enrollment_changed.emit()
+            self._feedback.success("Tuition credit recorded", key="student-enrollment")
+        except TuitionAdjustmentValidationError as exc:
+            self._feedback.warning(str(exc), title="Tuition credit unavailable", key="student-enrollment")
+        except Exception as exc:
+            self._feedback.system_error(exc, message="The tuition credit could not be recorded.", key="student-enrollment")
 
     def _freeze(self, enrollment) -> None:
         if not self._require_write():
