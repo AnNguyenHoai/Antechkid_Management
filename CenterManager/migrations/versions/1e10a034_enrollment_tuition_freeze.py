@@ -4,7 +4,7 @@ Revision ID: 1e10a034
 Revises: 1e10a033
 
 Freeze history is session-range based and intentionally independent from
-FinancePeriod. No historical freeze is inferred during migration.
+accounting periods. No historical freeze is inferred during migration.
 """
 from alembic import op
 import sqlalchemy as sa
