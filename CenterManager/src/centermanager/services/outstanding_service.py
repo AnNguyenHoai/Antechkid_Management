@@ -3,7 +3,7 @@
 
 Outstanding is derived in real time as Enrollment tuition accrual minus ACTIVE
 Tuition payments attributed to that same Enrollment. FinancePeriod is retained
-only as optional reporting/filter context and never creates tuition obligation.
+only as an optional reporting/filter context and never creates tuition obligation.
 """
 from __future__ import annotations
 
