@@ -65,12 +65,19 @@ This inventory is the committed architecture classification for application serv
 | `teacher_timeline_service.py` | PASS | repository-owned | — |
 | `timeline_service.py` | PASS | repository-owned | — |
 | `tuition_accrual_service.py` | PASS | repository-owned | — |
+| `tuition_adjustment_service.py` | PASS | repository-owned adjustment/Income orchestration | — |
 | `tuition_detail_service.py` | PASS | repository-owned read model | — |
 | `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
 
 ## TUITION-13 Enrollment Transfer
 
 `enrollment_transfer_service.py` — **EnrollmentTransferService** is provider-backed and classified as `PASS`. It coordinates source/target Enrollment contracts, transfer-ledger persistence, tuition settlement reads and audit recording through `RepositoryProvider`; repositories own database query/persistence operations while transfer validation and transaction completion remain service-owned.
+
+## TUITION-16 Tuition Adjustment Ledger
+
+`tuition_adjustment_service.py` — **TuitionAdjustmentService** is provider-backed and classified as `PASS`. It coordinates first-class refund/credit adjustment policy, transaction completion, audit and event publication through `RepositoryProvider.tuition_adjustments/incomes/enrollments/finance_periods/sessions`. SQLAlchemy query and persistence behavior, including row-lock acquisition and aggregate reads, remains repository-owned. Accounting-date mutability is crossed only through `FinanceLedgerGuard`.
+
+`tuition_refund.py` is a compatibility adapter, not an additional persistence boundary: legacy callers delegate to `TuitionAdjustmentService`, preventing a second refund path that could bypass the adjustment ledger.
 
 ## EP-FIN-04 Financial Settlement
 
