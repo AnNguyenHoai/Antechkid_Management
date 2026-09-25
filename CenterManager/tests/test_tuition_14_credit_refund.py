@@ -60,7 +60,7 @@ def test_refund_implementation_is_append_only_and_projects_to_tuition_and_wallet
     # Existing tuition settlement and Wallet V2 consume the same immutable row.
     assert "sum_active_tuition_for_enrollment(" in source
     assert "canonical_wallet_value" in source
-    assert "finance_period_start=finance_period_start" in source
+    assert "finance_period_start=accounting_period_start" in source
 
     # Historical payment is only read/validated, never edited or voided.
     assert "origin = incomes.get_by_id(origin_income_id)" in source
@@ -79,8 +79,9 @@ def test_refund_guards_amount_prepaid_period_and_audit_contracts():
     assert "prepaid_only" in source
     assert "exceeds available prepaid credit" in source
     assert "TuitionAccrualService.calculate_from_records" in source
-    assert "FinanceLedgerGuard.ensure_period_start_mutable" in source
-    assert "FinancePeriodClosedError" in source
+    assert "FinanceLedgerGuard.ensure_date_mutable" in source
+    assert "models.finance_period" not in source
+    assert "FinancePeriod" not in source
     assert 'action="TUITION_REFUND"' in source
     assert 'module="tuition"' in source
     assert "Refund reason is required" in source
