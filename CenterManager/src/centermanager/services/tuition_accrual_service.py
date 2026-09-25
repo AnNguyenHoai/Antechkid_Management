@@ -172,12 +172,14 @@ class TuitionAccrualService:
                 )
             sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
             attendance_by_session_id = {}
+            student_id = getattr(enrollment, "student_id", None)
             attendance_factory = getattr(self._repository_provider, "attendances", None)
-            if callable(attendance_factory):
-                attendance_rows = attendance_factory(session).get_by_student(
-                    enrollment.student_id
-                )
-                attendance_by_session_id = self._attendance_map(attendance_rows)
+            if student_id is not None and callable(attendance_factory):
+                attendance_repo = attendance_factory(session)
+                get_by_student = getattr(attendance_repo, "get_by_student", None)
+                if callable(get_by_student):
+                    attendance_rows = get_by_student(student_id)
+                    attendance_by_session_id = self._attendance_map(attendance_rows)
             return self.calculate_from_records(
                 enrollment,
                 sessions,
