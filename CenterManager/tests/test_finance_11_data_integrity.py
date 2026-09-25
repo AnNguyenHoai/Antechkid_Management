@@ -1,7 +1,14 @@
+from pathlib import Path
+
 from centermanager.dto.outstanding_dto import (
     OutstandingDTO,
     OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTSTANDING_SERVICE = ROOT / "src" / "centermanager" / "services" / "outstanding_service.py"
+INCOME_REPOSITORY = ROOT / "src" / "centermanager" / "repositories" / "income_repository.py"
 
 
 def test_missing_tuition_configuration_is_explicit():
@@ -16,28 +23,27 @@ def test_missing_tuition_configuration_is_explicit():
 
 
 def test_non_tuition_income_is_not_tuition_contract():
-    from pathlib import Path
-    source = Path("src/centermanager/services/outstanding_service.py").read_text(encoding="utf-8")
-    assert 'TUITION_INCOME_TYPE = "Tuition"' in source
-    assert 'income_type=self.TUITION_INCOME_TYPE' in source
+    outstanding_source = OUTSTANDING_SERVICE.read_text(encoding="utf-8")
+    income_source = INCOME_REPOSITORY.read_text(encoding="utf-8")
+    assert "sum_active_tuition_for_enrollment" in outstanding_source
+    assert 'Income.income_type == "Tuition"' in income_source
+    assert "Income.enrollment_id == enrollment_id" in income_source
 
 
 def test_missing_fee_is_not_silently_skipped():
-    from pathlib import Path
-    source = Path("src/centermanager/services/outstanding_service.py").read_text(encoding="utf-8")
-    assert 'OUTSTANDING_STATUS_NO_TUITION_CONFIGURED' in source
-    assert 'tuition_configured=configured' in source
-    assert 'skip' not in source.lower() or 'skipped' not in source.lower()
+    source = OUTSTANDING_SERVICE.read_text(encoding="utf-8")
+    assert "OUTSTANDING_STATUS_NO_TUITION_CONFIGURED" in source
+    assert "tuition_configured=configured" in source
+    assert "TuitionAccrualUnresolvedError" in source
 
 
 def test_summary_excludes_unconfigured_fee_from_debt_math():
-    from pathlib import Path
-    source = Path("src/centermanager/services/outstanding_service.py").read_text(encoding="utf-8")
-    assert 'if dto.tuition_configured:' in source
-    assert 'has_unconfigured_tuition = True' in source
+    source = OUTSTANDING_SERVICE.read_text(encoding="utf-8")
+    assert "if dto.tuition_configured:" in source
+    assert "has_unconfigured_tuition = True" in source
+    assert "total_paid += self._amount(dto.paid)" in source
 
 
 def test_outstanding_list_can_filter_configuration_problem():
-    from pathlib import Path
-    source = Path("src/centermanager/ui/finance_workspace/outstanding_list_page.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "outstanding_list_page.py").read_text(encoding="utf-8")
     assert '"No Tuition Configured"' in source
