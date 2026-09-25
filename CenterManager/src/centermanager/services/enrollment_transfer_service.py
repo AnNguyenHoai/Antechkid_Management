@@ -59,6 +59,15 @@ class EnrollmentTransferService:
         return resolved
 
     @staticmethod
+    def _idempotency_key(source_enrollment_id: int, value: Optional[str]) -> str:
+        key = (value or f"source-enrollment:{source_enrollment_id}").strip()
+        if not key:
+            raise EnrollmentTransferValidationError("Transfer idempotency key is required.")
+        if len(key) > 120:
+            raise EnrollmentTransferValidationError("Transfer idempotency key is too long.")
+        return key
+
+    @staticmethod
     def _target_start_session(class_obj, sessions) -> int:
         if not class_obj.has_course_contract:
             raise EnrollmentTransferValidationError("Target class tuition contract is incomplete.")
@@ -87,6 +96,92 @@ class EnrollmentTransferService:
             "enrolled_until_session": planned_total,
             "discount_amount": Decimal("0.0000"),
         }
+
+    @staticmethod
+    def _same_command(
+        existing: EnrollmentTransfer,
+        *,
+        source_enrollment_id: int,
+        target_class_id: int,
+        transferred_credit: Decimal,
+        reason: str,
+        idempotency_key: str,
+    ) -> bool:
+        target = getattr(existing, "target_enrollment", None)
+        return (
+            int(existing.source_enrollment_id) == int(source_enrollment_id)
+            and target is not None
+            and int(target.class_id) == int(target_class_id)
+            and _money(existing.transferred_credit) == transferred_credit
+            and existing.reason == reason
+            and existing.idempotency_key == idempotency_key
+        )
+
+    def _existing_or_conflict(
+        self,
+        transfer_repo,
+        *,
+        source_enrollment_id: int,
+        target_class_id: int,
+        transferred_credit: Decimal,
+        reason: str,
+        idempotency_key: str,
+    ) -> Optional[EnrollmentTransfer]:
+        command = {
+            "source_enrollment_id": source_enrollment_id,
+            "target_class_id": target_class_id,
+            "transferred_credit": transferred_credit,
+            "reason": reason,
+            "idempotency_key": idempotency_key,
+        }
+        keyed = transfer_repo.get_by_idempotency_key(idempotency_key)
+        if keyed is not None:
+            if self._same_command(keyed, **command):
+                return keyed
+            raise EnrollmentTransferValidationError(
+                "Transfer idempotency key is already used by a different command."
+            )
+        existing = transfer_repo.get_for_source(source_enrollment_id)
+        if existing is not None:
+            if self._same_command(existing, **command):
+                return existing
+            raise EnrollmentTransferValidationError(
+                "Source Enrollment has already completed a different transfer."
+            )
+        return None
+
+    def _recover_conflict(
+        self,
+        *,
+        source_enrollment_id: int,
+        target_class_id: int,
+        transferred_credit: Decimal,
+        reason: str,
+        idempotency_key: str,
+    ) -> EnrollmentTransfer:
+        with self._session_factory() as replay_session:
+            transfer_repo = self._repository_provider.enrollment_transfers(replay_session)
+            existing = self._existing_or_conflict(
+                transfer_repo,
+                source_enrollment_id=source_enrollment_id,
+                target_class_id=target_class_id,
+                transferred_credit=transferred_credit,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+            if existing is not None:
+                return existing
+            enrollments = self._repository_provider.enrollments(replay_session)
+            source = enrollments.get_by_id(source_enrollment_id)
+            if source is not None and enrollments.exists(
+                source.student_id, target_class_id, active_only=True
+            ):
+                raise EnrollmentTransferValidationError(
+                    "Student already has an active Enrollment in target class."
+                )
+        raise EnrollmentTransferValidationError(
+            "Concurrent Enrollment transfer conflict; retry with the same idempotency key."
+        )
 
     def _source_balance(self, session, enrollment: Enrollment) -> Decimal:
         if enrollment.class_id is None or not enrollment.has_tuition_contract:
@@ -123,8 +218,10 @@ class EnrollmentTransferService:
             }
 
     def transfer(self, source_enrollment_id: int, target_class_id: int, *,
-                 transferred_credit=0, reason: str, actor=None) -> EnrollmentTransfer:
+                 transferred_credit=0, reason: str, actor=None,
+                 idempotency_key: Optional[str] = None) -> EnrollmentTransfer:
         resolved_reason = self._require_reason(reason)
+        resolved_key = self._idempotency_key(source_enrollment_id, idempotency_key)
         resolved_actor = actor if actor is not None else get_current_user()
         if resolved_actor is not None:
             AuthorizationService.require(resolved_actor, Capability.STUDENT_UPDATE)
@@ -134,7 +231,22 @@ class EnrollmentTransferService:
 
         with self._session_factory() as session:
             enrollments = self._repository_provider.enrollments(session)
-            source = enrollments.get_by_id(source_enrollment_id)
+            transfer_repo = self._repository_provider.enrollment_transfers(session)
+            source, target_class = transfer_repo.acquire_command_lock(
+                source_enrollment_id, target_class_id
+            )
+
+            existing = self._existing_or_conflict(
+                transfer_repo,
+                source_enrollment_id=source_enrollment_id,
+                target_class_id=target_class_id,
+                transferred_credit=credit,
+                reason=resolved_reason,
+                idempotency_key=resolved_key,
+            )
+            if existing is not None:
+                return existing
+
             if source is None:
                 raise EnrollmentTransferValidationError("Source Enrollment not found.")
             if source.status != "ACTIVE":
@@ -147,11 +259,14 @@ class EnrollmentTransferService:
             if enrollments.exists(source.student_id, target_class_id, active_only=True):
                 raise EnrollmentTransferValidationError("Student already has an active Enrollment in target class.")
 
-            target_class = self._repository_provider.classes(session).get_by_id(target_class_id)
             if target_class is None or target_class.deleted_at is not None:
                 raise EnrollmentTransferValidationError("Target class not found or archived.")
-            if target_class.capacity is not None and len(enrollments.get_active_by_class(target_class_id)) >= target_class.capacity:
-                raise EnrollmentTransferValidationError(f"Target class capacity ({target_class.capacity}) reached.")
+            if target_class.capacity is not None and len(
+                enrollments.get_active_by_class(target_class_id)
+            ) >= target_class.capacity:
+                raise EnrollmentTransferValidationError(
+                    f"Target class capacity ({target_class.capacity}) reached."
+                )
 
             target_sessions = self._repository_provider.sessions(session).get_by_class(target_class_id)
             target_start = self._target_start_session(target_class, target_sessions)
@@ -174,14 +289,21 @@ class EnrollmentTransferService:
                 **target_contract,
             )
             enrollments.add(target)
-            enrollments.flush()
+            if not transfer_repo.flush_guarded():
+                return self._recover_conflict(
+                    source_enrollment_id=source_enrollment_id,
+                    target_class_id=target_class_id,
+                    transferred_credit=credit,
+                    reason=resolved_reason,
+                    idempotency_key=resolved_key,
+                )
 
             source.status = "WITHDRAWN"
             source.end_date = today
-            transfer_repo = self._repository_provider.enrollment_transfers(session)
             transfer = EnrollmentTransfer(
                 source_enrollment_id=int(source.id),
                 target_enrollment_id=int(target.id),
+                idempotency_key=resolved_key,
                 transferred_credit=credit,
                 source_balance_before=source_balance,
                 reason=resolved_reason,
@@ -189,7 +311,14 @@ class EnrollmentTransferService:
                 created_by=getattr(resolved_actor, "username", None),
             )
             transfer_repo.add(transfer)
-            transfer_repo.flush()
+            if not transfer_repo.flush_guarded():
+                return self._recover_conflict(
+                    source_enrollment_id=source_enrollment_id,
+                    target_class_id=target_class_id,
+                    transferred_credit=credit,
+                    reason=resolved_reason,
+                    idempotency_key=resolved_key,
+                )
             self._audit_service.record_in_session(
                 session,
                 action="TUITION_ENROLLMENT_TRANSFER",
@@ -207,6 +336,7 @@ class EnrollmentTransferService:
                     "source_balance_before": str(source_balance),
                     "transferred_credit": str(credit),
                     "target_unit_fee": str(target.unit_fee),
+                    "idempotency_key": resolved_key,
                     "reason": resolved_reason,
                 },
                 summary=f"Enrollment transfer from {source.class_name} to {target_class.name}",
