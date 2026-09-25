@@ -22,78 +22,66 @@ def test_refund_reason_is_required_and_trimmed():
     assert TuitionRefundService._reason("  Parent request  ") == "Parent request"
 
 
-def test_preview_returns_current_refundable_settlement_without_mutation():
-    enrollment = MagicMock(id=11)
-    enrollment_repo = MagicMock()
-    enrollment_repo.get_by_id.return_value = enrollment
-    income_repo = MagicMock()
-    income_repo.sum_active_tuition_for_enrollment.return_value = Decimal("1250000")
-    provider = MagicMock()
-    provider.enrollments.return_value = enrollment_repo
-    provider.incomes.return_value = income_repo
-    session = MagicMock()
-    session_factory = MagicMock()
-    session_factory.return_value.__enter__.return_value = session
+def test_refund_adapter_delegates_preview_without_mutation():
+    service = TuitionRefundService.__new__(TuitionRefundService)
+    service._adjustments = MagicMock()
+    service._adjustments.preview.return_value = {
+        "enrollment_id": 11,
+        "refundable_amount": Decimal("1250000.00"),
+    }
 
-    service = TuitionRefundService(
-        session_factory,
-        repository_provider=provider,
-        audit_service=MagicMock(),
-    )
     result = service.preview(11)
 
     assert result["refundable_amount"] == Decimal("1250000.00")
-    enrollment_repo.get_by_id.assert_called_once_with(11)
-    income_repo.sum_active_tuition_for_enrollment.assert_called_once()
+    service._adjustments.preview.assert_called_once_with(11, as_of_date=None)
 
 
-def test_refund_implementation_is_append_only_and_projects_to_tuition_and_wallet():
+def test_refund_compatibility_adapter_cannot_bypass_adjustment_ledger():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "src/centermanager/services/tuition_refund.py").read_text(encoding="utf-8")
+    adapter = (root / "src/centermanager/services/tuition_refund.py").read_text(encoding="utf-8")
+    implementation = (root / "src/centermanager/services/tuition_adjustment_service.py").read_text(encoding="utf-8")
 
-    # Dedicated workflow: normal IncomeService never creates negative amounts.
-    assert 'REFUND_MARKER = "tuition_refund=true"' in source
-    assert 'amount=-float(value)' in source
-    assert 'income_type=self.REFUND_TYPE' in source
-    assert 'payment_period="REFUND"' in source
+    assert "TuitionAdjustmentService(" in adapter
+    assert "self._adjustments.refund(" in adapter
+    assert "linked_income_id" in adapter
+    assert "Income(" not in adapter
 
-    # Existing tuition settlement and Wallet V2 consume the same immutable row.
-    assert "sum_active_tuition_for_enrollment(" in source
-    assert "canonical_wallet_value" in source
-    assert "finance_period_start=accounting_period_start" in source
-
-    # Historical payment is only read/validated, never edited or voided.
-    assert "origin = incomes.get_by_id(origin_income_id)" in source
-    assert "origin_income_id" in source
-    assert "origin.amount =" not in source
-    assert "origin.status =" not in source
-    assert "void_reason" not in source
+    assert "amount=-float(value)" in implementation
+    assert 'income_type="Tuition"' in implementation
+    assert 'payment_period="REFUND"' in implementation
+    assert "sum_active_tuition_for_enrollment(" in implementation
+    assert "FinanceLedgerGuard.ensure_date_mutable" in implementation
+    assert "models.finance_period" not in implementation
+    assert "FinancePeriod" not in implementation
 
 
-def test_refund_guards_amount_prepaid_period_and_audit_contracts():
+def test_refund_guards_origin_prepaid_period_audit_and_idempotency_contracts():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "src/centermanager/services/tuition_refund.py").read_text(encoding="utf-8")
+    source = (root / "src/centermanager/services/tuition_adjustment_service.py").read_text(encoding="utf-8")
 
-    assert "Refund amount must be greater than 0" in source
+    assert "Adjustment amount must be greater than 0" in source
     assert "exceeds refundable tuition" in source
     assert "prepaid_only" in source
     assert "exceeds available prepaid credit" in source
     assert "TuitionAccrualService.calculate_from_records" in source
     assert "FinanceLedgerGuard.ensure_date_mutable" in source
-    assert "models.finance_period" not in source
-    assert "FinancePeriod" not in source
     assert 'action="TUITION_REFUND"' in source
     assert 'module="tuition"' in source
-    assert "Refund reason is required" in source
+    assert "Adjustment reason is required" in source
     assert '@require_permission("finance.income.create")' in source
+    assert "Idempotency key is required" in source
+    assert "get_by_idempotency_key" in source
 
 
-def test_origin_payment_must_be_positive_active_tuition_for_same_enrollment():
+def test_origin_payment_is_structurally_linked_and_capped():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "src/centermanager/services/tuition_refund.py").read_text(encoding="utf-8")
+    source = (root / "src/centermanager/services/tuition_adjustment_service.py").read_text(encoding="utf-8")
 
     assert 'origin.income_type != "Tuition"' in source
     assert "origin.status != Income.STATUS_ACTIVE" in source
     assert "float(origin.amount) <= 0" in source
     assert "origin.enrollment_id != enrollment_id" in source
-    assert "Origin payment belongs to a different Enrollment" in source
+    assert "sum_refunds_for_origin(origin_income_id)" in source
+    assert "exceeds origin remaining refundable" in source
+    assert "origin_income_id=origin_income_id" in source
+    assert "linked_income_id=income.id" in source
