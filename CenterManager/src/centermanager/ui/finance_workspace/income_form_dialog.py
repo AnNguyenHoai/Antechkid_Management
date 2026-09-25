@@ -22,10 +22,7 @@ from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.class_service import ClassService
-from centermanager.services.income_service import (
-    IncomeService,
-    IncomeValidationError,
-)
+from centermanager.services.income_service import IncomeService, IncomeValidationError
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 
@@ -51,7 +48,7 @@ class IncomeFormDialog(QDialog):
         self._initial_payment_date = initial_payment_date or get_clock().today()
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
-        self.setMinimumWidth(550)
+        self.setMinimumWidth(620)
         self.setModal(True)
 
         self._setup_ui()
@@ -64,9 +61,8 @@ class IncomeFormDialog(QDialog):
 
         form = QFormLayout()
         form.setSpacing(8)
-        form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self._form = form
 
         self.source_combo = QComboBox()
         self.source_combo.addItems(["Từ học sinh", "Nguồn khác"])
@@ -75,16 +71,23 @@ class IncomeFormDialog(QDialog):
 
         self.student_combo = QComboBox()
         self._load_students()
+        self.student_combo.currentIndexChanged.connect(self._reload_enrollments)
         form.addRow("Học sinh *", self.student_combo)
 
         self.class_combo = QComboBox()
         self._load_classes()
+        self.class_combo.currentIndexChanged.connect(self._reload_enrollments)
         form.addRow("Lớp học *", self.class_combo)
 
-        self.other_source_edit = QLineEdit()
-        self.other_source_edit.setPlaceholderText(
-            "Ví dụ: Tiền quyên góp, Lãi ngân hàng..."
+        self.enrollment_combo = QComboBox()
+        self.enrollment_combo.setToolTip(
+            "Hợp đồng Enrollment mà khoản học phí này thanh toán. "
+            "Ngày thu chỉ quyết định kỳ kế toán, không quyết định Enrollment."
         )
+        form.addRow("Enrollment học phí *", self.enrollment_combo)
+
+        self.other_source_edit = QLineEdit()
+        self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng...")
         self.other_source_edit.setVisible(False)
         form.addRow("Mô tả nguồn khác", self.other_source_edit)
 
@@ -147,6 +150,13 @@ class IncomeFormDialog(QDialog):
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
         self._on_source_changed(0)
+        self._reload_enrollments()
+
+    def _set_enrollment_visible(self, visible: bool) -> None:
+        self.enrollment_combo.setVisible(visible)
+        label = self._form.labelForField(self.enrollment_combo)
+        if label is not None:
+            label.setVisible(visible)
 
     def _on_source_changed(self, index: int) -> None:
         is_student = index == 0
@@ -154,25 +164,24 @@ class IncomeFormDialog(QDialog):
         self.class_combo.setVisible(is_student)
         self.other_source_edit.setVisible(not is_student)
 
-        if self._is_edit:
-            return
-        if is_student:
-            self.type_combo.setEnabled(True)
-            if self.type_combo.currentText() == "Other":
-                self.type_combo.setCurrentText("Tuition")
-        else:
-            self.type_combo.setCurrentText("Other")
-            self.type_combo.setEnabled(False)
+        if not self._is_edit:
+            if is_student:
+                self.type_combo.setEnabled(True)
+                if self.type_combo.currentText() == "Other":
+                    self.type_combo.setCurrentText("Tuition")
+            else:
+                self.type_combo.setCurrentText("Other")
+                self.type_combo.setEnabled(False)
+        self._reload_enrollments()
 
     def _on_income_type_changed(self, income_type: str) -> None:
-        """Keep the source selector consistent with Income ownership rules."""
-        if self._is_edit:
-            return
-        if income_type == "Other":
-            if self.source_combo.currentIndex() != 1:
-                self.source_combo.setCurrentIndex(1)
-        elif self.source_combo.currentIndex() != 0:
-            self.source_combo.setCurrentIndex(0)
+        if not self._is_edit:
+            if income_type == "Other":
+                if self.source_combo.currentIndex() != 1:
+                    self.source_combo.setCurrentIndex(1)
+            elif self.source_combo.currentIndex() != 0:
+                self.source_combo.setCurrentIndex(0)
+        self._reload_enrollments()
 
     def _load_students(self) -> None:
         try:
@@ -180,8 +189,7 @@ class IncomeFormDialog(QDialog):
             self.student_combo.clear()
             for student in students:
                 self.student_combo.addItem(
-                    f"{student.full_name} ({student.student_code})",
-                    student.id,
+                    f"{student.full_name} ({student.student_code})", student.id
                 )
         except Exception:
             logger.exception("Error loading students")
@@ -195,10 +203,57 @@ class IncomeFormDialog(QDialog):
         except Exception:
             logger.exception("Error loading classes")
 
+    @staticmethod
+    def _enrollment_label(enrollment) -> str:
+        start = enrollment.start_date.strftime("%d/%m/%Y") if enrollment.start_date else "?"
+        end = enrollment.end_date.strftime("%d/%m/%Y") if enrollment.end_date else "đang học"
+        session_range = ""
+        if enrollment.enrolled_from_session is not None:
+            session_range = f" | buổi {enrollment.enrolled_from_session}"
+            if enrollment.enrolled_until_session is not None:
+                session_range += f"–{enrollment.enrolled_until_session}"
+        return f"#{enrollment.id} | {enrollment.status} | {start} → {end}{session_range}"
+
+    def _reload_enrollments(self, *_args) -> None:
+        is_tuition = (
+            self.source_combo.currentIndex() == 0
+            and self.type_combo.currentText() == "Tuition"
+        )
+        self._set_enrollment_visible(is_tuition)
+        if not is_tuition:
+            self.enrollment_combo.clear()
+            return
+
+        student_id = self.student_combo.currentData()
+        class_id = self.class_combo.currentData()
+        self.enrollment_combo.clear()
+        if not student_id or not class_id:
+            self.enrollment_combo.addItem("Chọn học sinh và lớp trước", None)
+            return
+        try:
+            enrollments = self._income_service.list_tuition_enrollments(
+                int(student_id), int(class_id)
+            )
+            if not enrollments:
+                self.enrollment_combo.addItem("Không có Enrollment phù hợp", None)
+                return
+            if len(enrollments) > 1:
+                self.enrollment_combo.addItem("— Chọn đúng Enrollment —", None)
+            for enrollment in enrollments:
+                self.enrollment_combo.addItem(
+                    self._enrollment_label(enrollment), enrollment.id
+                )
+            if len(enrollments) == 1:
+                self.enrollment_combo.setCurrentIndex(0)
+        except Exception:
+            logger.exception("Error loading Tuition enrollment choices")
+            self.enrollment_combo.addItem("Không thể tải Enrollment", None)
+
     def _lock_identity_fields(self) -> None:
         self.source_combo.setEnabled(False)
         self.student_combo.setEnabled(False)
         self.class_combo.setEnabled(False)
+        self.enrollment_combo.setEnabled(False)
         self.type_combo.setEnabled(False)
         self.other_source_edit.setEnabled(False)
 
@@ -220,33 +275,37 @@ class IncomeFormDialog(QDialog):
             type_index = self.type_combo.findText(income.income_type)
             if type_index >= 0:
                 self.type_combo.setCurrentIndex(type_index)
-            self.amount_spin.setValue(income.amount)
+            self._reload_enrollments()
+            if income.income_type == "Tuition":
+                if income.enrollment_id is not None:
+                    enrollment_index = self.enrollment_combo.findData(income.enrollment_id)
+                    if enrollment_index >= 0:
+                        self.enrollment_combo.setCurrentIndex(enrollment_index)
+                else:
+                    self.enrollment_combo.insertItem(
+                        0, "Legacy — chưa đối soát Enrollment", None
+                    )
+                    self.enrollment_combo.setCurrentIndex(0)
 
+            self.amount_spin.setValue(income.amount)
             try:
                 wallet = resolve_wallet(income.payment_method).value
                 method_index = self.method_combo.findData(wallet)
             except WalletMappingError:
                 self.method_combo.addItem(
-                    f"Legacy value requires selection: {income.payment_method}",
-                    None,
+                    f"Legacy value requires selection: {income.payment_method}", None
                 )
                 method_index = self.method_combo.count() - 1
             if method_index >= 0:
                 self.method_combo.setCurrentIndex(method_index)
 
             self.date_edit.setDate(
-                QDate(
-                    income.payment_date.year,
-                    income.payment_date.month,
-                    income.payment_date.day,
-                )
+                QDate(income.payment_date.year, income.payment_date.month, income.payment_date.day)
             )
             if income.payment_period:
                 period_index = self.period_combo.findData(income.payment_period)
                 if period_index < 0:
-                    self.period_combo.addItem(
-                        income.payment_period, income.payment_period
-                    )
+                    self.period_combo.addItem(income.payment_period, income.payment_period)
                     period_index = self.period_combo.count() - 1
                 self.period_combo.setCurrentIndex(period_index)
 
@@ -256,11 +315,7 @@ class IncomeFormDialog(QDialog):
             self._lock_identity_fields()
         except Exception as exc:
             logger.exception("Error loading income %s for edit", self._income_id)
-            QMessageBox.critical(
-                self,
-                "Lỗi",
-                f"Không thể tải dữ liệu thu nhập: {exc}",
-            )
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải dữ liệu thu nhập: {exc}")
             self.reject()
 
     def _create_identity_payload(self):
@@ -269,11 +324,17 @@ class IncomeFormDialog(QDialog):
             student_id = self.student_combo.currentData()
             class_id = self.class_combo.currentData()
             if not student_id or not class_id:
-                raise IncomeValidationError(
-                    "Vui lòng chọn học sinh và lớp học."
-                )
+                raise IncomeValidationError("Vui lòng chọn học sinh và lớp học.")
+            income_type = self.type_combo.currentText()
+            enrollment_id = None
+            if income_type == "Tuition":
+                enrollment_id = self.enrollment_combo.currentData()
+                if enrollment_id is None:
+                    raise IncomeValidationError(
+                        "Vui lòng chọn đúng Enrollment cho khoản học phí."
+                    )
             note = self.note_edit.text().strip() or None
-            return student_id, class_id, self.type_combo.currentText(), note
+            return student_id, class_id, enrollment_id, income_type, note
 
         description = self.other_source_edit.text().strip()
         if not description:
@@ -282,22 +343,18 @@ class IncomeFormDialog(QDialog):
         extra_note = self.note_edit.text().strip()
         if extra_note:
             note += f" ({extra_note})"
-        return None, None, "Other", note
+        return None, None, None, "Other", note
 
     def _save(self) -> None:
         amount = self.amount_spin.value()
         if amount <= 0:
-            QMessageBox.warning(
-                self, "Lỗi", "Số tiền phải lớn hơn 0."
-            )
+            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
             return
 
         payment_method = self.method_combo.currentData()
         if payment_method is None:
             QMessageBox.warning(
-                self,
-                "Wallet required",
-                "Select CASH or BANK before saving this transaction.",
+                self, "Wallet required", "Select CASH or BANK before saving this transaction."
             )
             return
         payment_date = self.date_edit.date().toPython()
@@ -317,12 +374,13 @@ class IncomeFormDialog(QDialog):
                     note=note,
                 )
             else:
-                student_id, class_id, income_type, create_note = (
+                student_id, class_id, enrollment_id, income_type, create_note = (
                     self._create_identity_payload()
                 )
                 self._income_service.create_income(
                     student_id=student_id,
                     class_id=class_id,
+                    enrollment_id=enrollment_id,
                     amount=amount,
                     income_type=income_type,
                     payment_method=payment_method,
@@ -336,6 +394,4 @@ class IncomeFormDialog(QDialog):
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
         except Exception:
             logger.exception("Error saving income")
-            QMessageBox.critical(
-                self, "Lỗi", "Đã xảy ra lỗi không mong muốn."
-            )
+            QMessageBox.critical(self, "Lỗi", "Đã xảy ra lỗi không mong muốn.")

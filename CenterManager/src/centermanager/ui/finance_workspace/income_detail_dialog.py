@@ -47,6 +47,7 @@ class IncomeDetailDialog(QDialog):
         self.source_label = QLabel()
         self.student_label = QLabel()
         self.class_label = QLabel()
+        self.enrollment_label = QLabel()
         self.type_label = QLabel()
         self.amount_label = QLabel()
         self.method_label = QLabel()
@@ -67,6 +68,7 @@ class IncomeDetailDialog(QDialog):
         form.addRow("Nguồn thu:", self.source_label)
         form.addRow("Học sinh:", self.student_label)
         form.addRow("Lớp học:", self.class_label)
+        form.addRow("Enrollment học phí:", self.enrollment_label)
         form.addRow("Loại thu:", self.type_label)
         form.addRow("Số tiền:", self.amount_label)
         form.addRow("Hình thức:", self.method_label)
@@ -104,21 +106,24 @@ class IncomeDetailDialog(QDialog):
         try:
             income = self._service.get_income(self._income_id)
             linked = income.student_id is not None
-            self.source_label.setText(
-                "STUDENT_PAYMENT" if linked else "OTHER_INCOME"
-            )
+            self.source_label.setText("STUDENT_PAYMENT" if linked else "OTHER_INCOME")
             self.student_label.setText(
                 income.student.full_name if linked and income.student else "-"
             )
             self.class_label.setText(
                 income.class_.name if linked and income.class_ else "-"
             )
+            if income.income_type == "Tuition":
+                if income.enrollment_id is not None:
+                    self.enrollment_label.setText(f"Enrollment #{income.enrollment_id} — LINKED")
+                else:
+                    self.enrollment_label.setText("Chưa đối soát — UNRESOLVED_LEGACY")
+            else:
+                self.enrollment_label.setText("-")
             self.type_label.setText(income.income_type)
             self.amount_label.setText(f"{income.amount:,.0f} VND")
             self.method_label.setText(income.payment_method)
-            self.date_label.setText(
-                income.payment_date.strftime("%d/%m/%Y")
-            )
+            self.date_label.setText(income.payment_date.strftime("%d/%m/%Y"))
             self.payment_period_label.setText(income.payment_period or "-")
             self.finance_period_label.setText(
                 income.finance_period_start.strftime("%d/%m/%Y")
@@ -136,9 +141,7 @@ class IncomeDetailDialog(QDialog):
             )
 
             is_voided = income.status == Income.STATUS_VOIDED
-            self.voided_at_label.setText(
-                self._format_datetime(income.voided_at)
-            )
+            self.voided_at_label.setText(self._format_datetime(income.voided_at))
             self.voided_by_label.setText(income.voided_by or "-")
             self.void_reason_label.setText(income.void_reason or "-")
             for widget in (
@@ -147,11 +150,7 @@ class IncomeDetailDialog(QDialog):
                 self.void_reason_label,
             ):
                 widget.setVisible(is_voided)
-            # QFormLayout labels remain visible; keep explicit "-" values when active
-            # so the dialog is deterministic even across Qt versions.
         except Exception:
             logger.exception("Error loading income detail")
-            QMessageBox.critical(
-                self, "Lỗi", "Không thể tải dữ liệu thu nhập."
-            )
+            QMessageBox.critical(self, "Lỗi", "Không thể tải dữ liệu thu nhập.")
             self.reject()
