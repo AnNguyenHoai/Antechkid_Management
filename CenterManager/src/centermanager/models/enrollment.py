@@ -40,9 +40,17 @@ class Enrollment(Base, TimestampMixin):
     unit_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4), nullable=True)
     enrolled_from_session: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     enrolled_until_session: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Canonical effective amount consumed by accrual.  Rule metadata below is
+    # immutable provenance for the Enrollment contract; historical rows may
+    # legitimately have only discount_amount populated.
     discount_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
+    discount_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    discount_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4), nullable=True)
+    discount_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    discount_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    discount_policy_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     billing_policy_version: Mapped[str] = mapped_column(
         String(40), nullable=False, default="attendance_v1"
     )
