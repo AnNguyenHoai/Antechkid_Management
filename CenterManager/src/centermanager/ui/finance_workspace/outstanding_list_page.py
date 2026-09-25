@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from centermanager.core.clock import get_clock
 from centermanager.dto.outstanding_dto import (
     BALANCE_STATE_NO_TUITION_CONFIGURED,
     BALANCE_STATE_OWED,
@@ -27,8 +28,10 @@ from centermanager.dto.outstanding_dto import (
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 from centermanager.services.outstanding_service import OutstandingService
+from centermanager.services.tuition_detail_service import TuitionDetailService
 from centermanager.ui.design_system import SearchBar, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
+from centermanager.ui.finance_workspace.tuition_detail_dialog import TuitionDetailDialog
 from centermanager.ui.shared import DataTable, LoadingWidget
 
 logger = logging.getLogger(__name__)
@@ -47,10 +50,13 @@ class OutstandingListPage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._service = outstanding_service
+        self._detail_service = TuitionDetailService.from_outstanding_service(
+            outstanding_service
+        )
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._items: List[OutstandingDTO] = []
-        self._target_date = date.today()
+        self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
         self._period_configured = None
         self._current_page = 1
@@ -152,6 +158,7 @@ class OutstandingListPage(QWidget):
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
         self.data_table = DataTable(columns, page_size=self._page_size)
+        self.data_table.setToolTip("Nhấp đúp một dòng để xem chi tiết học phí Enrollment.")
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -299,7 +306,7 @@ class OutstandingListPage(QWidget):
                     "paid": f"{item.paid:,.0f}",
                     "outstanding": outstanding,
                     "status": status,
-                    "_id": item.student_id,
+                    "_id": item.enrollment_id or item.student_id,
                 }
             )
         self.data_table.set_server_data(
@@ -346,8 +353,25 @@ class OutstandingListPage(QWidget):
         self._load_page()
 
     def _on_row_double_clicked(self, row: int) -> None:
-        if 0 <= row < len(self._items):
-            self.student_selected.emit(self._items[row].student_id)
+        if not (0 <= row < len(self._items)):
+            return
+        item = self._items[row]
+        if item.enrollment_id is None:
+            self._notify("Không xác định được Enrollment để mở chi tiết học phí.", "warning")
+            return
+        try:
+            detail = self._detail_service.get_detail(
+                item.enrollment_id,
+                as_of_date=self._target_date,
+            )
+            TuitionDetailDialog(detail, self).exec()
+        except Exception as exc:
+            logger.exception("Tuition detail drill-down failed")
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải chi tiết học phí.\n{exc}")
+            return
+        # Preserve the legacy outward selection signal after the enrollment detail
+        # closes, so existing Student navigation integrations remain compatible.
+        self.student_selected.emit(item.student_id)
 
     def _clear_filters(self) -> None:
         status_blocked = self.status_combo.blockSignals(True)
@@ -390,4 +414,4 @@ class OutstandingListPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         del enabled
-        # Outstanding is a read-only derived read model.
+        # Outstanding and Tuition Detail are read-only derived read models.
