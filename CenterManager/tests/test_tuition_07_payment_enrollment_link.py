@@ -11,7 +11,10 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.database.engine import create_engine_for_path
+from centermanager.models.class_ import Class
+from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
+from centermanager.models.student import Student
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.services.income_service import IncomeService, IncomeValidationError
 
@@ -52,11 +55,7 @@ def _service_with(enrollments):
 
 
 def _enrollment(enrollment_id, student_id=10, class_id=20):
-    return SimpleNamespace(
-        id=enrollment_id,
-        student_id=student_id,
-        class_id=class_id,
-    )
+    return SimpleNamespace(id=enrollment_id, student_id=student_id, class_id=class_id)
 
 
 def test_income_model_exposes_explicit_tuition_attribution_state():
@@ -78,7 +77,6 @@ def test_income_model_exposes_explicit_tuition_attribution_state():
 
 def test_exact_enrollment_is_validated_against_student_and_class():
     service = _service_with([_enrollment(1), _enrollment(2, student_id=99)])
-
     resolved = service._resolve_tuition_enrollment(
         object(), student_id=10, class_id=20, enrollment_id=1
     )
@@ -131,9 +129,20 @@ def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_
     SessionLocal = sessionmaker(bind=engine)
     try:
         with SessionLocal() as session:
+            student = Student(id=10, student_code="TU07", full_name="Tuition Seven")
+            class_one = Class(id=20, name="Python TU07")
+            class_two = Class(id=21, name="Scratch TU07")
+            enrollment_one = Enrollment(id=101, student_id=10, class_id=20)
+            enrollment_two = Enrollment(id=202, student_id=10, class_id=21)
+            session.add_all(
+                [student, class_one, class_two, enrollment_one, enrollment_two]
+            )
+            session.flush()
             session.add_all(
                 [
                     Income(
+                        student_id=10,
+                        class_id=20,
                         enrollment_id=101,
                         amount=300000,
                         income_type="Tuition",
@@ -142,6 +151,8 @@ def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_
                         status=Income.STATUS_ACTIVE,
                     ),
                     Income(
+                        student_id=10,
+                        class_id=20,
                         enrollment_id=101,
                         amount=200000,
                         income_type="Tuition",
@@ -150,6 +161,8 @@ def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_
                         status=Income.STATUS_ACTIVE,
                     ),
                     Income(
+                        student_id=10,
+                        class_id=20,
                         enrollment_id=101,
                         amount=900000,
                         income_type="Tuition",
@@ -158,6 +171,8 @@ def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_
                         status=Income.STATUS_VOIDED,
                     ),
                     Income(
+                        student_id=10,
+                        class_id=21,
                         enrollment_id=202,
                         amount=800000,
                         income_type="Tuition",
@@ -166,6 +181,8 @@ def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_
                         status=Income.STATUS_ACTIVE,
                     ),
                     Income(
+                        student_id=10,
+                        class_id=20,
                         enrollment_id=None,
                         amount=700000,
                         income_type="Tuition",
