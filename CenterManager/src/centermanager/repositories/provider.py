@@ -8,6 +8,7 @@ from centermanager.repositories.class_timeline_repository import ClassTimelineRe
 from centermanager.repositories.enrollment_repository import EnrollmentRepository
 from centermanager.repositories.enrollment_freeze_repository import EnrollmentFreezeRepository
 from centermanager.repositories.enrollment_transfer_repository import EnrollmentTransferRepository
+from centermanager.repositories.tuition_adjustment_repository import TuitionAdjustmentRepository
 from centermanager.repositories.session_repository import SessionRepository
 from centermanager.repositories.session_note_repository import SessionNoteRepository
 from centermanager.repositories.employee_repository import EmployeeRepository
@@ -46,6 +47,7 @@ class RepositoryProvider(Protocol):
     def enrollments(self, session: Session) -> EnrollmentRepository: ...
     def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: ...
     def enrollment_transfers(self, session: Session) -> EnrollmentTransferRepository: ...
+    def tuition_adjustments(self, session: Session) -> TuitionAdjustmentRepository: ...
     def sessions(self, session: Session) -> SessionRepository: ...
     def session_notes(self, session: Session) -> SessionNoteRepository: ...
     def employees(self, session: Session) -> EmployeeRepository: ...
@@ -84,6 +86,7 @@ class SqlAlchemyRepositoryProvider:
     def enrollments(self, session: Session) -> EnrollmentRepository: return EnrollmentRepository(session)
     def enrollment_freezes(self, session: Session) -> EnrollmentFreezeRepository: return EnrollmentFreezeRepository(session)
     def enrollment_transfers(self, session: Session) -> EnrollmentTransferRepository: return EnrollmentTransferRepository(session)
+    def tuition_adjustments(self, session: Session) -> TuitionAdjustmentRepository: return TuitionAdjustmentRepository(session)
     def sessions(self, session: Session) -> SessionRepository: return SessionRepository(session)
     def session_notes(self, session: Session) -> SessionNoteRepository: return SessionNoteRepository(session)
     def employees(self, session: Session) -> EmployeeRepository: return EmployeeRepository(session)
