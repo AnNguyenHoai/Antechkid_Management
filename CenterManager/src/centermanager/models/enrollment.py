@@ -44,6 +44,12 @@ class Enrollment(Base, TimestampMixin):
     discount_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
+    # Versioned billing policy snapshot. Migration 1e10a033 assigns all
+    # pre-TUITION-11 rows to the legacy session-only policy; new Enrollments are
+    # created with the current attendance-aware version by EnrollmentService.
+    billing_policy_version: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="attendance_v1"
+    )
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
     class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")
