@@ -36,6 +36,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["linked_income_id"], ["incomes.id"], ondelete="RESTRICT"),
         sa.CheckConstraint("kind IN ('REFUND', 'CREDIT_ADJUSTMENT')", name="ck_tuition_adjustment_kind"),
         sa.CheckConstraint("amount > 0", name="ck_tuition_adjustment_amount_positive"),
+        sa.CheckConstraint(
+            "(kind = 'REFUND' AND linked_income_id IS NOT NULL AND wallet IS NOT NULL AND origin_adjustment_id IS NULL) "
+            "OR (kind = 'CREDIT_ADJUSTMENT' AND linked_income_id IS NULL AND wallet IS NULL AND origin_income_id IS NULL)",
+            name="ck_tuition_adjustment_shape",
+        ),
         sa.UniqueConstraint("idempotency_key", name="uq_tuition_adjustment_idempotency_key"),
         sa.UniqueConstraint("linked_income_id", name="uq_tuition_adjustment_linked_income"),
     )
