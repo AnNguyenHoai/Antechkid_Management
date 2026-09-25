@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Outstanding Workspace - read-only, period-aware tuition debt management."""
+"""Outstanding Workspace - read-only, period-aware tuition balance management."""
 import logging
 from datetime import date
 from pathlib import Path
@@ -17,7 +17,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from centermanager.dto.outstanding_dto import OutstandingDTO
+from centermanager.dto.outstanding_dto import (
+    BALANCE_STATE_NO_TUITION_CONFIGURED,
+    BALANCE_STATE_OWED,
+    BALANCE_STATE_PAID,
+    BALANCE_STATE_PREPAID,
+    OutstandingDTO,
+)
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 from centermanager.services.outstanding_service import OutstandingService
@@ -29,9 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingListPage(QWidget):
-    # Keep the canonical status value explicit at the UI filter boundary. This
-    # value is persisted nowhere; it is passed back to OutstandingService only.
-    STATUS_NO_TUITION_CONFIGURED = "No Tuition Configured"
+    STATUS_NO_TUITION_CONFIGURED = BALANCE_STATE_NO_TUITION_CONFIGURED
     student_selected = Signal(int)
 
     def __init__(
@@ -55,8 +59,6 @@ class OutstandingListPage(QWidget):
         self._sort_by = "outstanding"
         self._sort_ascending = False
         self._setup_ui()
-        # Protected Finance data is loaded only after FinanceWorkspaceShell
-        # resolves authorization and the shared Finance Period.
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -75,9 +77,7 @@ class OutstandingListPage(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(SPACING["sm"])
-        self.search_bar = SearchBar(
-            "Tìm theo tên học sinh, mã, lớp hoặc khóa học..."
-        )
+        self.search_bar = SearchBar("Tìm theo tên học sinh, mã, lớp hoặc khóa học...")
         self.search_bar.text_changed.connect(self._filters_changed)
         top_row.addWidget(self.search_bar)
 
@@ -95,15 +95,13 @@ class OutstandingListPage(QWidget):
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(SPACING["sm"])
-
         self.status_combo = QComboBox()
         self.status_combo.addItem("Tất cả trạng thái", None)
-        self.status_combo.addItem("Chưa đóng", "Not Yet")
-        self.status_combo.addItem("Đóng một phần", "Partial")
-        self.status_combo.addItem("Đã đóng đủ", "Paid")
-        self.status_combo.addItem("Đóng dư", "Overpaid")
+        self.status_combo.addItem("Còn nợ", BALANCE_STATE_OWED)
+        self.status_combo.addItem("Đã thanh toán", BALANCE_STATE_PAID)
+        self.status_combo.addItem("Trả trước / Dư", BALANCE_STATE_PREPAID)
         self.status_combo.addItem(
-            "Chưa cấu hình học phí", self.STATUS_NO_TUITION_CONFIGURED
+            "Chưa cấu hình học phí", BALANCE_STATE_NO_TUITION_CONFIGURED
         )
         self.status_combo.currentIndexChanged.connect(self._filters_changed)
         filter_row.addWidget(QLabel("Trạng thái:"))
@@ -114,7 +112,6 @@ class OutstandingListPage(QWidget):
         self.class_combo.currentIndexChanged.connect(self._filters_changed)
         filter_row.addWidget(QLabel("Lớp:"))
         filter_row.addWidget(self.class_combo)
-
         filter_row.addStretch()
         clear_btn = QPushButton("Xóa bộ lọc")
         clear_btn.clicked.connect(self._clear_filters)
@@ -127,15 +124,17 @@ class OutstandingListPage(QWidget):
             SPACING["md"], SPACING["sm"], SPACING["md"], SPACING["sm"]
         )
         kpi_row.setSpacing(SPACING["lg"])
-        self.expected_kpi = QLabel("Phải thu: 0 VND")
+        self.expected_kpi = QLabel("Đã phát sinh: 0 VND")
         self.paid_kpi = QLabel("Đã thu: 0 VND")
         self.outstanding_kpi = QLabel("Còn nợ: 0 VND")
+        self.prepaid_kpi = QLabel("Trả trước: 0 VND")
         self.debt_students_kpi = QLabel("HS còn nợ: 0")
         self.unconfigured_kpi = QLabel("Chưa cấu hình HP: 0")
         for widget in (
             self.expected_kpi,
             self.paid_kpi,
             self.outstanding_kpi,
+            self.prepaid_kpi,
             self.debt_students_kpi,
             self.unconfigured_kpi,
         ):
@@ -147,13 +146,9 @@ class OutstandingListPage(QWidget):
             {"key": "student_code", "label": "Mã HS", "sortable": True},
             {"key": "student_name", "label": "Học sinh", "sortable": True},
             {"key": "class_name", "label": "Lớp", "sortable": True},
-            {
-                "key": "expected_tuition",
-                "label": "Học phí dự kiến",
-                "sortable": True,
-            },
+            {"key": "expected_tuition", "label": "Đã phát sinh", "sortable": True},
             {"key": "paid", "label": "Đã đóng", "sortable": True},
-            {"key": "outstanding", "label": "Còn nợ", "sortable": True},
+            {"key": "outstanding", "label": "Số dư", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
         self.data_table = DataTable(columns, page_size=self._page_size)
@@ -275,20 +270,21 @@ class OutstandingListPage(QWidget):
         self._total_rows = total
         self._populate_table()
         self._update_kpis(stats)
-        logger.info(
-            "Loaded outstanding page %s (%s/%s rows)",
-            self._current_page,
-            len(items),
-            total,
-        )
 
     def _populate_table(self) -> None:
         data = []
         for item in self._items:
             if item.tuition_configured:
                 expected_tuition = f"{item.expected_tuition:,.0f}"
-                outstanding = f"{item.outstanding:,.0f}"
-                status = item.status
+                if item.balance_state == BALANCE_STATE_PREPAID:
+                    outstanding = f"Trả trước {item.prepaid_amount:,.0f}"
+                    status = "Trả trước"
+                elif item.balance_state == BALANCE_STATE_OWED:
+                    outstanding = f"Nợ {item.debt_amount:,.0f}"
+                    status = "Còn nợ"
+                else:
+                    outstanding = "0"
+                    status = "Đã thanh toán"
             else:
                 expected_tuition = "Chưa cấu hình"
                 outstanding = "Chưa xác định"
@@ -317,11 +313,13 @@ class OutstandingListPage(QWidget):
         total_expected = int(stats.get("total_expected", 0))
         total_paid = int(stats.get("total_paid", 0))
         total_outstanding = int(stats.get("total_outstanding", 0))
+        total_prepaid = int(stats.get("total_prepaid", 0))
         total_debt_students = int(stats.get("total_students_with_debt", 0))
         total_unconfigured = int(stats.get("total_unconfigured_tuition", 0))
-        self.expected_kpi.setText(f"Phải thu: {total_expected:,.0f} VND")
+        self.expected_kpi.setText(f"Đã phát sinh: {total_expected:,.0f} VND")
         self.paid_kpi.setText(f"Đã thu: {total_paid:,.0f} VND")
         self.outstanding_kpi.setText(f"Còn nợ: {total_outstanding:,.0f} VND")
+        self.prepaid_kpi.setText(f"Trả trước: {total_prepaid:,.0f} VND")
         self.debt_students_kpi.setText(f"HS còn nợ: {total_debt_students}")
         self.unconfigured_kpi.setText(f"Chưa cấu hình HP: {total_unconfigured}")
 
@@ -392,5 +390,4 @@ class OutstandingListPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         del enabled
-        # Outstanding is a read-only derived read model. Money mutations remain
-        # exclusively in Finance Income/Expense workspaces.
+        # Outstanding is a read-only derived read model.
