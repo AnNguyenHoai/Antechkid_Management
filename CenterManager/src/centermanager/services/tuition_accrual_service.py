@@ -8,8 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.tuition_policy import BillableSessionPolicy
 
 
@@ -49,9 +50,13 @@ class TuitionAccrualResult:
 class TuitionAccrualService:
     """Calculate tuition obligation for one Enrollment as of a business date."""
 
-    def __init__(self, session_factory: Callable, repository_provider) -> None:
+    def __init__(
+        self,
+        session_factory: Callable,
+        repository_provider: Optional[RepositoryProvider] = None,
+    ) -> None:
         self._session_factory = session_factory
-        self._repository_provider = repository_provider
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     @staticmethod
     def _session_effective_date(session) -> date:
