@@ -114,7 +114,7 @@ class TuitionDetailDialog(QDialog):
 
         note = QLabel(
             f"Số liệu tại ngày {self._detail.as_of_date:%d/%m/%Y}. "
-            "Học phí phát sinh lấy từ TuitionAccrualService; các khoản đã đóng chỉ gồm "
+            "Học phí phát sinh theo chính sách tính phí chuẩn; các khoản đã đóng chỉ gồm "
             "Tuition Income ACTIVE được gắn đúng Enrollment."
         )
         note.setWordWrap(True)
