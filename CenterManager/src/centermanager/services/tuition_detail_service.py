@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Read-only, explainable tuition detail projection for one Enrollment.
 
-TUITION-10 deliberately composes the canonical TuitionAccrualService and
+TUITION-10 deliberately composes the canonical tuition accrual policy and
 Enrollment-attributed Income rows. It does not persist tuition state and it does
-not use FinancePeriod to create or limit tuition obligations.
+not use accounting-period metadata to create or limit tuition obligations.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ class TuitionPaymentDetail:
             if self.finance_period_start is not None
             else "unassigned"
         )
-        return f"Income #{self.income_id} · FinancePeriod {period}"
+        return f"Income #{self.income_id} · Accounting period {period}"
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ class TuitionDetailService:
 
     def __init__(
         self,
-        session_factory: sessionmaker,
+        session_factory: Optional[sessionmaker],
         repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
@@ -115,11 +115,9 @@ class TuitionDetailService:
 
     @classmethod
     def from_outstanding_service(cls, outstanding_service) -> "TuitionDetailService":
-        """Reuse the Finance composition root without giving Qt repository access."""
+        """Reuse the application composition root without giving Qt repository access."""
         session_factory = getattr(outstanding_service, "_session_factory", None)
         provider = getattr(outstanding_service, "_repository_provider", None)
-        if session_factory is None:
-            raise ValueError("OutstandingService does not expose its application session factory.")
         return cls(session_factory, provider)
 
     @staticmethod
@@ -201,6 +199,9 @@ class TuitionDetailService:
         *,
         as_of_date: Optional[date] = None,
     ) -> TuitionDetailReadModel:
+        if self._session_factory is None:
+            raise RuntimeError("Tuition detail requires an application session factory.")
+
         cutoff = as_of_date or get_clock().today()
         with self._session_factory() as db_session:
             enrollment = self._repository_provider.enrollments(db_session).get_by_id(
@@ -263,7 +264,11 @@ class TuitionDetailService:
                     recognized_discount = self._amount(accrual.discount)
                     net = self._amount(accrual.net_accrued)
 
-            unit_fee = self._amount(enrollment.unit_fee) if enrollment.unit_fee is not None else Decimal("0")
+            unit_fee = (
+                self._amount(enrollment.unit_fee)
+                if enrollment.unit_fee is not None
+                else Decimal("0")
+            )
             session_rows = self._session_rows(
                 enrollment,
                 sessions,
