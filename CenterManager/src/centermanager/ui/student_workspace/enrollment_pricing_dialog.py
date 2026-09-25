@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -19,6 +20,7 @@ from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import get_current_user
 from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.enrollment_service import EnrollmentValidationError
+from centermanager.services.tuition_discount_policy import TuitionDiscountPolicy
 from centermanager.ui.design_system.tokens import SPACING
 
 
@@ -30,8 +32,11 @@ class EnrollmentPricingDialog(QDialog):
         self._service = enrollment_service
         self._class_id = int(class_id)
         self._preview = None
+        self._can_override = AuthorizationService.allows(
+            get_current_user(), Capability.TUITION_ENROLLMENT_OVERRIDE
+        )
         self.setWindowTitle("Enrollment tuition terms")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(480)
         self._build_ui()
         self._load_default_preview()
 
@@ -51,24 +56,45 @@ class EnrollmentPricingDialog(QDialog):
         self.remaining_sessions = QLabel("—", self)
         form.addRow("Contracted sessions", self.remaining_sessions)
         self.unit_fee = QLabel("—", self)
-        form.addRow("Unit fee", self.unit_fee)
+        form.addRow("Gross unit fee", self.unit_fee)
         self.suggested_fee = QLabel("—", self)
-        form.addRow("Suggested agreed fee", self.suggested_fee)
+        form.addRow("Gross agreed fee", self.suggested_fee)
+        self.discount_amount_label = QLabel("—", self)
+        form.addRow("Discount snapshot", self.discount_amount_label)
+        self.net_fee = QLabel("—", self)
+        form.addRow("Net contract fee", self.net_fee)
         layout.addLayout(form)
 
-        self.override_enabled = QCheckBox("Override suggested agreed fee", self)
-        self.override_enabled.setVisible(
-            AuthorizationService.allows(
-                get_current_user(),
-                Capability.TUITION_ENROLLMENT_OVERRIDE,
-            )
-        )
+        self.discount_enabled = QCheckBox("Apply manual enrollment discount", self)
+        self.discount_enabled.setVisible(self._can_override)
+        self.discount_enabled.toggled.connect(self._update_discount_state)
+        self.discount_enabled.toggled.connect(self._reload_preview)
+        layout.addWidget(self.discount_enabled)
+
+        discount_form = QFormLayout()
+        self.discount_type = QComboBox(self)
+        self.discount_type.addItem("Fixed amount", "FIXED")
+        self.discount_type.addItem("Percentage", "PERCENT")
+        self.discount_type.currentIndexChanged.connect(self._reload_preview)
+        discount_form.addRow("Discount type", self.discount_type)
+        self.discount_value = QLineEdit(self)
+        self.discount_value.setPlaceholderText("Amount or percent")
+        self.discount_value.textChanged.connect(self._reload_preview)
+        discount_form.addRow("Discount value", self.discount_value)
+        self.discount_reason = QLineEdit(self)
+        self.discount_reason.setPlaceholderText("Required audit reason")
+        discount_form.addRow("Discount reason", self.discount_reason)
+        layout.addLayout(discount_form)
+        self._update_discount_state(False)
+
+        self.override_enabled = QCheckBox("Override suggested gross agreed fee", self)
+        self.override_enabled.setVisible(self._can_override)
         self.override_enabled.toggled.connect(self._update_override_state)
         layout.addWidget(self.override_enabled)
 
         override_form = QFormLayout()
         self.override_fee = QLineEdit(self)
-        self.override_fee.setPlaceholderText("Enter agreed fee")
+        self.override_fee.setPlaceholderText("Enter gross agreed fee")
         override_form.addRow("Override fee", self.override_fee)
         self.override_reason = QLineEdit(self)
         self.override_reason.setPlaceholderText("Required reason")
@@ -93,6 +119,18 @@ class EnrollmentPricingDialog(QDialog):
         amount = Decimal(value)
         return f"{amount:,.0f}"
 
+    def _discount_preview_kwargs(self) -> dict:
+        if not self.discount_enabled.isChecked():
+            return {}
+        raw_value = self.discount_value.text().replace(",", "").strip()
+        value = Decimal(raw_value) if raw_value else Decimal("0")
+        return {
+            "discount_type": self.discount_type.currentData(),
+            "discount_value": value,
+            "discount_source": TuitionDiscountPolicy.SOURCE_MANUAL,
+            "discount_reason": self.discount_reason.text().strip() or None,
+        }
+
     def _load_default_preview(self) -> None:
         try:
             preview = self._service.preview_enrollment_pricing(self._class_id)
@@ -110,6 +148,7 @@ class EnrollmentPricingDialog(QDialog):
             preview = self._service.preview_enrollment_pricing(
                 self._class_id,
                 enrolled_from_session=self.start_session.value(),
+                **self._discount_preview_kwargs(),
             )
             self._apply_preview(preview)
         except Exception as exc:
@@ -126,7 +165,17 @@ class EnrollmentPricingDialog(QDialog):
         self.remaining_sessions.setText(str(preview["planned_sessions"]))
         self.unit_fee.setText(self._money_text(preview["unit_fee"]))
         self.suggested_fee.setText(self._money_text(preview["suggested_agreed_course_fee"]))
+        self.discount_amount_label.setText(self._money_text(preview["discount_amount"]))
+        self.net_fee.setText(self._money_text(preview["net_course_fee"]))
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+
+    def _update_discount_state(self, enabled: bool) -> None:
+        self.discount_type.setEnabled(enabled)
+        self.discount_value.setEnabled(enabled)
+        self.discount_reason.setEnabled(enabled)
+        if not enabled:
+            self.discount_value.clear()
+            self.discount_reason.clear()
 
     def _update_override_state(self, enabled: bool) -> None:
         self.override_fee.setEnabled(enabled)
@@ -138,6 +187,10 @@ class EnrollmentPricingDialog(QDialog):
     def _accept_if_valid(self) -> None:
         if self._preview is None:
             return
+        if self.discount_enabled.isChecked() and self._preview["discount_amount"] > 0:
+            if not self.discount_reason.text().strip():
+                self.error_label.setText("A reason is required for a manual discount.")
+                return
         if self.override_enabled.isChecked():
             try:
                 override = Decimal(self.override_fee.text().replace(",", "").strip())
@@ -159,6 +212,8 @@ class EnrollmentPricingDialog(QDialog):
             "enrolled_from_session": self._preview["enrolled_from_session"],
             "enrolled_until_session": self._preview["enrolled_until_session"],
         }
+        if self.discount_enabled.isChecked():
+            result.update(self._discount_preview_kwargs())
         if self.override_enabled.isChecked():
             result["agreed_course_fee_override"] = Decimal(
                 self.override_fee.text().replace(",", "").strip()
