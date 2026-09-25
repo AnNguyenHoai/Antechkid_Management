@@ -2,6 +2,7 @@
 """TUITION-07 — exact Enrollment attribution for Tuition payments."""
 from __future__ import annotations
 
+import ast
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -115,13 +116,35 @@ def test_non_tuition_cannot_carry_enrollment_identity():
 
 def test_resolver_contract_is_independent_of_payment_date():
     source = SERVICE_SOURCE.read_text(encoding="utf-8")
-    start = source.index("def _resolve_tuition_enrollment")
-    end = source.index("def _resolve_finance_period", start)
-    resolver = source[start:end]
+    tree = ast.parse(source)
+    resolver = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_resolve_tuition_enrollment"
+    )
 
-    assert "payment_date" not in resolver
-    assert "get_by_student_and_class" in resolver
-    assert "Multiple Enrollment contracts" in resolver
+    argument_names = {
+        argument.arg
+        for argument in (*resolver.args.args, *resolver.args.kwonlyargs)
+    }
+    referenced_names = {
+        node.id for node in ast.walk(resolver) if isinstance(node, ast.Name)
+    }
+    called_attributes = {
+        node.attr for node in ast.walk(resolver) if isinstance(node, ast.Attribute)
+    }
+    string_literals = {
+        node.value
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert "payment_date" not in argument_names
+    assert "payment_date" not in referenced_names
+    assert "exists_on_date" not in called_attributes
+    assert "get_by_student_and_class" in called_attributes
+    assert any("Multiple Enrollment contracts" in value for value in string_literals)
 
 
 def test_repository_paid_total_is_enrollment_scoped_and_excludes_voided(test_db_path):
