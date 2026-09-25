@@ -7,11 +7,16 @@ from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Callable, List, Optional
 
+from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
+from centermanager.core.current_user import get_current_user
 from centermanager.models.enrollment import Enrollment
+from centermanager.models.session import SessionStatus
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentEnrollmentChanged
+from centermanager.services.audit_service import AuditService
+from centermanager.services.authorization_service import AuthorizationService
 
 
 class EnrollmentStatus(str, Enum):
@@ -48,10 +53,15 @@ class EnrollmentService:
         session_factory: Callable,
         event_bus: Optional[EventBus] = None,
         repository_provider: Optional[RepositoryProvider] = None,
+        audit_service: Optional[AuditService] = None,
     ):
         self._session_factory = session_factory
         self._event_bus = event_bus
         self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
+        self._audit_service = audit_service or AuditService(
+            session_factory,
+            repository_provider=self._repository_provider,
+        )
 
     def _publish_change(
         self, enrollment: Enrollment, action: str, previous_status: Optional[str]
@@ -75,15 +85,7 @@ class EnrollmentService:
         enrolled_until_session: Optional[int],
         discount_amount: Decimal | int,
     ) -> dict:
-        """Build an immutable tuition snapshot from the current Class contract.
-
-        Mid-course enrollment is explicit: callers provide the first effective
-        class-session ordinal instead of inferring it from dates. Enrollment
-        ``planned_sessions`` is the number of sessions in that student's
-        effective contract, while ``enrolled_from_session``/``until`` retain the
-        corresponding Class session range. This preserves the invariant
-        ``unit_fee = agreed_course_fee / planned_sessions``.
-        """
+        """Build an immutable tuition snapshot from the current Class contract."""
         if not class_obj.has_course_contract:
             raise EnrollmentValidationError(
                 "Class course contract is incomplete; complete tuition terms before enrolling students."
@@ -127,15 +129,96 @@ class EnrollmentService:
             "discount_amount": discount,
         }
 
+    @staticmethod
+    def _resolved_start_session(class_obj, sessions) -> tuple[int, str]:
+        """Resolve the next effective Class session from completed progress only.
+
+        Pre-created SCHEDULED/POSTPONED/CANCELLED sessions do not advance tuition
+        progress. This keeps a student's effective range tied to delivered course
+        progress rather than to how far ahead the timetable was generated.
+        """
+        if not class_obj.has_course_contract:
+            raise EnrollmentValidationError(
+                "Class course contract is incomplete; complete tuition terms before enrolling students."
+            )
+        completed_numbers = [
+            int(item.session_number)
+            for item in sessions
+            if item.status == SessionStatus.COMPLETED.value
+        ]
+        if not completed_numbers:
+            return 1, "NO_COMPLETED_SESSIONS"
+        next_session = max(completed_numbers) + 1
+        if next_session > int(class_obj.planned_sessions):
+            raise EnrollmentValidationError(
+                "The class has already completed all planned sessions; a new enrollment cannot be created."
+            )
+        return next_session, "AFTER_LAST_COMPLETED_SESSION"
+
+    def preview_enrollment_pricing(
+        self,
+        class_id: int,
+        *,
+        enrolled_from_session: Optional[int] = None,
+        enrolled_until_session: Optional[int] = None,
+        discount_amount: Decimal | int = 0,
+    ) -> dict:
+        """Return deterministic tuition terms before Enrollment is persisted."""
+        with self._session_factory() as session:
+            class_obj = self._repository_provider.classes(session).get_by_id(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise EnrollmentError("Class not found or archived.")
+
+            resolution = "EXPLICIT"
+            effective_from = enrolled_from_session
+            if effective_from is None:
+                sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+                effective_from, resolution = self._resolved_start_session(class_obj, sessions)
+
+            snapshot = self._snapshot_tuition_contract(
+                class_obj,
+                enrolled_from_session=int(effective_from),
+                enrolled_until_session=enrolled_until_session,
+                discount_amount=discount_amount,
+            )
+            return {
+                **snapshot,
+                "suggested_agreed_course_fee": snapshot["agreed_course_fee"],
+                "class_planned_sessions": int(class_obj.planned_sessions),
+                "class_course_fee": _money(Decimal(class_obj.course_fee)),
+                "resolution": resolution,
+            }
+
+    @staticmethod
+    def _apply_agreed_fee_override(
+        snapshot: dict,
+        override_value: Decimal | int,
+    ) -> dict:
+        try:
+            override_fee = _money(Decimal(str(override_value)))
+        except Exception as exc:
+            raise EnrollmentValidationError("Agreed fee override must be a valid number.") from exc
+        if override_fee < 0:
+            raise EnrollmentValidationError("Agreed fee override cannot be negative.")
+        if snapshot["discount_amount"] > override_fee:
+            raise EnrollmentValidationError("Discount amount cannot exceed the overridden agreed course fee.")
+        result = dict(snapshot)
+        result["agreed_course_fee"] = override_fee
+        result["unit_fee"] = _money(override_fee / Decimal(result["planned_sessions"]))
+        return result
+
     def enroll(
         self,
         student_id: int,
         class_id: int,
         start_date: Optional[date] = None,
         *,
-        enrolled_from_session: int = 1,
+        enrolled_from_session: Optional[int] = None,
         enrolled_until_session: Optional[int] = None,
         discount_amount: Decimal | int = 0,
+        agreed_course_fee_override: Optional[Decimal | int] = None,
+        override_reason: Optional[str] = None,
+        actor=None,
     ) -> Enrollment:
         with self._session_factory() as session:
             class_obj = self._repository_provider.classes(session).get_by_id(class_id)
@@ -151,12 +234,41 @@ class EnrollmentService:
             if class_obj.capacity is not None and len(repo.get_active_by_class(class_id)) >= class_obj.capacity:
                 raise EnrollmentCapacityError(f"Class capacity ({class_obj.capacity}) reached.")
 
+            effective_from = enrolled_from_session
+            if effective_from is None:
+                session_factory = getattr(self._repository_provider, "sessions", None)
+                if callable(session_factory):
+                    sessions = session_factory(session).get_by_class(class_id)
+                    effective_from, _ = self._resolved_start_session(class_obj, sessions)
+                else:
+                    # Compatibility for narrow injected providers used by older
+                    # application boundaries. Production provider always exposes
+                    # Sessions and UI uses preview_enrollment_pricing first.
+                    effective_from = 1
+
             tuition_snapshot = self._snapshot_tuition_contract(
                 class_obj,
-                enrolled_from_session=enrolled_from_session,
+                enrolled_from_session=int(effective_from),
                 enrolled_until_session=enrolled_until_session,
                 discount_amount=discount_amount,
             )
+            suggested_fee = tuition_snapshot["agreed_course_fee"]
+            resolved_actor = actor if actor is not None else get_current_user()
+            reason = (override_reason or "").strip()
+            if agreed_course_fee_override is not None:
+                AuthorizationService.require(
+                    resolved_actor,
+                    Capability.TUITION_ENROLLMENT_OVERRIDE,
+                )
+                if not reason:
+                    raise EnrollmentValidationError(
+                        "A reason is required when overriding the suggested agreed course fee."
+                    )
+                tuition_snapshot = self._apply_agreed_fee_override(
+                    tuition_snapshot,
+                    agreed_course_fee_override,
+                )
+
             enrollment = Enrollment(
                 student_id=student_id,
                 class_id=class_id,
@@ -167,6 +279,30 @@ class EnrollmentService:
                 **tuition_snapshot,
             )
             repo.add(enrollment)
+            if agreed_course_fee_override is not None:
+                flush = getattr(repo, "flush", None)
+                if callable(flush):
+                    flush()
+                self._audit_service.record_in_session(
+                    session,
+                    action="TUITION_ENROLLMENT_FEE_OVERRIDE",
+                    module="tuition",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=class_obj.name,
+                    actor=resolved_actor,
+                    details={
+                        "student_id": student_id,
+                        "class_id": class_id,
+                        "enrolled_from_session": tuition_snapshot["enrolled_from_session"],
+                        "enrolled_until_session": tuition_snapshot["enrolled_until_session"],
+                        "planned_sessions": tuition_snapshot["planned_sessions"],
+                        "suggested_agreed_course_fee": str(suggested_fee),
+                        "overridden_agreed_course_fee": str(tuition_snapshot["agreed_course_fee"]),
+                        "reason": reason,
+                    },
+                    summary=f"Tuition fee override for enrollment in {class_obj.name}",
+                )
             session.commit()
             repo.refresh(enrollment)
             self._publish_change(enrollment, "ENROLLED", None)

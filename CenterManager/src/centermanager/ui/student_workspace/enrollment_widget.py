@@ -18,6 +18,7 @@ from centermanager.ui.design_system.feedback import ConfirmationDialog, Feedback
 from centermanager.ui.design_system.form_detail import EditStateBanner
 from centermanager.ui.design_system.foundation import Badge, Button, ButtonVariant, Card, Select
 from centermanager.ui.design_system.tokens import COLORS, FONT_WEIGHTS, SPACING, TYPOGRAPHY
+from centermanager.ui.student_workspace.enrollment_pricing_dialog import EnrollmentPricingDialog
 
 
 class EnrollmentWidget(QWidget):
@@ -278,11 +279,25 @@ class EnrollmentWidget(QWidget):
         if class_id is None:
             self._feedback.info("Select a class before enrolling the student.", key="student-enrollment")
             return
+
+        pricing = EnrollmentPricingDialog(
+            self._enrollment_service,
+            int(class_id),
+            parent=self,
+        )
+        if pricing.exec() != QDialog.DialogCode.Accepted:
+            return
+        enroll_kwargs = pricing.enrollment_kwargs()
+
         operation_id = "student-enrollment-create"
         if not self._feedback.begin_operation(operation_id, "Enrolling student…"):
             return
         try:
-            self._enrollment_service.enroll(self._student_id, int(class_id))
+            self._enrollment_service.enroll(
+                self._student_id,
+                int(class_id),
+                **enroll_kwargs,
+            )
             self.refresh()
             self.enrollment_changed.emit()
             self._feedback.finish_operation(operation_id)
