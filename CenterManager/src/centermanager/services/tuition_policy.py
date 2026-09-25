@@ -27,8 +27,8 @@ class BillableSessionPolicy:
       session range is known;
     - Attendance is intentionally outside this phase-1 policy.
 
-    This policy is academic/tuition-domain logic and has no AccountingPeriod or
-    FinancePeriod dependency.
+    This policy belongs only to the academic/tuition domain. Accounting-period
+    selection does not participate in the decision.
     """
 
     REASON_BILLABLE = "completed_in_effective_range"
