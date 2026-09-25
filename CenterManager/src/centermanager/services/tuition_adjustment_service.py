@@ -6,7 +6,6 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.clock import get_clock
@@ -23,14 +22,18 @@ from centermanager.services.finance_ledger_guard import FinanceLedgerGuard
 
 _MONEY_QUANTUM = Decimal("0.01")
 
+
 class TuitionAdjustmentError(Exception):
     pass
+
 
 class TuitionAdjustmentValidationError(TuitionAdjustmentError):
     pass
 
+
 def _money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
 
 class TuitionAdjustmentService:
     """Create immutable adjustments with repository-owned persistence and locking."""
@@ -68,6 +71,11 @@ class TuitionAdjustmentService:
     @staticmethod
     def _actor_name(actor) -> str:
         return getattr(actor, "full_name", None) or getattr(actor, "username", None) or "System"
+
+    @staticmethod
+    def _is_integrity_conflict(exc: Exception) -> bool:
+        """Recognize persistence integrity failures without importing ORM error types here."""
+        return exc.__class__.__name__ == "IntegrityError" and exc.__class__.__module__.startswith("sqlalchemy")
 
     def _publish(self, adjustment: TuitionAdjustment) -> None:
         if self._event_bus is None:
@@ -120,6 +128,18 @@ class TuitionAdjustmentService:
         if not self._same_command(existing, **command):
             raise TuitionAdjustmentValidationError("Idempotency key is already used by a different adjustment command.")
         return existing
+
+    def _recover_integrity_conflict(self, exc: Exception, key: str, command: dict) -> TuitionAdjustment:
+        if not self._is_integrity_conflict(exc):
+            raise exc
+        with self._session_factory() as replay_session:
+            replay_repo = self._repository_provider.tuition_adjustments(replay_session)
+            existing = self._return_existing_or_conflict(replay_repo, key, **command)
+            if existing is not None:
+                return existing
+        raise TuitionAdjustmentValidationError(
+            "Concurrent adjustment conflicted with the current command; retry with the same idempotency key."
+        ) from exc
 
     def preview(self, enrollment_id: int, *, origin_income_id: Optional[int] = None,
                 as_of_date: Optional[date] = None) -> dict:
@@ -215,13 +235,8 @@ class TuitionAdjustmentService:
                     summary=f"Tuition refund for Enrollment#{enrollment.id}")
                 session.commit()
                 adjustments.refresh(adjustment)
-        except IntegrityError as exc:
-            with self._session_factory() as replay_session:
-                replay_repo = self._repository_provider.tuition_adjustments(replay_session)
-                existing = self._return_existing_or_conflict(replay_repo, key, **command)
-                if existing is not None:
-                    return existing
-            raise TuitionAdjustmentValidationError("Concurrent adjustment conflicted with the current command; retry with the same idempotency key.") from exc
+        except Exception as exc:
+            return self._recover_integrity_conflict(exc, key, command)
         self._publish(adjustment)
         return adjustment
 
@@ -266,12 +281,7 @@ class TuitionAdjustmentService:
                     entity_id=adjustment.id, summary=f"Tuition credit adjustment for Enrollment#{enrollment.id}")
                 session.commit()
                 adjustments.refresh(adjustment)
-        except IntegrityError as exc:
-            with self._session_factory() as replay_session:
-                replay_repo = self._repository_provider.tuition_adjustments(replay_session)
-                existing = self._return_existing_or_conflict(replay_repo, key, **command)
-                if existing is not None:
-                    return existing
-            raise TuitionAdjustmentValidationError("Concurrent adjustment conflicted with the current command; retry with the same idempotency key.") from exc
+        except Exception as exc:
+            return self._recover_integrity_conflict(exc, key, command)
         self._publish(adjustment)
         return adjustment
