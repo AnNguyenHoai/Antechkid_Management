@@ -20,7 +20,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE enrollment_transfers "
-            "SET idempotency_key = 'legacy-source-' || source_enrollment_id "
+            "SET idempotency_key = 'source-enrollment:' || source_enrollment_id "
             "WHERE idempotency_key IS NULL"
         )
     )
