@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Outstanding DTO for period-aware tuition balance calculation.
-"""
+"""Outstanding DTO for Enrollment-centric tuition balances."""
 from dataclasses import dataclass
 from datetime import date
 
@@ -27,6 +25,7 @@ class OutstandingDTO:
     period_start: date | None = None
     period_end: date | None = None
     course_name: str | None = None
+    enrollment_id: int | None = None
 
     @classmethod
     def create(
@@ -42,6 +41,7 @@ class OutstandingDTO:
         period_start: date | None = None,
         period_end: date | None = None,
         course_name: str | None = None,
+        enrollment_id: int | None = None,
     ) -> "OutstandingDTO":
         outstanding = expected_tuition - paid
 
@@ -70,6 +70,7 @@ class OutstandingDTO:
             period_start=period_start,
             period_end=period_end,
             course_name=course_name,
+            enrollment_id=enrollment_id,
         )
 
 

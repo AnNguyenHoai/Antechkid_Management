@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / "src" / "centermanager" / "services" / "outstanding_service.py"
 PAGE = ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "outstanding_list_page.py"
 REPO = ROOT / "src" / "centermanager" / "repositories" / "enrollment_repository.py"
+INCOME_REPO = ROOT / "src" / "centermanager" / "repositories" / "income_repository.py"
 
 
 def _source(path: Path) -> str:
@@ -22,22 +23,26 @@ def test_outstanding_status_filter_happens_before_pagination():
     assert "return page_rows, total, stats" in source
 
 
-def test_outstanding_bulk_does_not_reopen_one_session_per_enrollment():
+def test_outstanding_bulk_reuses_one_service_session_and_exact_enrollment_identity():
     source = _source(SERVICE)
     collect_start = source.index("def _collect_outstanding")
     collect_end = source.index("@staticmethod\n    def _stats_for_rows", collect_start)
     collect_source = source[collect_start:collect_end]
     assert "get_outstanding_for_enrollment(" not in collect_source
-    assert "payment_totals = self._load_payment_totals(" in collect_source
+    assert "self._calculate_from_enrollment(" in collect_source
+    assert "seen_enrollment_ids = set()" in collect_source
     assert "limit=None" in collect_source
 
 
-def test_outstanding_live_money_uses_active_income_and_finance_period():
-    source = _source(SERVICE)
-    assert "repo.count_active(" in source
-    assert "repo.list_active(" in source
-    assert "finance_period_start=period_start" in source
-    assert 'TUITION_INCOME_TYPE = "Tuition"' in source
+def test_outstanding_live_money_uses_enrollment_attributed_active_tuition():
+    service_source = _source(SERVICE)
+    income_source = _source(INCOME_REPO)
+    assert "sum_active_tuition_for_enrollment" in service_source
+    assert "as_of_date=as_of_date" in service_source
+    assert 'Income.status == Income.STATUS_ACTIVE' in income_source
+    assert 'Income.income_type == "Tuition"' in income_source
+    assert "Income.enrollment_id == enrollment_id" in income_source
+    assert "finance_period_start=" not in service_source
 
 
 def test_outstanding_repository_can_load_full_period_read_model():

@@ -2,7 +2,9 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+from centermanager.dto.outstanding_dto import OutstandingDTO
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
+from centermanager.services.outstanding_service import OutstandingService
 
 
 def _read(relative_path: str) -> str:
@@ -28,7 +30,7 @@ def test_dashboard_snapshot_uses_month_start_not_today_for_month_kpis():
             calls.append(("expense", kwargs["date_from"], kwargs["date_to"]))
             return [SimpleNamespace(amount=40, payment_method="Cash")], 1
 
-    class OutstandingService:
+    class OutstandingServiceStub:
         def get_outstanding_stats(self):
             return {
                 "total_outstanding": 0,
@@ -36,7 +38,7 @@ def test_dashboard_snapshot_uses_month_start_not_today_for_month_kpis():
                 "total_unconfigured_tuition": 0,
             }
 
-    service = FinanceDashboardService(IncomeService(), ExpenseService(), OutstandingService())
+    service = FinanceDashboardService(IncomeService(), ExpenseService(), OutstandingServiceStub())
     service._get_today_date = lambda: date(2026, 9, 18)
     snapshot = service.get_dashboard_snapshot()
 
@@ -50,9 +52,34 @@ def test_dashboard_snapshot_uses_month_start_not_today_for_month_kpis():
 
 
 def test_outstanding_stats_exposes_unconfigured_tuition_count():
-    source = _read("src/centermanager/services/outstanding_service.py")
-    assert '"total_unconfigured_tuition": total_unconfigured_tuition' in source
-    assert "sum(1 for dto in all_dtos if not dto.tuition_configured)" in source
+    rows = [
+        OutstandingDTO.create(
+            student_id=1,
+            student_name="A",
+            student_code="S1",
+            class_id=10,
+            class_name="Python",
+            expected_tuition=100,
+            paid=0,
+            tuition_configured=True,
+        ),
+        OutstandingDTO.create(
+            student_id=2,
+            student_name="B",
+            student_code="S2",
+            class_id=20,
+            class_name="Robotics",
+            expected_tuition=0,
+            paid=50,
+            tuition_configured=False,
+        ),
+    ]
+
+    stats = OutstandingService._stats_for_rows(rows)
+
+    assert stats["total_unconfigured_tuition"] == 1
+    assert stats["total_paid"] == 50
+    assert stats["total_expected"] == 100
 
 
 def test_income_search_preserves_nullable_student_and_class_records():

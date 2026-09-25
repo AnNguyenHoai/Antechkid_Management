@@ -3,6 +3,10 @@ from pathlib import Path
 from centermanager.dto.outstanding_dto import OutstandingDTO
 
 
+ROOT = Path(__file__).resolve().parents[1]
+OUTSTANDING_SERVICE = ROOT / "src" / "centermanager" / "services" / "outstanding_service.py"
+
+
 def test_configured_tuition_balance_contract():
     dto = OutstandingDTO.create(
         student_id=1, student_name="A", student_code="S1",
@@ -26,20 +30,22 @@ def test_overpayment_is_explicit_not_hidden():
 
 
 def test_unconfigured_fee_does_not_hide_real_payment():
-    source = Path("src/centermanager/services/outstanding_service.py").read_text(encoding="utf-8")
-    assert "total_paid += dto.paid" in source
+    source = OUTSTANDING_SERVICE.read_text(encoding="utf-8")
+    assert "total_paid += self._amount(dto.paid)" in source
     assert "if dto.tuition_configured:" in source
-    assert "total_expected += dto.expected_tuition" in source
+    assert "total_expected += self._amount(dto.expected_tuition)" in source
 
 
-def test_student_summary_deduplicates_duplicate_enrollment_pairs():
-    source = Path("src/centermanager/services/outstanding_service.py").read_text(encoding="utf-8")
-    assert "seen_pairs = set()" in source
-    assert "seen_class_ids = set()" in source
+def test_student_summary_deduplicates_only_exact_enrollment_identity():
+    source = OUTSTANDING_SERVICE.read_text(encoding="utf-8")
+    assert "seen_enrollment_ids = set()" in source
+    assert "identity = dto.enrollment_id" in source
+    assert "seen_pairs = set()" not in source
+    assert "seen_class_ids = set()" not in source
 
 
 def test_student_financial_widget_uses_outstanding_source_of_truth():
-    source = Path("src/centermanager/ui/student_workspace/student_financial_widget.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "centermanager" / "ui" / "student_workspace" / "student_financial_widget.py").read_text(encoding="utf-8")
     assert "OutstandingService" in source
     assert "get_student_summary" in source
     assert "self._summary.total_expected" in source
@@ -47,7 +53,7 @@ def test_student_financial_widget_uses_outstanding_source_of_truth():
 
 
 def test_student_financial_widget_shows_per_class_status():
-    source = Path("src/centermanager/ui/student_workspace/student_financial_widget.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "centermanager" / "ui" / "student_workspace" / "student_financial_widget.py").read_text(encoding="utf-8")
     assert '"label": "Status"' in source
     assert "detail.status" in source
     assert '"Not configured"' in source
@@ -55,6 +61,6 @@ def test_student_financial_widget_shows_per_class_status():
 
 
 def test_outstanding_list_does_not_display_unknown_debt_as_zero():
-    source = Path("src/centermanager/ui/finance_workspace/outstanding_list_page.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "outstanding_list_page.py").read_text(encoding="utf-8")
     assert '"Chưa xác định"' in source
     assert '"Chưa cấu hình"' in source
