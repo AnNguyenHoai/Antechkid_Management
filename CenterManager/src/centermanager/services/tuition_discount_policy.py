@@ -1,8 +1,8 @@
 """Enrollment-level tuition discount policy.
 
 The policy resolves a business rule into the canonical ``discount_amount``
-snapshot consumed by TuitionAccrualService.  It deliberately has no knowledge
-of Class persistence, Outstanding, FinancePeriod, or promotion configuration.
+snapshot consumed by TuitionAccrualService. It deliberately has no knowledge
+of Class persistence, Outstanding, accounting-period state, or promotion configuration.
 """
 from __future__ import annotations
 
