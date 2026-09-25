@@ -5,6 +5,7 @@ from centermanager.models.parent import Parent
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.enrollment_freeze import EnrollmentFreeze
 from centermanager.models.enrollment_transfer import EnrollmentTransfer
+from centermanager.models.tuition_adjustment import TuitionAdjustment
 from centermanager.models.assessment import Assessment
 from centermanager.models.timeline_event import TimelineEvent
 from centermanager.models.student_product import StudentProduct
@@ -43,7 +44,7 @@ from centermanager.models.class_fee_history import ClassFeeHistory
 from centermanager.models.attendance import Attendance, AttendanceStatus
 
 __all__ = [
-    "Student", "Parent", "Enrollment", "EnrollmentFreeze", "EnrollmentTransfer", "Assessment", "TimelineEvent",
+    "Student", "Parent", "Enrollment", "EnrollmentFreeze", "EnrollmentTransfer", "TuitionAdjustment", "Assessment", "TimelineEvent",
     "StudentProduct", "Progress", "Attachment", "Class", "Session", "SessionStatus",
     "SessionNote", "TeachingProgress", "ClassAtmosphere", "StudentHighlight", "HighlightType",
     "Note", "NoteType", "Document", "Report", "User", "Role", "RoleDefinitions",
