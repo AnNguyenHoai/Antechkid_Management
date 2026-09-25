@@ -63,6 +63,7 @@ This inventory is the committed architecture classification for application serv
 | `teacher_service.py` | PASS | repository-owned | — |
 | `teacher_timeline_service.py` | PASS | repository-owned | — |
 | `timeline_service.py` | PASS | repository-owned | — |
+| `tuition_accrual_service.py` | PASS | repository-owned | — |
 | `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
 
 ## EP-FIN-04 Financial Settlement
