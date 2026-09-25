@@ -19,11 +19,10 @@ from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
 from centermanager.core.wallet import WalletMappingError, canonical_wallet_value
-from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.income import Income
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.audit_service import AuditService
-from centermanager.services.finance_ledger_guard import FinanceLedgerGuard, FinancePeriodClosedError
+from centermanager.services.finance_ledger_guard import FinanceLedgerGuard
 
 
 _MONEY_QUANTUM = Decimal("0.01")
@@ -75,21 +74,20 @@ class TuitionRefundService:
             raise TuitionRefundValidationError(str(exc)) from exc
 
     def _resolve_period(self, session, refund_date: date):
+        """Cross into accounting only through the realized-ledger guard."""
         try:
-            config = self._repository_provider.finance_periods(session).get_unique_effective(refund_date)
+            resolved = FinanceLedgerGuard.ensure_date_mutable(
+                session, self._repository_provider, refund_date
+            )
+            config = self._repository_provider.finance_periods(
+                session
+            ).get_unique_effective(refund_date)
         except ValueError as exc:
             raise TuitionRefundValidationError(str(exc)) from exc
         if config is None:
             raise TuitionRefundValidationError(
-                f"No Finance period configuration covers refund date {refund_date.isoformat()}."
+                f"No accounting configuration covers refund date {refund_date.isoformat()}."
             )
-        resolved = FinancePeriodDefinition.resolved_for_configuration(config, refund_date)
-        try:
-            FinanceLedgerGuard.ensure_period_start_mutable(
-                session, self._repository_provider, resolved.period_start
-            )
-        except FinancePeriodClosedError as exc:
-            raise TuitionRefundValidationError(str(exc)) from exc
         return config, resolved.period_start
 
     def preview(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> dict:
@@ -180,7 +178,7 @@ class TuitionRefundService:
                         f"Prepaid refund {value} exceeds available prepaid credit {prepaid}."
                     )
 
-            finance_period, finance_period_start = self._resolve_period(session, refund_date)
+            accounting_config, accounting_period_start = self._resolve_period(session, refund_date)
             origin_marker = (
                 f"{self.ORIGIN_MARKER}{origin_income_id}; " if origin_income_id is not None else ""
             )
@@ -196,8 +194,8 @@ class TuitionRefundService:
                 payment_method=wallet,
                 payment_date=refund_date,
                 payment_period="REFUND",
-                finance_period_id=finance_period.id,
-                finance_period_start=finance_period_start,
+                finance_period_id=accounting_config.id,
+                finance_period_start=accounting_period_start,
                 received_by=actor_name,
                 note=note,
                 status=Income.STATUS_ACTIVE,
@@ -218,7 +216,7 @@ class TuitionRefundService:
                     "amount": str(value),
                     "payment_method": wallet,
                     "refund_date": refund_date.isoformat(),
-                    "finance_period_start": finance_period_start.isoformat(),
+                    "accounting_period_start": accounting_period_start.isoformat(),
                     "prepaid_only": prepaid_only,
                     "reason": resolved_reason,
                 },
