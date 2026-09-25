@@ -20,6 +20,11 @@ class TuitionAdjustment(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("kind IN ('REFUND', 'CREDIT_ADJUSTMENT')", name="ck_tuition_adjustment_kind"),
         CheckConstraint("amount > 0", name="ck_tuition_adjustment_amount_positive"),
+        CheckConstraint(
+            "(kind = 'REFUND' AND linked_income_id IS NOT NULL AND wallet IS NOT NULL AND origin_adjustment_id IS NULL) "
+            "OR (kind = 'CREDIT_ADJUSTMENT' AND linked_income_id IS NULL AND wallet IS NULL AND origin_income_id IS NULL)",
+            name="ck_tuition_adjustment_shape",
+        ),
         UniqueConstraint("idempotency_key", name="uq_tuition_adjustment_idempotency_key"),
         UniqueConstraint("linked_income_id", name="uq_tuition_adjustment_linked_income"),
     )
