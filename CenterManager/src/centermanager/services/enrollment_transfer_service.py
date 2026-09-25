@@ -25,6 +25,10 @@ class EnrollmentTransferValidationError(EnrollmentTransferError):
     pass
 
 
+class _TransferPersistenceConflict(Exception):
+    """Internal signal used to leave the owned session before replay recovery."""
+
+
 _MONEY_QUANTUM = Decimal("0.0001")
 
 
@@ -229,118 +233,115 @@ class EnrollmentTransferService:
         if credit < 0:
             raise EnrollmentTransferValidationError("Transferred credit cannot be negative.")
 
-        with self._session_factory() as session:
-            enrollments = self._repository_provider.enrollments(session)
-            transfer_repo = self._repository_provider.enrollment_transfers(session)
-            source, target_class = transfer_repo.acquire_command_lock(
-                source_enrollment_id, target_class_id
-            )
+        try:
+            with self._session_factory() as session:
+                enrollments = self._repository_provider.enrollments(session)
+                transfer_repo = self._repository_provider.enrollment_transfers(session)
+                source, target_class = transfer_repo.acquire_command_lock(
+                    source_enrollment_id, target_class_id
+                )
 
-            existing = self._existing_or_conflict(
-                transfer_repo,
+                existing = self._existing_or_conflict(
+                    transfer_repo,
+                    source_enrollment_id=source_enrollment_id,
+                    target_class_id=target_class_id,
+                    transferred_credit=credit,
+                    reason=resolved_reason,
+                    idempotency_key=resolved_key,
+                )
+                if existing is not None:
+                    return existing
+
+                if source is None:
+                    raise EnrollmentTransferValidationError("Source Enrollment not found.")
+                if source.status != "ACTIVE":
+                    raise EnrollmentTransferValidationError("Only an ACTIVE Enrollment can be transferred.")
+                if source.class_id == target_class_id:
+                    raise EnrollmentTransferValidationError("Target class must differ from source class.")
+                freeze_repo = self._repository_provider.enrollment_freezes(session)
+                if freeze_repo.get_open(source_enrollment_id) is not None:
+                    raise EnrollmentTransferValidationError("Resume the open tuition freeze before transferring.")
+                if enrollments.exists(source.student_id, target_class_id, active_only=True):
+                    raise EnrollmentTransferValidationError("Student already has an active Enrollment in target class.")
+
+                if target_class is None or target_class.deleted_at is not None:
+                    raise EnrollmentTransferValidationError("Target class not found or archived.")
+                if target_class.capacity is not None and len(
+                    enrollments.get_active_by_class(target_class_id)
+                ) >= target_class.capacity:
+                    raise EnrollmentTransferValidationError(
+                        f"Target class capacity ({target_class.capacity}) reached."
+                    )
+
+                target_sessions = self._repository_provider.sessions(session).get_by_class(target_class_id)
+                target_start = self._target_start_session(target_class, target_sessions)
+                target_contract = self._target_contract(target_class, target_start)
+                source_balance = self._source_balance(session, source)
+                available_credit = max(-source_balance, Decimal("0.0000"))
+                if credit > available_credit:
+                    raise EnrollmentTransferValidationError(
+                        f"Transferred credit {credit} exceeds available prepaid credit {available_credit}."
+                    )
+
+                today = get_clock().today()
+                target = Enrollment(
+                    student_id=source.student_id,
+                    class_id=target_class_id,
+                    class_name=target_class.name,
+                    course_name=target_class.course,
+                    start_date=today,
+                    status="ACTIVE",
+                    **target_contract,
+                )
+                enrollments.add(target)
+                if not transfer_repo.flush_guarded():
+                    raise _TransferPersistenceConflict()
+
+                source.status = "WITHDRAWN"
+                source.end_date = today
+                transfer = EnrollmentTransfer(
+                    source_enrollment_id=int(source.id),
+                    target_enrollment_id=int(target.id),
+                    idempotency_key=resolved_key,
+                    transferred_credit=credit,
+                    source_balance_before=source_balance,
+                    reason=resolved_reason,
+                    transferred_at=get_clock().now(),
+                    created_by=getattr(resolved_actor, "username", None),
+                )
+                transfer_repo.add(transfer)
+                if not transfer_repo.flush_guarded():
+                    raise _TransferPersistenceConflict()
+                self._audit_service.record_in_session(
+                    session,
+                    action="TUITION_ENROLLMENT_TRANSFER",
+                    module="tuition",
+                    target_type="enrollment_transfer",
+                    target_id=transfer.id,
+                    target_name=f"{source.class_name} -> {target_class.name}",
+                    actor=resolved_actor,
+                    details={
+                        "student_id": source.student_id,
+                        "source_enrollment_id": source.id,
+                        "target_enrollment_id": target.id,
+                        "source_class_id": source.class_id,
+                        "target_class_id": target_class_id,
+                        "source_balance_before": str(source_balance),
+                        "transferred_credit": str(credit),
+                        "target_unit_fee": str(target.unit_fee),
+                        "idempotency_key": resolved_key,
+                        "reason": resolved_reason,
+                    },
+                    summary=f"Enrollment transfer from {source.class_name} to {target_class.name}",
+                )
+                session.commit()
+                transfer_repo.refresh(transfer)
+                return transfer
+        except _TransferPersistenceConflict:
+            return self._recover_conflict(
                 source_enrollment_id=source_enrollment_id,
                 target_class_id=target_class_id,
                 transferred_credit=credit,
                 reason=resolved_reason,
                 idempotency_key=resolved_key,
             )
-            if existing is not None:
-                return existing
-
-            if source is None:
-                raise EnrollmentTransferValidationError("Source Enrollment not found.")
-            if source.status != "ACTIVE":
-                raise EnrollmentTransferValidationError("Only an ACTIVE Enrollment can be transferred.")
-            if source.class_id == target_class_id:
-                raise EnrollmentTransferValidationError("Target class must differ from source class.")
-            freeze_repo = self._repository_provider.enrollment_freezes(session)
-            if freeze_repo.get_open(source_enrollment_id) is not None:
-                raise EnrollmentTransferValidationError("Resume the open tuition freeze before transferring.")
-            if enrollments.exists(source.student_id, target_class_id, active_only=True):
-                raise EnrollmentTransferValidationError("Student already has an active Enrollment in target class.")
-
-            if target_class is None or target_class.deleted_at is not None:
-                raise EnrollmentTransferValidationError("Target class not found or archived.")
-            if target_class.capacity is not None and len(
-                enrollments.get_active_by_class(target_class_id)
-            ) >= target_class.capacity:
-                raise EnrollmentTransferValidationError(
-                    f"Target class capacity ({target_class.capacity}) reached."
-                )
-
-            target_sessions = self._repository_provider.sessions(session).get_by_class(target_class_id)
-            target_start = self._target_start_session(target_class, target_sessions)
-            target_contract = self._target_contract(target_class, target_start)
-            source_balance = self._source_balance(session, source)
-            available_credit = max(-source_balance, Decimal("0.0000"))
-            if credit > available_credit:
-                raise EnrollmentTransferValidationError(
-                    f"Transferred credit {credit} exceeds available prepaid credit {available_credit}."
-                )
-
-            today = get_clock().today()
-            target = Enrollment(
-                student_id=source.student_id,
-                class_id=target_class_id,
-                class_name=target_class.name,
-                course_name=target_class.course,
-                start_date=today,
-                status="ACTIVE",
-                **target_contract,
-            )
-            enrollments.add(target)
-            if not transfer_repo.flush_guarded():
-                return self._recover_conflict(
-                    source_enrollment_id=source_enrollment_id,
-                    target_class_id=target_class_id,
-                    transferred_credit=credit,
-                    reason=resolved_reason,
-                    idempotency_key=resolved_key,
-                )
-
-            source.status = "WITHDRAWN"
-            source.end_date = today
-            transfer = EnrollmentTransfer(
-                source_enrollment_id=int(source.id),
-                target_enrollment_id=int(target.id),
-                idempotency_key=resolved_key,
-                transferred_credit=credit,
-                source_balance_before=source_balance,
-                reason=resolved_reason,
-                transferred_at=get_clock().now(),
-                created_by=getattr(resolved_actor, "username", None),
-            )
-            transfer_repo.add(transfer)
-            if not transfer_repo.flush_guarded():
-                return self._recover_conflict(
-                    source_enrollment_id=source_enrollment_id,
-                    target_class_id=target_class_id,
-                    transferred_credit=credit,
-                    reason=resolved_reason,
-                    idempotency_key=resolved_key,
-                )
-            self._audit_service.record_in_session(
-                session,
-                action="TUITION_ENROLLMENT_TRANSFER",
-                module="tuition",
-                target_type="enrollment_transfer",
-                target_id=transfer.id,
-                target_name=f"{source.class_name} -> {target_class.name}",
-                actor=resolved_actor,
-                details={
-                    "student_id": source.student_id,
-                    "source_enrollment_id": source.id,
-                    "target_enrollment_id": target.id,
-                    "source_class_id": source.class_id,
-                    "target_class_id": target_class_id,
-                    "source_balance_before": str(source_balance),
-                    "transferred_credit": str(credit),
-                    "target_unit_fee": str(target.unit_fee),
-                    "idempotency_key": resolved_key,
-                    "reason": resolved_reason,
-                },
-                summary=f"Enrollment transfer from {source.class_name} to {target_class.name}",
-            )
-            session.commit()
-            transfer_repo.refresh(transfer)
-            return transfer
