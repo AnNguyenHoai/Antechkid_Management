@@ -18,9 +18,13 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.clock import get_clock
 from centermanager.dto.outstanding_dto import (
+    BALANCE_STATE_NO_TUITION_CONFIGURED,
+    BALANCE_STATE_OWED,
+    BALANCE_STATE_PAID,
+    BALANCE_STATE_PREPAID,
+    OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
     OutstandingDTO,
     StudentOutstandingSummary,
-    OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
 )
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.finance_period import FinancePeriodDefinition
@@ -37,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class OutstandingService:
-    """Read-only Enrollment balance projection for tuition receivables."""
+    """Read-only Enrollment balance projection for tuition receivables and credit."""
 
     TUITION_INCOME_TYPE = "Tuition"
     NO_TUITION_CONFIGURED_STATUS = OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
@@ -50,6 +54,7 @@ class OutstandingService:
         "paid": lambda dto: dto.paid,
         "outstanding": lambda dto: dto.outstanding,
         "status": lambda dto: dto.status or "",
+        "balance_state": lambda dto: dto.balance_state or "",
     }
 
     def __init__(
@@ -66,19 +71,12 @@ class OutstandingService:
         on_date: date,
         period_start: Optional[date] = None,
     ) -> Optional[Tuple[date, date]]:
-        """Resolve optional accounting report context.
-
-        A missing FinancePeriod is not a tuition-calculation failure. Callers that
-        explicitly selected ``period_start`` may still treat a missing period as
-        an invalid report filter, while callers without one simply calculate the
-        Enrollment balance without accounting-period filtering.
-        """
+        """Resolve optional accounting report context."""
         target = period_start or on_date
         period_repo = self._repository_provider.finance_periods(session)
         config = period_repo.get_unique_effective(target)
         if config is None:
             return None
-
         resolved = FinancePeriodDefinition.resolved_for_configuration(config, target)
         if period_start is not None and resolved.period_start != period_start:
             raise ValueError(
@@ -93,7 +91,6 @@ class OutstandingService:
         period_start: Optional[date],
         period_end: Optional[date],
     ) -> bool:
-        """Reporting-only Enrollment overlap predicate."""
         if period_start is None or period_end is None:
             return True
         if enrollment.start_date and enrollment.start_date > period_end:
@@ -104,7 +101,6 @@ class OutstandingService:
 
     @staticmethod
     def _amount(value) -> Decimal:
-        """Normalize read-model money without losing Enrollment snapshot precision."""
         return Decimal(str(value or 0))
 
     def _get_total_paid(
@@ -114,7 +110,6 @@ class OutstandingService:
         *,
         as_of_date: date,
     ) -> Decimal:
-        """ACTIVE Tuition paid for exactly one Enrollment, independent of period."""
         repo = self._repository_provider.incomes(session)
         return self._amount(
             repo.sum_active_tuition_for_enrollment(
@@ -130,7 +125,6 @@ class OutstandingService:
         *,
         as_of_date: date,
     ) -> Tuple[Decimal, bool]:
-        """Use TUITION-06 as the single source of truth for tuition obligation."""
         if enrollment.class_id is None:
             return Decimal("0"), False
         sessions = self._repository_provider.sessions(session).get_by_class(
@@ -156,12 +150,7 @@ class OutstandingService:
         *,
         as_of_date: Optional[date] = None,
     ) -> Optional[OutstandingDTO]:
-        """Build one balance row for one exact Enrollment.
-
-        ``payment_totals`` is accepted only for call compatibility with the old
-        private helper. It is intentionally ignored because student/class period
-        aggregates cannot safely attribute payments across re-enrollments.
-        """
+        """Build one signed balance row for one exact Enrollment."""
         del payment_totals
         if enrollment.id is None or enrollment.class_id is None:
             return None
@@ -173,7 +162,6 @@ class OutstandingService:
             return None
 
         cutoff = as_of_date or get_clock().today()
-
         class_obj = enrollment.class_
         if class_obj is None:
             class_obj = self._repository_provider.classes(session).get_by_id(
@@ -202,7 +190,6 @@ class OutstandingService:
             int(enrollment.id),
             as_of_date=cutoff,
         )
-
         return OutstandingDTO.create(
             student_id=enrollment.student_id,
             student_name=student.full_name,
@@ -225,7 +212,6 @@ class OutstandingService:
         target_date: date,
         period_start: Optional[date],
     ) -> Tuple[Optional[date], Optional[date], bool]:
-        """Return report bounds plus whether an explicit report filter is valid."""
         period = self._resolve_period(session, target_date, period_start)
         if period is None:
             return None, None, period_start is None
@@ -241,11 +227,6 @@ class OutstandingService:
         as_of_date: Optional[date] = None,
         enrollment_id: Optional[int] = None,
     ) -> Optional[OutstandingDTO]:
-        """Calculate the balance for one exact Enrollment contract.
-
-        Legacy student/class callers remain supported only when that identity is
-        unambiguous. Re-enrollment is never resolved by date or accounting period.
-        """
         target_date = on_date or get_clock().today()
         cutoff = as_of_date or target_date
         with self._session_factory() as session:
@@ -262,10 +243,7 @@ class OutstandingService:
                 enrollment = enrollment_repo.get_by_id(enrollment_id)
                 if enrollment is None:
                     return None
-                if (
-                    enrollment.student_id != student_id
-                    or enrollment.class_id != class_id
-                ):
+                if enrollment.student_id != student_id or enrollment.class_id != class_id:
                     raise ValueError(
                         "Enrollment does not belong to the requested student/class."
                     )
@@ -331,7 +309,7 @@ class OutstandingService:
             )
             if dto is None:
                 continue
-            if status_filter and dto.status != status_filter:
+            if status_filter and status_filter not in (dto.status, dto.balance_state):
                 continue
             results.append(dto)
 
@@ -341,14 +319,22 @@ class OutstandingService:
 
     @staticmethod
     def _stats_for_rows(rows: List[OutstandingDTO]) -> Dict[str, int]:
+        """Aggregate debt and prepaid independently; never net credit against debt."""
         configured = [dto for dto in rows if dto.tuition_configured]
         return {
             "total_rows": len(rows),
             "total_students_with_debt": len(
-                {dto.student_id for dto in configured if dto.outstanding > 0}
+                {dto.student_id for dto in configured if dto.balance_state == BALANCE_STATE_OWED}
+            ),
+            "total_students_with_prepaid": len(
+                {dto.student_id for dto in configured if dto.balance_state == BALANCE_STATE_PREPAID}
             ),
             "total_outstanding": sum(
-                (max(dto.outstanding, 0) for dto in configured),
+                (dto.debt_amount for dto in configured),
+                Decimal("0"),
+            ),
+            "total_prepaid": sum(
+                (dto.prepaid_amount for dto in configured),
                 Decimal("0"),
             ),
             "total_expected": sum(
@@ -379,11 +365,6 @@ class OutstandingService:
         ascending: bool = False,
         as_of_date: Optional[date] = None,
     ) -> Tuple[List[OutstandingDTO], int, Dict[str, int]]:
-        """Return a derived page plus full-filter KPI totals.
-
-        ``as_of_date`` is the sole monetary projection cutoff. FinancePeriod, if
-        resolved, only limits which Enrollment rows participate in the report.
-        """
         target_date = on_date or get_clock().today()
         cutoff = as_of_date or target_date
         with self._session_factory() as session:
@@ -453,7 +434,6 @@ class OutstandingService:
         period_start: Optional[date] = None,
         on_date: Optional[date] = None,
     ) -> List[Tuple[int, str]]:
-        """Return classes participating in the optional accounting report window."""
         target_date = on_date or get_clock().today()
         with self._session_factory() as session:
             report_start, report_end, report_valid = self._report_period_for_request(
@@ -463,9 +443,7 @@ class OutstandingService:
             )
             if not report_valid:
                 return []
-            enrollments, _ = self._repository_provider.enrollments(
-                session
-            ).list_for_outstanding(
+            enrollments, _ = self._repository_provider.enrollments(session).list_for_outstanding(
                 period_start=report_start,
                 period_end=report_end,
                 offset=0,
@@ -480,9 +458,7 @@ class OutstandingService:
                     if enrollment.class_ is not None
                     else enrollment.class_name
                 )
-                classes[enrollment.class_id] = (
-                    class_name or f"Class #{enrollment.class_id}"
-                )
+                classes[enrollment.class_id] = class_name or f"Class #{enrollment.class_id}"
             return sorted(classes.items(), key=lambda item: item[1].casefold())
 
     def get_student_summary(
@@ -492,7 +468,6 @@ class OutstandingService:
         on_date: Optional[date] = None,
         as_of_date: Optional[date] = None,
     ) -> Optional[StudentOutstandingSummary]:
-        """Aggregate Enrollment-centric balances for one student."""
         rows, _, _ = self.get_outstanding_page(
             student_id=student_id,
             period_start=period_start,
@@ -519,6 +494,7 @@ class OutstandingService:
         has_unconfigured_tuition = False
         details: List[OutstandingDTO] = []
         seen_enrollment_ids = set()
+        configured_count = 0
         for dto in rows:
             identity = dto.enrollment_id
             if identity is not None and identity in seen_enrollment_ids:
@@ -527,19 +503,24 @@ class OutstandingService:
                 seen_enrollment_ids.add(identity)
             total_paid += self._amount(dto.paid)
             if dto.tuition_configured:
+                configured_count += 1
                 total_expected += self._amount(dto.expected_tuition)
             else:
                 has_unconfigured_tuition = True
             details.append(dto)
 
         total_outstanding = total_expected - total_paid
-        if total_outstanding == 0:
-            status = "Paid"
-        elif total_outstanding > 0 and total_paid == 0:
-            status = "Not Yet"
+        if has_unconfigured_tuition and configured_count == 0:
+            balance_state = BALANCE_STATE_NO_TUITION_CONFIGURED
+            status = OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
         elif total_outstanding > 0:
-            status = "Partial"
+            balance_state = BALANCE_STATE_OWED
+            status = "Not Yet" if total_paid == 0 else "Partial"
+        elif total_outstanding == 0:
+            balance_state = BALANCE_STATE_PAID
+            status = "Paid"
         else:
+            balance_state = BALANCE_STATE_PREPAID
             status = "Overpaid"
 
         return StudentOutstandingSummary(
@@ -552,6 +533,7 @@ class OutstandingService:
             status=status,
             details=details,
             has_unconfigured_tuition=has_unconfigured_tuition,
+            balance_state=balance_state,
         )
 
     def get_outstanding_stats(
@@ -589,7 +571,6 @@ class OutstandingService:
         ascending: bool = False,
         as_of_date: Optional[date] = None,
     ) -> str:
-        """Export every Enrollment row matching the current report filters."""
         rows, _, _ = self.get_outstanding_page(
             class_id=class_id,
             status_filter=status_filter,
@@ -615,6 +596,8 @@ class OutstandingService:
                 "Expected Tuition",
                 "Paid",
                 "Outstanding",
+                "Prepaid Credit",
+                "Balance State",
                 "Status",
                 "Finance Period Start",
                 "Finance Period End",
@@ -630,6 +613,8 @@ class OutstandingService:
                     row.expected_tuition if row.tuition_configured else "",
                     row.paid,
                     row.outstanding if row.tuition_configured else "",
+                    row.prepaid_amount if row.tuition_configured else "",
+                    row.balance_state,
                     row.status,
                     row.period_start.isoformat() if row.period_start else "",
                     row.period_end.isoformat() if row.period_end else "",

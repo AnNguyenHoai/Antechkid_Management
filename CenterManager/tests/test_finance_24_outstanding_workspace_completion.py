@@ -17,7 +17,7 @@ def _source(path: Path) -> str:
 
 def test_outstanding_status_filter_happens_before_pagination():
     source = _source(SERVICE)
-    assert source.index("if status_filter and dto.status != status_filter") < source.index(
+    assert source.index("if status_filter and status_filter not in (dto.status, dto.balance_state)") < source.index(
         "start = max(0, offset)"
     )
     assert "return page_rows, total, stats" in source
@@ -75,6 +75,7 @@ def test_outstanding_workspace_has_filter_kpis_export_and_is_read_only():
     assert "self.class_combo" in source
     assert "self.status_combo" in source
     assert "def _update_kpis" in source
+    assert "self.prepaid_kpi" in source
     assert "def _export_csv" in source
     assert "export_outstanding_csv(" in source
     assert "create_income(" not in source
@@ -83,7 +84,7 @@ def test_outstanding_workspace_has_filter_kpis_export_and_is_read_only():
     assert "void_income(" not in source
 
 
-def test_outstanding_kpis_cover_full_filtered_rows():
+def test_outstanding_kpis_cover_full_filtered_rows_without_netting_credit():
     rows = [
         OutstandingDTO.create(
             student_id=1,
@@ -101,7 +102,7 @@ def test_outstanding_kpis_cover_full_filtered_rows():
             class_id=10,
             class_name="C1",
             expected_tuition=100,
-            paid=100,
+            paid=140,
         ),
         OutstandingDTO.create(
             student_id=3,
@@ -119,9 +120,11 @@ def test_outstanding_kpis_cover_full_filtered_rows():
 
     assert stats["total_rows"] == 3
     assert stats["total_expected"] == 200
-    assert stats["total_paid"] == 160
+    assert stats["total_paid"] == 200
     assert stats["total_outstanding"] == 60
+    assert stats["total_prepaid"] == 40
     assert stats["total_students_with_debt"] == 1
+    assert stats["total_students_with_prepaid"] == 1
     assert stats["total_unconfigured_tuition"] == 1
 
 
@@ -131,5 +134,7 @@ def test_outstanding_csv_exports_all_matching_rows_contract():
     export_start = source.index("def export_outstanding_csv")
     export_source = source[export_start:]
     assert "limit=None" in export_source
+    assert '"Prepaid Credit"' in export_source
+    assert '"Balance State"' in export_source
     assert '"Finance Period Start"' in export_source
     assert '"Finance Period End"' in export_source

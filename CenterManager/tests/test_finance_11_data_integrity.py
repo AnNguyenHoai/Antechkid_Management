@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from centermanager.dto.outstanding_dto import (
+    BALANCE_STATE_NO_TUITION_CONFIGURED,
     OutstandingDTO,
     OUTSTANDING_STATUS_NO_TUITION_CONFIGURED,
 )
@@ -18,6 +19,7 @@ def test_missing_tuition_configuration_is_explicit():
         expected_tuition=0, paid=0, tuition_configured=False,
     )
     assert dto.status == OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
+    assert dto.balance_state == BALANCE_STATE_NO_TUITION_CONFIGURED
     assert dto.tuition_configured is False
     assert dto.outstanding == 0
 
@@ -46,4 +48,4 @@ def test_summary_excludes_unconfigured_fee_from_debt_math():
 
 def test_outstanding_list_can_filter_configuration_problem():
     source = (ROOT / "src" / "centermanager" / "ui" / "finance_workspace" / "outstanding_list_page.py").read_text(encoding="utf-8")
-    assert '"No Tuition Configured"' in source
+    assert "BALANCE_STATE_NO_TUITION_CONFIGURED" in source
