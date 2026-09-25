@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -20,6 +20,10 @@ class EnrollmentTransfer(Base, TimestampMixin):
     """Immutable evidence of a class transfer and any explicit prepaid credit moved."""
 
     __tablename__ = "enrollment_transfers"
+    __table_args__ = (
+        UniqueConstraint("source_enrollment_id", name="uq_enrollment_transfer_source"),
+        UniqueConstraint("idempotency_key", name="uq_enrollment_transfer_idempotency_key"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_enrollment_id: Mapped[int] = mapped_column(
@@ -28,6 +32,7 @@ class EnrollmentTransfer(Base, TimestampMixin):
     target_enrollment_id: Mapped[int] = mapped_column(
         ForeignKey("enrollments.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True
     )
+    idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
     transferred_credit: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
