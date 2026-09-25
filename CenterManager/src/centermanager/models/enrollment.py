@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List
 
 from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -17,6 +17,7 @@ from centermanager.models.mixins import TimestampMixin
 if TYPE_CHECKING:
     from centermanager.models.student import Student
     from centermanager.models.class_ import Class
+    from centermanager.models.enrollment_freeze import EnrollmentFreeze
 
 
 class Enrollment(Base, TimestampMixin):
@@ -34,8 +35,6 @@ class Enrollment(Base, TimestampMixin):
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")
 
-    # Tuition contract snapshot. Nullable fields intentionally represent legacy
-    # enrollments for which the old schema recorded no auditable contract terms.
     agreed_course_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4), nullable=True)
     planned_sessions: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     unit_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4), nullable=True)
@@ -44,19 +43,21 @@ class Enrollment(Base, TimestampMixin):
     discount_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
-    # Versioned billing policy snapshot. Migration 1e10a033 assigns all
-    # pre-TUITION-11 rows to the legacy session-only policy; new Enrollments are
-    # created with the current attendance-aware version by EnrollmentService.
     billing_policy_version: Mapped[str] = mapped_column(
         String(40), nullable=False, default="attendance_v1"
     )
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
     class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")
+    freezes: Mapped[List["EnrollmentFreeze"]] = relationship(
+        "EnrollmentFreeze",
+        back_populates="enrollment",
+        order_by="EnrollmentFreeze.start_session",
+        cascade="save-update, merge",
+    )
 
     @property
     def has_tuition_contract(self) -> bool:
-        """Whether this row has a complete auditable tuition snapshot."""
         return (
             self.agreed_course_fee is not None
             and self.planned_sessions is not None
@@ -75,6 +76,10 @@ class Enrollment(Base, TimestampMixin):
         if self.enrolled_until_session < self.enrolled_from_session:
             return None
         return self.enrolled_until_session - self.enrolled_from_session + 1
+
+    @property
+    def has_open_freeze(self) -> bool:
+        return any(item.is_open for item in (self.freezes or []))
 
     def __repr__(self) -> str:
         return f"<Enrollment(id={self.id}, student_id={self.student_id}, class='{self.class_name}')>"
