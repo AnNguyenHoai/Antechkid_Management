@@ -12,6 +12,7 @@ from centermanager.models.class_ import Class
 from centermanager.models.enrollment_transfer import EnrollmentTransfer
 from centermanager.models.income import Income
 from centermanager.models.student import Student
+from centermanager.models.tuition_adjustment import TuitionAdjustment
 from centermanager.repositories.base import BaseRepository
 
 
@@ -165,7 +166,7 @@ class IncomeRepository(BaseRepository[Income]):
         return query.order_by(asc(Income.payment_date), asc(Income.id)).all()
 
     def sum_active_tuition_for_enrollment(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> Decimal:
-        """Effective settled tuition: cash payments plus incoming credit minus outgoing credit."""
+        """Effective settled tuition: cash + non-cash credit + transfer credits - refunds/outgoing credit."""
         payment_query = self._session.query(func.coalesce(func.sum(Income.amount), 0)).filter(
             Income.deleted_at.is_(None), Income.status == Income.STATUS_ACTIVE,
             Income.income_type == "Tuition", Income.enrollment_id == enrollment_id,
@@ -173,6 +174,14 @@ class IncomeRepository(BaseRepository[Income]):
         if as_of_date is not None:
             payment_query = payment_query.filter(Income.payment_date <= as_of_date)
         paid = Decimal(str(payment_query.scalar() or 0))
+
+        credit_query = self._session.query(func.coalesce(func.sum(TuitionAdjustment.amount), 0)).filter(
+            TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
+            TuitionAdjustment.enrollment_id == enrollment_id,
+        )
+        if as_of_date is not None:
+            credit_query = credit_query.filter(TuitionAdjustment.adjustment_date <= as_of_date)
+        non_cash_credit = Decimal(str(credit_query.scalar() or 0))
 
         incoming = self._session.query(func.coalesce(func.sum(EnrollmentTransfer.transferred_credit), 0)).filter(
             EnrollmentTransfer.target_enrollment_id == enrollment_id
@@ -184,7 +193,12 @@ class IncomeRepository(BaseRepository[Income]):
             cutoff = datetime.combine(as_of_date, time.max)
             incoming = incoming.filter(EnrollmentTransfer.transferred_at <= cutoff)
             outgoing = outgoing.filter(EnrollmentTransfer.transferred_at <= cutoff)
-        return paid + Decimal(str(incoming.scalar() or 0)) - Decimal(str(outgoing.scalar() or 0))
+        return (
+            paid
+            + non_cash_credit
+            + Decimal(str(incoming.scalar() or 0))
+            - Decimal(str(outgoing.scalar() or 0))
+        )
 
     def aggregate_active_tuition_by_student_class(self, *, finance_period_start: date, date_from: date,
                                                   date_to: date, income_type: str = "Tuition",
