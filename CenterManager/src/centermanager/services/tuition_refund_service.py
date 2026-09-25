@@ -2,10 +2,10 @@
 """TUITION-14 explicit, auditable tuition refund workflow.
 
 Refunds are immutable adjustment transactions. They never edit or void the
-originating Tuition payment. A refund is represented as a negative ACTIVE
-Income row with ``income_type='Tuition Refund'`` so Wallet/Settlement sees the
-real cash outflow in the refund's own Finance period while tuition settlement
-for the Enrollment is reduced by the same amount.
+originating Tuition payment. A refund is posted through this dedicated service
+as a negative ACTIVE Tuition ledger row. Normal IncomeService rejects negative
+amounts, so refund semantics stay isolated while Wallet/Settlement and Tuition
+Outstanding consume the adjustment without a schema fork.
 """
 from __future__ import annotations
 
@@ -44,7 +44,8 @@ def _money(value) -> Decimal:
 class TuitionRefundService:
     """Post refund adjustments without rewriting Tuition payment history."""
 
-    REFUND_TYPE = "Tuition Refund"
+    REFUND_TYPE = "Tuition"
+    REFUND_MARKER = "tuition_refund=true"
     ORIGIN_MARKER = "origin_income_id="
 
     def __init__(
@@ -135,10 +136,14 @@ class TuitionRefundService:
             if enrollment is None:
                 raise TuitionRefundValidationError("Enrollment not found.")
 
-            origin = None
             if origin_income_id is not None:
                 origin = incomes.get_by_id(origin_income_id)
-                if origin is None or origin.income_type != "Tuition" or origin.status != Income.STATUS_ACTIVE:
+                if (
+                    origin is None
+                    or origin.income_type != "Tuition"
+                    or origin.status != Income.STATUS_ACTIVE
+                    or float(origin.amount) <= 0
+                ):
                     raise TuitionRefundValidationError("Origin must be an ACTIVE Tuition payment.")
                 if origin.enrollment_id != enrollment_id:
                     raise TuitionRefundValidationError("Origin payment belongs to a different Enrollment.")
@@ -155,7 +160,10 @@ class TuitionRefundService:
                 )
 
             if prepaid_only:
-                from centermanager.services.tuition_accrual_service import TuitionAccrualService, TuitionAccrualUnresolvedError
+                from centermanager.services.tuition_accrual_service import (
+                    TuitionAccrualService,
+                    TuitionAccrualUnresolvedError,
+                )
 
                 sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
                 try:
@@ -164,7 +172,9 @@ class TuitionRefundService:
                     )
                 except TuitionAccrualUnresolvedError as exc:
                     raise TuitionRefundValidationError("Enrollment tuition accrual is unresolved.") from exc
-                prepaid = max(_money(settled - Decimal(accrual.net_accrued)), Decimal("0.00"))
+                prepaid = max(
+                    _money(settled - Decimal(accrual.net_accrued)), Decimal("0.00")
+                )
                 if value > prepaid:
                     raise TuitionRefundValidationError(
                         f"Prepaid refund {value} exceeds available prepaid credit {prepaid}."
@@ -174,7 +184,7 @@ class TuitionRefundService:
             origin_marker = (
                 f"{self.ORIGIN_MARKER}{origin_income_id}; " if origin_income_id is not None else ""
             )
-            note = f"{origin_marker}refund_reason={resolved_reason}"
+            note = f"{self.REFUND_MARKER}; {origin_marker}refund_reason={resolved_reason}"
             actor = get_current_user()
             actor_name = getattr(actor, "full_name", None) or getattr(actor, "username", None) or "System"
             adjustment = Income(
@@ -185,6 +195,7 @@ class TuitionRefundService:
                 income_type=self.REFUND_TYPE,
                 payment_method=wallet,
                 payment_date=refund_date,
+                payment_period="REFUND",
                 finance_period_id=finance_period.id,
                 finance_period_start=finance_period_start,
                 received_by=actor_name,
