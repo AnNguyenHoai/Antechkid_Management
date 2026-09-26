@@ -54,11 +54,11 @@ class AdminDataResetRepository:
             "students", "parents", "attachments", "documents", "notes",
             "student_highlights", "student_products", "progress",
             "enrollments", "enrollment_freezes", "enrollment_transfers",
-            "assessments", "attendance",
+            "assessments", "attendances",
         }),
         "class": frozenset({
             "classes", "class_fee_history", "class_timeline_events",
-            "teacher_assignments", "sessions", "session_notes", "attendance",
+            "teacher_assignments", "sessions", "session_notes", "attendances",
             "enrollments", "enrollment_freezes", "enrollment_transfers",
             "assessments",
         }),
@@ -75,7 +75,7 @@ class AdminDataResetRepository:
         }),
         "finance": FINANCE_TABLES,
         "operational": frozenset({
-            "sessions", "session_notes", "attendance", "assessments",
+            "sessions", "session_notes", "attendances", "assessments",
             "reports", "report_cache", "timeline_events",
         }),
     }
