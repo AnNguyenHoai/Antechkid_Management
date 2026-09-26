@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 # Importing the model package registers every mapped table on Base.metadata.
@@ -105,30 +105,41 @@ class AdminDataResetRepository:
 
     def _count(self, table_name: str) -> int:
         table = self._all_tables()[table_name]
-        return int(self._session.execute(select(func.count()).select_from(table)).scalar_one())
+        return int(
+            self._session.execute(select(func.count()).select_from(table)).scalar_one()
+        )
+
+    def _count_fk_references(self, table, fk_columns) -> int:
+        conditions = [column.is_not(None) for column in fk_columns]
+        if not conditions:
+            return 0
+        statement = select(func.count()).select_from(table).where(or_(*conditions))
+        return int(self._session.execute(statement).scalar_one())
 
     def preview(self, scope: str, *, include_finance: bool = False) -> ResetPreviewData:
         selected = set(self.resolve_tables(scope, include_finance=include_finance))
         tables = self._all_tables()
         counts = {name: self._count(name) for name in sorted(selected)}
-        finance_counts = {
-            name: self._count(name)
-            for name in sorted(set(self.FINANCE_TABLES).intersection(tables))
-            if self._count(name) > 0
-        }
+
+        finance_counts: dict[str, int] = {}
+        for name in sorted(set(self.FINANCE_TABLES).intersection(tables)):
+            count = self._count(name)
+            if count:
+                finance_counts[name] = count
 
         blockers: dict[str, int] = {}
-        # If a table outside the requested reset set still owns a FK to a table
-        # being cleared, deleting the parent would make that retained data invalid.
+        # Only rows whose FK value actually references a table being cleared are
+        # blockers. Nullable historical/optional FK columns must not block a reset
+        # merely because unrelated rows exist in the same retained table.
         for child_name, child in tables.items():
             if child_name in selected or child_name in self.PROTECTED_TABLES:
                 continue
-            references_selected = any(
-                fk.column.table.name in selected for fk in child.foreign_keys
-            )
-            if not references_selected:
-                continue
-            child_count = self._count(child_name)
+            fk_columns = [
+                fk.parent
+                for fk in child.foreign_keys
+                if fk.column.table.name in selected
+            ]
+            child_count = self._count_fk_references(child, fk_columns)
             if child_count:
                 blockers[child_name] = child_count
 
