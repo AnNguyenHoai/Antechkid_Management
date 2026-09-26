@@ -15,10 +15,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QVBoxLayout,
-    QWidget,
 )
 
-from centermanager.services.admin_data_reset_service import AdminDataResetError
+from centermanager.services.admin_data_reset import AdminDataResetError
 
 
 class DataManagementPanel(QFrame):
@@ -149,7 +148,9 @@ class DataManagementPanel(QFrame):
             lines.extend(
                 f"  - {name}: {count}" for name, count in preview.blockers.items()
             )
-            lines.append("Enable related finance data when applicable, or reset the dependent scope first.")
+            lines.append(
+                "Enable related finance data when applicable, or reset the dependent scope first."
+            )
         else:
             lines.extend(("", "Dependency check: OK"))
             lines.append(f'Type exactly: {preview.confirmation_phrase}')
