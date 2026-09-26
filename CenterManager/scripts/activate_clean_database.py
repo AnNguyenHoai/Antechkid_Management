@@ -168,7 +168,11 @@ def _atomic_copy(source: Path, destination: Path) -> None:
     temp_path = Path(temp_name)
     try:
         shutil.copy2(source, temp_path)
-        with temp_path.open("rb") as handle:
+        # Windows can reject fsync() on a descriptor reopened read-only. Reopen
+        # the fully-copied file read/write so the durability barrier remains
+        # portable without weakening the atomic-publish contract.
+        with temp_path.open("rb+") as handle:
+            handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_path, destination)
     except Exception:
