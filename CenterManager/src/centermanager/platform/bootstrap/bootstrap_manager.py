@@ -3,7 +3,6 @@
 
 import logging
 import platform
-import uuid
 from typing import Optional
 
 from centermanager.core.paths import get_paths
@@ -33,6 +32,11 @@ class BootstrapManager:
     """
     Orchestrates platform startup up to READY state.
     Does NOT authenticate user or create session.
+
+    Git is the production database source of truth. Bootstrap therefore requires
+    valid Git configuration and a successful startup synchronization before the
+    runtime is declared READY. A missing runtime database is never replaced by
+    an empty production database during this sequence.
     """
 
     def __init__(self):
@@ -48,28 +52,45 @@ class BootstrapManager:
             self._lifecycle.transition_to(PlatformLifecycleState.INITIALIZING)
             logger.info("[BOOTSTRAP] Starting platform")
 
-            # 1. Load configuration
+            # 1. Load configuration and create the filesystem runtime shell.
             config = get_config().raw
             paths = get_paths()
 
-            # 2. Detect repository state
             repo_state = self._repo_manager.detect()
             logger.info(f"[BOOTSTRAP] Repository state: {repo_state.value}")
 
-            # 3. If not ready, create default runtime
             if repo_state in (RepositoryState.NOT_FOUND, RepositoryState.INVALID):
                 logger.info("[BOOTSTRAP] Creating default runtime")
                 self._create_default_runtime(paths)
                 self._repo_manager.refresh()
                 repo_state = self._repo_manager.detect()
 
-            # 4. If still invalid or corrupted, cannot proceed
             if repo_state in (RepositoryState.INVALID, RepositoryState.CORRUPTED):
                 logger.error(f"[BOOTSTRAP] Repository {repo_state.value}, cannot proceed")
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # 5. Build contexts
+            # 2. The remote Git repository is authoritative. Ensure credentials
+            # exist, prompt on first run when they do not, then materialize the
+            # repository database into runtime before any database engine opens.
+            if not self._ensure_authoritative_runtime_database(paths):
+                self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
+                return False
+
+            # Synchronization can replace manifest/runtime files. Refresh the
+            # repository view before building contexts from the authoritative
+            # materialized runtime.
+            self._repo_manager.refresh()
+            repo_state = self._repo_manager.detect()
+            if repo_state in (RepositoryState.INVALID, RepositoryState.CORRUPTED):
+                logger.error(
+                    "[BOOTSTRAP] Authoritative runtime is %s after synchronization",
+                    repo_state.value,
+                )
+                self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
+                return False
+
+            # 3. Build contexts after Git source-of-truth materialization.
             runtime_context = self._build_runtime_context(paths)
             deployment_context = self._build_deployment_context(config)
             configuration_context = ConfigurationContext.from_app_config(config)
@@ -77,7 +98,6 @@ class BootstrapManager:
             workspace_context = WorkspaceContext()
             user_context = UserContext()
 
-            # 6. Aggregate into PlatformContext
             self._context = PlatformContext(
                 runtime=runtime_context,
                 deployment=deployment_context,
@@ -86,21 +106,16 @@ class BootstrapManager:
                 user=user_context,
                 configuration=configuration_context,
             )
-            # RuntimeContextManager is the lifecycle owner; use its public
-            # installation boundary instead of mutating its private state.
             self._context_manager.install_context(runtime_context)
 
-            # 7. Transition runtime state to CHECK_REPOSITORY
             self._context.runtime.state.transition_to(RuntimeState.CHECK_REPOSITORY)
 
-            # 8. Validate runtime (quick check)
             if not self._repo_manager.validate():
                 logger.error("[BOOTSTRAP] Runtime validation failed")
                 self._context.runtime.state.transition_to(RuntimeState.ERROR)
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # 9. Runtime ready
             self._context.runtime.state.transition_to(RuntimeState.READY)
             self._lifecycle.transition_to(PlatformLifecycleState.READY)
             logger.info("[BOOTSTRAP] Platform ready")
@@ -111,8 +126,69 @@ class BootstrapManager:
             self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
             return False
 
+    def _ensure_authoritative_runtime_database(self, paths) -> bool:
+        """Require Git config and install the remote database into runtime.
+
+        This method runs only after QApplication has been created by app.main(),
+        so the first-run Git configuration dialog can be shown safely.
+        """
+        # Local imports avoid widening the bootstrap module import graph and
+        # keep UI/Git dependencies out of module initialization.
+        from centermanager.core.git_locator import locate_git
+        from centermanager.services.git_config_service import GitConfigService
+        from centermanager.ui.git_config_dialog import GitConfigDialog
+        from centermanager.platform.synchronization import GitSynchronizationProvider
+        from centermanager.platform.sync import StartupSynchronization
+        from centermanager.database.lifecycle import DatabaseLifecycle, DatabaseLifecycleState
+
+        git_executable = locate_git()
+        if not git_executable:
+            logger.error("[BOOTSTRAP] Git executable is required but was not found")
+            return False
+
+        git_config_service = GitConfigService()
+        git_config = git_config_service.get_config() if git_config_service.has_config() else None
+
+        if git_config is None:
+            logger.info("[BOOTSTRAP] Git configuration missing or invalid; requesting first-run configuration")
+            dialog = GitConfigDialog(git_config_service)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                logger.warning("[BOOTSTRAP] Git configuration cancelled; startup aborted")
+                return False
+            git_config = git_config_service.get_config()
+            if git_config is None:
+                logger.error("[BOOTSTRAP] Git configuration was not available after first-run dialog")
+                return False
+
+        provider = GitSynchronizationProvider(
+            repo_path=paths.runtime_root / "repository",
+            repository_url=git_config.repository_url,
+            token=git_config.token,
+            username=git_config.username,
+            branch=git_config.branch,
+            email=git_config.email or "",
+            git_executable=str(git_executable),
+        )
+
+        logger.info("[BOOTSTRAP] Synchronizing authoritative Git runtime")
+        if not StartupSynchronization(provider).run():
+            logger.error("[BOOTSTRAP] Authoritative Git synchronization failed")
+            return False
+
+        runtime_db = paths.database_dir / "center.db"
+        state = DatabaseLifecycle(runtime_db).inspect()
+        if state is not DatabaseLifecycleState.AVAILABLE:
+            logger.error(
+                "[BOOTSTRAP] Git synchronization did not materialize a usable database: state=%s",
+                state.value,
+            )
+            return False
+
+        logger.info("[BOOTSTRAP] Authoritative Git database materialized successfully")
+        return True
+
     def _create_default_runtime(self, paths) -> None:
-        """Create default runtime structure and manifest."""
+        """Create the filesystem/runtime shell only; never create business DB data."""
         paths.ensure_directories()
 
         manifest = RuntimeManifest(
