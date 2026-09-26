@@ -13,7 +13,7 @@ from centermanager.ui.admin_workspace.settings_page import SettingsPage
 from centermanager.ui.admin_workspace.git_settings_page import GitSettingsPage
 from centermanager.ui.admin_workspace.audit_log_page import AuditLogPage
 from centermanager.services.audit_service import AuditService
-from centermanager.services.admin_data_reset_service import AdminDataResetService
+from centermanager.services.admin_data_reset import AdminDataResetService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
 from centermanager.models.permission import PermissionDefinitions
