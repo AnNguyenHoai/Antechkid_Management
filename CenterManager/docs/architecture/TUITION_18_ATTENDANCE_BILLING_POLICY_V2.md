@@ -2,9 +2,18 @@
 
 ## Purpose
 
-TUITION-18 aligns the canonical tuition rule with the approved business meaning that a delivered/reserved teaching session remains billable when a student is `Absent` or `Excused`.
+TUITION-18 defines the canonical attendance-aware tuition rule for completed teaching sessions.
 
-The change is versioned. It does **not** mutate `attendance_v1`, because each Enrollment snapshots its billing-policy version and historical tuition must remain auditable.
+Current business rule:
+
+- `Present` → billable.
+- `Late` → billable.
+- `Absent` → billable.
+- `Excused` → **not billable**.
+- Missing attendance → billable fallback so missing attendance cannot silently erase a receivable.
+- Unknown future attendance values → fail closed.
+
+The policy remains versioned so each Enrollment snapshots its billing-policy version and historical tuition stays auditable.
 
 ## Evaluation order
 
@@ -24,7 +33,7 @@ Historical pre-TUITION-11 behavior. Attendance is ignored for otherwise eligible
 
 ### `attendance_v1`
 
-Historical TUITION-11 behavior. Its meaning is frozen and must not be changed:
+Historical TUITION-11 behavior:
 
 | Attendance | Billable |
 | --- | --- |
@@ -35,8 +44,6 @@ Historical TUITION-11 behavior. Its meaning is frozen and must not be changed:
 | Missing | Yes |
 | Unknown | No |
 
-`Excused` therefore remains a waiver only for Enrollment rows that already snapshot `attendance_v1`.
-
 ### `attendance_v2`
 
 Current policy for newly created Enrollment rows:
@@ -45,20 +52,20 @@ Current policy for newly created Enrollment rows:
 | --- | --- | --- |
 | Present | Yes | Delivered session is billable. |
 | Late | Yes | Delivered session is billable. |
-| Absent | Yes | Reserved/delivered session remains billable. |
-| Excused | Yes | Excused absence does not waive tuition. |
+| Absent | Yes | Unexcused absence still consumes the reserved teaching session. |
+| Excused | No | Approved/excused absence waives tuition for that session. |
 | Missing | Yes | Missing attendance cannot silently erase a receivable. |
 | Unknown | No | Unknown future values fail closed. |
 
 ## Historical auditability
 
-TUITION-18 requires no data migration. Existing database rows retain their persisted policy version (`legacy_session_only_v1` or `attendance_v1`). Only newly inserted Enrollment rows receive the model default `attendance_v2`.
+Existing database rows retain their persisted policy version (`legacy_session_only_v1`, `attendance_v1`, or `attendance_v2`). No finance history is deleted or rewritten by this policy correction.
 
-This avoids retroactively increasing historical receivables for Enrollment contracts that were created under the explicit TUITION-11 waiver semantics.
+`attendance_v2` was introduced in TUITION-18 and corrected before establishing a distinct historical accounting contract: its intended current business meaning is that `Excused` is non-billable.
 
 ## Ledger boundary
 
-No tuition-adjustment compensation is created. TUITION-11 represented `Excused` as a dynamic accrual decision, not as a persisted waiver/credit ledger row. Creating a compensating finance adjustment would therefore duplicate accounting effects and violate source-of-truth ownership.
+No tuition-adjustment compensation is created by this change. Attendance billability is an accrual decision calculated by `BillableSessionPolicy`; TUITION-11/TUITION-18 do not persist a separate waiver ledger row for `Excused`. Creating a compensating finance adjustment here would duplicate accounting effects rather than correct them.
 
 ## Calculation ownership
 
