@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING, List
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -22,6 +22,16 @@ if TYPE_CHECKING:
 
 class Enrollment(Base, TimestampMixin):
     __tablename__ = "enrollments"
+    __table_args__ = (
+        Index(
+            "uq_enrollments_active_student_class",
+            "student_id",
+            "class_id",
+            unique=True,
+            sqlite_where=text("status = 'ACTIVE' AND class_id IS NOT NULL"),
+            postgresql_where=text("status = 'ACTIVE' AND class_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
