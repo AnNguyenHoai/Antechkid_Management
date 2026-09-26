@@ -34,6 +34,24 @@ class BackupService:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    @staticmethod
+    def _copy_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
+        """Create a transactionally consistent SQLite snapshot.
+
+        The runtime database uses WAL mode. Copying only ``center.db`` with a
+        filesystem copy can omit committed pages still resident in ``-wal`` while
+        still producing a database that passes ``integrity_check``. SQLite's online
+        backup API reads the logical database, including committed WAL contents.
+        """
+        source_uri = source_path.resolve().as_uri() + "?mode=ro"
+        source = sqlite3.connect(source_uri, uri=True)
+        destination = sqlite3.connect(destination_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+            source.close()
+
     def _is_owned_backup(self, backup_path: Path) -> bool:
         try:
             backup_path.resolve().relative_to(self._backup_root)
@@ -91,7 +109,7 @@ class BackupService:
             if not db_src.is_file():
                 raise FileNotFoundError(f"Runtime database not found: {db_src}")
             db_dst = backup_path / "center.db"
-            shutil.copy2(db_src, db_dst)
+            self._copy_sqlite_snapshot(db_src, db_dst)
             error = self._validate_sqlite(db_dst)
             if error:
                 raise RuntimeError(error)
