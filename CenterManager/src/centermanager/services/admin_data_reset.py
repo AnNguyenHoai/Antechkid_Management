@@ -196,6 +196,9 @@ class AdminDataResetService:
                 raise AdminDataResetValidationError(
                     "Reset dependencies changed after preview; retry the operation."
                 )
+            # Backup creation may take long enough for collaboration ownership to
+            # change. Revalidate WRITE immediately before the destructive write.
+            self._require_write()
             deleted = repository.delete_tables(current.tables)
             self._audit_service.record_in_session(
                 session,
