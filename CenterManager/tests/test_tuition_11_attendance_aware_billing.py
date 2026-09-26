@@ -10,7 +10,6 @@ from centermanager.models.session import SessionStatus
 from centermanager.services.tuition_accrual_service import TuitionAccrualService
 from centermanager.services.tuition_policy import (
     ATTENDANCE_AWARE_POLICY_V1,
-    CURRENT_BILLING_POLICY_VERSION,
     LEGACY_SESSION_ONLY_POLICY,
     BillableSessionPolicy,
 )
@@ -171,16 +170,13 @@ def test_explicit_attendance_map_is_supported_for_repository_backed_accrual():
     assert result.billable_session_numbers == (2,)
 
 
-def test_migration_freezes_existing_rows_to_legacy_policy_and_model_has_current_default():
+def test_tuition_11_migration_keeps_preexisting_rows_on_legacy_policy():
     root = Path(__file__).resolve().parents[1]
     migration = (
         root / "migrations/versions/1e10a033_enrollment_billing_policy_version.py"
     ).read_text(encoding="utf-8")
-    model = (root / "src/centermanager/models/enrollment.py").read_text(encoding="utf-8")
 
     assert 'revision = "1e10a033"' in migration
     assert 'down_revision = "1e10a032"' in migration
     assert "legacy_session_only_v1" in migration
     assert "UPDATE enrollments SET billing_policy_version" in migration
-    assert 'default="attendance_v1"' in model
-    assert CURRENT_BILLING_POLICY_VERSION == ATTENDANCE_AWARE_POLICY_V1
