@@ -42,9 +42,7 @@ class BillableSessionPolicy:
     REASON_ATTENDANCE_PRESENT = "attendance_present"
     REASON_ATTENDANCE_LATE = "attendance_late"
     REASON_ATTENDANCE_ABSENT = "attendance_absent_reserved_session"
-    # Historical attendance_v1 meaning. Never change this reason/meaning in place.
     REASON_ATTENDANCE_EXCUSED = "attendance_excused_waiver"
-    REASON_ATTENDANCE_EXCUSED_BILLABLE = "attendance_excused_reserved_session"
     REASON_ATTENDANCE_MISSING = "attendance_missing_fallback_billable"
     REASON_ATTENDANCE_UNKNOWN = "attendance_status_unrecognized"
     REASON_UNSUPPORTED_POLICY = "unsupported_billing_policy_version"
@@ -150,16 +148,9 @@ class BillableSessionPolicy:
                 version,
             )
         if status == AttendanceStatus.EXCUSED.value:
-            if version == ATTENDANCE_AWARE_POLICY_V1:
-                return BillableSessionDecision(
-                    False,
-                    cls.REASON_ATTENDANCE_EXCUSED,
-                    status,
-                    version,
-                )
             return BillableSessionDecision(
-                True,
-                cls.REASON_ATTENDANCE_EXCUSED_BILLABLE,
+                False,
+                cls.REASON_ATTENDANCE_EXCUSED,
                 status,
                 version,
             )
