@@ -10,9 +10,14 @@ from centermanager.models.session import SessionStatus
 
 LEGACY_SESSION_ONLY_POLICY = "legacy_session_only_v1"
 ATTENDANCE_AWARE_POLICY_V1 = "attendance_v1"
-CURRENT_BILLING_POLICY_VERSION = ATTENDANCE_AWARE_POLICY_V1
+ATTENDANCE_AWARE_POLICY_V2 = "attendance_v2"
+CURRENT_BILLING_POLICY_VERSION = ATTENDANCE_AWARE_POLICY_V2
 SUPPORTED_BILLING_POLICY_VERSIONS = frozenset(
-    {LEGACY_SESSION_ONLY_POLICY, ATTENDANCE_AWARE_POLICY_V1}
+    {
+        LEGACY_SESSION_ONLY_POLICY,
+        ATTENDANCE_AWARE_POLICY_V1,
+        ATTENDANCE_AWARE_POLICY_V2,
+    }
 )
 
 
@@ -37,8 +42,10 @@ class BillableSessionPolicy:
     REASON_ATTENDANCE_PRESENT = "attendance_present"
     REASON_ATTENDANCE_LATE = "attendance_late"
     REASON_ATTENDANCE_ABSENT = "attendance_absent_reserved_session"
-    REASON_ATTENDANCE_MISSING = "attendance_missing_fallback_billable"
+    # Historical attendance_v1 meaning. Never change this reason/meaning in place.
     REASON_ATTENDANCE_EXCUSED = "attendance_excused_waiver"
+    REASON_ATTENDANCE_EXCUSED_BILLABLE = "attendance_excused_reserved_session"
+    REASON_ATTENDANCE_MISSING = "attendance_missing_fallback_billable"
     REASON_ATTENDANCE_UNKNOWN = "attendance_status_unrecognized"
     REASON_UNSUPPORTED_POLICY = "unsupported_billing_policy_version"
 
@@ -60,15 +67,27 @@ class BillableSessionPolicy:
             return BillableSessionDecision(False, cls.REASON_UNRESOLVED_RANGE, policy_version=version)
         session_class_id = getattr(session, "class_id", None)
         enrollment_class_id = getattr(enrollment, "class_id", None)
-        if session_class_id is not None and enrollment_class_id is not None and session_class_id != enrollment_class_id:
+        if (
+            session_class_id is not None
+            and enrollment_class_id is not None
+            and session_class_id != enrollment_class_id
+        ):
             return BillableSessionDecision(False, cls.REASON_CLASS_MISMATCH, policy_version=version)
         if not int(enrolled_from) <= int(session_number) <= int(enrolled_until):
             return BillableSessionDecision(False, cls.REASON_OUTSIDE_RANGE, policy_version=version)
         for freeze in (getattr(enrollment, "freezes", None) or []):
             start = getattr(freeze, "start_session", None)
             end = getattr(freeze, "end_session", None)
-            if start is not None and int(session_number) >= int(start) and (end is None or int(session_number) <= int(end)):
-                return BillableSessionDecision(False, cls.REASON_ENROLLMENT_FROZEN, policy_version=version)
+            if (
+                start is not None
+                and int(session_number) >= int(start)
+                and (end is None or int(session_number) <= int(end))
+            ):
+                return BillableSessionDecision(
+                    False,
+                    cls.REASON_ENROLLMENT_FROZEN,
+                    policy_version=version,
+                )
         return None
 
     @staticmethod
@@ -84,29 +103,91 @@ class BillableSessionPolicy:
         gate_decision = cls._session_gate(session, enrollment)
         if gate_decision is not None:
             return gate_decision
+
         version = cls.policy_version_for(enrollment)
-        if version == LEGACY_SESSION_ONLY_POLICY:
-            return BillableSessionDecision(True, cls.REASON_BILLABLE, cls._attendance_status(attendance), version)
-        if version != ATTENDANCE_AWARE_POLICY_V1:
-            return BillableSessionDecision(False, cls.REASON_UNSUPPORTED_POLICY, cls._attendance_status(attendance), version)
         status = cls._attendance_status(attendance)
+
+        if version == LEGACY_SESSION_ONLY_POLICY:
+            return BillableSessionDecision(
+                True,
+                cls.REASON_BILLABLE,
+                status,
+                version,
+            )
+        if version not in {ATTENDANCE_AWARE_POLICY_V1, ATTENDANCE_AWARE_POLICY_V2}:
+            return BillableSessionDecision(
+                False,
+                cls.REASON_UNSUPPORTED_POLICY,
+                status,
+                version,
+            )
+
         if status is None:
-            return BillableSessionDecision(True, cls.REASON_ATTENDANCE_MISSING, policy_version=version)
+            return BillableSessionDecision(
+                True,
+                cls.REASON_ATTENDANCE_MISSING,
+                policy_version=version,
+            )
         if status == AttendanceStatus.PRESENT.value:
-            return BillableSessionDecision(True, cls.REASON_ATTENDANCE_PRESENT, status, version)
+            return BillableSessionDecision(
+                True,
+                cls.REASON_ATTENDANCE_PRESENT,
+                status,
+                version,
+            )
         if status == AttendanceStatus.LATE.value:
-            return BillableSessionDecision(True, cls.REASON_ATTENDANCE_LATE, status, version)
+            return BillableSessionDecision(
+                True,
+                cls.REASON_ATTENDANCE_LATE,
+                status,
+                version,
+            )
         if status == AttendanceStatus.ABSENT.value:
-            return BillableSessionDecision(True, cls.REASON_ATTENDANCE_ABSENT, status, version)
+            return BillableSessionDecision(
+                True,
+                cls.REASON_ATTENDANCE_ABSENT,
+                status,
+                version,
+            )
         if status == AttendanceStatus.EXCUSED.value:
-            return BillableSessionDecision(False, cls.REASON_ATTENDANCE_EXCUSED, status, version)
-        return BillableSessionDecision(False, cls.REASON_ATTENDANCE_UNKNOWN, status, version)
+            if version == ATTENDANCE_AWARE_POLICY_V1:
+                return BillableSessionDecision(
+                    False,
+                    cls.REASON_ATTENDANCE_EXCUSED,
+                    status,
+                    version,
+                )
+            return BillableSessionDecision(
+                True,
+                cls.REASON_ATTENDANCE_EXCUSED_BILLABLE,
+                status,
+                version,
+            )
+        return BillableSessionDecision(
+            False,
+            cls.REASON_ATTENDANCE_UNKNOWN,
+            status,
+            version,
+        )
 
     @classmethod
     def is_billable(cls, session, enrollment, attendance=None) -> bool:
         return cls.evaluate(session, enrollment, attendance).billable
 
     @classmethod
-    def filter_billable(cls, sessions: Iterable, enrollment, attendance_by_session_id: Optional[Mapping[int, object]] = None) -> List:
+    def filter_billable(
+        cls,
+        sessions: Iterable,
+        enrollment,
+        attendance_by_session_id: Optional[Mapping[int, object]] = None,
+    ) -> List:
         attendance_by_session_id = attendance_by_session_id or {}
-        return [session for session in sessions if cls.is_billable(session, enrollment, attendance_by_session_id.get(getattr(session, "id", None)))]
+        return [
+            session
+            for session in sessions
+            if cls.is_billable(
+                session,
+                enrollment,
+                attendance_by_session_id.get(getattr(session, "id", None)),
+            )
+        ]
