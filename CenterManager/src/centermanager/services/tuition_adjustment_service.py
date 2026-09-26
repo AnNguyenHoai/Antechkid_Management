@@ -175,15 +175,14 @@ class TuitionAdjustmentService:
         try:
             with self._session_factory() as session:
                 adjustments = self._repository_provider.tuition_adjustments(session)
+                enrollment, origin = adjustments.acquire_command_lock(enrollment_id, origin_income_id)
                 existing = self._return_existing_or_conflict(adjustments, key, **command)
                 if existing is not None:
                     return existing
-                enrollment = adjustments.lock_enrollment(enrollment_id)
                 if enrollment is None:
                     raise TuitionAdjustmentValidationError("Enrollment not found.")
                 incomes = self._repository_provider.incomes(session)
                 if origin_income_id is not None:
-                    origin = adjustments.lock_origin_income(origin_income_id)
                     if (origin is None or origin.deleted_at is not None or origin.income_type != "Tuition"
                             or origin.status != Income.STATUS_ACTIVE or float(origin.amount) <= 0):
                         raise TuitionAdjustmentValidationError("Origin must be an ACTIVE positive Tuition payment.")
@@ -253,10 +252,10 @@ class TuitionAdjustmentService:
         try:
             with self._session_factory() as session:
                 adjustments = self._repository_provider.tuition_adjustments(session)
+                enrollment, _ = adjustments.acquire_command_lock(enrollment_id)
                 existing = self._return_existing_or_conflict(adjustments, key, **command)
                 if existing is not None:
                     return existing
-                enrollment = adjustments.lock_enrollment(enrollment_id)
                 if enrollment is None:
                     raise TuitionAdjustmentValidationError("Enrollment not found.")
                 if origin_adjustment_id is not None:
