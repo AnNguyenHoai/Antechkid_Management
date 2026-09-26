@@ -13,9 +13,10 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.current_user import get_current_user
 from centermanager.platform.backup.backup_service import BackupService
-from centermanager.repositories.admin_data_reset_repository import (
-    AdminDataResetRepository,
-    ResetPreviewData,
+from centermanager.repositories.admin_data_reset_repository import ResetPreviewData
+from centermanager.repositories.provider import (
+    RepositoryProvider,
+    create_default_repository_provider,
 )
 from centermanager.services.audit_service import AuditService
 
@@ -79,11 +80,17 @@ class AdminDataResetService:
         collaboration_manager=None,
         backup_service: Optional[BackupService] = None,
         audit_service: Optional[AuditService] = None,
+        repository_provider: Optional[RepositoryProvider] = None,
     ) -> None:
         self._session_factory = session_factory
         self._collaboration_manager = collaboration_manager
         self._backup_service = backup_service or BackupService()
-        self._audit_service = audit_service or AuditService(session_factory)
+        self._repository_provider = (
+            repository_provider or create_default_repository_provider()
+        )
+        self._audit_service = audit_service or AuditService(
+            session_factory, repository_provider=self._repository_provider
+        )
 
     @staticmethod
     def _normalize_scope(scope: str) -> str:
@@ -136,7 +143,7 @@ class AdminDataResetService:
         self._require_admin()
         normalized = self._normalize_scope(scope)
         with self._session_factory() as session:
-            data = AdminDataResetRepository(session).preview(
+            data = self._repository_provider.admin_data_resets(session).preview(
                 normalized, include_finance=include_finance
             )
             return self._preview_from_data(normalized, include_finance, data)
@@ -164,7 +171,7 @@ class AdminDataResetService:
         # Re-preview immediately before backup/write so stale UI state cannot bypass
         # dependency protection.
         with self._session_factory() as session:
-            preview_data = AdminDataResetRepository(session).preview(
+            preview_data = self._repository_provider.admin_data_resets(session).preview(
                 normalized, include_finance=include_finance
             )
         if preview_data.blockers:
@@ -175,17 +182,19 @@ class AdminDataResetService:
                 "Reset is blocked by retained dependent data: " + blocker_text
             )
 
-        backup = self._backup_service.create_backup(label=f"pre_data_reset_{normalized}")
+        backup = self._backup_service.create_backup(
+            label=f"pre_data_reset_{normalized}"
+        )
         if not backup.success or backup.backup_path is None:
             raise AdminDataResetError(
-                f"Safety backup failed; no data was deleted: {backup.error or 'unknown error'}"
+                f"Safety backup failed; no data was deleted: "
+                f"{backup.error or 'unknown error'}"
             )
 
         # The session context rolls the transaction back automatically if any delete,
         # audit write, flush or commit step raises.
         with self._session_factory() as session:
-            repository = AdminDataResetRepository(session)
-            # Re-resolve table ownership in the write transaction.
+            repository = self._repository_provider.admin_data_resets(session)
             current = repository.preview(normalized, include_finance=include_finance)
             if current.blockers:
                 raise AdminDataResetValidationError(
