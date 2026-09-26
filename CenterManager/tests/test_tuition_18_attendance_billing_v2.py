@@ -65,14 +65,10 @@ def _session(number, session_status, attendance_status=None):
         (AttendanceStatus.PRESENT.value, BillableSessionPolicy.REASON_ATTENDANCE_PRESENT),
         (AttendanceStatus.LATE.value, BillableSessionPolicy.REASON_ATTENDANCE_LATE),
         (AttendanceStatus.ABSENT.value, BillableSessionPolicy.REASON_ATTENDANCE_ABSENT),
-        (
-            AttendanceStatus.EXCUSED.value,
-            BillableSessionPolicy.REASON_ATTENDANCE_EXCUSED_BILLABLE,
-        ),
         (None, BillableSessionPolicy.REASON_ATTENDANCE_MISSING),
     ],
 )
-def test_attendance_v2_bills_every_known_attendance_state_for_completed_session(
+def test_attendance_v2_bills_billable_known_attendance_states_for_completed_session(
     attendance_status, reason
 ):
     teaching_session = _session(
@@ -95,6 +91,25 @@ def test_attendance_v2_bills_every_known_attendance_state_for_completed_session(
     assert decision.billable is True
     assert decision.reason == reason
     assert decision.attendance_status == attendance_status
+    assert decision.policy_version == ATTENDANCE_AWARE_POLICY_V2
+
+
+def test_attendance_v2_excused_is_not_billable():
+    teaching_session = _session(
+        2,
+        SessionStatus.COMPLETED.value,
+        AttendanceStatus.EXCUSED.value,
+    )
+
+    decision = BillableSessionPolicy.evaluate(
+        teaching_session,
+        _enrollment(),
+        teaching_session.attendances[0],
+    )
+
+    assert decision.billable is False
+    assert decision.reason == BillableSessionPolicy.REASON_ATTENDANCE_EXCUSED
+    assert decision.attendance_status == AttendanceStatus.EXCUSED.value
     assert decision.policy_version == ATTENDANCE_AWARE_POLICY_V2
 
 
@@ -168,7 +183,7 @@ def test_attendance_v2_unknown_attendance_still_fails_closed():
     assert decision.reason == BillableSessionPolicy.REASON_ATTENDANCE_UNKNOWN
 
 
-def test_attendance_v2_accrual_includes_excused_and_absent_sessions():
+def test_attendance_v2_accrual_excludes_excused_but_includes_absent_sessions():
     sessions = [
         _session(1, SessionStatus.COMPLETED.value, AttendanceStatus.PRESENT.value),
         _session(2, SessionStatus.COMPLETED.value, AttendanceStatus.EXCUSED.value),
@@ -183,10 +198,10 @@ def test_attendance_v2_accrual_includes_excused_and_absent_sessions():
     )
 
     assert result.billing_policy_version == ATTENDANCE_AWARE_POLICY_V2
-    assert result.billable_session_numbers == (1, 2, 3, 4)
-    assert result.billable_sessions == 4
-    assert result.gross_accrued == Decimal("400000.0000")
-    assert result.net_accrued == Decimal("400000.0000")
+    assert result.billable_session_numbers == (1, 3, 4)
+    assert result.billable_sessions == 3
+    assert result.gross_accrued == Decimal("300000.0000")
+    assert result.net_accrued == Decimal("300000.0000")
 
 
 def test_attendance_v2_is_current_and_new_enrollment_model_default():
