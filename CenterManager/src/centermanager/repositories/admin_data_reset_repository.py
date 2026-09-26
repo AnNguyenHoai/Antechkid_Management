@@ -67,9 +67,11 @@ class AdminDataResetRepository:
             "teacher_timeline_events",
         }),
         "employee": frozenset({
-            "employees", "employee_documents", "employee_schedules",
+            "employees", "employee_documents",
+            "employee_schedule_rules", "employee_schedule_exceptions",
+            "employee_schedule_weeks", "employee_schedule_assignments",
             "employee_work_registration_periods", "employee_work_registrations",
-            "employee_working_times",
+            "employee_work_registration_blocks", "employee_working_time_entries",
         }),
         "finance": FINANCE_TABLES,
         "operational": frozenset({
@@ -77,6 +79,7 @@ class AdminDataResetRepository:
             "reports", "report_cache", "timeline_events",
         }),
     }
+    BUSINESS_TABLES = frozenset().union(*SCOPE_TABLES.values())
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -89,7 +92,20 @@ class AdminDataResetRepository:
         normalized = str(scope or "").strip().lower()
         available = self._all_tables()
         if normalized == "all_business":
-            names = set(available) - set(self.PROTECTED_TABLES)
+            # Fail closed when a new mapped table has not explicitly been classified.
+            # A destructive "all" operation must never silently start deleting a new
+            # system/config table merely because it was added to Base.metadata.
+            unclassified = (
+                set(available)
+                - set(self.PROTECTED_TABLES)
+                - set(self.BUSINESS_TABLES)
+            )
+            if unclassified:
+                raise ValueError(
+                    "Unclassified mapped tables prevent all-business reset: "
+                    + ", ".join(sorted(unclassified))
+                )
+            names = set(self.BUSINESS_TABLES).intersection(available)
         elif normalized in self.SCOPE_TABLES:
             expected = set(self.SCOPE_TABLES[normalized])
             # Some historical databases may not have every optional model yet;
@@ -128,11 +144,11 @@ class AdminDataResetRepository:
                 finance_counts[name] = count
 
         blockers: dict[str, int] = {}
-        # Only rows whose FK value actually references a table being cleared are
-        # blockers. Nullable historical/optional FK columns must not block a reset
-        # merely because unrelated rows exist in the same retained table.
+        # A retained table referencing a table being cleared is a blocker,
+        # including a protected table. Protected data must never be silently
+        # altered merely to make a reset possible.
         for child_name, child in tables.items():
-            if child_name in selected or child_name in self.PROTECTED_TABLES:
+            if child_name in selected:
                 continue
             fk_columns = [
                 fk.parent
