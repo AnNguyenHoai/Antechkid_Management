@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import centermanager.services.admin_data_reset as reset_module
+from centermanager.database.base import Base
+from centermanager.platform.backup.backup_service import BackupService
 from centermanager.repositories.admin_data_reset_repository import (
     AdminDataResetRepository,
     ResetPreviewData,
@@ -91,11 +94,16 @@ class FakeAudit:
 class FakeCollaboration:
     def __init__(self, writing=True):
         self.writing = writing
+        self.write_checks = 0
 
     def is_initialized(self):
         return True
 
     def is_writing(self):
+        self.write_checks += 1
+        if isinstance(self.writing, (list, tuple)):
+            index = min(self.write_checks - 1, len(self.writing) - 1)
+            return self.writing[index]
         return self.writing
 
 
@@ -134,6 +142,44 @@ def test_identity_and_audit_tables_are_protected():
     )
 
 
+def test_every_current_mapped_table_is_explicitly_classified():
+    mapped = set(Base.metadata.tables)
+    classified = (
+        set(AdminDataResetRepository.PROTECTED_TABLES)
+        | set(AdminDataResetRepository.BUSINESS_TABLES)
+    )
+    assert mapped == classified
+
+
+def test_employee_scope_covers_schedule_and_registration_children():
+    employee_tables = set(AdminDataResetRepository.SCOPE_TABLES["employee"])
+    assert {
+        "employees",
+        "employee_documents",
+        "employee_schedule_rules",
+        "employee_schedule_exceptions",
+        "employee_schedule_weeks",
+        "employee_schedule_assignments",
+        "employee_work_registration_periods",
+        "employee_work_registrations",
+        "employee_work_registration_blocks",
+        "employee_working_time_entries",
+    } <= employee_tables
+    assert "employee_schedules" not in employee_tables
+    assert "employee_working_times" not in employee_tables
+
+
+def test_all_business_fails_closed_for_unclassified_mapped_table(monkeypatch):
+    repository = AdminDataResetRepository(SimpleNamespace())
+    known = {name: object() for name in AdminDataResetRepository.BUSINESS_TABLES}
+    known.update({name: object() for name in AdminDataResetRepository.PROTECTED_TABLES})
+    known["future_system_config"] = object()
+    monkeypatch.setattr(repository, "_all_tables", lambda: known)
+
+    with pytest.raises(ValueError, match="future_system_config"):
+        repository.resolve_tables("all_business")
+
+
 def test_admin_write_mode_and_confirmation_are_required(monkeypatch):
     service, repo, backup, _audit, _sessions = make_service(monkeypatch, writing=False)
     with pytest.raises(AdminDataResetAuthorizationError, match="WRITE mode"):
@@ -162,6 +208,16 @@ def test_dependency_or_backup_failure_aborts_before_write(monkeypatch):
     assert not repo.cleared
 
 
+def test_write_ownership_is_revalidated_after_backup(monkeypatch):
+    service, repo, backup, _audit, _sessions = make_service(
+        monkeypatch, writing=[True, False]
+    )
+    with pytest.raises(AdminDataResetAuthorizationError, match="WRITE mode"):
+        service.reset("student", reason="test", confirmation="RESET STUDENT")
+    assert backup.calls == ["pre_data_reset_student"]
+    assert not repo.cleared
+
+
 def test_successful_reset_creates_backup_commits_and_audits(monkeypatch):
     service, repo, backup, audit, sessions = make_service(monkeypatch)
     result = service.reset(
@@ -182,3 +238,30 @@ def test_commit_failure_propagates(monkeypatch):
     with pytest.raises(RuntimeError, match="commit failed"):
         service.reset("student", reason="test", confirmation="RESET STUDENT")
     assert backup.calls and repo.cleared and audit.calls
+
+
+def test_sqlite_safety_snapshot_includes_committed_wal_rows(tmp_path):
+    source_path = tmp_path / "source.db"
+    snapshot_path = tmp_path / "snapshot.db"
+    source = sqlite3.connect(source_path)
+    try:
+        assert source.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+        source.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+        source.commit()
+        source.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        source.execute("PRAGMA wal_autocheckpoint=0")
+        source.execute("INSERT INTO sample(value) VALUES ('latest committed row')")
+        source.commit()
+
+        wal_path = Path(str(source_path) + "-wal")
+        assert wal_path.is_file() and wal_path.stat().st_size > 0
+        BackupService._copy_sqlite_snapshot(source_path, snapshot_path)
+    finally:
+        source.close()
+
+    snapshot = sqlite3.connect(snapshot_path)
+    try:
+        rows = snapshot.execute("SELECT value FROM sample ORDER BY id").fetchall()
+    finally:
+        snapshot.close()
+    assert rows == [("latest committed row",)]
