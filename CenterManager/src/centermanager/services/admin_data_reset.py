@@ -125,6 +125,23 @@ class AdminDataResetService:
                 "WRITE mode is required before resetting workspace data."
             )
 
+    def _repository_preview(
+        self,
+        session,
+        scope: str,
+        *,
+        include_finance: bool,
+    ) -> ResetPreviewData:
+        try:
+            return self._repository_provider.admin_data_resets(session).preview(
+                scope, include_finance=include_finance
+            )
+        except ValueError as exc:
+            # Repository scope classification intentionally fails closed. Convert
+            # that persistence-layer refusal into the service error family so the
+            # UI can report it without leaking an unhandled exception.
+            raise AdminDataResetValidationError(str(exc)) from exc
+
     @staticmethod
     def _preview_from_data(
         scope: str, include_finance: bool, data: ResetPreviewData
@@ -143,8 +160,8 @@ class AdminDataResetService:
         self._require_admin()
         normalized = self._normalize_scope(scope)
         with self._session_factory() as session:
-            data = self._repository_provider.admin_data_resets(session).preview(
-                normalized, include_finance=include_finance
+            data = self._repository_preview(
+                session, normalized, include_finance=include_finance
             )
             return self._preview_from_data(normalized, include_finance, data)
 
@@ -169,8 +186,8 @@ class AdminDataResetService:
             )
 
         with self._session_factory() as session:
-            preview_data = self._repository_provider.admin_data_resets(session).preview(
-                normalized, include_finance=include_finance
+            preview_data = self._repository_preview(
+                session, normalized, include_finance=include_finance
             )
         if preview_data.blockers:
             blocker_text = ", ".join(
@@ -191,7 +208,10 @@ class AdminDataResetService:
 
         with self._session_factory() as session:
             repository = self._repository_provider.admin_data_resets(session)
-            current = repository.preview(normalized, include_finance=include_finance)
+            try:
+                current = repository.preview(normalized, include_finance=include_finance)
+            except ValueError as exc:
+                raise AdminDataResetValidationError(str(exc)) from exc
             if current.blockers:
                 raise AdminDataResetValidationError(
                     "Reset dependencies changed after preview; retry the operation."
