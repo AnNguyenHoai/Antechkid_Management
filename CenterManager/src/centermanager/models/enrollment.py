@@ -61,8 +61,10 @@ class Enrollment(Base, TimestampMixin):
     discount_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     discount_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     discount_policy_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # Versioned tuition-policy snapshot. Existing rows keep the value persisted
+    # when they were created; this default applies only to newly inserted rows.
     billing_policy_version: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="attendance_v1"
+        String(40), nullable=False, default="attendance_v2"
     )
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
