@@ -28,6 +28,16 @@ def _method_source(path: Path, class_name: str, method_name: str) -> str:
     raise AssertionError(f"{class_name}.{method_name} not found")
 
 
+def _function_source(path: Path, function_name: str) -> str:
+    source = _source(path)
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            lines = source.splitlines()
+            return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+    raise AssertionError(f"{function_name} not found")
+
+
 def test_bootstrap_materializes_git_database_before_runtime_ready():
     run_source = _method_source(BOOTSTRAP, "BootstrapManager", "run")
 
@@ -79,11 +89,11 @@ def test_default_runtime_creation_never_creates_an_empty_business_database():
 
 def test_app_runs_platform_bootstrap_before_legacy_database_initialization_call():
     """The remaining compatibility no-op cannot run before Git materialization."""
-    source = _source(APP)
+    main_source = _function_source(APP, "main")
 
-    bootstrap_index = source.index("bootstrap.run()")
-    initialize_index = source.index("initialize_runtime_database()")
-    engine_index = source.index("create_production_engine(echo=False)")
-    schema_index = source.index("ensure_schema()")
+    bootstrap_index = main_source.index("bootstrap.run()")
+    initialize_index = main_source.index("initialize_runtime_database()", bootstrap_index)
+    engine_index = main_source.index("create_production_engine(echo=False)", initialize_index)
+    schema_index = main_source.index("ensure_schema()", engine_index)
 
     assert bootstrap_index < initialize_index < engine_index < schema_index
