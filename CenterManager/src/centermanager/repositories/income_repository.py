@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Income repository - data access for Income entity."""
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -16,6 +17,30 @@ from centermanager.models.tuition_adjustment import TuitionAdjustment
 from centermanager.repositories.base import BaseRepository
 
 
+@dataclass(frozen=True)
+class TuitionSettlementComponent:
+    """One signed component contributing to an Enrollment's settled tuition."""
+
+    KIND_PAYMENT = "PAYMENT"
+    KIND_REFUND = "REFUND"
+    KIND_CREDIT_ADJUSTMENT = "CREDIT_ADJUSTMENT"
+    KIND_TRANSFER_IN = "TRANSFER_IN"
+    KIND_TRANSFER_OUT = "TRANSFER_OUT"
+
+    SOURCE_INCOME = "INCOME"
+    SOURCE_ADJUSTMENT = "TUITION_ADJUSTMENT"
+    SOURCE_TRANSFER = "ENROLLMENT_TRANSFER"
+
+    kind: str
+    source: str
+    source_id: int
+    effective_date: date
+    amount: Decimal
+    wallet: Optional[str] = None
+    note: Optional[str] = None
+    counterparty_enrollment_id: Optional[int] = None
+
+
 class IncomeRepository(BaseRepository[Income]):
     _SORT_COLUMNS = {
         "payment_date": Income.payment_date,
@@ -25,6 +50,13 @@ class IncomeRepository(BaseRepository[Income]):
         "payment_period": Income.payment_period,
         "received_by": Income.received_by,
         "created_at": Income.created_at,
+    }
+    _SETTLEMENT_KIND_ORDER = {
+        TuitionSettlementComponent.KIND_PAYMENT: 0,
+        TuitionSettlementComponent.KIND_REFUND: 1,
+        TuitionSettlementComponent.KIND_CREDIT_ADJUSTMENT: 2,
+        TuitionSettlementComponent.KIND_TRANSFER_IN: 3,
+        TuitionSettlementComponent.KIND_TRANSFER_OUT: 4,
     }
 
     def __init__(self, session: Session) -> None:
@@ -165,39 +197,128 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.class_id == class_id)
         return query.order_by(asc(Income.payment_date), asc(Income.id)).all()
 
-    def sum_active_tuition_for_enrollment(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> Decimal:
-        """Effective settled tuition: cash + non-cash credit + transfer credits - refunds/outgoing credit."""
-        payment_query = self._session.query(func.coalesce(func.sum(Income.amount), 0)).filter(
-            Income.deleted_at.is_(None), Income.status == Income.STATUS_ACTIVE,
-            Income.income_type == "Tuition", Income.enrollment_id == enrollment_id,
+    @staticmethod
+    def _decimal(value) -> Decimal:
+        return Decimal(str(value or 0))
+
+    def list_active_tuition_settlement_components(
+        self,
+        enrollment_id: int,
+        *,
+        as_of_date: Optional[date] = None,
+    ) -> Tuple[TuitionSettlementComponent, ...]:
+        """Return the canonical signed components used to compute settled tuition.
+
+        Cash/bank refunds are represented by their negative Income row. REFUND
+        TuitionAdjustment rows are intentionally excluded because each is linked
+        to that Income and including both would double-count the refund.
+        """
+        payment_query = self._session.query(Income).filter(
+            Income.deleted_at.is_(None),
+            Income.status == Income.STATUS_ACTIVE,
+            Income.income_type == "Tuition",
+            Income.enrollment_id == enrollment_id,
         )
         if as_of_date is not None:
             payment_query = payment_query.filter(Income.payment_date <= as_of_date)
-        paid = Decimal(str(payment_query.scalar() or 0))
 
-        credit_query = self._session.query(func.coalesce(func.sum(TuitionAdjustment.amount), 0)).filter(
+        components = []
+        for income in payment_query.all():
+            amount = self._decimal(income.amount)
+            components.append(
+                TuitionSettlementComponent(
+                    kind=(
+                        TuitionSettlementComponent.KIND_REFUND
+                        if amount < 0
+                        else TuitionSettlementComponent.KIND_PAYMENT
+                    ),
+                    source=TuitionSettlementComponent.SOURCE_INCOME,
+                    source_id=int(income.id),
+                    effective_date=income.payment_date,
+                    amount=amount,
+                    wallet=income.payment_method,
+                    note=income.note,
+                )
+            )
+
+        credit_query = self._session.query(TuitionAdjustment).filter(
             TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
             TuitionAdjustment.enrollment_id == enrollment_id,
         )
         if as_of_date is not None:
             credit_query = credit_query.filter(TuitionAdjustment.adjustment_date <= as_of_date)
-        non_cash_credit = Decimal(str(credit_query.scalar() or 0))
+        for adjustment in credit_query.all():
+            components.append(
+                TuitionSettlementComponent(
+                    kind=TuitionSettlementComponent.KIND_CREDIT_ADJUSTMENT,
+                    source=TuitionSettlementComponent.SOURCE_ADJUSTMENT,
+                    source_id=int(adjustment.id),
+                    effective_date=adjustment.adjustment_date,
+                    amount=self._decimal(adjustment.amount),
+                    note=adjustment.reason,
+                )
+            )
 
-        incoming = self._session.query(func.coalesce(func.sum(EnrollmentTransfer.transferred_credit), 0)).filter(
-            EnrollmentTransfer.target_enrollment_id == enrollment_id
+        incoming_query = self._session.query(EnrollmentTransfer).filter(
+            EnrollmentTransfer.target_enrollment_id == enrollment_id,
+            EnrollmentTransfer.transferred_credit != 0,
         )
-        outgoing = self._session.query(func.coalesce(func.sum(EnrollmentTransfer.transferred_credit), 0)).filter(
-            EnrollmentTransfer.source_enrollment_id == enrollment_id
+        outgoing_query = self._session.query(EnrollmentTransfer).filter(
+            EnrollmentTransfer.source_enrollment_id == enrollment_id,
+            EnrollmentTransfer.transferred_credit != 0,
         )
         if as_of_date is not None:
             cutoff = datetime.combine(as_of_date, time.max)
-            incoming = incoming.filter(EnrollmentTransfer.transferred_at <= cutoff)
-            outgoing = outgoing.filter(EnrollmentTransfer.transferred_at <= cutoff)
-        transfer_settlement = paid + Decimal(str(incoming.scalar() or 0)) - Decimal(str(outgoing.scalar() or 0))
-        return (
-            paid
-            + non_cash_credit
-            + (transfer_settlement - paid)
+            incoming_query = incoming_query.filter(EnrollmentTransfer.transferred_at <= cutoff)
+            outgoing_query = outgoing_query.filter(EnrollmentTransfer.transferred_at <= cutoff)
+
+        for transfer in incoming_query.all():
+            components.append(
+                TuitionSettlementComponent(
+                    kind=TuitionSettlementComponent.KIND_TRANSFER_IN,
+                    source=TuitionSettlementComponent.SOURCE_TRANSFER,
+                    source_id=int(transfer.id),
+                    effective_date=transfer.transferred_at.date(),
+                    amount=self._decimal(transfer.transferred_credit),
+                    note=transfer.reason,
+                    counterparty_enrollment_id=int(transfer.source_enrollment_id),
+                )
+            )
+        for transfer in outgoing_query.all():
+            components.append(
+                TuitionSettlementComponent(
+                    kind=TuitionSettlementComponent.KIND_TRANSFER_OUT,
+                    source=TuitionSettlementComponent.SOURCE_TRANSFER,
+                    source_id=int(transfer.id),
+                    effective_date=transfer.transferred_at.date(),
+                    amount=-self._decimal(transfer.transferred_credit),
+                    note=transfer.reason,
+                    counterparty_enrollment_id=int(transfer.target_enrollment_id),
+                )
+            )
+
+        return tuple(
+            sorted(
+                components,
+                key=lambda item: (
+                    item.effective_date,
+                    self._SETTLEMENT_KIND_ORDER[item.kind],
+                    item.source_id,
+                ),
+            )
+        )
+
+    def sum_active_tuition_for_enrollment(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> Decimal:
+        """Effective settled tuition derived from the canonical settlement components."""
+        return sum(
+            (
+                component.amount
+                for component in self.list_active_tuition_settlement_components(
+                    enrollment_id,
+                    as_of_date=as_of_date,
+                )
+            ),
+            Decimal("0"),
         )
 
     def aggregate_active_tuition_by_student_class(self, *, finance_period_start: date, date_from: date,

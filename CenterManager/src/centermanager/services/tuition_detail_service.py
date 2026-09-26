@@ -18,6 +18,7 @@ from centermanager.core.clock import get_clock
 from centermanager.dto.outstanding_dto import OutstandingDTO
 from centermanager.models.income import Income
 from centermanager.models.session import SessionStatus
+from centermanager.repositories.income_repository import TuitionSettlementComponent
 from centermanager.repositories.provider import (
     RepositoryProvider,
     create_default_repository_provider,
@@ -63,6 +64,24 @@ class TuitionPaymentDetail:
 
 
 @dataclass(frozen=True)
+class TuitionSettlementDetail:
+    """One signed row explaining how ``paid`` / settled tuition was derived."""
+
+    kind: str
+    source: str
+    source_id: int
+    effective_date: date
+    amount: Decimal
+    wallet: Optional[str]
+    note: Optional[str]
+    counterparty_enrollment_id: Optional[int]
+
+    @property
+    def reference(self) -> str:
+        return f"{self.source} #{self.source_id}"
+
+
+@dataclass(frozen=True)
 class TuitionDetailReadModel:
     enrollment_id: int
     student_id: int
@@ -92,6 +111,7 @@ class TuitionDetailReadModel:
     prepaid_amount: Decimal
     sessions: Tuple[TuitionSessionDetail, ...]
     payments: Tuple[TuitionPaymentDetail, ...]
+    settlement_ledger: Tuple[TuitionSettlementDetail, ...]
 
 
 class TuitionDetailNotFoundError(LookupError):
@@ -193,6 +213,25 @@ class TuitionDetailService:
             for payment in sorted(payments, key=lambda item: (item.payment_date, item.id or 0))
         )
 
+    @classmethod
+    def _settlement_rows(
+        cls,
+        components: Tuple[TuitionSettlementComponent, ...],
+    ) -> Tuple[TuitionSettlementDetail, ...]:
+        return tuple(
+            TuitionSettlementDetail(
+                kind=component.kind,
+                source=component.source,
+                source_id=component.source_id,
+                effective_date=component.effective_date,
+                amount=cls._amount(component.amount),
+                wallet=component.wallet,
+                note=component.note,
+                counterparty_enrollment_id=component.counterparty_enrollment_id,
+            )
+            for component in components
+        )
+
     def get_detail(
         self,
         enrollment_id: int,
@@ -237,12 +276,12 @@ class TuitionDetailService:
                 sort_by="payment_date",
                 ascending=True,
             )
-            paid = self._amount(
-                income_repo.sum_active_tuition_for_enrollment(
-                    enrollment_id,
-                    as_of_date=cutoff,
-                )
+            settlement_components = income_repo.list_active_tuition_settlement_components(
+                enrollment_id,
+                as_of_date=cutoff,
             )
+            settlement_rows = self._settlement_rows(settlement_components)
+            paid = sum((row.amount for row in settlement_rows), Decimal("0"))
 
             configured = enrollment.has_tuition_contract
             billable_numbers = ()
@@ -329,4 +368,5 @@ class TuitionDetailService:
                 prepaid_amount=self._amount(balance_projection.prepaid_amount),
                 sessions=session_rows,
                 payments=self._payment_rows(payments),
+                settlement_ledger=settlement_rows,
             )
