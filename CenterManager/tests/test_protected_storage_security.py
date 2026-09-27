@@ -42,7 +42,6 @@ def test_production_engine_boundary_fails_before_key_or_db_access(monkeypatch):
 
     with pytest.raises(ProtectedStorageConfigurationError, match="direct database access"):
         database_engine.create_production_engine()
-
     with pytest.raises(ProtectedStorageConfigurationError, match="direct database access"):
         database_engine.inspect_runtime_database()
 
@@ -66,24 +65,23 @@ def test_service_owned_layout_is_outside_desktop_runtime_tree():
 def test_service_protocol_never_exposes_raw_key_or_sql_operation():
     assert PROTOCOL_VERSION == 2
     values = {operation.value for operation in ProtectedDataOperation}
-    assert {
+    assert values == {
         "health",
         "validate_database",
         "create_backup",
         "authenticate",
         "logout",
+        "user.change_password",
         "student.list",
         "student.create",
-    } == values
+    }
     assert all("key" not in value for value in values)
     assert all("sql" not in value for value in values)
 
 
 def test_acl_script_is_service_only_and_dry_run_by_default():
     root = Path(__file__).resolve().parents[1]
-    script = (root / "scripts" / "prepare_protected_storage_acl.ps1").read_text(
-        encoding="utf-8"
-    )
+    script = (root / "scripts" / "prepare_protected_storage_acl.ps1").read_text(encoding="utf-8")
     assert "[switch]$Apply" in script
     assert "if (-not $Apply)" in script
     assert "Assert-ServiceExists" in script
