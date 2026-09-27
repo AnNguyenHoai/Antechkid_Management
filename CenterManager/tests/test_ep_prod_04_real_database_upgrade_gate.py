@@ -155,12 +155,19 @@ def test_prod_04_gate_rejects_foreign_key_corruption(tmp_path):
         upgrade_gate.assert_healthy(health, phase="pre-upgrade")
 
 
-def test_prod_04_migration_api_is_path_aware_source_contract():
+def test_prod_04_migration_api_preserves_path_gate_and_production_engine_contract():
+    """Keep rehearsal path-aware while production uses its keyed deployment engine.
+
+    The explicit-path helper is intentionally plain/disposable and must never create
+    a missing snapshot. The canonical runtime migration must instead reuse the
+    production engine so SQLCipher deployments are not reopened through sqlite3.
+    """
     import inspect
     from centermanager.database import migration
 
     source = inspect.getsource(migration)
     assert "def upgrade_database_path_to_head(database_path: Path)" in source
-    assert "allow_create=False" in source
+    assert "create_engine_for_path(database_path, allow_create=False)" in source
     assert "def upgrade_database_to_head()" in source
-    assert "upgrade_database_path_to_head(get_database_path())" in source
+    assert "create_production_engine(echo=False)" in source
+    assert "_upgrade_database_with_engine(database_path, engine)" in source
