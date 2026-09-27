@@ -5,10 +5,9 @@ from __future__ import annotations
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Mapping
 
-import bcrypt
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.capabilities import Capability
@@ -17,6 +16,7 @@ from centermanager.database.encryption import DatabaseKeyStore
 from centermanager.repositories.user_repository import UserRepository
 from centermanager.security.protected_storage import ProtectedStorageLayout
 from centermanager.services.authorization_service import AuthorizationService
+from centermanager.services.permission_service import PermissionService, AuthenticationError
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
 
@@ -81,7 +81,7 @@ class ServiceSessionRegistry:
 
 
 class ProtectedDomainGateway:
-    """Own service-side DB sessions and canonical app authorization.
+    """Own service-side DB sessions and canonical application authorization.
 
     DB/key initialization is lazy so the Windows service can install/start and
     answer health checks before protected storage has been staged. First auth or
@@ -98,6 +98,7 @@ class ProtectedDomainGateway:
         self._layout = layout
         self._sessions = session_registry or ServiceSessionRegistry()
         self._session_factory = session_factory
+        self._permission_service = None
         self._timeline_service = None
         self._student_service = None
 
@@ -114,6 +115,8 @@ class ProtectedDomainGateway:
                 encryption_key=key,
             )
             self._session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        if self._permission_service is None:
+            self._permission_service = PermissionService(self._session_factory)
         if self._timeline_service is None:
             self._timeline_service = TimelineService(self._session_factory)
         if self._student_service is None:
@@ -121,7 +124,7 @@ class ProtectedDomainGateway:
                 self._session_factory,
                 timeline_service=self._timeline_service,
             )
-        return self._session_factory, self._student_service
+        return self._session_factory, self._permission_service, self._student_service
 
     @staticmethod
     def _principal_summary(user) -> dict[str, Any]:
@@ -130,43 +133,29 @@ class ProtectedDomainGateway:
             "username": str(user.username),
             "full_name": str(user.full_name),
             "role": getattr(getattr(user, "role", None), "name", None),
+            "permissions": sorted(str(value) for value in getattr(user, "permissions", set())),
             "force_password_change": bool(getattr(user, "force_password_change", False)),
         }
 
     def authenticate(self, username: str, password: str, caller_sid: str) -> dict[str, Any]:
-        session_factory, _ = self._ensure_services()
-        clean_username = str(username or "").strip()
-        if not clean_username or not password or not caller_sid:
+        _, permission_service, _ = self._ensure_services()
+        if not str(username or "").strip() or not password or not caller_sid:
             raise ProtectedDomainAuthenticationError("Invalid username or password.")
-        with session_factory() as db:
-            user = UserRepository(db).get_by_username(clean_username)
-            if user is None or not user.is_active or user.is_locked:
-                raise ProtectedDomainAuthenticationError("Invalid username or password.")
-            try:
-                valid = bcrypt.checkpw(
-                    str(password).encode("utf-8"),
-                    str(user.password_hash).encode("utf-8"),
-                )
-            except (ValueError, TypeError):
-                valid = False
-            if not valid:
-                user.increment_login_attempts()
-                db.commit()
-                raise ProtectedDomainAuthenticationError("Invalid username or password.")
-            user.reset_login_attempts()
-            user.last_login = datetime.now()
-            db.commit()
-            issued = self._sessions.issue(user.id, caller_sid)
-            result = self._principal_summary(user)
-            result["session_token"] = issued.token
-            return result
+        try:
+            user = permission_service.authenticate_user(str(username).strip(), str(password))
+        except AuthenticationError as exc:
+            raise ProtectedDomainAuthenticationError(str(exc)) from exc
+        issued = self._sessions.issue(user.id, caller_sid)
+        result = self._principal_summary(user)
+        result["session_token"] = issued.token
+        return result
 
     def logout(self, token: str, caller_sid: str) -> dict[str, Any]:
         self._sessions.revoke(token, caller_sid)
         return {"logged_out": True}
 
     def _authorized_user(self, token: str, caller_sid: str, *capabilities: Capability):
-        session_factory, _ = self._ensure_services()
+        session_factory, _, _ = self._ensure_services()
         service_session = self._sessions.require(token, caller_sid)
         with session_factory() as db:
             user = UserRepository(db).get_by_id_with_role(service_session.user_id)
@@ -176,6 +165,23 @@ class ProtectedDomainGateway:
             if capabilities and not AuthorizationService.allows_any(user, capabilities):
                 raise ProtectedDomainAuthorizationError("Required capability is not granted.")
             return user
+
+    def change_password(
+        self,
+        token: str,
+        caller_sid: str,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        _, permission_service, _ = self._ensure_services()
+        user = self._authorized_user(token, caller_sid)
+        try:
+            updated = permission_service.change_password(
+                int(user.id), str(current_password), str(new_password)
+            )
+        except AuthenticationError as exc:
+            raise ProtectedDomainAuthenticationError(str(exc)) from exc
+        return {"user": self._principal_summary(updated)}
 
     @staticmethod
     def _student_dto(student) -> dict[str, Any]:
@@ -193,7 +199,7 @@ class ProtectedDomainGateway:
         }
 
     def list_students(self, token: str, caller_sid: str) -> dict[str, Any]:
-        _, student_service = self._ensure_services()
+        _, _, student_service = self._ensure_services()
         self._authorized_user(
             token, caller_sid, Capability.STUDENT_READ, Capability.STUDENT_VIEW
         )
@@ -215,7 +221,7 @@ class ProtectedDomainGateway:
         caller_sid: str,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
-        _, student_service = self._ensure_services()
+        _, _, student_service = self._ensure_services()
         self._authorized_user(token, caller_sid, Capability.STUDENT_CREATE)
         if not isinstance(payload, Mapping):
             raise ProtectedDomainError("Student payload must be an object.")
