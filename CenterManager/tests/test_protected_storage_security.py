@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from centermanager.database import engine as database_engine
 from centermanager.platform.protected_data_service.protocol import (
     PROTOCOL_VERSION,
     SERVICE_NAME,
@@ -28,6 +29,22 @@ def test_enforced_mode_blocks_direct_gui_database_access():
     env = {"ANTECHKIDS_PROTECTED_STORAGE_MODE": "enforced"}
     with pytest.raises(ProtectedStorageConfigurationError, match="direct database access"):
         assert_direct_database_access_allowed(env)
+
+
+def test_production_engine_boundary_fails_before_key_or_db_access(monkeypatch):
+    monkeypatch.setenv("ANTECHKIDS_PROTECTED_STORAGE_MODE", "enforced")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("key/database access must not be reached")
+
+    monkeypatch.setattr(database_engine.DatabaseKeyStore, "load", forbidden)
+    monkeypatch.setattr(database_engine, "get_database_path", forbidden)
+
+    with pytest.raises(ProtectedStorageConfigurationError, match="direct database access"):
+        database_engine.create_production_engine()
+
+    with pytest.raises(ProtectedStorageConfigurationError, match="direct database access"):
+        database_engine.inspect_runtime_database()
 
 
 def test_invalid_protected_storage_mode_fails_closed():
