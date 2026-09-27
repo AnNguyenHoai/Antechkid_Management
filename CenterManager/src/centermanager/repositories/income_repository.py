@@ -207,11 +207,12 @@ class IncomeRepository(BaseRepository[Income]):
         *,
         as_of_date: Optional[date] = None,
     ) -> Tuple[TuitionSettlementComponent, ...]:
-        """Return the canonical signed components used to compute settled tuition.
+        """Return the canonical settlement components used to compute settled tuition.
 
-        Cash/bank refunds are represented by their negative Income row. REFUND
-        TuitionAdjustment rows are intentionally excluded because each is linked
-        to that Income and including both would double-count the refund.
+        Each component is signed, so summing the returned amounts reconciles to the
+        effective settled tuition. Cash/bank refunds are represented by their negative
+        Income row. REFUND TuitionAdjustment rows are intentionally excluded because
+        each is linked to that Income and including both would double-count the refund.
         """
         payment_query = self._session.query(Income).filter(
             Income.deleted_at.is_(None),
