@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Operation-oriented broker for the protected Windows data service.
-
-The broker deliberately does not expose raw SQL or the SQLCipher workspace key.
-Only narrowly-scoped operations may cross the service boundary. Windows named-
-pipe transport/authentication lives in ``pipe_transport`` so this dispatch core
-remains unit-testable on non-Windows hosts.
-"""
+"""Operation-oriented broker for the protected Windows data service."""
 from __future__ import annotations
 
 import hashlib
@@ -19,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from centermanager.core.capabilities import Capability
 from centermanager.database.artifact_security import validate_database_artifact
 from centermanager.database.encryption import (
     DatabaseKeyStore,
@@ -30,6 +25,7 @@ from centermanager.security.protected_storage import (
     get_protected_storage_layout,
 )
 
+from .domain_gateway import ProtectedDomainError, ProtectedDomainGateway
 from .protocol import PROTOCOL_VERSION, ProtectedDataOperation
 
 MAX_REQUEST_BYTES = 64 * 1024
@@ -91,8 +87,12 @@ def decode_request(data: bytes) -> BrokerRequest:
     return BrokerRequest(request_id=request_id, operation=operation, payload=payload)
 
 
-def encode_response(request_id: str, *, result: Mapping[str, Any] | None = None,
-                    error: str | None = None) -> bytes:
+def encode_response(
+    request_id: str,
+    *,
+    result: Mapping[str, Any] | None = None,
+    error: str | None = None,
+) -> bytes:
     envelope: dict[str, Any] = {
         "version": PROTOCOL_VERSION,
         "request_id": request_id,
@@ -212,16 +212,52 @@ class ProtectedDataBackend:
 
 
 class ProtectedDataBroker:
-    def __init__(self, backend: ProtectedDataBackend | None = None) -> None:
+    """Dispatch OS-authenticated requests through service-owned authorization."""
+
+    def __init__(
+        self,
+        backend: ProtectedDataBackend | None = None,
+        domain_gateway: ProtectedDomainGateway | None = None,
+    ) -> None:
         self._backend = backend or ProtectedDataBackend()
+        self._domain = domain_gateway or ProtectedDomainGateway(self._backend.layout)
+
+    @staticmethod
+    def _token(payload: Mapping[str, Any]) -> str:
+        return str(payload.get("session_token", ""))
 
     def dispatch(self, request: BrokerRequest, caller: CallerIdentity) -> dict[str, Any]:
         if not caller.sid:
             raise ProtectedDataBrokerError("Authenticated caller identity is required.")
-        if request.operation is ProtectedDataOperation.HEALTH:
-            return self._backend.health()
-        if request.operation is ProtectedDataOperation.VALIDATE_DATABASE:
-            return self._backend.validate_database()
-        if request.operation is ProtectedDataOperation.CREATE_BACKUP:
-            return self._backend.create_backup(str(request.payload.get("label", "manual")))
+        try:
+            if request.operation is ProtectedDataOperation.HEALTH:
+                return self._backend.health()
+            if request.operation is ProtectedDataOperation.VALIDATE_DATABASE:
+                return self._backend.validate_database()
+            if request.operation is ProtectedDataOperation.AUTHENTICATE:
+                return self._domain.authenticate(
+                    str(request.payload.get("username", "")),
+                    str(request.payload.get("password", "")),
+                    caller.sid,
+                )
+            if request.operation is ProtectedDataOperation.LOGOUT:
+                return self._domain.logout(self._token(request.payload), caller.sid)
+            if request.operation is ProtectedDataOperation.STUDENT_LIST:
+                return self._domain.list_students(self._token(request.payload), caller.sid)
+            if request.operation is ProtectedDataOperation.STUDENT_CREATE:
+                return self._domain.create_student(
+                    self._token(request.payload),
+                    caller.sid,
+                    request.payload.get("student", {}),
+                )
+            if request.operation is ProtectedDataOperation.CREATE_BACKUP:
+                # Backup is safe with respect to DB mutation but can consume disk;
+                # it therefore requires a service-authenticated app user with the
+                # canonical backup.create capability.
+                self._domain._authorized_user(
+                    self._token(request.payload), caller.sid, Capability.BACKUP_CREATE
+                )
+                return self._backend.create_backup(str(request.payload.get("label", "manual")))
+        except ProtectedDomainError as exc:
+            raise ProtectedDataBrokerError(str(exc)) from exc
         raise ProtectedDataProtocolError("Operation is not enabled by this broker version.")
