@@ -309,16 +309,52 @@ class IncomeRepository(BaseRepository[Income]):
         )
 
     def sum_active_tuition_for_enrollment(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> Decimal:
-        """Effective settled tuition derived from the canonical settlement components."""
-        return sum(
-            (
-                component.amount
-                for component in self.list_active_tuition_settlement_components(
-                    enrollment_id,
-                    as_of_date=as_of_date,
-                )
-            ),
-            Decimal("0"),
+        """Return effective settled tuition without materializing ledger ORM rows.
+
+        The filters intentionally mirror ``list_active_tuition_settlement_components``.
+        TUITION-19 regression tests assert that both paths reconcile, while this
+        aggregate path remains efficient for OutstandingService list/batch reads.
+        """
+        payment_query = self._session.query(func.coalesce(func.sum(Income.amount), 0)).filter(
+            Income.deleted_at.is_(None),
+            Income.status == Income.STATUS_ACTIVE,
+            Income.income_type == "Tuition",
+            Income.enrollment_id == enrollment_id,
+        )
+        if as_of_date is not None:
+            payment_query = payment_query.filter(Income.payment_date <= as_of_date)
+        paid = self._decimal(payment_query.scalar())
+
+        credit_query = self._session.query(func.coalesce(func.sum(TuitionAdjustment.amount), 0)).filter(
+            TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
+            TuitionAdjustment.enrollment_id == enrollment_id,
+        )
+        if as_of_date is not None:
+            credit_query = credit_query.filter(TuitionAdjustment.adjustment_date <= as_of_date)
+        non_cash_credit = self._decimal(credit_query.scalar())
+
+        incoming_query = self._session.query(
+            func.coalesce(func.sum(EnrollmentTransfer.transferred_credit), 0)
+        ).filter(
+            EnrollmentTransfer.target_enrollment_id == enrollment_id,
+            EnrollmentTransfer.transferred_credit != 0,
+        )
+        outgoing_query = self._session.query(
+            func.coalesce(func.sum(EnrollmentTransfer.transferred_credit), 0)
+        ).filter(
+            EnrollmentTransfer.source_enrollment_id == enrollment_id,
+            EnrollmentTransfer.transferred_credit != 0,
+        )
+        if as_of_date is not None:
+            cutoff = datetime.combine(as_of_date, time.max)
+            incoming_query = incoming_query.filter(EnrollmentTransfer.transferred_at <= cutoff)
+            outgoing_query = outgoing_query.filter(EnrollmentTransfer.transferred_at <= cutoff)
+
+        return (
+            paid
+            + non_cash_credit
+            + self._decimal(incoming_query.scalar())
+            - self._decimal(outgoing_query.scalar())
         )
 
     def aggregate_active_tuition_by_student_class(self, *, finance_period_start: date, date_from: date,
