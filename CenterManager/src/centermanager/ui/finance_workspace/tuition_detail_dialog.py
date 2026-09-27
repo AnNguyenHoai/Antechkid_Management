@@ -38,6 +38,14 @@ def _money(value: Optional[Decimal]) -> str:
 class TuitionDetailDialog(QDialog):
     """Render a service-owned tuition read model without recalculating money."""
 
+    _SETTLEMENT_KIND_LABELS = {
+        "PAYMENT": "Thanh toán",
+        "REFUND": "Hoàn tiền",
+        "CREDIT_ADJUSTMENT": "Điều chỉnh tín dụng",
+        "TRANSFER_IN": "Chuyển vào",
+        "TRANSFER_OUT": "Chuyển ra",
+    }
+
     def __init__(
         self,
         detail: TuitionDetailReadModel,
@@ -46,7 +54,7 @@ class TuitionDetailDialog(QDialog):
         super().__init__(parent)
         self._detail = detail
         self.setWindowTitle(f"Chi tiết học phí · {detail.student_name}")
-        self.resize(980, 720)
+        self.resize(1040, 740)
         self._setup_ui()
 
     @staticmethod
@@ -98,7 +106,7 @@ class TuitionDetailDialog(QDialog):
             ("Phát sinh gộp", _money(self._detail.gross_accrued)),
             ("Giảm giá đã ghi nhận", _money(self._detail.recognized_discount)),
             ("Học phí đã phát sinh", _money(self._detail.net_accrued)),
-            ("Đã đóng", _money(self._detail.paid)),
+            ("Đã đối soát", _money(self._detail.paid)),
             ("Số dư", self._balance_label(self._detail)),
         ]
         for index, (label, value) in enumerate(values):
@@ -114,14 +122,15 @@ class TuitionDetailDialog(QDialog):
 
         note = QLabel(
             f"Số liệu tại ngày {self._detail.as_of_date:%d/%m/%Y}. "
-            "Học phí phát sinh theo chính sách tính phí chuẩn; các khoản đã đóng chỉ gồm "
-            "Tuition Income ACTIVE được gắn đúng Enrollment."
+            "Học phí phát sinh theo chính sách tính phí chuẩn. Số đã đối soát là tổng có dấu "
+            "của thanh toán, hoàn tiền, điều chỉnh tín dụng và tín dụng chuyển lớp thuộc Enrollment."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
         tabs = QTabWidget()
         tabs.addTab(self._session_tab(), "Buổi học")
+        tabs.addTab(self._settlement_tab(), "Đối soát học phí")
         tabs.addTab(self._payment_tab(), "Lịch sử thanh toán")
         layout.addWidget(tabs, 1)
 
@@ -149,6 +158,42 @@ class TuitionDetailDialog(QDialog):
         table.setAlternatingRowColors(True)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
+        return widget
+
+    def _settlement_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        table = QTableWidget(len(self._detail.settlement_ledger), 7)
+        table.setHorizontalHeaderLabels(
+            ["Ngày", "Loại", "Số tiền", "Ví", "Tham chiếu", "Enrollment liên quan", "Ghi chú"]
+        )
+        for row, entry in enumerate(self._detail.settlement_ledger):
+            table.setItem(row, 0, self._readonly_item(entry.effective_date.strftime("%d/%m/%Y")))
+            table.setItem(
+                row,
+                1,
+                self._readonly_item(self._SETTLEMENT_KIND_LABELS.get(entry.kind, entry.kind)),
+            )
+            table.setItem(row, 2, self._readonly_item(_money(entry.amount)))
+            table.setItem(row, 3, self._readonly_item(entry.wallet or "—"))
+            table.setItem(row, 4, self._readonly_item(entry.reference))
+            table.setItem(
+                row,
+                5,
+                self._readonly_item(
+                    f"#{entry.counterparty_enrollment_id}"
+                    if entry.counterparty_enrollment_id is not None
+                    else "—"
+                ),
+            )
+            table.setItem(row, 6, self._readonly_item(entry.note or ""))
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(table)
+        if not self._detail.settlement_ledger:
+            layout.addWidget(QLabel("Chưa có thành phần đối soát học phí tại ngày chốt."))
         return widget
 
     def _payment_tab(self) -> QWidget:
