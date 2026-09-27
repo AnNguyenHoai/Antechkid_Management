@@ -16,6 +16,7 @@ from centermanager.database.encryption import (
     load_sqlcipher_driver,
 )
 from centermanager.database.lifecycle import DatabaseLifecycle, DatabaseLifecycleState
+from centermanager.security.protected_storage import assert_direct_database_access_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,6 @@ def _connect_encrypted(db_path: Path, key: bytes, *, allow_create: bool, readonl
     )
     try:
         apply_sqlcipher_key(connection, key)
-        # Force SQLCipher to read the encrypted schema immediately. A wrong key
-        # therefore fails at the connection boundary rather than much later.
         connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
         return connection
     except Exception:
@@ -65,8 +64,10 @@ def inspect_runtime_database() -> DatabaseLifecycleState:
     """Inspect the runtime DB using the same encryption boundary as production.
 
     Missing/unreadable key material fails closed as RECOVERY_REQUIRED rather
-    than retrying with plain SQLite.
+    than retrying with plain SQLite. In SEC-02 enforced mode the desktop process
+    is forbidden from opening the database directly at all.
     """
+    assert_direct_database_access_allowed()
     db_path = get_database_path()
     if not database_encryption_required():
         return DatabaseLifecycle(db_path).inspect()
@@ -137,8 +138,10 @@ def initialize_runtime_database() -> Path:
 
     Windows production creates a SQLCipher database and a random 256-bit DB key
     protected by DPAPI. Existing database files are never overwritten and a
-    missing key for an existing DB is never silently replaced.
+    missing key for an existing DB is never silently replaced. SEC-02 enforced
+    mode forbids this desktop-owned initialization path.
     """
+    assert_direct_database_access_allowed()
     db_path = get_database_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
@@ -164,6 +167,7 @@ def initialize_runtime_database() -> Path:
 
 def create_production_engine(echo: bool = False) -> Engine:
     """Create production engine without auto-creating DB or encryption keys."""
+    assert_direct_database_access_allowed()
     db_path = get_database_path()
     encrypted = database_encryption_required()
     key = DatabaseKeyStore().load() if encrypted else None
