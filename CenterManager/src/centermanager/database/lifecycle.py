@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from enum import Enum
 from pathlib import Path
+from typing import Callable, Optional, Any
 
 
 class DatabaseLifecycleState(str, Enum):
@@ -31,17 +32,35 @@ class DatabaseLifecycleError(RuntimeError):
 
 
 class DatabaseLifecycle:
-    """Detect database health without creating or mutating the database file."""
+    """Detect database health without creating or mutating the database file.
 
-    def __init__(self, database_path: Path):
+    ``readonly_connector`` lets encrypted production callers provide an already
+    keyed SQLCipher connection while preserving the historical plain-SQLite
+    behavior used by low-level tests and non-Windows development.
+    """
+
+    def __init__(
+        self,
+        database_path: Path,
+        readonly_connector: Optional[Callable[[Path], Any]] = None,
+    ) -> None:
         self._database_path = Path(database_path)
+        self._readonly_connector = readonly_connector
 
     @property
     def database_path(self) -> Path:
         return self._database_path
 
+    def _connect_readonly(self):
+        if self._readonly_connector is not None:
+            return self._readonly_connector(self._database_path)
+        return sqlite3.connect(
+            f"file:{self._database_path.resolve()}?mode=ro",
+            uri=True,
+        )
+
     def inspect(self) -> DatabaseLifecycleState:
-        """Inspect the database file using SQLite read-only mode."""
+        """Inspect the database file in read-only mode."""
         if not self._database_path.exists():
             return DatabaseLifecycleState.MISSING
         if not self._database_path.is_file():
@@ -49,10 +68,7 @@ class DatabaseLifecycle:
         try:
             if self._database_path.stat().st_size == 0:
                 return DatabaseLifecycleState.CORRUPTED
-            connection = sqlite3.connect(
-                f"file:{self._database_path.resolve()}?mode=ro",
-                uri=True,
-            )
+            connection = self._connect_readonly()
             try:
                 integrity = connection.execute("PRAGMA integrity_check").fetchone()
                 if not integrity or integrity[0] != "ok":
@@ -64,10 +80,14 @@ class DatabaseLifecycle:
                     return DatabaseLifecycleState.INVALID_SCHEMA
             finally:
                 connection.close()
-        except sqlite3.DatabaseError:
+        except (sqlite3.DatabaseError, Exception) as exc:
+            # SQLCipher DB-API exceptions are not subclasses of stdlib sqlite3
+            # on every supported wheel, so classify DB-driver failures without
+            # allowing them to escape the lifecycle boundary. Permission and OS
+            # failures remain UNREADABLE below when recognizable.
+            if isinstance(exc, (OSError, PermissionError)):
+                return DatabaseLifecycleState.UNREADABLE
             return DatabaseLifecycleState.CORRUPTED
-        except (OSError, PermissionError):
-            return DatabaseLifecycleState.UNREADABLE
         return DatabaseLifecycleState.AVAILABLE
 
     def require_available(self) -> None:

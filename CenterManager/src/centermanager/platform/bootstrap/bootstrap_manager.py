@@ -139,7 +139,8 @@ class BootstrapManager:
         from centermanager.ui.git_config_dialog import GitConfigDialog
         from centermanager.platform.synchronization import GitSynchronizationProvider
         from centermanager.platform.sync import StartupSynchronization
-        from centermanager.database.lifecycle import DatabaseLifecycle, DatabaseLifecycleState
+        from centermanager.database.engine import inspect_runtime_database
+        from centermanager.database.lifecycle import DatabaseLifecycleState
 
         git_executable = locate_git()
         if not git_executable:
@@ -175,8 +176,7 @@ class BootstrapManager:
             logger.error("[BOOTSTRAP] Authoritative Git synchronization failed")
             return False
 
-        runtime_db = paths.database_dir / "center.db"
-        state = DatabaseLifecycle(runtime_db).inspect()
+        state = inspect_runtime_database()
         if state is not DatabaseLifecycleState.AVAILABLE:
             logger.error(
                 "[BOOTSTRAP] Git synchronization did not materialize a usable database: state=%s",
