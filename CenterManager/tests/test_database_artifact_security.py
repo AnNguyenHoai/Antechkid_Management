@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from pathlib import Path
 from types import SimpleNamespace
 import sqlite3
 
@@ -102,3 +103,17 @@ def test_sync_gate_refuses_plaintext_authoritative_repository_db(tmp_path, monke
 
     with pytest.raises(DatabaseArtifactSecurityError, match="Plaintext"):
         validate_authoritative_repository_database()
+
+
+def test_sync_manager_never_falls_back_to_pull_capable_publish_after_materialization():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src" / "centermanager" / "platform" / "synchronization" / "synchronization_manager.py").read_text(encoding="utf-8")
+    assert "refusing to pull after database materialization" in source
+    assert "publish_call = lambda: self._provider.publish" not in source
+
+
+def test_legacy_publish_workflow_never_falls_back_to_pull_capable_publish_after_materialization():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src" / "centermanager" / "platform" / "workflow" / "publish_workflow.py").read_text(encoding="utf-8")
+    assert "refusing to pull after database materialization" in source
+    assert "publish_operation = self._sync_provider.publish" not in source
