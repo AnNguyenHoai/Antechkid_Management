@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Application bootstrap for CenterManager."""
 
-import os
 import sys
 import logging
 import traceback
@@ -30,7 +29,7 @@ from centermanager.platform import (
 )
 from centermanager.platform.sync import StartupSynchronization
 from centermanager.platform.business import BusinessModule
-from centermanager.platform.collaboration import CollaborationPoller, PollerMode
+from centermanager.platform.collaboration import CollaborationPoller, PollerMode  # <-- THÊM
 
 from centermanager.ui.main_window import MainWindow
 from centermanager.services.student_service import StudentService
@@ -90,29 +89,9 @@ logger = logging.getLogger(__name__)
 def ensure_schema():
     """Upgrade the runtime database to the current Alembic schema."""
     from centermanager.database.migration import upgrade_database_to_head
+
     upgrade_database_to_head()
     logger.info("Database schema is at Alembic head.")
-
-
-def _build_permission_service(session_factory):
-    """Select local or service-owned authentication for SEC-02 migration/UAT.
-
-    This switch migrates authentication only. It deliberately does not imply
-    protected-storage enforcement because startup and remaining domain services
-    still use the transitional local SQLAlchemy engine.
-    """
-    transport = os.environ.get("ANTECHKIDS_AUTH_TRANSPORT", "local").strip().lower()
-    if transport == "local":
-        return PermissionService(session_factory)
-    if transport == "service":
-        from centermanager.platform.protected_data_service.permission_adapter import (
-            ProtectedPermissionServiceAdapter,
-        )
-        logger.info("[SEC-02] Authentication transport: AnTechKidsData service")
-        return ProtectedPermissionServiceAdapter()
-    raise RuntimeError(
-        "Unsupported ANTECHKIDS_AUTH_TRANSPORT value; expected 'local' or 'service'."
-    )
 
 
 def main() -> int:
@@ -135,6 +114,9 @@ def main() -> int:
         qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
         qapp.setOrganizationName("CenterManager")
 
+        # ============================================
+        # PLATFORM BOOTSTRAP
+        # ============================================
         bootstrap = BootstrapManager()
         if not bootstrap.run():
             logger.error("[STARTUP] Bootstrap failed")
@@ -145,14 +127,25 @@ def main() -> int:
         context_manager = bootstrap._context_manager
         workspace_registry = bootstrap.get_workspace_registry()
         lifecycle = bootstrap.get_lifecycle()
+
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
 
+        # ============================================
+        # DATABASE + GIT STARTUP ORDER
+        # ============================================
+        # Git is the database source of truth. Do not create the production
+        # engine until the startup synchronization has materialized the Git
+        # database into runtime/Database/center.db.
         from sqlalchemy.orm import sessionmaker
 
+        # ============================================
+        # OPTIONAL GIT CONFIGURATION
+        # ============================================
         git_config_service = GitConfigService()
         git_executable = locate_git()
         git_config = None
         sync_provider = None
+
         if not git_executable:
             logger.warning("[STARTUP] Git executable unavailable; starting in local/offline mode")
         elif git_config_service.has_config():
@@ -170,15 +163,18 @@ def main() -> int:
                     email=git_config.email or "",
                     git_executable=str(git_executable),
                 )
+
                 logger.info("[STARTUP] Running startup synchronization...")
                 startup_sync = StartupSynchronization(sync_provider)
                 if not startup_sync.run():
+                    # A configured Git repository is authoritative for the
+                    # runtime database. Never fall back to a stale local DB.
                     logger.error("[STARTUP] Startup synchronization failed; refusing to start with a non-authoritative database")
                     QMessageBox.critical(
                         None,
                         "Synchronization Error",
-                        "Unable to synchronize the authoritative Git database.\n"
-                        "CenterManager will not start with a stale local database.\n\n"
+                        "Unable to synchronize the authoritative Git database.\\n"
+                        "CenterManager will not start with a stale local database.\\n\\n"
                         "Please check the network connection and Git configuration.",
                     )
                     return 1
@@ -186,42 +182,72 @@ def main() -> int:
         else:
             logger.info("[STARTUP] No Git configuration found; starting in local/offline mode")
 
+        # A4.2: create the local container only after Git synchronization has
+        # had the opportunity to materialize the authoritative database. In
+        # configured mode this is a no-op; in true local/offline mode it is the
+        # explicit first-run lifecycle transition from A4.1.
         initialize_runtime_database()
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
+
+        # ============================================
+        # ENSURE DATABASE SCHEMA (after Git DB materialization)
+        # ============================================
         ensure_schema()
         logger.info("[STARTUP] Schema ensured")
 
-        # SEC-02 B2: service-owned auth can be enabled independently for UAT while
-        # the rest of the application remains on transitional local persistence.
-        permission_service = _build_permission_service(session_factory)
+        # ============================================
+        # PERMISSION SERVICE (for login)
+        # ============================================
+        permission_service = PermissionService(session_factory)
 
+        # ============================================
+        # LOGIN
+        # ============================================
         login_dialog = LoginDialog(permission_service)
         if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
             logger.info("[STARTUP] Login cancelled. Exiting.")
             return 0
+
         current_user = login_dialog.get_user()
         if current_user is None:
             logger.error("[STARTUP] No user after login. Exiting.")
             return 1
+
         set_current_user(current_user)
         logger.info(f"[STARTUP] User authenticated: {current_user.username}")
 
+        # ============================================
+        # PLATFORM SERVICES (after login)
+        # ============================================
         event_bus = EventBus()
+
+        # Synchronization manager (for background sync)
         sync_policy = SynchronizationPolicy.from_config(config.raw.get("collaboration", {}))
-        sync_manager = SynchronizationManager(provider=sync_provider, policy=sync_policy, event_bus=event_bus)
+        sync_manager = SynchronizationManager(
+            provider=sync_provider,
+            policy=sync_policy,
+            event_bus=event_bus,
+        )
+
+        # Collaboration
         collaboration_manager = CollaborationManager(
             runtime_root=paths.runtime_root,
             event_bus=event_bus,
             sync_provider=sync_provider,
         )
         notification_service = NotificationService()
+
         collaboration_manager.initialize(
             user_id=str(current_user.id),
             username=current_user.username,
             role=current_user.role.name if current_user.role else "user",
             runtime_version=platform_context.runtime.manifest.runtime_version,
         )
+
+        # ============================================
+        # RUNTIME SYNC SERVICE (background)
+        # ============================================
         sync_service = RuntimeSyncService(
             sync_manager=sync_manager,
             collab_manager=collaboration_manager,
@@ -230,35 +256,239 @@ def main() -> int:
             poll_interval=30,
         )
 
-        # Remaining application composition is intentionally unchanged below.
-        # It stays on the transitional local persistence boundary until each
-        # domain is migrated to operation-oriented service APIs.
-        from centermanager.app_runtime import run_composed_application
-        return run_composed_application(
-            qapp=qapp,
-            paths=paths,
-            config=config,
-            platform_context=platform_context,
-            context_manager=context_manager,
-            lifecycle=lifecycle,
-            session_factory=session_factory,
-            current_user=current_user,
-            permission_service=permission_service,
-            event_bus=event_bus,
-            sync_provider=sync_provider,
-            sync_manager=sync_manager,
-            collaboration_manager=collaboration_manager,
-            notification_service=notification_service,
-            sync_service=sync_service,
+        # Install the mandatory data-consistency barrier BEFORE the collaboration
+        # poller can grant any queued writer.
+        collaboration_manager.set_write_handoff_guard(
+            sync_service.execute_write_handoff_sync
         )
-    except Exception as exc:
-        logger.exception("[STARTUP] Fatal startup error: %s", exc)
-        try:
-            QMessageBox.critical(None, "Startup Error", str(exc))
-        except Exception:
-            pass
+
+        # ============================================
+        # COLLABORATION POLLER (NEW)
+        # ============================================
+        poller = CollaborationPoller(
+            collaboration_manager=collaboration_manager,
+            event_bus=event_bus,
+            normal_interval=10,
+            waiting_interval=3,
+            max_backoff=120,
+            initial_backoff=5,
+        )
+        poller.start()
+        logger.info("[STARTUP] CollaborationPoller started")
+        sync_service.start()
+
+        # ============================================
+        # BUSINESS MODULES REGISTRATION
+        # ============================================
+        module_registry = BusinessModuleRegistry()
+
+        # Initialize business services - CORRECT ORDER
+        timeline_service = TimelineService(session_factory)
+
+        student_service = StudentService(
+            session_factory,
+            timeline_service,
+            event_bus=event_bus
+        )
+
+        parent_service = ParentService(
+            session_factory,
+            timeline_service,
+            event_bus
+        )
+
+        assessment_service = AssessmentService(session_factory, timeline_service, event_bus=event_bus)
+        session_service = SessionService(session_factory, event_bus=event_bus)
+        note_service = SessionNoteService(session_factory, session_service)
+        student_note_service = StudentNoteService(session_factory, timeline_service)
+        document_service = StudentDocumentService(session_factory, timeline_service)
+        summary_service = StudentSummaryService(
+            student_service=student_service,
+            parent_service=parent_service,
+            assessment_service=assessment_service,
+            timeline_service=timeline_service,
+            session_factory=session_factory,
+        )
+
+        highlight_service = StudentHighlightService(session_factory, session_service, event_bus)
+        timeline_handler = HighlightTimelineHandler(timeline_service, session_service)
+        event_bus.register(StudentHighlightCreated, timeline_handler)
+
+        dashboard_service = StudentDashboardService(session_factory)
+        filter_service = StudentFilterService(session_factory)
+        export_service = StudentExportService(student_service)
+        import_service = StudentImportService(student_service)
+
+        home_service = HomeDashboardService(session_factory, event_bus=event_bus)
+
+        analytics_service = StudentAnalyticsService(session_factory)
+
+        employee_service = EmployeeService(session_factory)
+        employee_document_service = EmployeeDocumentService(session_factory, paths.runtime_root / "Attachments")
+        employee_schedule_service = EmployeeScheduleService(session_factory)
+        employee_working_time_service = EmployeeWorkingTimeService(session_factory, employee_schedule_service)
+        employee_work_registration_service = EmployeeWorkRegistrationService(session_factory)
+
+        teacher_timeline_service = TeacherTimelineService(session_factory)
+        teacher_service = TeacherService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
+        teacher_assignment_service = TeacherAssignmentService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
+        teacher_document_service = TeacherDocumentService(
+            session_factory, teacher_timeline_service, event_bus=event_bus
+        )
+        teacher_assignment_service_for_class = teacher_assignment_service
+
+        class_timeline_service = ClassTimelineService(session_factory)
+        class_service = ClassService(session_factory, timeline_service=class_timeline_service, event_bus=event_bus)
+        enrollment_service = EnrollmentService(session_factory, event_bus=event_bus)
+
+        expense_timeline_service = ExpenseTimelineService(session_factory)
+        expense_service = ExpenseService(
+            session_factory=session_factory,
+            timeline_service=expense_timeline_service,
+            permission_service=permission_service,
+        )
+        income_service = IncomeService(
+            session_factory=session_factory,
+            student_service=student_service,
+            class_service=class_service,
+            timeline_service=timeline_service,
+            permission_service=permission_service,
+        )
+        outstanding_service = OutstandingService(session_factory)
+        finance_dashboard_service = FinanceDashboardService(
+            income_service, expense_service, outstanding_service
+        )
+        
+        attendance_service = AttendanceService(
+            session_factory=session_factory,
+            timeline_service=timeline_service,
+            permission_service=permission_service,
+            report_policy=None,
+            report_service=None,
+            event_bus=event_bus,
+        )
+
+        report_service = ReportService(
+            student_service=student_service,
+            parent_service=parent_service,
+            attendance_service=attendance_service,
+            session_service=session_service,
+            student_note_service=student_note_service,
+            outstanding_service=outstanding_service,
+            income_service=income_service,
+            session_factory=session_factory,
+        )
+
+        report_policy = ReportPolicy(
+            student_service=student_service,
+            session_service=session_service,
+            class_service=class_service,
+            attendance_service=attendance_service,
+            report_service=report_service,
+        )
+        student_service._report_policy = report_policy
+        student_service._report_service = report_service
+        assessment_service._report_policy = report_policy
+        assessment_service._report_service = report_service
+        attendance_service._report_policy = report_policy
+        attendance_service._report_service = report_service
+
+        auto_report_service = AutoReportService(
+            student_service=student_service,
+            report_service=report_service,
+        )
+
+        # Create Version Manager
+        metadata_dir = paths.runtime_root / "metadata"
+        metadata_repo = JsonMetadataRepository(metadata_dir)
+        version_manager = VersionManager(metadata_repo, event_bus)
+
+        # Create Write Transaction Manager
+        transaction_manager = WriteTransactionManager(collaboration_manager)
+        if sync_service is not None:
+            transaction_manager.set_sync_service(sync_service)
+        else:
+            logger.warning("[STARTUP] WriteTransactionManager: sync service disabled")
+        transaction_manager.set_version_manager(version_manager)
+
+        # ============================================
+        # MAIN WINDOW
+        # ============================================
+        window = MainWindow(
+            student_service=student_service,
+            parent_service=parent_service,
+            timeline_service=timeline_service,
+            assessment_service=assessment_service,
+            summary_service=summary_service,
+            session_service=session_service,
+            note_service=note_service,
+            highlight_service=highlight_service,
+            dashboard_service=dashboard_service,
+            home_service=home_service,
+            student_note_service=student_note_service,
+            document_service=document_service,
+            analytics_service=analytics_service,
+            filter_service=filter_service,
+            export_service=export_service,
+            import_service=import_service,
+            teacher_service=teacher_service,
+            teacher_assignment_service=teacher_assignment_service,
+            teacher_document_service=teacher_document_service,
+            teacher_timeline_service=teacher_timeline_service,
+            employee_service=employee_service,
+            employee_document_service=employee_document_service,
+            employee_schedule_service=employee_schedule_service,
+            employee_working_time_service=employee_working_time_service,
+            employee_work_registration_service=employee_work_registration_service,
+            class_service=class_service,
+            enrollment_service=enrollment_service,
+            class_timeline_service=class_timeline_service,
+            teacher_assignment_service_for_class=teacher_assignment_service_for_class,
+            permission_service=permission_service,
+            income_service=income_service,
+            expense_service=expense_service,
+            finance_dashboard_service=finance_dashboard_service,
+            outstanding_service=outstanding_service,
+            attendance_service=attendance_service,
+            report_service=report_service,
+            platform_context=platform_context,
+            collaboration_manager=collaboration_manager,
+            sync_service=sync_service,
+            module_registry=module_registry,
+            transaction_manager=transaction_manager,
+            notification_service=notification_service,
+            git_config_service=git_config_service,
+            event_bus=event_bus,
+            poller=poller,  # <-- THÊM poller vào MainWindow
+        )
+
+        logger.info("[STARTUP] MainWindow instance created")
+
+        auto_report_service.run_daily_check()
+
+        window.show()
+        logger.info("[STARTUP] MainWindow shown")
+
+        exit_code = qapp.exec()
+        logger.info(f"[STARTUP] QApplication.exec finished with code {exit_code}")
+
+        # Shutdown
+        if sync_service is not None:
+            sync_service.stop()
+        poller.stop()  # <-- STOP POLLER
+        collaboration_manager.shutdown()
+
+        return exit_code
+
+    except Exception as e:
+        logger.exception("[STARTUP] Fatal error")
+        traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
