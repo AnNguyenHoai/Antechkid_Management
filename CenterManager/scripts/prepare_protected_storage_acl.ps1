@@ -52,14 +52,14 @@ foreach ($path in $paths) {
 # intentionally not run automatically by the desktop application.
 icacls $ProtectedRoot /inheritance:r | Out-Null
 icacls $ProtectedRoot /grant:r `
-    "$serviceSid:(OI)(CI)F" `
+    "${serviceSid}:(OI)(CI)F" `
     "SYSTEM:(OI)(CI)F" `
     "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
 
 # Re-apply recursively so pre-existing children cannot retain weaker ACLs.
 icacls $ProtectedRoot /inheritance:r /T /C | Out-Null
 icacls $ProtectedRoot /grant:r `
-    "$serviceSid:(OI)(CI)F" `
+    "${serviceSid}:(OI)(CI)F" `
     "SYSTEM:(OI)(CI)F" `
     "BUILTIN\Administrators:(OI)(CI)F" /T /C | Out-Null
 
