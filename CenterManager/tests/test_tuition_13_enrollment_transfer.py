@@ -89,8 +89,10 @@ def test_outstanding_settlement_projects_credit_without_cash_income_rows():
 
     assert "EnrollmentTransfer.target_enrollment_id == enrollment_id" in source
     assert "EnrollmentTransfer.source_enrollment_id == enrollment_id" in source
-    assert "paid + Decimal(str(incoming.scalar() or 0)) - Decimal(str(outgoing.scalar() or 0))" in source
-    assert "Effective settled tuition" in source
+    assert "TuitionSettlementComponent.KIND_TRANSFER_IN" in source
+    assert "TuitionSettlementComponent.KIND_TRANSFER_OUT" in source
+    assert "amount=-self._decimal(transfer.transferred_credit)" in source
+    assert "canonical settlement components" in source
 
 
 def test_ui_requires_explicit_target_credit_and_reason():
