@@ -12,7 +12,11 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
-from centermanager.database.engine import create_engine_for_path, get_database_path
+from centermanager.database.engine import (
+    create_engine_for_path,
+    create_production_engine,
+    get_database_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,44 +68,60 @@ def get_alembic_config(database_path: Path | None = None) -> Config:
     return config
 
 
-def upgrade_database_path_to_head(database_path: Path) -> None:
-    """Upgrade one existing database file to the current Alembic head.
+def _upgrade_database_with_engine(database_path: Path, engine) -> None:
+    """Upgrade one database using an already-correct SQLAlchemy engine.
 
-    The caller owns the path. This is the canonical migration implementation
-    used both by the production runtime database and by the pre-release real-DB
-    upgrade gate. The helper never creates a missing database implicitly.
+    Production passes the SQLCipher-keyed production engine. Disposable/dev
+    callers can continue to use a plain SQLite engine. Alembic receives the
+    existing connection through Config.attributes so it never reopens an
+    encrypted file through the plain sqlite driver.
     """
+    database_path = Path(database_path).resolve()
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+
+        config = get_alembic_config(database_path)
+        config.attributes["connection"] = connection
+
+        if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
+            logger.info(
+                "Legacy database detected without Alembic version; stamping baseline %s",
+                "5ce9314feb37",
+            )
+            command.stamp(config, "5ce9314feb37")
+
+        logger.info("Upgrading database schema to Alembic head: %s", database_path)
+        command.upgrade(config, "head")
+        logger.info("Database schema migration completed successfully: %s", database_path)
+
+
+def upgrade_database_path_to_head(database_path: Path) -> None:
+    """Upgrade one existing plain/disposable database file to Alembic head."""
     database_path = Path(database_path).resolve()
     engine = create_engine_for_path(database_path, allow_create=False)
     try:
-        inspector = inspect(engine)
-        tables = set(inspector.get_table_names())
+        _upgrade_database_with_engine(database_path, engine)
     finally:
         engine.dispose()
 
-    config = get_alembic_config(database_path)
-    if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
-        logger.info(
-            "Legacy database detected without Alembic version; stamping baseline %s",
-            "5ce9314feb37",
-        )
-        command.stamp(config, "5ce9314feb37")
-
-    logger.info("Upgrading database schema to Alembic head: %s", database_path)
-    command.upgrade(config, "head")
-    logger.info("Database schema migration completed successfully: %s", database_path)
-
 
 def upgrade_database_to_head() -> None:
-    """Upgrade the canonical production runtime database to Alembic head."""
-    upgrade_database_path_to_head(get_database_path())
+    """Upgrade the canonical runtime DB using the active deployment engine."""
+    database_path = get_database_path()
+    engine = create_production_engine(echo=False)
+    try:
+        _upgrade_database_with_engine(database_path, engine)
+    finally:
+        engine.dispose()
 
 
 def get_current_revision(database_path: Path | None = None) -> str | None:
     """Return the Alembic revision for an existing database path."""
     if database_path is None:
-        database_path = get_database_path()
-    engine = create_engine_for_path(Path(database_path), allow_create=False)
+        engine = create_production_engine(echo=False)
+    else:
+        engine = create_engine_for_path(Path(database_path), allow_create=False)
     try:
         with engine.connect() as connection:
             context = MigrationContext.configure(connection)

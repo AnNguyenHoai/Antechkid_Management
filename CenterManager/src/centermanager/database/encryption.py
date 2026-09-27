@@ -15,6 +15,7 @@ from centermanager.core.secret_store import (
     protect_secret_machine,
     unprotect_secret,
 )
+from centermanager.security.deployment_profile import is_production_profile
 
 
 _KEY_BYTES = 32
@@ -35,8 +36,17 @@ class DatabaseKeyUnavailable(DatabaseEncryptionError):
 
 
 def database_encryption_required() -> bool:
+    """Return whether SQLCipher is mandatory for the active deployment profile.
+
+    Medium-security policy intentionally distinguishes source/development runs
+    from packaged production runs. Development may use plaintext test data;
+    production always requires SQLCipher. Tests/UAT can force encryption with
+    ``ANTECHKIDS_FORCE_DATABASE_ENCRYPTION=1``.
+    """
     forced = os.environ.get(_FORCE_ENCRYPTION_ENV, "").strip().lower()
-    return os.name == "nt" or forced in {"1", "true", "yes", "on"}
+    if forced in {"1", "true", "yes", "on"}:
+        return True
+    return is_production_profile()
 
 
 def load_sqlcipher_driver() -> Any:
@@ -52,8 +62,9 @@ def load_sqlcipher_driver() -> Any:
 class DatabaseKeyStore:
     """Persist a workspace DB key in a DPAPI-protected local bundle.
 
-    ``machine_scope`` is reserved for the SEC-02 service-owned key bundle. It is
-    safe only when the bundle path is protected by service-only NTFS ACLs.
+    ``machine_scope`` is retained for compatibility with the optional SEC-02
+    service tooling. The practical production profile uses the default
+    user-scoped DPAPI bundle and does not require a Windows service.
     """
 
     def __init__(self, bundle_path: Path | None = None, *, machine_scope: bool = False) -> None:
