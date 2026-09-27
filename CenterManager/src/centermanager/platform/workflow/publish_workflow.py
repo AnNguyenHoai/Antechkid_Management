@@ -96,13 +96,18 @@ class PublicationTransaction:
             # closed before Git can stage a stale/plaintext authoritative DB.
             materialize_runtime_database_to_repository()
 
-            # 3. Sync with retry
+            # 3. Publish without a second pull whenever the provider exposes the
+            # fenced publish-only path. Pulling after materialization could
+            # overwrite the just-prepared repository database with remote state.
             self._event_bus.publish(SynchronizationStarted(session_id=session_id))
             retry_policy = RetryPolicy(max_retries=3, base_delay=1.0)
+            publish_operation = getattr(self._sync_provider, "publish_only", None)
+            if publish_operation is None:
+                publish_operation = self._sync_provider.publish
             success = retry_policy.execute(
-                self._sync_provider.publish,
+                publish_operation,
                 message=message,
-                user=user
+                user=user,
             )
 
             if not success:
@@ -223,7 +228,6 @@ class PublishWorkflow:
         self._event_bus.publish(PublishStarted(session_id=session_id))
         self._notification_service.notify("Publishing changes...", "info")
 
-        # Use PublicationTransaction
         tx = PublicationTransaction(
             lock_manager=self._lock_manager,
             mode_manager=self._mode_manager,
@@ -240,5 +244,4 @@ class PublishWorkflow:
             self._notification_service.notify("Publish failed: backup error", "error")
             return False
 
-        success = tx.commit(message, owner)
-        return success
+        return tx.commit(message, owner)
