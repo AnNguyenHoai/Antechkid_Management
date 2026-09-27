@@ -12,7 +12,6 @@ from datetime import datetime
 from centermanager.core.paths import Paths
 from centermanager.database.engine import create_engine_for_path
 from centermanager.database.base import Base
-from centermanager.database.session import refresh_runtime_db
 from centermanager.models.student import Student
 from centermanager.services.student_service import StudentService
 from centermanager.events.event_bus import EventBus
@@ -44,8 +43,17 @@ class TestRuntimeApply:
         
         return TestPaths(root)
 
-    def test_runtime_db_apply(self, temp_runtime):
-        """Test that repository database is applied to runtime database."""
+    def test_runtime_db_apply(self, temp_runtime, monkeypatch):
+        """Test that repository database is applied to runtime database.
+
+        This legacy integration test intentionally uses disposable plaintext
+        SQLite databases through ``create_engine_for_path``. On Windows,
+        ``refresh_runtime_db`` normally rebuilds the *production* SQLCipher
+        session factory and therefore correctly requires the DPAPI-protected
+        production database key. Keep this test at the low-level plaintext test
+        boundary by injecting a session factory bound to its disposable runtime
+        database instead of weakening the production encryption policy.
+        """
         # Create initial runtime DB
         runtime_db = temp_runtime.database_dir / "center.db"
         engine1 = create_engine_for_path(runtime_db)
@@ -77,8 +85,21 @@ class TestRuntimeApply:
         # Simulate copy
         shutil.copy2(repo_db, runtime_db)
         
-        # Refresh sessions
-        refresh_runtime_db()
+        # Refresh sessions. The production refresh path is encryption-aware on
+        # Windows; this test uses the explicitly plaintext low-level test DB.
+        import centermanager.database.session as session_module
+
+        monkeypatch.setattr(session_module, "_session_factory", None)
+        monkeypatch.setattr(
+            session_module,
+            "create_session_factory",
+            lambda echo=False: sessionmaker(
+                bind=create_engine_for_path(runtime_db),
+                autocommit=False,
+                autoflush=False,
+            ),
+        )
+        session_module.refresh_runtime_db()
         
         # Verify runtime DB updated
         engine3 = create_engine_for_path(runtime_db)
