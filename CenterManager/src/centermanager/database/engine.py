@@ -51,6 +51,33 @@ def _connect_encrypted(db_path: Path, key: bytes, *, allow_create: bool, readonl
         raise
 
 
+def _runtime_lifecycle(db_path: Path, key: bytes | None = None) -> DatabaseLifecycle:
+    if key is None:
+        return DatabaseLifecycle(db_path)
+
+    def readonly_connector(path: Path):
+        return _connect_encrypted(path, key, allow_create=False, readonly=True)
+
+    return DatabaseLifecycle(db_path, readonly_connector=readonly_connector)
+
+
+def inspect_runtime_database() -> DatabaseLifecycleState:
+    """Inspect the runtime DB using the same encryption boundary as production.
+
+    Missing/unreadable key material fails closed as RECOVERY_REQUIRED rather
+    than retrying with plain SQLite.
+    """
+    db_path = get_database_path()
+    if not database_encryption_required():
+        return DatabaseLifecycle(db_path).inspect()
+    try:
+        key = DatabaseKeyStore().load()
+    except Exception:
+        logger.exception("Encrypted runtime database key is unavailable")
+        return DatabaseLifecycleState.RECOVERY_REQUIRED
+    return _runtime_lifecycle(db_path, key).inspect()
+
+
 def create_engine_for_path(
     db_path: Path,
     echo: bool = False,
@@ -72,18 +99,7 @@ def create_engine_for_path(
     if encrypted and encryption_key is None:
         raise ValueError("encryption_key is required for an encrypted database")
 
-    def readonly_encrypted_connector(path: Path):
-        return _connect_encrypted(
-            path,
-            encryption_key,  # type: ignore[arg-type]
-            allow_create=False,
-            readonly=True,
-        )
-
-    lifecycle = DatabaseLifecycle(
-        db_path,
-        readonly_connector=readonly_encrypted_connector if encrypted else None,
-    )
+    lifecycle = _runtime_lifecycle(db_path, encryption_key if encrypted else None)
 
     def connect_database():
         if not allow_create:
@@ -151,13 +167,7 @@ def create_production_engine(echo: bool = False) -> Engine:
     db_path = get_database_path()
     encrypted = database_encryption_required()
     key = DatabaseKeyStore().load() if encrypted else None
-
-    if encrypted:
-        def readonly_connector(path: Path):
-            return _connect_encrypted(path, key, allow_create=False, readonly=True)  # type: ignore[arg-type]
-        state = DatabaseLifecycle(db_path, readonly_connector=readonly_connector).inspect()
-    else:
-        state = DatabaseLifecycle(db_path).inspect()
+    state = _runtime_lifecycle(db_path, key if encrypted else None).inspect()
 
     if state is not DatabaseLifecycleState.AVAILABLE:
         logger.warning(
