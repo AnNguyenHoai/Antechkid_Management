@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SQLCipher database encryption and key-management boundary.
-
-Windows production databases use a 256-bit workspace key protected locally by
-Windows DPAPI. The raw key is never persisted on disk. Each workstation stores
-its own DPAPI-wrapped copy of the shared workspace key so encrypted Git database
-artifacts remain readable across authorized CenterManager machines without
-leaving a plaintext key beside the database.
-"""
+"""SQLCipher database encryption and key-management boundary."""
 from __future__ import annotations
 
 import base64
@@ -19,6 +12,7 @@ from centermanager.core.paths import get_paths
 from centermanager.core.secret_store import (
     SecretStoreUnavailable,
     protect_secret,
+    protect_secret_machine,
     unprotect_secret,
 )
 
@@ -33,43 +27,40 @@ class DatabaseEncryptionError(RuntimeError):
 
 
 class DatabaseEncryptionDriverUnavailable(DatabaseEncryptionError):
-    """Raised when SQLCipher is required but its Python driver is unavailable."""
+    pass
 
 
 class DatabaseKeyUnavailable(DatabaseEncryptionError):
-    """Raised when the production database key cannot be loaded safely."""
+    pass
 
 
 def database_encryption_required() -> bool:
-    """Return whether this runtime must use SQLCipher.
-
-    CenterManager production is Windows-targeted. CI and developer hosts on
-    other platforms keep the historical SQLite path unless tests explicitly
-    force the encrypted boundary.
-    """
     forced = os.environ.get(_FORCE_ENCRYPTION_ENV, "").strip().lower()
     return os.name == "nt" or forced in {"1", "true", "yes", "on"}
 
 
 def load_sqlcipher_driver() -> Any:
-    """Load SQLCipher DB-API without silently falling back to stdlib SQLite."""
     try:
         from sqlcipher3 import dbapi2 as sqlcipher  # type: ignore
-    except Exception as exc:  # pragma: no cover - platform/package dependent
+    except Exception as exc:  # pragma: no cover
         raise DatabaseEncryptionDriverUnavailable(
-            "SQLCipher is required for the production database but the "
-            "sqlcipher3 driver is unavailable."
+            "SQLCipher is required for the production database but the sqlcipher3 driver is unavailable."
         ) from exc
     return sqlcipher
 
 
 class DatabaseKeyStore:
-    """Persist a workspace DB key as a local DPAPI-protected bundle."""
+    """Persist a workspace DB key in a DPAPI-protected local bundle.
 
-    def __init__(self, bundle_path: Path | None = None) -> None:
+    ``machine_scope`` is reserved for the SEC-02 service-owned key bundle. It is
+    safe only when the bundle path is protected by service-only NTFS ACLs.
+    """
+
+    def __init__(self, bundle_path: Path | None = None, *, machine_scope: bool = False) -> None:
         self._bundle_path = Path(bundle_path) if bundle_path else (
             get_paths().config_dir / "database_key.dpapi"
         )
+        self._machine_scope = bool(machine_scope)
 
     @property
     def bundle_path(self) -> Path:
@@ -92,11 +83,8 @@ class DatabaseKeyStore:
         return key
 
     def load(self) -> bytes:
-        """Load an existing key; never create a replacement implicitly."""
         if not self._bundle_path.is_file():
-            raise DatabaseKeyUnavailable(
-                "Protected database key is missing; recovery is required."
-            )
+            raise DatabaseKeyUnavailable("Protected database key is missing; recovery is required.")
         try:
             bundle = self._bundle_path.read_text(encoding="utf-8").strip()
         except OSError as exc:
@@ -113,13 +101,6 @@ class DatabaseKeyStore:
         return self._decode_key(plaintext)
 
     def provision(self, key: bytes, *, overwrite: bool = False) -> bytes:
-        """Persist an explicitly supplied workspace key under local DPAPI.
-
-        Provisioning is intentionally separate from normal application startup.
-        It is used by trusted deployment/migration flows on each authorized
-        workstation. Existing key material is never replaced unless the caller
-        explicitly requests an overwrite.
-        """
         if len(key) != _KEY_BYTES:
             raise DatabaseKeyUnavailable("Database key must be exactly 256 bits.")
         if self._bundle_path.exists() and not overwrite:
@@ -130,7 +111,12 @@ class DatabaseKeyStore:
                 )
             return existing
         try:
-            protected = protect_secret(self._encode_key(key))
+            encoded = self._encode_key(key)
+            protected = (
+                protect_secret_machine(encoded)
+                if self._machine_scope
+                else protect_secret(encoded)
+            )
         except SecretStoreUnavailable as exc:
             raise DatabaseKeyUnavailable(
                 "Windows DPAPI is required to provision a production database key."
@@ -149,25 +135,21 @@ class DatabaseKeyStore:
         return key
 
     def create(self) -> bytes:
-        """Generate and provision a new workspace key exactly once."""
         if self._bundle_path.exists():
             return self.load()
         return self.provision(secrets.token_bytes(_KEY_BYTES))
 
     def load_or_create(self, *, allow_create: bool) -> bytes:
-        """Load existing key, creating only during explicit first-run setup."""
         if self._bundle_path.exists():
             return self.load()
         if not allow_create:
             raise DatabaseKeyUnavailable(
-                "Protected database key is missing; refusing to create a new key "
-                "for an existing/production database."
+                "Protected database key is missing; refusing to create a new key for an existing/production database."
             )
         return self.create()
 
 
 def apply_sqlcipher_key(connection: Any, key: bytes) -> None:
-    """Apply a raw 256-bit key before any schema access and verify SQLCipher."""
     if len(key) != _KEY_BYTES:
         raise DatabaseKeyUnavailable("Database key must be exactly 256 bits.")
     cursor = connection.cursor()
@@ -183,7 +165,6 @@ def apply_sqlcipher_key(connection: Any, key: bytes) -> None:
 
 
 def is_plaintext_sqlite_file(path: Path) -> bool:
-    """Detect the standard SQLite plaintext header without parsing DB content."""
     try:
         with Path(path).open("rb") as handle:
             return handle.read(16) == b"SQLite format 3\x00"
