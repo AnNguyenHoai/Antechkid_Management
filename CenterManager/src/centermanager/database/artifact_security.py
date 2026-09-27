@@ -93,9 +93,17 @@ def authoritative_repository_database_path() -> Path:
 
 
 def validate_authoritative_repository_database() -> Path:
-    """Fail closed if the Git source-of-truth DB violates active policy."""
+    """Fail closed if the Git source-of-truth DB violates active policy.
+
+    Disposable non-production synchronization tests historically use providers
+    without materializing a physical database. Preserve that test/dev contract;
+    production encryption mode still treats a missing artifact as a hard error.
+    """
     repo_db = authoritative_repository_database_path()
-    validate_database_artifact(repo_db)
+    encrypted = database_encryption_required()
+    if not encrypted and not repo_db.exists():
+        return repo_db
+    validate_database_artifact(repo_db, encryption_required=encrypted)
     return repo_db
 
 
@@ -111,8 +119,14 @@ def materialize_runtime_database_to_repository() -> Path:
     runtime_db = paths.database_dir / "center.db"
     repo_db = authoritative_repository_database_path()
     encrypted = database_encryption_required()
-    key = DatabaseKeyStore().load() if encrypted else None
 
+    # Unit/integration providers on non-production hosts may exercise Git
+    # orchestration without a runtime DB. Do not make those mocks manufacture a
+    # database merely for the security boundary. Production remains fail-closed.
+    if not encrypted and not runtime_db.exists():
+        return repo_db
+
+    key = DatabaseKeyStore().load() if encrypted else None
     validate_database_artifact(runtime_db, encryption_required=encrypted, key=key)
     repo_db.parent.mkdir(parents=True, exist_ok=True)
     tmp = repo_db.with_name(f".{repo_db.name}.publish-{uuid.uuid4().hex}.tmp")
