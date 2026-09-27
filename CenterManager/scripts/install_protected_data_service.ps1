@@ -19,7 +19,7 @@ Assert-Administrator
 # pywin32 registers the ServiceFramework host. Registration alone does not move
 # database access out of the GUI; SEC-02 enforced mode remains blocked until the
 # broker implementation is complete.
-& $PythonExe -m centermanager.platform.protected_data_service.service_host install --startup auto
+& $PythonExe -m centermanager.platform.protected_data_service.service_host --startup auto install
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to install $ServiceName."
 }
