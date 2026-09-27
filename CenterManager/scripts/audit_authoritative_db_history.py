@@ -14,6 +14,15 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+# Standalone scripts are executed with CenterManager/scripts as sys.path[0].
+# Bootstrap the application source tree exactly like run.py so
+# ``python scripts/audit_authoritative_db_history.py`` works from a clean shell
+# without requiring an editable install or caller-provided PYTHONPATH.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_SRC_ROOT = _PROJECT_ROOT / "src"
+if _SRC_ROOT.is_dir() and str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
+
 from git import Repo
 
 from centermanager.core.paths import get_paths
