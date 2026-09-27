@@ -10,6 +10,7 @@ Security properties:
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
@@ -23,6 +24,8 @@ from .broker import (
     encode_response,
 )
 from .protocol import SERVICE_PIPE_NAME
+
+logger = logging.getLogger(__name__)
 
 
 class ProtectedDataTransportUnavailable(RuntimeError):
@@ -46,9 +49,6 @@ def _load_win32():
 
 def _pipe_security_attributes():
     pywintypes, _, _, _, _, win32security = _load_win32()
-    # Protected storage remains service/SYSTEM/Admin only.  The pipe itself is
-    # callable by authenticated local users because the broker enforces a narrow
-    # operation contract. Remote clients are rejected by the pipe creation flag.
     sddl = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)"
     descriptor = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
         sddl, win32security.SDDL_REVISION_1
@@ -81,12 +81,15 @@ def _caller_identity(pipe_handle) -> CallerIdentity:
 
 
 def _create_server_pipe():
-    _, _, _, win32file, win32pipe, _ = _load_win32()
+    _, _, _, _, win32pipe, _ = _load_win32()
     reject_remote = getattr(win32pipe, "PIPE_REJECT_REMOTE_CLIENTS", 0x00000008)
     return win32pipe.CreateNamedPipe(
         SERVICE_PIPE_NAME,
         win32pipe.PIPE_ACCESS_DUPLEX,
-        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT | reject_remote,
+        win32pipe.PIPE_TYPE_MESSAGE
+        | win32pipe.PIPE_READMODE_MESSAGE
+        | win32pipe.PIPE_WAIT
+        | reject_remote,
         win32pipe.PIPE_UNLIMITED_INSTANCES,
         64 * 1024,
         64 * 1024,
@@ -127,25 +130,51 @@ class NamedPipeBrokerServer:
                     win32pipe.ConnectNamedPipe(pipe, None)
                     connected = True
                 except Exception as exc:
-                    # ERROR_PIPE_CONNECTED means the client connected between
-                    # CreateNamedPipe and ConnectNamedPipe and is still valid.
-                    winerror = getattr(exc, "winerror", None)
-                    if winerror != 535:
+                    if getattr(exc, "winerror", None) != 535:  # ERROR_PIPE_CONNECTED
                         raise
                     connected = True
                 if stop_requested():
                     break
                 request_id = "unknown"
+                caller = CallerIdentity(sid="", account="")
+                operation = "unknown"
                 try:
                     _, raw = win32file.ReadFile(pipe, MAX_REQUEST_BYTES)
                     request = decode_request(bytes(raw))
                     request_id = request.request_id
+                    operation = request.operation.value
                     caller = _caller_identity(pipe)
+                    logger.info(
+                        "Protected-data request id=%s operation=%s caller_sid=%s caller=%s",
+                        request_id,
+                        operation,
+                        caller.sid,
+                        caller.account or "unknown",
+                    )
                     result = self.broker.dispatch(request, caller)
                     response = encode_response(request_id, result=result)
+                    logger.info(
+                        "Protected-data success id=%s operation=%s caller_sid=%s",
+                        request_id,
+                        operation,
+                        caller.sid,
+                    )
                 except (ProtectedDataProtocolError, ProtectedDataBrokerError) as exc:
+                    logger.warning(
+                        "Protected-data rejected id=%s operation=%s caller_sid=%s error=%s",
+                        request_id,
+                        operation,
+                        caller.sid or "unknown",
+                        str(exc),
+                    )
                     response = encode_response(request_id, error=str(exc))
                 except Exception:
+                    logger.exception(
+                        "Protected-data failure id=%s operation=%s caller_sid=%s",
+                        request_id,
+                        operation,
+                        caller.sid or "unknown",
+                    )
                     response = encode_response(request_id, error="Protected data operation failed.")
                 win32file.WriteFile(pipe, response)
                 win32file.FlushFileBuffers(pipe)
