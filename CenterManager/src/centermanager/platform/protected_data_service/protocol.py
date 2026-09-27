@@ -24,6 +24,7 @@ class ProtectedDataOperation(str, Enum):
     # Service-owned application session lifecycle.
     AUTHENTICATE = "authenticate"
     LOGOUT = "logout"
+    USER_CHANGE_PASSWORD = "user.change_password"
 
     # First Phase-B2 vertical slice. These are domain APIs, not table/SQL APIs.
     STUDENT_LIST = "student.list"
@@ -38,6 +39,7 @@ UNAUTHENTICATED_OPERATIONS = frozenset({
 
 SESSION_OPERATIONS = frozenset({
     ProtectedDataOperation.LOGOUT,
+    ProtectedDataOperation.USER_CHANGE_PASSWORD,
     ProtectedDataOperation.STUDENT_LIST,
     ProtectedDataOperation.STUDENT_CREATE,
     ProtectedDataOperation.CREATE_BACKUP,
