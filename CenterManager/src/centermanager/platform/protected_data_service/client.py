@@ -41,32 +41,22 @@ class ProtectedDataClient:
     def is_authenticated(self) -> bool:
         return bool(self._session_token)
 
-    def _call(
-        self,
-        operation: ProtectedDataOperation,
-        payload: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    def _call(self, operation: ProtectedDataOperation,
+              payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         win32file, win32pipe = _load_win32()
         request_id = uuid.uuid4().hex
-        message = json.dumps(
-            {
-                "version": PROTOCOL_VERSION,
-                "request_id": request_id,
-                "operation": operation.value,
-                "payload": dict(payload or {}),
-            },
-            separators=(",", ":"),
-        ).encode("utf-8")
+        message = json.dumps({
+            "version": PROTOCOL_VERSION,
+            "request_id": request_id,
+            "operation": operation.value,
+            "payload": dict(payload or {}),
+        }, separators=(",", ":")).encode("utf-8")
         try:
             win32pipe.WaitNamedPipe(self._pipe_name, self._timeout_ms)
             handle = win32file.CreateFile(
                 self._pipe_name,
                 win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                0,
-                None,
-                win32file.OPEN_EXISTING,
-                0,
-                None,
+                0, None, win32file.OPEN_EXISTING, 0, None,
             )
         except Exception as exc:
             raise ProtectedDataClientError("AnTechKidsData service is unavailable.") from exc
@@ -125,11 +115,21 @@ class ProtectedDataClient:
         finally:
             self._session_token = None
 
-    def list_students(self) -> list[dict[str, Any]]:
+    def change_password(self, current_password: str, new_password: str) -> dict[str, Any]:
         result = self._call(
-            ProtectedDataOperation.STUDENT_LIST,
-            self._session_payload(),
+            ProtectedDataOperation.USER_CHANGE_PASSWORD,
+            self._session_payload({
+                "current_password": current_password,
+                "new_password": new_password,
+            }),
         )
+        user = result.get("user")
+        if not isinstance(user, dict):
+            raise ProtectedDataClientError("Protected-data user result is invalid.")
+        return user
+
+    def list_students(self) -> list[dict[str, Any]]:
+        result = self._call(ProtectedDataOperation.STUDENT_LIST, self._session_payload())
         students = result.get("students", [])
         if not isinstance(students, list):
             raise ProtectedDataClientError("Protected-data student list is invalid.")
