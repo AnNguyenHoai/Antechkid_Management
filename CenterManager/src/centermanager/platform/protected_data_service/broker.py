@@ -118,8 +118,12 @@ class ProtectedDataBackend:
         return self._layout
 
     def _load_key(self) -> bytes:
-        # DPAPI unsealing occurs only inside the Windows service process/account.
-        return DatabaseKeyStore(bundle_path=self._layout.key_bundle_path).load()
+        # The protected bundle uses machine-scoped DPAPI and is readable only by
+        # the service/SYSTEM/Admin ACL. The raw key never crosses the IPC boundary.
+        return DatabaseKeyStore(
+            bundle_path=self._layout.key_bundle_path,
+            machine_scope=True,
+        ).load()
 
     @staticmethod
     def _fsync(path: Path) -> None:
@@ -190,7 +194,10 @@ class ProtectedDataBackend:
                 json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
             )
             self._fsync(manifest_path)
-            return {"backup_id": backup_id, "database_sha256": manifest["checksums"]["center.db"]}
+            return {
+                "backup_id": backup_id,
+                "database_sha256": manifest["checksums"]["center.db"],
+            }
         except Exception:
             import shutil
             shutil.rmtree(destination_dir, ignore_errors=True)
@@ -204,7 +211,6 @@ class ProtectedDataBroker:
         self._backend = backend or ProtectedDataBackend()
 
     def dispatch(self, request: BrokerRequest, caller: CallerIdentity) -> dict[str, Any]:
-        # Caller identity comes from the named-pipe token, never from request JSON.
         if not caller.sid:
             raise ProtectedDataBrokerError("Authenticated caller identity is required.")
         if request.operation is ProtectedDataOperation.HEALTH:
