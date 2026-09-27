@@ -253,12 +253,13 @@ class SynchronizationManager:
             if message:
                 materialize_runtime_database_to_repository()
                 publish_only = getattr(self._provider, "publish_only", None)
-                if publish_only is not None:
-                    publish_call = lambda: publish_only(message, user)
-                else:
-                    publish_call = lambda: self._provider.publish(message, user)
+                if not callable(publish_only):
+                    raise RuntimeError(
+                        "Synchronization provider does not support safe publish_only; "
+                        "refusing to pull after database materialization"
+                    )
                 publish_result = self._retry_policy.execute(
-                    publish_call,
+                    lambda: publish_only(message, user),
                     name="publish",
                 )
                 if not publish_result:
