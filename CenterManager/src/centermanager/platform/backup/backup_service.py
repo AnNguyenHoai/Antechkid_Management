@@ -1,6 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Backup and recovery service with integrity and path-boundary protection."""
-import hashlib, json, logging, os, shutil, sqlite3, uuid
+"""Backup and recovery service with encrypted production snapshots.
+
+Production backups use the same SQLCipher workspace key as the runtime database.
+No plaintext database or plaintext restore temporary file is created while the
+encrypted production boundary is active.
+"""
+import hashlib
+import json
+import logging
+import os
+import shutil
+import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -9,6 +20,14 @@ from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
 from centermanager.events.collaboration_events import BackupCreated, BackupFailed
 from centermanager.database.session import refresh_runtime_db
+from centermanager.database.encryption import (
+    DatabaseEncryptionError,
+    DatabaseKeyStore,
+    apply_sqlcipher_key,
+    database_encryption_required,
+    is_plaintext_sqlite_file,
+    load_sqlcipher_driver,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +38,7 @@ class BackupResult:
 
 
 class BackupService:
-    FORMAT_VERSION = 2
+    FORMAT_VERSION = 3
 
     def __init__(self, event_bus: Optional[EventBus] = None):
         self._backup_root = (get_paths().backup_dir / "publish").resolve()
@@ -35,14 +54,14 @@ class BackupService:
         return digest.hexdigest()
 
     @staticmethod
-    def _copy_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
-        """Create a transactionally consistent SQLite snapshot.
+    def _fsync_file(path: Path) -> None:
+        with path.open("r+b") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
 
-        The runtime database uses WAL mode. Copying only ``center.db`` with a
-        filesystem copy can omit committed pages still resident in ``-wal`` while
-        still producing a database that passes ``integrity_check``. SQLite's online
-        backup API reads the logical database, including committed WAL contents.
-        """
+    @staticmethod
+    def _copy_plain_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
+        """Create a transactionally consistent plaintext SQLite snapshot."""
         source_uri = source_path.resolve().as_uri() + "?mode=ro"
         source = sqlite3.connect(source_uri, uri=True)
         destination = sqlite3.connect(destination_path)
@@ -52,14 +71,39 @@ class BackupService:
             destination.close()
             source.close()
 
-    def _is_owned_backup(self, backup_path: Path) -> bool:
-        try:
-            backup_path.resolve().relative_to(self._backup_root)
-            return True
-        except ValueError:
-            return False
+    @staticmethod
+    def _copy_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
+        """Backward-compatible plaintext snapshot helper for non-production callers.
 
-    def _validate_sqlite(self, db_path: Path) -> Optional[str]:
+        Production backup creation never calls this compatibility alias when the
+        encryption policy is active; it routes through the keyed SQLCipher helper.
+        """
+        BackupService._copy_plain_sqlite_snapshot(source_path, destination_path)
+
+    @staticmethod
+    def _copy_encrypted_sqlite_snapshot(source_path: Path, destination_path: Path, key: bytes) -> None:
+        """Create a logical SQLCipher snapshot into a keyed destination.
+
+        Both connections are keyed before schema/page access. SQLite's online
+        backup API therefore captures committed WAL contents while the
+        destination pager writes ciphertext with the workspace key.
+        """
+        sqlcipher = load_sqlcipher_driver()
+        source_uri = source_path.resolve().as_uri() + "?mode=ro"
+        source = sqlcipher.connect(source_uri, uri=True)
+        destination = sqlcipher.connect(str(destination_path))
+        try:
+            apply_sqlcipher_key(source, key)
+            source.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            apply_sqlcipher_key(destination, key)
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+
+    @staticmethod
+    def _validate_plain_sqlite(db_path: Path) -> Optional[str]:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return "Database backup is missing or empty"
         try:
@@ -74,6 +118,47 @@ class BackupService:
             return f"Invalid SQLite database: {exc}"
         return None
 
+    @staticmethod
+    def _validate_encrypted_sqlite(db_path: Path, key: bytes) -> Optional[str]:
+        if not db_path.is_file() or db_path.stat().st_size == 0:
+            return "Database backup is missing or empty"
+        if is_plaintext_sqlite_file(db_path):
+            return "Plaintext SQLite database is forbidden by the production encryption policy"
+        try:
+            sqlcipher = load_sqlcipher_driver()
+            con = sqlcipher.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+            try:
+                apply_sqlcipher_key(con, key)
+                con.execute("SELECT count(*) FROM sqlite_master").fetchone()
+                row = con.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                con.close()
+            if not row or row[0] != "ok":
+                return f"SQLCipher integrity check failed: {row[0] if row else 'unknown'}"
+        except Exception as exc:
+            return f"Invalid encrypted database or wrong workspace key: {exc}"
+        return None
+
+    def _encryption_context(self) -> tuple[bool, Optional[bytes]]:
+        encrypted = database_encryption_required()
+        if not encrypted:
+            return False, None
+        return True, DatabaseKeyStore().load()
+
+    def _validate_database(self, db_path: Path, *, encrypted: bool, key: Optional[bytes]) -> Optional[str]:
+        if encrypted:
+            if key is None:
+                return "Production database key is unavailable"
+            return self._validate_encrypted_sqlite(db_path, key)
+        return self._validate_plain_sqlite(db_path)
+
+    def _is_owned_backup(self, backup_path: Path) -> bool:
+        try:
+            backup_path.resolve().relative_to(self._backup_root)
+            return True
+        except ValueError:
+            return False
+
     def _validate_backup(self, backup_path: Path) -> tuple[bool, str]:
         if not self._is_owned_backup(backup_path):
             return False, "Backup path is outside the managed backup directory"
@@ -86,8 +171,22 @@ class BackupService:
             return False, f"Invalid manifest: {exc}"
         if manifest.get("format_version", 1) > self.FORMAT_VERSION:
             return False, "Backup format is newer than this application supports"
+
+        try:
+            encryption_required, key = self._encryption_context()
+        except DatabaseEncryptionError as exc:
+            return False, str(exc)
+
+        backup_encrypted = bool(manifest.get("database_encrypted", False))
+        if encryption_required and not backup_encrypted:
+            return False, "Plaintext/legacy backup is forbidden by the production encryption policy"
+
         db_path = backup_path / manifest.get("database", "center.db")
-        error = self._validate_sqlite(db_path)
+        error = self._validate_database(
+            db_path,
+            encrypted=backup_encrypted,
+            key=key if backup_encrypted else None,
+        )
         if error:
             return False, error
         checksum = manifest.get("checksums", {}).get(db_path.name)
@@ -100,7 +199,9 @@ class BackupService:
         return True, ""
 
     def create_backup(self, label: str = "pre_publish") -> BackupResult:
+        backup_path: Optional[Path] = None
         try:
+            encrypted, key = self._encryption_context()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = self._backup_root / f"{label}_{timestamp}_{uuid.uuid4().hex[:8]}"
             backup_path.mkdir(parents=True)
@@ -108,39 +209,65 @@ class BackupService:
             db_src = paths.database_dir / "center.db"
             if not db_src.is_file():
                 raise FileNotFoundError(f"Runtime database not found: {db_src}")
+
+            source_error = self._validate_database(db_src, encrypted=encrypted, key=key)
+            if source_error:
+                raise RuntimeError(source_error)
+
             db_dst = backup_path / "center.db"
-            self._copy_sqlite_snapshot(db_src, db_dst)
-            error = self._validate_sqlite(db_dst)
+            if encrypted:
+                assert key is not None
+                self._copy_encrypted_sqlite_snapshot(db_src, db_dst, key)
+            else:
+                self._copy_plain_sqlite_snapshot(db_src, db_dst)
+            self._fsync_file(db_dst)
+
+            error = self._validate_database(db_dst, encrypted=encrypted, key=key)
             if error:
                 raise RuntimeError(error)
+
             meta_src = paths.metadata_dir
             if not meta_src.is_dir():
                 raise FileNotFoundError(f"Runtime metadata not found: {meta_src}")
             shutil.copytree(meta_src, backup_path / "metadata")
             manifest = {
-                "format_version": self.FORMAT_VERSION, "label": label, "timestamp": timestamp,
-                "created_at": datetime.now().isoformat(), "database": "center.db", "metadata": "metadata",
+                "format_version": self.FORMAT_VERSION,
+                "label": label,
+                "timestamp": timestamp,
+                "created_at": datetime.now().isoformat(),
+                "database": "center.db",
+                "database_encrypted": encrypted,
+                "encryption": "sqlcipher-workspace-key-v1" if encrypted else "none",
+                "metadata": "metadata",
                 "checksums": {"center.db": self._sha256(db_dst)},
             }
-            (backup_path / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+            manifest_path = backup_path / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+            self._fsync_file(manifest_path)
             if self._event_bus:
                 self._event_bus.publish(BackupCreated(backup_path=str(backup_path), label=label))
-            logger.info("Backup created: %s", backup_path)
+            logger.info("Backup created: %s (encrypted=%s)", backup_path, encrypted)
             return BackupResult(True, backup_path)
         except Exception as exc:
             logger.exception("Backup creation failed")
+            if backup_path is not None and backup_path.exists():
+                shutil.rmtree(backup_path, ignore_errors=True)
             if self._event_bus:
                 self._event_bus.publish(BackupFailed(error=str(exc)))
             return BackupResult(False, error=str(exc))
 
     def restore_backup(self, backup_path: Path) -> BackupResult:
+        db_tmp: Optional[Path] = None
         try:
             backup_path = Path(backup_path).resolve()
             ok, error = self._validate_backup(backup_path)
             if not ok:
                 return BackupResult(False, error=error)
+
+            encrypted, key = self._encryption_context()
             paths = get_paths()
             manifest = json.loads((backup_path / "manifest.json").read_text(encoding="utf-8"))
+            backup_encrypted = bool(manifest.get("database_encrypted", False))
             db_src = backup_path / manifest["database"]
             meta_src = backup_path / manifest["metadata"]
             paths.database_dir.mkdir(parents=True, exist_ok=True)
@@ -148,11 +275,25 @@ class BackupService:
 
             db_tmp = paths.database_dir / f".center.db.restore-{uuid.uuid4().hex}.tmp"
             shutil.copy2(db_src, db_tmp)
-            db_error = self._validate_sqlite(db_tmp)
+            self._fsync_file(db_tmp)
+            db_error = self._validate_database(
+                db_tmp,
+                encrypted=backup_encrypted,
+                key=key if backup_encrypted else None,
+            )
             if db_error:
                 db_tmp.unlink(missing_ok=True)
                 return BackupResult(False, error=db_error)
+
+            runtime_db = paths.database_dir / "center.db"
             os.replace(db_tmp, paths.database_dir / "center.db")
+            db_tmp = None
+            for suffix in ("-wal", "-shm"):
+                (Path(str(runtime_db) + suffix)).unlink(missing_ok=True)
+
+            final_error = self._validate_database(runtime_db, encrypted=encrypted, key=key)
+            if final_error:
+                raise RuntimeError(f"Restored runtime database failed validation: {final_error}")
 
             meta_target = paths.metadata_dir
             meta_tmp = meta_target.parent / f".metadata.restore-{uuid.uuid4().hex}"
@@ -169,13 +310,13 @@ class BackupService:
             if old_meta.exists():
                 shutil.rmtree(old_meta)
 
-            # The database file has been replaced. Dispose all existing
-            # SQLAlchemy engine resources and point future sessions to it.
             refresh_runtime_db()
-            logger.info("Backup restored: %s", backup_path)
+            logger.info("Backup restored: %s (encrypted=%s)", backup_path, encrypted)
             return BackupResult(True, backup_path)
         except Exception as exc:
             logger.exception("Backup restore failed")
+            if db_tmp is not None:
+                db_tmp.unlink(missing_ok=True)
             return BackupResult(False, error=str(exc))
 
     def list_backups(self) -> list:
@@ -186,9 +327,20 @@ class BackupService:
             try:
                 manifest = json.loads((item / "manifest.json").read_text(encoding="utf-8"))
                 valid, error = self._validate_backup(item)
-                backups.append({"path": str(item), "timestamp": manifest.get("timestamp"), "label": manifest.get("label"),
-                                "created_at": manifest.get("created_at"), "status": "valid" if valid else "invalid",
-                                "error": error if not valid else None})
+                backups.append({
+                    "path": str(item),
+                    "timestamp": manifest.get("timestamp"),
+                    "label": manifest.get("label"),
+                    "created_at": manifest.get("created_at"),
+                    "status": "valid" if valid else "invalid",
+                    "error": error if not valid else None,
+                })
             except Exception as exc:
-                backups.append({"path": str(item), "timestamp": "", "label": item.name, "status": "invalid", "error": str(exc)})
+                backups.append({
+                    "path": str(item),
+                    "timestamp": "",
+                    "label": item.name,
+                    "status": "invalid",
+                    "error": str(exc),
+                })
         return sorted(backups, key=lambda x: x.get("timestamp") or "", reverse=True)

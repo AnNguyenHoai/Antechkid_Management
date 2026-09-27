@@ -5,11 +5,11 @@ import logging
 import time
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Callable
 
 from .synchronization_provider import SynchronizationProvider
-from .synchronization_policy import SynchronizationPolicy, SyncPolicy
-from .version_resolver import VersionResolver, VersionStatus
+from .synchronization_policy import SynchronizationPolicy
+from .version_resolver import VersionResolver
 from .synchronization_result import SynchronizationResult, SyncResult
 from .retry_policy import RetryPolicy
 from .events import (
@@ -20,16 +20,17 @@ from .events import (
     VersionChecked,
     ProviderUnavailable,
 )
-
+from centermanager.database.artifact_security import (
+    materialize_runtime_database_to_repository,
+    validate_authoritative_repository_database,
+)
 from centermanager.events.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
 
 class SynchronizationManager:
-    """
-    Coordinates synchronization workflow.
-    """
+    """Coordinates synchronization workflow."""
 
     def __init__(
         self,
@@ -47,7 +48,6 @@ class SynchronizationManager:
         self._correlation_id: Optional[str] = None
 
     def clone(self, progress_callback: Optional[Callable] = None) -> SynchronizationResult:
-        """Clone repository from remote."""
         if self._provider is None:
             return SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -55,13 +55,10 @@ class SynchronizationManager:
                 provider="none",
                 started_at=datetime.now(),
             )
-
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
-
         logger.info(f"[{correlation_id}] Cloning repository")
-
         try:
             if not self._provider.connect():
                 return SynchronizationResult(
@@ -70,9 +67,9 @@ class SynchronizationManager:
                     provider=self._provider.name(),
                     started_at=datetime.now(),
                 )
-
-            if hasattr(self._provider, 'clone'):
+            if hasattr(self._provider, "clone"):
                 self._provider.clone(progress_callback)
+                validate_authoritative_repository_database()
                 result = SynchronizationResult(
                     result=SyncResult.SUCCESS,
                     message="Repository cloned successfully",
@@ -83,14 +80,12 @@ class SynchronizationManager:
                 )
                 self._last_result = result
                 return result
-            else:
-                return SynchronizationResult(
-                    result=SyncResult.FAILED,
-                    message="Provider does not support clone",
-                    provider=self._provider.name(),
-                    started_at=datetime.now(),
-                )
-
+            return SynchronizationResult(
+                result=SyncResult.FAILED,
+                message="Provider does not support clone",
+                provider=self._provider.name(),
+                started_at=datetime.now(),
+            )
         except Exception as e:
             logger.exception(f"[{correlation_id}] Clone failed: {e}")
             result = SynchronizationResult(
@@ -104,7 +99,6 @@ class SynchronizationManager:
             return result
 
     def check_updates(self) -> SynchronizationResult:
-        """Check for updates without performing sync."""
         if self._provider is None:
             return SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -112,13 +106,10 @@ class SynchronizationManager:
                 provider="none",
                 started_at=datetime.now(),
             )
-
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         start_time = time.time()
-
         logger.info(f"[{correlation_id}] Checking updates")
-
         if not self._provider.health():
             result = SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -132,7 +123,6 @@ class SynchronizationManager:
             ))
             self._last_result = result
             return result
-
         if not self._provider.connect():
             result = SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -142,7 +132,6 @@ class SynchronizationManager:
             )
             self._last_result = result
             return result
-
         try:
             remote_manifest = self._provider.remote_manifest()
             remote_version = remote_manifest.get("runtime_version") if remote_manifest else None
@@ -150,14 +139,11 @@ class SynchronizationManager:
         except Exception as e:
             logger.error(f"[{correlation_id}] Failed to get remote manifest: {e}")
             remote_version = None
-
         current_version = 0
-        if hasattr(self._provider, 'current_version'):
+        if hasattr(self._provider, "current_version"):
             current_version = self._provider.current_version()
-
         resolver = VersionResolver()
         status = resolver.resolve(current_version, remote_version)
-
         self._publish_event(VersionChecked(
             correlation_id=correlation_id,
             current_version=current_version,
@@ -165,9 +151,7 @@ class SynchronizationManager:
             status=status.value,
             provider=self._provider.name(),
         ))
-
         needs_sync = resolver.needs_sync(current_version, remote_version)
-
         result = SynchronizationResult(
             result=SyncResult.NO_CHANGE if not needs_sync else SyncResult.SUCCESS,
             message="Version check completed",
@@ -182,7 +166,6 @@ class SynchronizationManager:
         return result
 
     def begin_sync(self, message: str = "", user: str = "system") -> SynchronizationResult:
-        """Execute synchronization workflow."""
         if self._provider is None:
             return SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -190,27 +173,22 @@ class SynchronizationManager:
                 provider="none",
                 started_at=datetime.now(),
             )
-
         if self._is_syncing:
             return SynchronizationResult(
                 result=SyncResult.FAILED,
                 message="Synchronization already in progress",
                 provider=self._provider.name(),
             )
-
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         self._is_syncing = True
         start_time = time.time()
-
         logger.info(f"[{correlation_id}] Beginning synchronization")
-
         self._publish_event(SynchronizationStarted(
             correlation_id=correlation_id,
             provider=self._provider.name(),
             policy=self._policy.policy.value,
         ))
-
         try:
             if not self._provider.health():
                 result = SynchronizationResult(
@@ -225,7 +203,6 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-
             if not self._provider.connect():
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
@@ -240,12 +217,7 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-
-            fetch_result = self._retry_policy.execute(
-                self._provider.fetch,
-                name="fetch"
-            )
-
+            fetch_result = self._retry_policy.execute(self._provider.fetch, name="fetch")
             if not fetch_result:
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
@@ -260,12 +232,7 @@ class SynchronizationManager:
                 ))
                 self._last_result = result
                 return result
-
-            pull_result = self._retry_policy.execute(
-                self._provider.pull,
-                name="pull"
-            )
-
+            pull_result = self._retry_policy.execute(self._provider.pull, name="pull")
             if not pull_result:
                 result = SynchronizationResult(
                     result=SyncResult.CONFLICT,
@@ -281,12 +248,20 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            if message:
-                publish_result = self._retry_policy.execute(
-                    lambda: self._provider.publish(message, user),
-                    name="publish"
-                )
+            validate_authoritative_repository_database()
 
+            if message:
+                materialize_runtime_database_to_repository()
+                publish_only = getattr(self._provider, "publish_only", None)
+                if not callable(publish_only):
+                    raise RuntimeError(
+                        "Synchronization provider does not support safe publish_only; "
+                        "refusing to pull after database materialization"
+                    )
+                publish_result = self._retry_policy.execute(
+                    lambda: publish_only(message, user),
+                    name="publish",
+                )
                 if not publish_result:
                     result = SynchronizationResult(
                         result=SyncResult.FAILED,
@@ -301,7 +276,6 @@ class SynchronizationManager:
                     ))
                     self._last_result = result
                     return result
-
             result = SynchronizationResult(
                 result=SyncResult.SUCCESS,
                 message="Synchronization completed successfully",
@@ -310,17 +284,14 @@ class SynchronizationManager:
                 started_at=datetime.now(),
                 finished_at=datetime.now(),
             )
-
             self._publish_event(SynchronizationFinished(
                 correlation_id=correlation_id,
                 provider=self._provider.name(),
                 result=result.result.value,
                 duration_ms=result.duration_ms,
             ))
-
             self._last_result = result
             return result
-
         except Exception as e:
             logger.exception(f"[{correlation_id}] Sync failed: {e}")
             result = SynchronizationResult(
@@ -337,15 +308,16 @@ class SynchronizationManager:
             ))
             self._last_result = result
             return result
-
         finally:
             self._is_syncing = False
 
-    def publish_only(self, message: str = "", user: str = "system", expected_main_commit: Optional[str] = None) -> SynchronizationResult:
-        """
-        Publish local changes WITHOUT fetching or pulling first.
-        This is for Writer Finish Editing - only commit and push.
-        """
+    def publish_only(
+        self,
+        message: str = "",
+        user: str = "system",
+        expected_main_commit: Optional[str] = None,
+    ) -> SynchronizationResult:
+        """Publish local changes without fetching/pulling first."""
         if self._provider is None:
             return SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -353,21 +325,17 @@ class SynchronizationManager:
                 provider="none",
                 started_at=datetime.now(),
             )
-
         if self._is_syncing:
             return SynchronizationResult(
                 result=SyncResult.FAILED,
                 message="Synchronization already in progress",
                 provider=self._provider.name(),
             )
-
         correlation_id = str(uuid.uuid4())
         self._correlation_id = correlation_id
         self._is_syncing = True
         start_time = time.time()
-
         logger.info(f"[{correlation_id}] Publishing local changes (no fetch/pull)")
-
         try:
             if not self._provider.health():
                 result = SynchronizationResult(
@@ -378,7 +346,6 @@ class SynchronizationManager:
                 )
                 self._last_result = result
                 return result
-
             if not self._provider.connect():
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
@@ -389,8 +356,12 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            # Gọi publish_only thay vì publish
-            if not self._provider.publish_only(message, user, expected_main_commit=expected_main_commit):
+            materialize_runtime_database_to_repository()
+            if not self._provider.publish_only(
+                message,
+                user,
+                expected_main_commit=expected_main_commit,
+            ):
                 result = SynchronizationResult(
                     result=SyncResult.FAILED,
                     message="Publish-only failed",
@@ -400,7 +371,6 @@ class SynchronizationManager:
                 )
                 self._last_result = result
                 return result
-
             result = SynchronizationResult(
                 result=SyncResult.SUCCESS,
                 message="Publish-only completed successfully",
@@ -411,7 +381,6 @@ class SynchronizationManager:
             )
             self._last_result = result
             return result
-
         except Exception as e:
             logger.exception(f"[{correlation_id}] Publish-only failed: {e}")
             result = SynchronizationResult(
@@ -423,12 +392,10 @@ class SynchronizationManager:
             )
             self._last_result = result
             return result
-
         finally:
             self._is_syncing = False
 
     def cancel(self) -> bool:
-        """Cancel current synchronization."""
         if not self._is_syncing:
             return False
         self._is_syncing = False

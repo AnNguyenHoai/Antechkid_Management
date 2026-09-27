@@ -16,6 +16,7 @@ from centermanager.platform.backup import BackupService
 from centermanager.platform.retry import RetryPolicy
 from centermanager.events.event_bus import EventBus
 from centermanager.platform.notification import NotificationService
+from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.events.synchronization_events import (
     PublishStarted, PublishSucceeded, PublishFailed,
     SynchronizationStarted, SynchronizationCompleted, SynchronizationFailed,
@@ -66,7 +67,6 @@ class PublicationTransaction:
 
         logger.info(f"PublicationTransaction begin: session={session_id}, owner={owner}")
 
-        # 1. Create backup
         self._event_bus.publish(BackupCreated(label="pre_publish", backup_path=""))
         backup_result = self._backup_service.create_backup("pre_publish")
         if not backup_result.success:
@@ -89,13 +89,20 @@ class PublicationTransaction:
         owner = self._session_manager.get_owner()
 
         try:
-            # 2. Sync with retry
+            materialize_runtime_database_to_repository()
+
             self._event_bus.publish(SynchronizationStarted(session_id=session_id))
             retry_policy = RetryPolicy(max_retries=3, base_delay=1.0)
+            publish_operation = getattr(self._sync_provider, "publish_only", None)
+            if not callable(publish_operation):
+                raise RuntimeError(
+                    "Synchronization provider does not support safe publish_only; "
+                    "refusing to pull after database materialization"
+                )
             success = retry_policy.execute(
-                self._sync_provider.publish,
+                publish_operation,
                 message=message,
-                user=user
+                user=user,
             )
 
             if not success:
@@ -107,7 +114,6 @@ class PublicationTransaction:
 
             self._event_bus.publish(SynchronizationCompleted(session_id=session_id))
 
-            # 3. Increment version
             old_version = self._version_manager.get_current_version()
             new_version = self._version_manager.increment_version(
                 metadata={
@@ -124,13 +130,9 @@ class PublicationTransaction:
                 user=owner,
             ))
 
-            # 4. Release lock and switch to READ
             self._release_lock_and_mode(owner, session_id)
-
-            # 5. Mark committed
             self._committed = True
 
-            # 6. Publish success event
             self._event_bus.publish(PublishSucceeded(session_id=session_id, version=new_version))
             self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
             logger.info(f"Publish succeeded. Version {new_version}")
@@ -159,7 +161,6 @@ class PublicationTransaction:
                 logger.exception("Rollback restore failed")
                 self._notification_service.notify(f"Rollback failed: {e}", "error")
 
-        # Ensure lock is released even if restore fails
         owner = self._session_manager.get_owner()
         if owner:
             self._release_lock_and_mode(owner, self._session_manager.get_session_id())
@@ -216,7 +217,6 @@ class PublishWorkflow:
         self._event_bus.publish(PublishStarted(session_id=session_id))
         self._notification_service.notify("Publishing changes...", "info")
 
-        # Use PublicationTransaction
         tx = PublicationTransaction(
             lock_manager=self._lock_manager,
             mode_manager=self._mode_manager,
@@ -233,5 +233,4 @@ class PublishWorkflow:
             self._notification_service.notify("Publish failed: backup error", "error")
             return False
 
-        success = tx.commit(message, owner)
-        return success
+        return tx.commit(message, owner)
