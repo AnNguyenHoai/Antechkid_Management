@@ -4,6 +4,10 @@
 from pathlib import Path
 
 import centermanager.platform.sync.startup_sync as startup_sync_module
+from centermanager.database.startup_security import (
+    StartupDatabasePreflight,
+    StartupDatabaseReadiness,
+)
 from centermanager.platform.sync.startup_sync import StartupSynchronization
 
 
@@ -42,8 +46,16 @@ class _FakeProvider:
 def _make_sync(tmp_path, monkeypatch):
     paths = _FakePaths(tmp_path)
     monkeypatch.setattr(startup_sync_module, "get_paths", lambda: paths)
+    monkeypatch.setattr(
+        startup_sync_module,
+        "inspect_authoritative_database_for_startup",
+        lambda path: StartupDatabasePreflight(
+            StartupDatabaseReadiness.READY,
+            "ready",
+        ),
+    )
     sync = StartupSynchronization(_FakeProvider())
-    sync._refresh_database_sessions = lambda: None
+    sync._refresh_database_sessions = lambda: True
     return sync, paths
 
 
@@ -75,6 +87,46 @@ def test_startup_sync_fails_when_authoritative_repository_database_is_missing(
 
     assert sync.run() is False
     assert paths.database_dir.joinpath("center.db").read_bytes() == b"STALE-LOCAL-DATABASE"
+
+
+def test_startup_sync_does_not_copy_database_when_security_preflight_fails(
+    tmp_path, monkeypatch
+):
+    sync, paths = _make_sync(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        startup_sync_module,
+        "inspect_authoritative_database_for_startup",
+        lambda path: StartupDatabasePreflight(
+            StartupDatabaseReadiness.KEY_PROVISIONING_REQUIRED,
+            "workspace key missing",
+        ),
+    )
+
+    repo = paths.runtime_root / "repository"
+    repo_db = repo / "database" / "center.db"
+    repo.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    repo_db.parent.mkdir(parents=True)
+    repo_db.write_bytes(b"ENCRYPTED-AUTHORITATIVE-DATABASE")
+    runtime_db = paths.database_dir / "center.db"
+    runtime_db.write_bytes(b"KNOWN-GOOD-LOCAL-DATABASE")
+
+    assert sync.run() is False
+    assert runtime_db.read_bytes() == b"KNOWN-GOOD-LOCAL-DATABASE"
+
+
+def test_startup_sync_fails_if_database_session_refresh_fails(tmp_path, monkeypatch):
+    sync, paths = _make_sync(tmp_path, monkeypatch)
+    sync._refresh_database_sessions = lambda: False
+
+    repo = paths.runtime_root / "repository"
+    repo_db = repo / "database" / "center.db"
+    repo.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    repo_db.parent.mkdir(parents=True)
+    repo_db.write_bytes(b"GIT-AUTHORITATIVE-DATABASE")
+
+    assert sync.run() is False
 
 
 def test_app_materializes_git_database_before_creating_production_engine():
