@@ -18,7 +18,6 @@ from centermanager.core.clock import get_clock
 from centermanager.dto.outstanding_dto import OutstandingDTO
 from centermanager.models.income import Income
 from centermanager.models.session import SessionStatus
-from centermanager.repositories.income_repository import TuitionSettlementComponent
 from centermanager.repositories.provider import (
     RepositoryProvider,
     create_default_repository_provider,
@@ -210,14 +209,14 @@ class TuitionDetailService:
                 received_by=payment.received_by,
                 note=payment.note,
             )
-            for payment in sorted(payments, key=lambda item: (item.payment_date, item.id or 0))
+            for payment in sorted(
+                payments, key=lambda item: (item.payment_date, item.id or 0)
+            )
         )
 
     @classmethod
-    def _settlement_rows(
-        cls,
-        components: Tuple[TuitionSettlementComponent, ...],
-    ) -> Tuple[TuitionSettlementDetail, ...]:
+    def _settlement_rows(cls, components) -> Tuple[TuitionSettlementDetail, ...]:
+        """Project provider-owned settlement components without repository coupling."""
         return tuple(
             TuitionSettlementDetail(
                 kind=component.kind,
@@ -276,12 +275,31 @@ class TuitionDetailService:
                 sort_by="payment_date",
                 ascending=True,
             )
-            settlement_components = income_repo.list_active_tuition_settlement_components(
-                enrollment_id,
-                as_of_date=cutoff,
+
+            # Production repositories expose the canonical signed settlement ledger.
+            # The fallback keeps older provider doubles/embedders compatible while
+            # preserving the historical paid projection contract.
+            settlement_reader = getattr(
+                income_repo,
+                "list_active_tuition_settlement_components",
+                None,
             )
-            settlement_rows = self._settlement_rows(settlement_components)
-            paid = sum((row.amount for row in settlement_rows), Decimal("0"))
+            if callable(settlement_reader):
+                settlement_rows = self._settlement_rows(
+                    settlement_reader(enrollment_id, as_of_date=cutoff)
+                )
+                paid = sum(
+                    (row.amount for row in settlement_rows),
+                    Decimal("0"),
+                )
+            else:
+                settlement_rows = ()
+                paid = self._amount(
+                    income_repo.sum_active_tuition_for_enrollment(
+                        enrollment_id,
+                        as_of_date=cutoff,
+                    )
+                )
 
             configured = enrollment.has_tuition_contract
             billable_numbers = ()
