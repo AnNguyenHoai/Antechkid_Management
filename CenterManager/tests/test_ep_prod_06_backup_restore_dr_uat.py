@@ -97,12 +97,12 @@ def test_prod_06_collector_is_read_only_and_records_integrity_evidence():
     source = _read(COLLECTOR)
     assert "Get-FileHash" in source
     assert "PRAGMA integrity_check" in source
-    assert "runtime\\Backup\\publish" not in source  # composed from runtime + Backup\\publish
+    assert "runtime\\Backup\\publish" not in source
     assert "Backup\\publish" in source
     assert "managed_path" in source
     assert "checksum_matches" in source
     assert "restore_temp_artifact_count" in source
-    assert "Set-Content" in source  # evidence output only
+    assert "Set-Content" in source
     assert "restore_backup" not in source.lower()
     assert "Copy-Item" not in source
     assert "Remove-Item" not in source
@@ -154,9 +154,11 @@ def test_prod_06_verifier_source_compiles():
 def test_prod_06_existing_backup_service_has_required_safety_building_blocks():
     source = _read(BACKUP_SERVICE)
     for marker in (
-        "FORMAT_VERSION = 2",
+        "FORMAT_VERSION = 3",
+        "database_encrypted",
         "PRAGMA integrity_check",
         "Database checksum mismatch",
+        "Plaintext/legacy backup is forbidden by the production encryption policy",
         "Backup path is outside the managed backup directory",
         "Backup format is newer than this application supports",
         "os.replace(db_tmp, paths.database_dir / \"center.db\")",
