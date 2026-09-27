@@ -86,8 +86,9 @@ def test_refund_is_cash_linked_but_credit_adjustment_has_no_income_or_wallet_mov
 def test_non_cash_credit_projects_to_tuition_settlement_without_wallet_income():
     source = (_root() / "src/centermanager/repositories/income_repository.py").read_text(encoding="utf-8")
     assert "TuitionAdjustment.KIND_CREDIT" in source
-    assert "non_cash_credit" in source
-    assert "paid\n            + non_cash_credit" in source
+    assert "TuitionSettlementComponent.KIND_CREDIT_ADJUSTMENT" in source
+    assert "amount=self._decimal(adjustment.amount)" in source
+    assert "canonical settlement components" in source
 
 
 def test_adjustments_publish_finance_events_and_keep_accounting_boundary():
