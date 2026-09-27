@@ -69,8 +69,6 @@ class SynchronizationManager:
                 )
             if hasattr(self._provider, "clone"):
                 self._provider.clone(progress_callback)
-                # A cloned repository is authoritative business data. Validate it
-                # before callers are allowed to materialize it into runtime.
                 validate_authoritative_repository_database()
                 result = SynchronizationResult(
                     result=SyncResult.SUCCESS,
@@ -250,16 +248,17 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            # Git is authoritative. Never let the runtime apply a repository DB
-            # until it passes the active SQLite/SQLCipher policy.
             validate_authoritative_repository_database()
 
             if message:
-                # The current live runtime DB is the actual edited state. Copy it
-                # into the repository atomically before the provider stages Git.
                 materialize_runtime_database_to_repository()
+                publish_only = getattr(self._provider, "publish_only", None)
+                if publish_only is not None:
+                    publish_call = lambda: publish_only(message, user)
+                else:
+                    publish_call = lambda: self._provider.publish(message, user)
                 publish_result = self._retry_policy.execute(
-                    lambda: self._provider.publish(message, user),
+                    publish_call,
                     name="publish",
                 )
                 if not publish_result:
@@ -356,8 +355,6 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            # Finish Editing is the most important write boundary: ensure the DB
-            # that Git will stage is the current validated runtime artifact.
             materialize_runtime_database_to_repository()
             if not self._provider.publish_only(
                 message,
