@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Windows service host for the SEC-02 protected-data identity.
-
-Phase A intentionally establishes the dedicated service identity and lifecycle
-without exposing database/key operations yet. Phase B will attach the broker to
-this process. The raw SQLCipher workspace key must never be returned to clients.
-"""
+"""Windows service host for the SEC-02 protected-data broker."""
 from __future__ import annotations
 
 import os
 import sys
 
+from .broker import ProtectedDataBroker
+from .pipe_transport import NamedPipeBrokerServer, wake_pipe_server
 from .protocol import SERVICE_NAME
 
 
@@ -41,24 +38,44 @@ def service_class():
         _svc_name_ = SERVICE_NAME
         _svc_display_name_ = "AnTech Kids Protected Data Service"
         _svc_description_ = (
-            "Owns protected CenterManager database/key storage. "
-            "Database broker operations are enabled only after SEC-02 Phase B."
+            "Owns protected CenterManager database/key/backup storage and exposes "
+            "only the versioned operation-oriented local broker."
         )
 
         def __init__(self, args):
             super().__init__(args)
-            self._stop_event = win32event.CreateEvent(None, 0, 0, None)
+            self._stop_event = win32event.CreateEvent(None, 1, 0, None)
+            self._stop_requested = False
 
         def SvcStop(self):
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            self._stop_requested = True
             win32event.SetEvent(self._stop_event)
+            # Connect to the pipe to release a blocking ConnectNamedPipe call.
+            wake_pipe_server()
+
+        def _should_stop(self) -> bool:
+            if self._stop_requested:
+                return True
+            return (
+                win32event.WaitForSingleObject(self._stop_event, 0)
+                == win32event.WAIT_OBJECT_0
+            )
 
         def SvcDoRun(self):
             servicemanager.LogInfoMsg(
-                f"{SERVICE_NAME} started (SEC-02 identity host; broker disabled)"
+                f"{SERVICE_NAME} started (SEC-02 protected-data broker v1)"
             )
-            win32event.WaitForSingleObject(self._stop_event, win32event.INFINITE)
-            servicemanager.LogInfoMsg(f"{SERVICE_NAME} stopped")
+            server = NamedPipeBrokerServer(ProtectedDataBroker())
+            try:
+                server.serve_until(self._should_stop)
+            except Exception as exc:
+                servicemanager.LogErrorMsg(
+                    f"{SERVICE_NAME} broker terminated unexpectedly: {exc}"
+                )
+                raise
+            finally:
+                servicemanager.LogInfoMsg(f"{SERVICE_NAME} stopped")
 
     return AnTechKidsDataService, win32serviceutil
 
