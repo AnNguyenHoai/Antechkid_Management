@@ -113,7 +113,8 @@ def encrypt_plaintext_database_in_place(database_path: Path, key: bytes) -> Path
         _validate_encrypted_database(temp_path, key)
 
         # Ensure encrypted bytes reach disk before the atomic replacement.
-        with temp_path.open("rb") as handle:
+        # On Windows, os.fsync() requires a writable file descriptor.
+        with temp_path.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(temp_path, database_path)
 
