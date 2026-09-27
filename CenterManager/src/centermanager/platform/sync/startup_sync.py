@@ -10,6 +10,9 @@ from pathlib import Path
 import os, json
 from centermanager.core.paths import get_paths
 from centermanager.platform.synchronization import GitSynchronizationProvider
+from centermanager.database.startup_security import (
+    inspect_authoritative_database_for_startup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +59,23 @@ class StartupSynchronization:
             logger.error("Reset to remote failed")
             return False
 
-        # 4. Always apply repository database to runtime
+        # 4. Validate the authoritative DB *before* copying it into runtime.
+        # Normal startup must never invent a new workspace key or implicitly
+        # migrate a plaintext collaboration DB because all clients must share
+        # the same controlled encryption state.
+        if not self._preflight_authoritative_database():
+            return False
+
+        # 5. Always apply repository database to runtime
         if not self._apply_runtime_database():
             logger.error("Failed to apply repository database to runtime")
             return False
 
-        # 5. Refresh database sessions
-        self._refresh_database_sessions()
+        # 6. Refresh database sessions. This is part of startup correctness,
+        # not best-effort logging: a copied DB that cannot be opened must make
+        # synchronization fail closed.
+        if not self._refresh_database_sessions():
+            return False
 
         logger.info("Startup synchronization completed successfully")
         return True
@@ -93,6 +106,19 @@ class StartupSynchronization:
             logger.exception(f"Reset to remote failed: {e}")
             return False
 
+    def _preflight_authoritative_database(self) -> bool:
+        repo_db = self._repo_path / "database" / "center.db"
+        result = inspect_authoritative_database_for_startup(repo_db)
+        if result.ready:
+            logger.info("Authoritative database security preflight passed")
+            return True
+        logger.error(
+            "Authoritative database security preflight failed: state=%s; %s",
+            result.state.value,
+            result.message,
+        )
+        return False
+
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
         repo_db = self._repo_path / "database" / "center.db"
@@ -109,7 +135,7 @@ class StartupSynchronization:
                     fdst.write(fsrc.read())
                     fdst.flush()
                     os.fsync(fdst.fileno())
-            
+
             # Verify
             if self._runtime_db_path.exists() and repo_db.exists():
                 src_size = repo_db.stat().st_size
@@ -188,10 +214,12 @@ class StartupSynchronization:
             logger.exception("Failed to synchronize Employee attachments from repository")
             raise
 
-    def _refresh_database_sessions(self):
+    def _refresh_database_sessions(self) -> bool:
         try:
             from centermanager.database.session import refresh_runtime_db
             refresh_runtime_db()
             logger.info("Database sessions refreshed")
+            return True
         except Exception as e:
             logger.exception(f"Failed to refresh database sessions: {e}")
+            return False
