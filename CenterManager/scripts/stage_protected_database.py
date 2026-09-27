@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Stage the existing encrypted runtime DB into SEC-02 protected storage.
+"""Stage encrypted runtime DB + metadata into SEC-02 protected storage.
 
 This is deliberately non-destructive to the current runtime. It copies ciphertext
 into ProgramData, fsyncs and validates it with the already-provisioned protected
-service key. ACL enforcement/cutover is a later explicit deployment step.
+service key, then stages metadata. ACL enforcement/cutover remains explicit.
 """
 from __future__ import annotations
 
@@ -32,13 +32,40 @@ def _is_windows_admin() -> bool:
         return False
 
 
+def _stage_metadata(source: Path, target: Path, *, overwrite: bool) -> None:
+    if not source.is_dir():
+        raise ProtectedDatabaseStagingError(f"Runtime metadata is missing: {source}")
+    if target.exists() and not overwrite:
+        raise ProtectedDatabaseStagingError(
+            "Protected metadata already exists; use --overwrite only during authorized restaging."
+        )
+    temp = target.with_name(f".{target.name}.stage-{uuid.uuid4().hex}")
+    previous = target.with_name(f".{target.name}.previous-{uuid.uuid4().hex}")
+    try:
+        shutil.copytree(source, temp)
+        if target.exists():
+            os.replace(target, previous)
+        try:
+            os.replace(temp, target)
+        except Exception:
+            if previous.exists():
+                os.replace(previous, target)
+            raise
+        if previous.exists():
+            shutil.rmtree(previous)
+    finally:
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+
+
 def stage_database(*, overwrite: bool = False) -> Path:
     if sys.platform != "win32":
         raise ProtectedDatabaseStagingError("Protected database staging is Windows-only.")
     if not _is_windows_admin():
         raise ProtectedDatabaseStagingError("Administrator privileges are required.")
 
-    runtime_db = get_paths().database_dir / "center.db"
+    paths = get_paths()
+    runtime_db = paths.database_dir / "center.db"
     if not runtime_db.is_file():
         raise ProtectedDatabaseStagingError(f"Runtime database is missing: {runtime_db}")
 
@@ -72,11 +99,16 @@ def stage_database(*, overwrite: bool = False) -> Path:
         validate_database_artifact(protected_db, encryption_required=True, key=service_key)
     finally:
         temp.unlink(missing_ok=True)
+
+    layout.metadata_dir.parent.mkdir(parents=True, exist_ok=True)
+    _stage_metadata(paths.metadata_dir, layout.metadata_dir, overwrite=overwrite)
     return protected_db
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Stage encrypted center.db into SEC-02 protected storage.")
+    parser = argparse.ArgumentParser(
+        description="Stage encrypted center.db + metadata into SEC-02 protected storage."
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -88,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
-    print(f"[OK] Encrypted database staged and validated: {path}")
+    print(f"[OK] Encrypted database and metadata staged and validated: {path}")
     print("[OK] Existing runtime database was not modified.")
     return 0
 
