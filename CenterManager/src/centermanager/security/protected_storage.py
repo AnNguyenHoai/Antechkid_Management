@@ -18,7 +18,7 @@ from typing import Mapping
 _PROTECTED_STORAGE_MODE_ENV = "ANTECHKIDS_PROTECTED_STORAGE_MODE"
 _SERVICE_NAME = "AnTechKidsData"
 _SERVICE_SID = rf"NT SERVICE\{_SERVICE_NAME}"
-_PIPE_NAME = r"\\.\pipe\AnTechKidsData.v1"
+_PIPE_NAME = r"\\.\pipe\AnTechKidsData.v2"
 
 
 class ProtectedStorageConfigurationError(RuntimeError):
