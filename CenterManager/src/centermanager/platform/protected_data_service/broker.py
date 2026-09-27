@@ -2,7 +2,7 @@
 """Operation-oriented broker for the protected Windows data service.
 
 The broker deliberately does not expose raw SQL or the SQLCipher workspace key.
-Only narrowly-scoped operations may cross the service boundary.  Windows named-
+Only narrowly-scoped operations may cross the service boundary. Windows named-
 pipe transport/authentication lives in ``pipe_transport`` so this dispatch core
 remains unit-testable on non-Windows hosts.
 """
@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,11 +39,11 @@ _BACKUP_LABEL_RE = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 
 
 class ProtectedDataBrokerError(RuntimeError):
-    """Base broker error safe to translate to an IPC error response."""
+    pass
 
 
 class ProtectedDataProtocolError(ProtectedDataBrokerError):
-    """Malformed/unsupported request."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -118,8 +119,6 @@ class ProtectedDataBackend:
         return self._layout
 
     def _load_key(self) -> bytes:
-        # The protected bundle uses machine-scoped DPAPI and is readable only by
-        # the service/SYSTEM/Admin ACL. The raw key never crosses the IPC boundary.
         return DatabaseKeyStore(
             bundle_path=self._layout.key_bundle_path,
             machine_scope=True,
@@ -137,6 +136,7 @@ class ProtectedDataBackend:
             "protocol_version": PROTOCOL_VERSION,
             "database_present": self._layout.database_path.is_file(),
             "key_present": self._layout.key_bundle_path.is_file(),
+            "metadata_present": self._layout.metadata_dir.is_dir(),
         }
 
     def validate_database(self) -> dict[str, Any]:
@@ -155,6 +155,10 @@ class ProtectedDataBackend:
         if not _BACKUP_LABEL_RE.fullmatch(label):
             raise ProtectedDataBrokerError(
                 "Backup label must contain only letters, numbers, '_' or '-' (1-48 chars)."
+            )
+        if not self._layout.metadata_dir.is_dir():
+            raise ProtectedDataBrokerError(
+                "Protected metadata is missing; refusing to create an incomplete recovery backup."
             )
         key = self._load_key()
         source = self._layout.database_path
@@ -180,6 +184,9 @@ class ProtectedDataBackend:
                 src.close()
             self._fsync(destination)
             validate_database_artifact(destination, encryption_required=True, key=key)
+
+            metadata_target = destination_dir / "metadata"
+            shutil.copytree(self._layout.metadata_dir, metadata_target)
             manifest = {
                 "format_version": 1,
                 "backup_id": backup_id,
@@ -187,6 +194,7 @@ class ProtectedDataBackend:
                 "database": "center.db",
                 "database_encrypted": True,
                 "encryption": "sqlcipher-service-key-v1",
+                "metadata": "metadata",
                 "checksums": {"center.db": _sha256(destination)},
             }
             manifest_path = destination_dir / "manifest.json"
@@ -199,14 +207,11 @@ class ProtectedDataBackend:
                 "database_sha256": manifest["checksums"]["center.db"],
             }
         except Exception:
-            import shutil
             shutil.rmtree(destination_dir, ignore_errors=True)
             raise
 
 
 class ProtectedDataBroker:
-    """Validate and dispatch one authenticated request."""
-
     def __init__(self, backend: ProtectedDataBackend | None = None) -> None:
         self._backend = backend or ProtectedDataBackend()
 
