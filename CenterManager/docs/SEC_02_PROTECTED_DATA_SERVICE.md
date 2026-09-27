@@ -8,12 +8,12 @@ Prevent an employee Windows account from directly reading, deleting or replacing
 
 SQLCipher + user-scope DPAPI protect copied/offline artifacts, but they do not isolate secrets from another process running under the same employee Windows token. NTFS ACLs also cannot distinguish CenterManager.exe from Explorer/PowerShell when both run as the same user.
 
-SEC-02 therefore requires a separate identity:
+SEC-02 therefore uses a separate identity:
 
 ```text
 Employee Windows User
         |
-        | authenticated IPC
+        | local authenticated named pipe
         v
 CenterManager desktop
         |
@@ -21,49 +21,116 @@ CenterManager desktop
 AnTechKidsData Windows service
 NT SERVICE\AnTechKidsData
         |
-        +-- SQLCipher key
+        +-- machine-DPAPI SQLCipher key bundle
         +-- center.db
         +-- encrypted backups
         +-- protected metadata
 ```
 
-## Phase A implemented in this branch
+## Phase A — merged
 
-1. `ProtectedStorageMode`
-   - default: `transitional`
-   - opt-in: `ANTECHKIDS_PROTECTED_STORAGE_MODE=enforced`
-   - enforced mode rejects all direct production DB access from the desktop process.
+- `ProtectedStorageMode`: `transitional` / `enforced`.
+- `%ProgramData%\AnTechKids\CenterManager\Protected` service-owned layout.
+- `AnTechKidsData` Windows service identity.
+- dry-run-by-default ACL script.
+- protocol v1 safe-operation contract.
+- enforced mode rejects GUI-local SQLCipher/key access.
 
-2. Protected service-owned layout
-   - `%ProgramData%\AnTechKids\CenterManager\Protected\Database`
-   - `%ProgramData%\AnTechKids\CenterManager\Protected\Key`
-   - `%ProgramData%\AnTechKids\CenterManager\Protected\Backup`
-   - `%ProgramData%\AnTechKids\CenterManager\Protected\metadata`
+## Phase B1 — broker/key/storage migration
 
-3. Windows service identity host
-   - service: `AnTechKidsData`
-   - virtual account / service SID: `NT SERVICE\AnTechKidsData`
-   - service host currently owns lifecycle/identity only; the DB broker is intentionally not enabled yet.
+### Local authenticated named pipe
 
-4. ACL preparation
-   - dry-run by default;
-   - refuses to apply unless the Windows service exists;
-   - removes inherited ACLs;
-   - grants Full Control only to the service SID, SYSTEM and local Administrators;
-   - grants no access to Users or Authenticated Users.
+`\\.\pipe\AnTechKidsData.v1` is created with:
 
-5. IPC protocol v1 contract
-   - health
-   - validate_database
-   - create_backup
-   - no raw-key operation exists;
-   - restore/reset/rekey are intentionally deferred to SEC-04 authorization work.
+- `PIPE_REJECT_REMOTE_CLIENTS`;
+- Windows ACL requiring an authenticated local identity;
+- server-side client impersonation to obtain the caller SID/account;
+- 64 KiB bounded JSON request/response messages;
+- protocol version and request correlation checks.
 
-## Why enforced mode currently fails closed
+The server logs request id, operation and trusted Windows caller identity. It does not log request payloads or key material.
 
-The application repositories still consume local SQLAlchemy `Session` objects. Therefore CenterManager desktop still needs direct database access in transitional mode. Applying service-only ACLs before replacing that Session boundary with a broker-backed adapter would simply break the application.
+### Operation-oriented protocol
 
-The code explicitly rejects this unsafe mixed state:
+Allowed v1 operations remain:
+
+- `health`
+- `validate_database`
+- `create_backup`
+
+There is no raw SQL API and no raw-key API. This is intentional: a generic SQL tunnel would let another process under the employee token bypass application authorization with arbitrary `DELETE`, `DROP` or mutation commands.
+
+Restore/reset/rekey remain excluded until SEC-04 adds an administrator authorization envelope at the service boundary.
+
+### Service-owned key
+
+The legacy key is currently user-DPAPI protected. Phase B1 introduces machine-scoped DPAPI only for the protected service key bundle. The bundle is then protected by NTFS ACL so only:
+
+- `NT SERVICE\AnTechKidsData`
+- `SYSTEM`
+- local `Administrators`
+
+can read it.
+
+Machine DPAPI is not considered sufficient without this ACL. A process that can read a machine-scoped DPAPI blob on the same host may be able to unprotect it.
+
+`provision_protected_service_key.py` re-wraps the existing workspace key without printing or logging its raw value.
+
+### Protected staging
+
+`stage_protected_database.py`:
+
+1. validates the encrypted runtime DB;
+2. proves the legacy and protected key bundles resolve to the same workspace key;
+3. copies ciphertext to protected storage;
+4. fsyncs and validates the temporary copy;
+5. atomically publishes protected `center.db`;
+6. stages runtime metadata;
+7. leaves the existing runtime DB unchanged.
+
+This makes rollback possible before final cutover.
+
+### Protected backup
+
+Service `create_backup`:
+
+- unseals the key only inside the Windows service process;
+- validates protected `center.db`;
+- creates a SQLCipher logical snapshot;
+- includes protected metadata;
+- fsyncs and validates the encrypted snapshot;
+- removes partial backup directories on failure.
+
+## Phase B1 deployment verification
+
+Before ACL enforcement, from elevated PowerShell:
+
+```powershell
+python .\scripts\provision_protected_service_key.py
+python .\scripts\stage_protected_database.py
+.\scripts\install_protected_data_service.ps1 -Start
+python .\scripts\verify_protected_data_service.py
+```
+
+Optional backup verification:
+
+```powershell
+python .\scripts\verify_protected_data_service.py --backup
+```
+
+Only after service verification should ACL preparation be evaluated:
+
+```powershell
+.\scripts\prepare_protected_storage_acl.ps1
+```
+
+That command remains dry-run unless `-Apply` is explicitly supplied.
+
+## Why `enforced` is still not production-ready
+
+The application repositories still consume local SQLAlchemy `Session` objects. Therefore normal CRUD persistence still occurs in the desktop process in transitional mode. Phase B1 moves key ownership, protected artifact validation and backup behind the service, but it does **not** yet move all domain persistence behind the broker.
+
+Consequently:
 
 ```text
 ANTECHKIDS_PROTECTED_STORAGE_MODE=enforced
@@ -74,26 +141,16 @@ GUI attempts create_production_engine()/inspect_runtime_database()
 
 There is no fallback to the employee-owned SQLCipher key path.
 
-## Deployment commands for Phase A testing
+## Phase B2 required before final SEC-02 enforcement
 
-Run from an elevated PowerShell in the CenterManager environment:
-
-```powershell
-.\scripts\install_protected_data_service.ps1 -Start
-.\scripts\prepare_protected_storage_acl.ps1
-```
-
-The ACL command above is a dry run. Do not use `-Apply` until Phase B database brokering has passed Windows UAT.
-
-## Phase B required before production enforcement
-
-1. Implement authenticated named-pipe broker in the service.
-2. Move SQLCipher key provisioning/unsealing into the service account.
-3. Replace GUI-local production SQLAlchemy engine/session creation with a broker-backed persistence boundary.
-4. Move runtime DB, authoritative materialization and backups into protected storage.
-5. Prove employee token cannot read/delete/replace protected artifacts.
-6. Apply ACLs and set `ANTECHKIDS_PROTECTED_STORAGE_MODE=enforced`.
-7. Run real-machine restart, crash, backup, publish and recovery UAT.
+1. Migrate production domain persistence from GUI-local SQLAlchemy sessions to operation-oriented service APIs.
+2. Keep authorization checks in the trusted service boundary; do not introduce a generic SQL tunnel.
+3. Move authoritative Git materialization/publish DB operations into the service boundary.
+4. Run a maintenance cutover so protected DB/metadata are staged from a quiescent final runtime state.
+5. Apply service-only ACLs.
+6. Set `ANTECHKIDS_PROTECTED_STORAGE_MODE=enforced`.
+7. Prove on a real employee Windows token that direct read/delete/replace of DB/key/backups fails while CenterManager workflows succeed.
+8. Run restart, crash, backup, publish and recovery UAT.
 
 ## Security invariant
 
