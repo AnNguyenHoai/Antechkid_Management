@@ -72,6 +72,15 @@ class BackupService:
             source.close()
 
     @staticmethod
+    def _copy_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
+        """Backward-compatible plaintext snapshot helper for non-production callers.
+
+        Production backup creation never calls this compatibility alias when the
+        encryption policy is active; it routes through the keyed SQLCipher helper.
+        """
+        BackupService._copy_plain_sqlite_snapshot(source_path, destination_path)
+
+    @staticmethod
     def _copy_encrypted_sqlite_snapshot(source_path: Path, destination_path: Path, key: bytes) -> None:
         """Create a logical SQLCipher snapshot into a keyed destination.
 
@@ -85,7 +94,6 @@ class BackupService:
         destination = sqlcipher.connect(str(destination_path))
         try:
             apply_sqlcipher_key(source, key)
-            # Force source authentication before backup starts.
             source.execute("SELECT count(*) FROM sqlite_master").fetchone()
             apply_sqlcipher_key(destination, key)
             source.backup(destination)
@@ -121,8 +129,6 @@ class BackupService:
             con = sqlcipher.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
             try:
                 apply_sqlcipher_key(con, key)
-                # Authentication/readability and structural consistency are both
-                # checked under the provisioned workspace key.
                 con.execute("SELECT count(*) FROM sqlite_master").fetchone()
                 row = con.execute("PRAGMA integrity_check").fetchone()
             finally:
@@ -137,7 +143,6 @@ class BackupService:
         encrypted = database_encryption_required()
         if not encrypted:
             return False, None
-        # Fail closed: normal backup/restore must never create a replacement key.
         return True, DatabaseKeyStore().load()
 
     def _validate_database(self, db_path: Path, *, encrypted: bool, key: Optional[bytes]) -> Optional[str]:
@@ -205,8 +210,6 @@ class BackupService:
             if not db_src.is_file():
                 raise FileNotFoundError(f"Runtime database not found: {db_src}")
 
-            # Refuse a plaintext production source before any backup artifact is
-            # created. This catches accidental downgrade/materialization early.
             source_error = self._validate_database(db_src, encrypted=encrypted, key=key)
             if source_error:
                 raise RuntimeError(source_error)
@@ -247,7 +250,6 @@ class BackupService:
             return BackupResult(True, backup_path)
         except Exception as exc:
             logger.exception("Backup creation failed")
-            # Never leave a partially-created security backup looking usable.
             if backup_path is not None and backup_path.exists():
                 shutil.rmtree(backup_path, ignore_errors=True)
             if self._event_bus:
@@ -272,8 +274,6 @@ class BackupService:
             paths.metadata_dir.parent.mkdir(parents=True, exist_ok=True)
 
             db_tmp = paths.database_dir / f".center.db.restore-{uuid.uuid4().hex}.tmp"
-            # Ciphertext is copied byte-for-byte; no plaintext restore temporary
-            # file exists in production.
             shutil.copy2(db_src, db_tmp)
             self._fsync_file(db_tmp)
             db_error = self._validate_database(
@@ -286,10 +286,8 @@ class BackupService:
                 return BackupResult(False, error=db_error)
 
             runtime_db = paths.database_dir / "center.db"
-            os.replace(db_tmp, runtime_db)
+            os.replace(db_tmp, paths.database_dir / "center.db")
             db_tmp = None
-            # A restored main database must never be paired with WAL/SHM files
-            # from the previously-open database generation.
             for suffix in ("-wal", "-shm"):
                 (Path(str(runtime_db) + suffix)).unlink(missing_ok=True)
 
@@ -312,8 +310,6 @@ class BackupService:
             if old_meta.exists():
                 shutil.rmtree(old_meta)
 
-            # The database file has been replaced. Dispose all existing
-            # SQLAlchemy engine resources and point future sessions to it.
             refresh_runtime_db()
             logger.info("Backup restored: %s (encrypted=%s)", backup_path, encrypted)
             return BackupResult(True, backup_path)
