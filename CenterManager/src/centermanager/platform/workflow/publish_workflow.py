@@ -16,6 +16,7 @@ from centermanager.platform.backup import BackupService
 from centermanager.platform.retry import RetryPolicy
 from centermanager.events.event_bus import EventBus
 from centermanager.platform.notification import NotificationService
+from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.events.synchronization_events import (
     PublishStarted, PublishSucceeded, PublishFailed,
     SynchronizationStarted, SynchronizationCompleted, SynchronizationFailed,
@@ -89,7 +90,13 @@ class PublicationTransaction:
         owner = self._session_manager.get_owner()
 
         try:
-            # 2. Sync with retry
+            # 2. Materialize the current runtime database into the Git working
+            # tree at the security boundary. In production this validates the
+            # SQLCipher source and destination with the workspace key and fails
+            # closed before Git can stage a stale/plaintext authoritative DB.
+            materialize_runtime_database_to_repository()
+
+            # 3. Sync with retry
             self._event_bus.publish(SynchronizationStarted(session_id=session_id))
             retry_policy = RetryPolicy(max_retries=3, base_delay=1.0)
             success = retry_policy.execute(
@@ -107,7 +114,7 @@ class PublicationTransaction:
 
             self._event_bus.publish(SynchronizationCompleted(session_id=session_id))
 
-            # 3. Increment version
+            # 4. Increment version
             old_version = self._version_manager.get_current_version()
             new_version = self._version_manager.increment_version(
                 metadata={
@@ -124,13 +131,13 @@ class PublicationTransaction:
                 user=owner,
             ))
 
-            # 4. Release lock and switch to READ
+            # 5. Release lock and switch to READ
             self._release_lock_and_mode(owner, session_id)
 
-            # 5. Mark committed
+            # 6. Mark committed
             self._committed = True
 
-            # 6. Publish success event
+            # 7. Publish success event
             self._event_bus.publish(PublishSucceeded(session_id=session_id, version=new_version))
             self._notification_service.notify(f"Publish succeeded. Version {new_version}", "success")
             logger.info(f"Publish succeeded. Version {new_version}")
