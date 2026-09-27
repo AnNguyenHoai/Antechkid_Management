@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Authenticated application/domain gateway owned by AnTechKidsData.
-
-This is intentionally not a generic persistence/RPC layer. The gateway owns the
-protected SQLCipher engine, re-resolves the authenticated principal for every
-request, evaluates canonical capabilities, then invokes existing application
-services. Raw SQL and ORM objects never cross IPC.
-"""
+"""Authenticated application/domain gateway owned by AnTechKidsData."""
 from __future__ import annotations
 
 import secrets
@@ -79,12 +73,21 @@ class ServiceSessionRegistry:
 
     def prune(self) -> None:
         now = time.monotonic()
-        expired = [token for token, value in self._sessions.items() if value.expires_at_monotonic <= now]
-        for token in expired:
+        for token in [
+            token for token, value in self._sessions.items()
+            if value.expires_at_monotonic <= now
+        ]:
             self._sessions.pop(token, None)
 
 
 class ProtectedDomainGateway:
+    """Own service-side DB sessions and canonical app authorization.
+
+    DB/key initialization is lazy so the Windows service can install/start and
+    answer health checks before protected storage has been staged. First auth or
+    domain access fails closed if protected key/database material is unavailable.
+    """
+
     def __init__(
         self,
         layout: ProtectedStorageLayout,
@@ -94,24 +97,31 @@ class ProtectedDomainGateway:
     ) -> None:
         self._layout = layout
         self._sessions = session_registry or ServiceSessionRegistry()
-        if session_factory is None:
+        self._session_factory = session_factory
+        self._timeline_service = None
+        self._student_service = None
+
+    def _ensure_services(self):
+        if self._session_factory is None:
             key = DatabaseKeyStore(
-                bundle_path=layout.key_bundle_path,
+                bundle_path=self._layout.key_bundle_path,
                 machine_scope=True,
             ).load()
             engine = create_engine_for_path(
-                layout.database_path,
+                self._layout.database_path,
                 allow_create=False,
                 encrypted=True,
                 encryption_key=key,
             )
-            session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-        self._session_factory = session_factory
-        self._timeline_service = TimelineService(self._session_factory)
-        self._student_service = StudentService(
-            self._session_factory,
-            timeline_service=self._timeline_service,
-        )
+            self._session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        if self._timeline_service is None:
+            self._timeline_service = TimelineService(self._session_factory)
+        if self._student_service is None:
+            self._student_service = StudentService(
+                self._session_factory,
+                timeline_service=self._timeline_service,
+            )
+        return self._session_factory, self._student_service
 
     @staticmethod
     def _principal_summary(user) -> dict[str, Any]:
@@ -124,10 +134,11 @@ class ProtectedDomainGateway:
         }
 
     def authenticate(self, username: str, password: str, caller_sid: str) -> dict[str, Any]:
+        session_factory, _ = self._ensure_services()
         clean_username = str(username or "").strip()
         if not clean_username or not password or not caller_sid:
             raise ProtectedDomainAuthenticationError("Invalid username or password.")
-        with self._session_factory() as db:
+        with session_factory() as db:
             user = UserRepository(db).get_by_username(clean_username)
             if user is None or not user.is_active or user.is_locked:
                 raise ProtectedDomainAuthenticationError("Invalid username or password.")
@@ -155,15 +166,15 @@ class ProtectedDomainGateway:
         return {"logged_out": True}
 
     def _authorized_user(self, token: str, caller_sid: str, *capabilities: Capability):
+        session_factory, _ = self._ensure_services()
         service_session = self._sessions.require(token, caller_sid)
-        with self._session_factory() as db:
+        with session_factory() as db:
             user = UserRepository(db).get_by_id_with_role(service_session.user_id)
             if user is None or not user.is_active or user.is_locked:
                 self._sessions.revoke(token, caller_sid)
                 raise ProtectedDomainAuthenticationError("Application session is no longer valid.")
             if capabilities and not AuthorizationService.allows_any(user, capabilities):
                 raise ProtectedDomainAuthorizationError("Required capability is not granted.")
-            # Relationships needed by AuthorizationService are eager-loaded by repository.
             return user
 
     @staticmethod
@@ -182,13 +193,11 @@ class ProtectedDomainGateway:
         }
 
     def list_students(self, token: str, caller_sid: str) -> dict[str, Any]:
+        _, student_service = self._ensure_services()
         self._authorized_user(
-            token,
-            caller_sid,
-            Capability.STUDENT_READ,
-            Capability.STUDENT_VIEW,
+            token, caller_sid, Capability.STUDENT_READ, Capability.STUDENT_VIEW
         )
-        students = self._student_service.list_students()
+        students = student_service.list_students()
         return {"students": [self._student_dto(student) for student in students]}
 
     @staticmethod
@@ -206,8 +215,11 @@ class ProtectedDomainGateway:
         caller_sid: str,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
+        _, student_service = self._ensure_services()
         self._authorized_user(token, caller_sid, Capability.STUDENT_CREATE)
-        student = self._student_service.create_student(
+        if not isinstance(payload, Mapping):
+            raise ProtectedDomainError("Student payload must be an object.")
+        student = student_service.create_student(
             full_name=str(payload.get("full_name", "")),
             preferred_name=payload.get("preferred_name"),
             date_of_birth=self._optional_date(payload.get("date_of_birth")),
