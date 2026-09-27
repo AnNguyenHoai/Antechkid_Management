@@ -219,9 +219,9 @@ def _create_admin_user(session: Session, admin_role: Role) -> None:
         email="admin@centermanager.local",
         role_id=admin_role.id,
         is_active=True,
-        force_password_change=False,
+        force_password_change=True,
         login_attempts=0,
     )
     session.add(admin)
     session.flush()
-    logger.info("Default admin user created: username='admin', password='admin123'")
+    logger.info("Default admin user created; password change is required at first login")
