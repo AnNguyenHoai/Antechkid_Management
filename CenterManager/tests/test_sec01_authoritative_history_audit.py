@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from git import Repo
@@ -60,3 +63,25 @@ def test_encrypted_only_history_is_append_only_safe(tmp_path):
     assert result.current_plaintext is False
     assert result.reachable_plaintext_versions == 0
     assert result.safe_for_in_place_append_only_cutover is True
+
+
+def test_direct_cli_execution_bootstraps_application_src(tmp_path):
+    repo, db = _repo(tmp_path)
+    _commit(repo, db, b"CIPHERTEXT-V1", "encrypted")
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_authoritative_db_history.py"
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--repo", str(repo.working_tree_dir)],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "ModuleNotFoundError" not in completed.stderr
+    assert "Reachable plaintext versions: 0" in completed.stdout
