@@ -13,19 +13,21 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-# Direct execution from CenterManager/scripts must be able to import the src-layout
-# package without requiring callers to preconfigure PYTHONPATH.
+# Direct execution from CenterManager/scripts must be able to import both the
+# src-layout package and sibling maintenance scripts without PYTHONPATH setup.
 CENTERMANAGER_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = CENTERMANAGER_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+SCRIPTS_ROOT = CENTERMANAGER_ROOT / "scripts"
+for path in (SRC_ROOT, SCRIPTS_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from git import Repo
 
 from centermanager.core.paths import get_paths
 from centermanager.database.encryption import DatabaseKeyStore
 from centermanager.security.protected_storage import get_protected_storage_layout
-from scripts.audit_authoritative_db_history import audit_repository
+from audit_authoritative_db_history import audit_repository
 
 
 @dataclass(frozen=True)
@@ -75,8 +77,9 @@ def build_plan(repo_path: Path) -> CutoverPlan:
     legacy_key_present = DatabaseKeyStore().bundle_path.is_file()
     protected_key_present = get_protected_storage_layout().key_bundle_path.is_file()
 
+    dirty = repo.is_dirty(untracked_files=True)
     blockers: list[str] = []
-    if repo.is_dirty(untracked_files=True):
+    if dirty:
         blockers.append("DATA_REPOSITORY_WORKTREE_DIRTY")
     if not has_origin:
         blockers.append("ORIGIN_REMOTE_MISSING")
@@ -110,7 +113,7 @@ def build_plan(repo_path: Path) -> CutoverPlan:
     return CutoverPlan(
         repository=str(repo_path),
         active_branch=active_branch,
-        working_tree_clean=not repo.is_dirty(untracked_files=True),
+        working_tree_clean=not dirty,
         has_origin=has_origin,
         reachable_plaintext_versions=audit.reachable_plaintext_versions,
         plaintext_refs=plaintext_refs,
