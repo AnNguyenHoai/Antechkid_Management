@@ -1,33 +1,29 @@
 # -*- coding: utf-8 -*-
-"""
-LoginDialog - simple login dialog for authentication.
-"""
+"""LoginDialog - authentication UI independent of persistence implementation."""
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QLabel, QWidget
+    QLineEdit, QPushButton, QLabel
 )
 
-from centermanager.models.user import User
-from centermanager.services.permission_service import PermissionService, AuthenticationError
+from centermanager.services.permission_service import AuthenticationError
 from centermanager.core.current_user import set_current_user
 
 logger = logging.getLogger(__name__)
 
 
 class LoginDialog(QDialog):
-    login_successful = Signal(User)
+    # Service-backed authentication returns a lightweight principal rather than
+    # an ORM User. Keep the UI contract persistence-agnostic.
+    login_successful = Signal(object)
 
-    def __init__(
-        self,
-        permission_service: PermissionService
-    ) -> None:
+    def __init__(self, permission_service) -> None:
         super().__init__()
         self._permission_service = permission_service
-        self._user: Optional[User] = None
+        self._user: Optional[Any] = None
 
         self.setWindowTitle("CenterManager - Login")
         self.setMinimumSize(350, 220)
@@ -35,64 +31,49 @@ class LoginDialog(QDialog):
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
-
         self._setup_ui()
         self._connect_signals()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
-
         header = QLabel("AN TECHKIDS")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976d2;")
         layout.addWidget(header)
-
         subheader = QLabel("Please sign in to continue")
         subheader.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subheader.setStyleSheet("font-size: 13px; color: #666;")
         layout.addWidget(subheader)
-
         layout.addSpacing(8)
-
         form = QFormLayout()
         form.setSpacing(8)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-
         self.username_edit = QLineEdit()
         self.username_edit.setPlaceholderText("Enter username")
         self.username_edit.setFixedHeight(32)
         form.addRow("Username:", self.username_edit)
-
         self.password_edit = QLineEdit()
         self.password_edit.setPlaceholderText("Enter password")
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_edit.setFixedHeight(32)
         form.addRow("Password:", self.password_edit)
-
         layout.addLayout(form)
-
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #d32f2f; font-size: 12px;")
         self.error_label.setVisible(False)
         layout.addWidget(self.error_label)
-
         layout.addSpacing(8)
-
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         self.login_btn = QPushButton("Sign In")
         self.login_btn.setFixedWidth(100)
         self.login_btn.setDefault(True)
-
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setFixedWidth(100)
-
         btn_layout.addWidget(self.login_btn)
         btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
-
         self.username_edit.setFocus()
 
     def _connect_signals(self) -> None:
@@ -104,7 +85,6 @@ class LoginDialog(QDialog):
     def _login(self) -> None:
         username = self.username_edit.text().strip()
         password = self.password_edit.text()
-
         if not username:
             self._show_error("Please enter username.")
             self.username_edit.setFocus()
@@ -113,20 +93,19 @@ class LoginDialog(QDialog):
             self._show_error("Please enter password.")
             self.password_edit.setFocus()
             return
-
         try:
-            logger.info(f"Attempting login for user: {username}")
+            logger.info("Attempting login for user: %s", username)
             user = self._permission_service.authenticate_user(username, password)
-
             self.error_label.setVisible(False)
             self._user = user
-
             if user.force_password_change:
                 from centermanager.ui.change_password_dialog import ChangePasswordDialog
                 self.hide()
                 change_dialog = ChangePasswordDialog(user, self._permission_service)
                 if change_dialog.exec() == ChangePasswordDialog.DialogCode.Accepted:
                     user = self._permission_service.get_user(user.id)
+                    if user is None:
+                        raise AuthenticationError("Authenticated user is no longer available.")
                     self._user = user
                     set_current_user(user)
                     self.login_successful.emit(user)
@@ -138,19 +117,22 @@ class LoginDialog(QDialog):
                     return
             else:
                 set_current_user(user)
-                logger.info(f"User logged in: {username} (role: {user.role.name if user.role else 'none'})")
+                logger.info(
+                    "User logged in: %s (role: %s)",
+                    username,
+                    user.role.name if getattr(user, "role", None) else "none",
+                )
                 self.login_successful.emit(user)
                 self.accept()
-
-        except AuthenticationError as e:
-            self._show_error(str(e))
-        except Exception as e:
-            logger.exception(f"Login error for user {username}: {e}")
-            self._show_error(f"Login error: {str(e)}")
+        except AuthenticationError as exc:
+            self._show_error(str(exc))
+        except Exception as exc:
+            logger.exception("Login error for user %s: %s", username, exc)
+            self._show_error(f"Login error: {exc}")
 
     def _show_error(self, message: str) -> None:
         self.error_label.setText(message)
         self.error_label.setVisible(True)
 
-    def get_user(self) -> Optional[User]:
+    def get_user(self) -> Optional[Any]:
         return self._user

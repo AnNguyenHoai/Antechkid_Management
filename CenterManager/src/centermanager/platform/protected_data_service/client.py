@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Desktop-side client for the protected-data Windows service.
 
-The client never receives SQLCipher key material and cannot issue raw SQL.
+The client never receives SQLCipher key material and cannot issue raw SQL. Domain
+calls use a service-issued application session token bound to the Windows caller
+SID by the broker.
 """
 from __future__ import annotations
 
@@ -33,30 +35,28 @@ class ProtectedDataClient:
     def __init__(self, pipe_name: str = SERVICE_PIPE_NAME, timeout_ms: int = 5000) -> None:
         self._pipe_name = pipe_name
         self._timeout_ms = int(timeout_ms)
+        self._session_token: str | None = None
+
+    @property
+    def is_authenticated(self) -> bool:
+        return bool(self._session_token)
 
     def _call(self, operation: ProtectedDataOperation,
               payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         win32file, win32pipe = _load_win32()
         request_id = uuid.uuid4().hex
-        message = json.dumps(
-            {
-                "version": PROTOCOL_VERSION,
-                "request_id": request_id,
-                "operation": operation.value,
-                "payload": dict(payload or {}),
-            },
-            separators=(",", ":"),
-        ).encode("utf-8")
+        message = json.dumps({
+            "version": PROTOCOL_VERSION,
+            "request_id": request_id,
+            "operation": operation.value,
+            "payload": dict(payload or {}),
+        }, separators=(",", ":")).encode("utf-8")
         try:
             win32pipe.WaitNamedPipe(self._pipe_name, self._timeout_ms)
             handle = win32file.CreateFile(
                 self._pipe_name,
                 win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                0,
-                None,
-                win32file.OPEN_EXISTING,
-                0,
-                None,
+                0, None, win32file.OPEN_EXISTING, 0, None,
             )
         except Exception as exc:
             raise ProtectedDataClientError("AnTechKidsData service is unavailable.") from exc
@@ -83,11 +83,70 @@ class ProtectedDataClient:
             raise ProtectedDataClientError("Protected-data result must be an object.")
         return result
 
+    def _session_payload(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        if not self._session_token:
+            raise ProtectedDataClientError("Authenticate with AnTechKidsData before domain operations.")
+        result = dict(payload or {})
+        result["session_token"] = self._session_token
+        return result
+
     def health(self) -> dict[str, Any]:
         return self._call(ProtectedDataOperation.HEALTH)
 
     def validate_database(self) -> dict[str, Any]:
         return self._call(ProtectedDataOperation.VALIDATE_DATABASE)
 
+    def authenticate(self, username: str, password: str) -> dict[str, Any]:
+        result = self._call(
+            ProtectedDataOperation.AUTHENTICATE,
+            {"username": username, "password": password},
+        )
+        token = str(result.get("session_token", ""))
+        if not token:
+            raise ProtectedDataClientError("Protected-data service did not issue a session token.")
+        self._session_token = token
+        return {key: value for key, value in result.items() if key != "session_token"}
+
+    def logout(self) -> None:
+        if not self._session_token:
+            return
+        try:
+            self._call(ProtectedDataOperation.LOGOUT, self._session_payload())
+        finally:
+            self._session_token = None
+
+    def change_password(self, current_password: str, new_password: str) -> dict[str, Any]:
+        result = self._call(
+            ProtectedDataOperation.USER_CHANGE_PASSWORD,
+            self._session_payload({
+                "current_password": current_password,
+                "new_password": new_password,
+            }),
+        )
+        user = result.get("user")
+        if not isinstance(user, dict):
+            raise ProtectedDataClientError("Protected-data user result is invalid.")
+        return user
+
+    def list_students(self) -> list[dict[str, Any]]:
+        result = self._call(ProtectedDataOperation.STUDENT_LIST, self._session_payload())
+        students = result.get("students", [])
+        if not isinstance(students, list):
+            raise ProtectedDataClientError("Protected-data student list is invalid.")
+        return students
+
+    def create_student(self, student: Mapping[str, Any]) -> dict[str, Any]:
+        result = self._call(
+            ProtectedDataOperation.STUDENT_CREATE,
+            self._session_payload({"student": dict(student)}),
+        )
+        created = result.get("student")
+        if not isinstance(created, dict):
+            raise ProtectedDataClientError("Protected-data student result is invalid.")
+        return created
+
     def create_backup(self, label: str = "manual") -> dict[str, Any]:
-        return self._call(ProtectedDataOperation.CREATE_BACKUP, {"label": label})
+        return self._call(
+            ProtectedDataOperation.CREATE_BACKUP,
+            self._session_payload({"label": label}),
+        )
