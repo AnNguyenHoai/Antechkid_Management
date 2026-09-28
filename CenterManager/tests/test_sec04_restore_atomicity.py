@@ -26,7 +26,16 @@ def _read_marker(path):
         connection.close()
 
 
-def test_metadata_swap_failure_rolls_database_and_metadata_back(tmp_path, monkeypatch):
+def _authorization(reason="rollback test"):
+    actor = SimpleNamespace(id=1, username="admin", is_admin=True)
+    return issue_restore_authorization(
+        actor=actor,
+        reason=reason,
+        confirmation="RESTORE snapshot",
+    )
+
+
+def _runtime_fixture(tmp_path, monkeypatch):
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
     snapshot = backup_root / "snapshot"
@@ -69,7 +78,11 @@ def test_metadata_swap_failure_rolls_database_and_metadata_back(tmp_path, monkey
     service._backup_root = backup_root.resolve()
     service._event_bus = None
     monkeypatch.setattr(service, "_encryption_context", lambda: (False, None))
+    return service, snapshot, database_dir, runtime_db, metadata_dir
 
+
+def test_metadata_swap_failure_rolls_database_and_metadata_back(tmp_path, monkeypatch):
+    service, snapshot, _, runtime_db, metadata_dir = _runtime_fixture(tmp_path, monkeypatch)
     real_replace = os.replace
 
     def fail_metadata_install(src, dst):
@@ -81,15 +94,43 @@ def test_metadata_swap_failure_rolls_database_and_metadata_back(tmp_path, monkey
 
     monkeypatch.setattr(backup_module.os, "replace", fail_metadata_install)
 
-    actor = SimpleNamespace(id=1, username="admin", is_admin=True)
-    authorization = issue_restore_authorization(
-        actor=actor,
-        reason="rollback test",
-        confirmation="RESTORE snapshot",
-    )
-    result = service.restore_backup(snapshot, authorization=authorization)
+    result = service.restore_backup(snapshot, authorization=_authorization())
 
     assert result.success is False
     assert "metadata swap failure" in result.error
     assert _read_marker(runtime_db) == "old"
     assert (metadata_dir / "state.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_live_metadata_preserve_failure_restores_db_metadata_and_sidecars(tmp_path, monkeypatch):
+    service, snapshot, database_dir, runtime_db, metadata_dir = _runtime_fixture(tmp_path, monkeypatch)
+    wal = backup_module.Path(str(runtime_db) + "-wal")
+    shm = backup_module.Path(str(runtime_db) + "-shm")
+    wal.write_bytes(b"old-wal")
+    shm.write_bytes(b"old-shm")
+    real_replace = os.replace
+
+    def fail_live_metadata_preserve(src, dst):
+        src_path = backup_module.Path(src)
+        dst_path = backup_module.Path(dst)
+        if src_path == metadata_dir and dst_path.name.startswith(".metadata.previous-"):
+            raise OSError("injected metadata preserve failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(backup_module.os, "replace", fail_live_metadata_preserve)
+
+    result = service.restore_backup(
+        snapshot,
+        authorization=_authorization("preservation rollback test"),
+    )
+
+    assert result.success is False
+    assert "metadata preserve failure" in result.error
+    assert _read_marker(runtime_db) == "old"
+    assert (metadata_dir / "state.txt").read_text(encoding="utf-8") == "old"
+    assert wal.read_bytes() == b"old-wal"
+    assert shm.read_bytes() == b"old-shm"
+    assert not list(database_dir.glob(".center.db.previous-*"))
+    assert not list(database_dir.glob(".center.db-wal.previous-*"))
+    assert not list(database_dir.glob(".center.db-shm.previous-*"))
+    assert not list(tmp_path.glob(".metadata.previous-*"))
