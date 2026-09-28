@@ -161,7 +161,7 @@ def test_prod_06_existing_backup_service_has_required_safety_building_blocks():
         "Plaintext/legacy backup is forbidden by the production encryption policy",
         "Backup path is outside the managed backup directory",
         "Backup format is newer than this application supports",
-        "os.replace(db_tmp, paths.database_dir / \"center.db\")",
+        "os.replace(db_tmp, runtime_db)",
         "refresh_runtime_db()",
     ):
         assert marker in source

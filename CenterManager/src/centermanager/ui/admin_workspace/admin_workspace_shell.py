@@ -129,7 +129,8 @@ class AdminWorkspaceShell(QWidget):
         self.content_stack.addWidget(self.system_operations_page)
 
         self.backup_operations_service = BackupOperationsService(
-            audit_service=self.audit_service
+            audit_service=self.audit_service,
+            collaboration_manager=self._collaboration_manager,
         )
         self.backup_page = BackupRecoveryPage(
             self.backup_operations_service,

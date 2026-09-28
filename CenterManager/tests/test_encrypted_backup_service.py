@@ -7,6 +7,7 @@ import pytest
 import centermanager.platform.backup.backup_service as backup_module
 from centermanager.database.encryption import apply_sqlcipher_key, load_sqlcipher_driver
 from centermanager.platform.backup.backup_service import BackupService
+from centermanager.platform.backup.restore_authorization import issue_restore_authorization
 
 
 KEY = bytes(range(32))
@@ -63,6 +64,15 @@ def _configure_encrypted_runtime(monkeypatch, paths):
     monkeypatch.setattr(backup_module, "refresh_runtime_db", lambda: None)
 
 
+def _restore_authorization(backup_path):
+    actor = SimpleNamespace(id=1, username="test-admin", is_admin=True)
+    return issue_restore_authorization(
+        actor=actor,
+        reason="encrypted backup restore test",
+        confirmation=f"RESTORE {backup_path.name}",
+    )
+
+
 def test_production_backup_is_ciphertext_and_restores_without_plaintext_temp(tmp_path, monkeypatch):
     pytest.importorskip("sqlcipher3")
     paths = _paths(tmp_path)
@@ -91,7 +101,10 @@ def test_production_backup_is_ciphertext_and_restores_without_plaintext_temp(tmp
     # Replace runtime content, then restore the encrypted snapshot.
     runtime_db.unlink()
     _create_encrypted_database(runtime_db, "Changed after backup")
-    restored = service.restore_backup(result.backup_path)
+    restored = service.restore_backup(
+        result.backup_path,
+        authorization=_restore_authorization(result.backup_path),
+    )
     assert restored.success, restored.error
     assert _read_encrypted_value(runtime_db) == SENSITIVE_VALUE
 
@@ -128,7 +141,7 @@ def test_production_restore_refuses_manifest_marked_plaintext(tmp_path, monkeypa
     _configure_encrypted_runtime(monkeypatch, paths)
     service = BackupService()
 
-    backup = (paths.backup_dir / "publish" / "legacy")
+    backup = paths.backup_dir / "publish" / "legacy"
     backup.mkdir(parents=True)
     (backup / "metadata").mkdir()
     plain = sqlite3.connect(str(backup / "center.db"))
@@ -140,6 +153,9 @@ def test_production_restore_refuses_manifest_marked_plaintext(tmp_path, monkeypa
         encoding="utf-8",
     )
 
-    result = service.restore_backup(backup)
+    result = service.restore_backup(
+        backup,
+        authorization=_restore_authorization(backup),
+    )
     assert not result.success
     assert "plaintext" in (result.error or "").lower() or "legacy" in (result.error or "").lower()

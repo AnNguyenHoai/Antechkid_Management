@@ -28,6 +28,9 @@ from centermanager.database.encryption import (
     is_plaintext_sqlite_file,
     load_sqlcipher_driver,
 )
+from centermanager.platform.backup.restore_authorization import (
+    validate_restore_authorization,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,8 +259,26 @@ class BackupService:
                 self._event_bus.publish(BackupFailed(error=str(exc)))
             return BackupResult(False, error=str(exc))
 
-    def restore_backup(self, backup_path: Path) -> BackupResult:
+    def restore_backup(self, backup_path: Path, *, authorization=None) -> BackupResult:
+        # Fail closed before validation/staging so a direct platform-layer call
+        # cannot bypass the application destructive-operation contract.
+        try:
+            validate_restore_authorization(authorization)
+        except Exception as exc:
+            return BackupResult(False, error=str(exc))
+
         db_tmp: Optional[Path] = None
+        meta_tmp: Optional[Path] = None
+        old_db: Optional[Path] = None
+        old_meta: Optional[Path] = None
+        preserved_sidecars: list[tuple[Path, Path]] = []
+        runtime_db: Optional[Path] = None
+        meta_target: Optional[Path] = None
+        db_installed = False
+        meta_installed = False
+        db_preserved = False
+        meta_preserved = False
+
         try:
             backup_path = Path(backup_path).resolve()
             ok, error = self._validate_backup(backup_path)
@@ -273,6 +294,7 @@ class BackupService:
             paths.database_dir.mkdir(parents=True, exist_ok=True)
             paths.metadata_dir.parent.mkdir(parents=True, exist_ok=True)
 
+            # Stage and validate both halves before touching live runtime state.
             db_tmp = paths.database_dir / f".center.db.restore-{uuid.uuid4().hex}.tmp"
             shutil.copy2(db_src, db_tmp)
             self._fsync_file(db_tmp)
@@ -283,40 +305,92 @@ class BackupService:
             )
             if db_error:
                 db_tmp.unlink(missing_ok=True)
+                db_tmp = None
                 return BackupResult(False, error=db_error)
-
-            runtime_db = paths.database_dir / "center.db"
-            os.replace(db_tmp, paths.database_dir / "center.db")
-            db_tmp = None
-            for suffix in ("-wal", "-shm"):
-                (Path(str(runtime_db) + suffix)).unlink(missing_ok=True)
-
-            final_error = self._validate_database(runtime_db, encrypted=encrypted, key=key)
-            if final_error:
-                raise RuntimeError(f"Restored runtime database failed validation: {final_error}")
 
             meta_target = paths.metadata_dir
             meta_tmp = meta_target.parent / f".metadata.restore-{uuid.uuid4().hex}"
             shutil.copytree(meta_src, meta_tmp)
+
+            runtime_db = paths.database_dir / "center.db"
+            old_db = paths.database_dir / f".center.db.previous-{uuid.uuid4().hex}"
             old_meta = meta_target.parent / f".metadata.previous-{uuid.uuid4().hex}"
+
+            # Preserve WAL/SHM alongside the old database. A staged restored DB
+            # must never see sidecars belonging to the previous runtime DB.
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(str(runtime_db) + suffix)
+                if sidecar.exists():
+                    preserved = paths.database_dir / (
+                        f".{sidecar.name}.previous-{uuid.uuid4().hex}"
+                    )
+                    os.replace(sidecar, preserved)
+                    preserved_sidecars.append((sidecar, preserved))
+
+            if runtime_db.exists():
+                os.replace(runtime_db, old_db)
+                db_preserved = True
             if meta_target.exists():
                 os.replace(meta_target, old_meta)
-            try:
-                os.replace(meta_tmp, meta_target)
-            except Exception:
-                if old_meta.exists():
-                    os.replace(old_meta, meta_target)
-                raise
-            if old_meta.exists():
-                shutil.rmtree(old_meta)
+                meta_preserved = True
 
-            refresh_runtime_db()
+            try:
+                os.replace(db_tmp, runtime_db)
+                db_tmp = None
+                db_installed = True
+
+                os.replace(meta_tmp, meta_target)
+                meta_tmp = None
+                meta_installed = True
+
+                final_error = self._validate_database(
+                    runtime_db,
+                    encrypted=encrypted,
+                    key=key,
+                )
+                if final_error:
+                    raise RuntimeError(
+                        f"Restored runtime database failed validation: {final_error}"
+                    )
+
+                # Keep previous runtime artifacts until the process-level DB
+                # refresh also succeeds; refresh failure therefore remains
+                # rollback-safe rather than reporting a failed partial restore.
+                refresh_runtime_db()
+            except Exception:
+                if db_installed and runtime_db.exists():
+                    runtime_db.unlink(missing_ok=True)
+                if meta_installed and meta_target.exists():
+                    shutil.rmtree(meta_target, ignore_errors=True)
+
+                if db_preserved and old_db is not None and old_db.exists():
+                    os.replace(old_db, runtime_db)
+                if meta_preserved and old_meta is not None and old_meta.exists():
+                    os.replace(old_meta, meta_target)
+                for live, preserved in preserved_sidecars:
+                    if preserved.exists():
+                        os.replace(preserved, live)
+                try:
+                    refresh_runtime_db()
+                except Exception:
+                    logger.exception("Runtime DB refresh failed after restore rollback")
+                raise
+
+            if old_db is not None and old_db.exists():
+                old_db.unlink(missing_ok=True)
+            if old_meta is not None and old_meta.exists():
+                shutil.rmtree(old_meta, ignore_errors=True)
+            for _, preserved in preserved_sidecars:
+                preserved.unlink(missing_ok=True)
+
             logger.info("Backup restored: %s (encrypted=%s)", backup_path, encrypted)
             return BackupResult(True, backup_path)
         except Exception as exc:
             logger.exception("Backup restore failed")
             if db_tmp is not None:
                 db_tmp.unlink(missing_ok=True)
+            if meta_tmp is not None and meta_tmp.exists():
+                shutil.rmtree(meta_tmp, ignore_errors=True)
             return BackupResult(False, error=str(exc))
 
     def list_backups(self) -> list:

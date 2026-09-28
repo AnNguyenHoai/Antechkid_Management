@@ -155,6 +155,7 @@ ADMIN_ONLY_CAPABILITIES = frozenset({
     Capability.FINANCE_SETTLEMENT_CONFIRM.value,
     Capability.FINANCE_SETTLEMENT_REOPEN.value,
     Capability.TUITION_ENROLLMENT_OVERRIDE.value,
+    Capability.BACKUP_RESTORE.value,
 })
 
 IMPLICIT_ROLE_CAPABILITIES = {
