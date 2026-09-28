@@ -27,8 +27,6 @@ def install_git_command_serialization(provider_cls: Any) -> None:
     def serialized_run_git_command(self, *args, **kwargs):
         lock = getattr(self, "_git_command_lock", None)
         if lock is None:
-            # Defensive path for unusual construction/deserialization. Normal
-            # provider instances always receive the lock in __init__.
             lock = threading.RLock()
             self._git_command_lock = lock
         with lock:

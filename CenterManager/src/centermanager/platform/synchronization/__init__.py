@@ -4,6 +4,7 @@
 from .synchronization_manager import SynchronizationManager
 from .synchronization_provider import SynchronizationProvider
 from .git_synchronization_provider import GitSynchronizationProvider   # <-- ĐỔI TỪ git_provider
+from .git_output_safety import install_git_output_safety
 from .git_credential_safety import install_git_credential_safety
 from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
@@ -36,6 +37,10 @@ from .exceptions import (
     PullFailedError,
     PushFailedError,
 )
+
+# Capture Git output as bytes before any other wrapper is installed. This avoids
+# Windows locale decoder failures while preserving all later security wrappers.
+install_git_output_safety(GitSynchronizationProvider)
 
 # Credentials are supplied through GIT_ASKPASS. Never allow token-bearing URLs
 # to reach subprocess argv, including the active startup-clone path.
