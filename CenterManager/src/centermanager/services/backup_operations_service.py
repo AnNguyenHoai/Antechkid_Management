@@ -2,11 +2,8 @@ from pathlib import Path
 
 from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import get_current_user
-from centermanager.platform.backup.backup_service import (
-    BackupResult,
-    BackupService,
-    _issue_restore_authorization,
-)
+from centermanager.platform.backup.backup_service import BackupResult, BackupService
+from centermanager.platform.backup.restore_authorization import issue_restore_authorization
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
 
@@ -124,7 +121,7 @@ class BackupOperationsService:
         # Safety backup may take long enough for collaboration ownership to
         # change. Revalidate WRITE immediately before issuing raw authorization.
         self._require_write()
-        authorization = _issue_restore_authorization(
+        authorization = issue_restore_authorization(
             actor=actor,
             reason=clean_reason,
             confirmation=expected,
