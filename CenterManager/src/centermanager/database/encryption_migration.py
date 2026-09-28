@@ -47,6 +47,56 @@ def _validate_encrypted_database(path: Path, key: bytes) -> None:
         )
 
 
+def _promote_encrypted_database(temp_path: Path, database_path: Path, key: bytes) -> None:
+    """Install a validated encrypted DB without losing the old DB or sidecars.
+
+    Migration can encounter a live SQLite DB together with plaintext WAL/SHM
+    sidecars.  Every live mutation therefore participates in the same rollback
+    boundary.  Preserved artifacts are removed only after the installed
+    encrypted database has itself passed validation.
+    """
+    previous_db = database_path.with_name(
+        f".{database_path.name}.previous-{uuid.uuid4().hex}"
+    )
+    preserved_sidecars: list[tuple[Path, Path]] = []
+    database_preserved = False
+    database_installed = False
+
+    try:
+        # Preserve sidecars first. If any later move fails, already-preserved
+        # artifacts are restored in reverse order below.
+        for suffix in ("-wal", "-shm"):
+            live = Path(str(database_path) + suffix)
+            if not live.exists():
+                continue
+            preserved = database_path.parent / (
+                f".{live.name}.previous-{uuid.uuid4().hex}"
+            )
+            os.replace(live, preserved)
+            preserved_sidecars.append((live, preserved))
+
+        os.replace(database_path, previous_db)
+        database_preserved = True
+
+        os.replace(temp_path, database_path)
+        database_installed = True
+        _validate_encrypted_database(database_path, key)
+    except Exception:
+        if database_installed and database_path.exists():
+            database_path.unlink(missing_ok=True)
+        if database_preserved and previous_db.exists():
+            os.replace(previous_db, database_path)
+        for live, preserved in reversed(preserved_sidecars):
+            if preserved.exists():
+                os.replace(preserved, live)
+        raise
+
+    # Commit the migration only after installed DB validation succeeds.
+    previous_db.unlink(missing_ok=True)
+    for _, preserved in preserved_sidecars:
+        preserved.unlink(missing_ok=True)
+
+
 def encrypt_plaintext_database_in_place(database_path: Path, key: bytes) -> Path:
     """Atomically replace a plaintext SQLite DB with SQLCipher ciphertext.
 
@@ -112,22 +162,12 @@ def encrypt_plaintext_database_in_place(database_path: Path, key: bytes) -> Path
 
         _validate_encrypted_database(temp_path, key)
 
-        # Ensure encrypted bytes reach disk before the atomic replacement.
-        # On Windows, os.fsync() requires a writable file descriptor.
+        # Ensure encrypted bytes reach disk before the atomic promotion. On
+        # Windows, os.fsync() requires a writable file descriptor.
         with temp_path.open("r+b") as handle:
             os.fsync(handle.fileno())
-        os.replace(temp_path, database_path)
 
-        # Stale plaintext WAL/SHM files must not survive the migration boundary.
-        for suffix in ("-wal", "-shm"):
-            try:
-                Path(str(database_path) + suffix).unlink(missing_ok=True)
-            except OSError as exc:
-                raise DatabaseEncryptionMigrationError(
-                    f"Failed to remove stale plaintext SQLite sidecar: {suffix}"
-                ) from exc
-
-        _validate_encrypted_database(database_path, key)
+        _promote_encrypted_database(temp_path, database_path, key)
         return database_path
     except DatabaseEncryptionMigrationError:
         raise

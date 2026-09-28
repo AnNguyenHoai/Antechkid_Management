@@ -4,6 +4,8 @@
 Git repository copies and backup/restore paths are file-level artifacts. In
 production they must remain SQLCipher ciphertext and must authenticate with the
 locally provisioned shared workspace key before they are accepted or published.
+The Git-authoritative DB additionally carries a signed stable identity and
+monotonic generation so decryptability alone is not treated as provenance.
 """
 from __future__ import annotations
 
@@ -15,6 +17,13 @@ from pathlib import Path
 from typing import Optional
 
 from centermanager.core.paths import get_paths
+from centermanager.database.artifact_identity import (
+    DatabaseArtifactIdentityError,
+    identity_manifest_path,
+    next_identity_document,
+    validate_and_pin_identity,
+    write_identity_document,
+)
 from centermanager.database.encryption import (
     DatabaseEncryptionError,
     DatabaseKeyStore,
@@ -103,26 +112,89 @@ def validate_authoritative_repository_database() -> Path:
     encrypted = database_encryption_required()
     if not encrypted and not repo_db.exists():
         return repo_db
-    validate_database_artifact(repo_db, encryption_required=encrypted)
+
+    key = DatabaseKeyStore().load() if encrypted else None
+    validate_database_artifact(repo_db, encryption_required=encrypted, key=key)
+    if encrypted:
+        try:
+            validate_and_pin_identity(repo_db, key)
+        except DatabaseArtifactIdentityError as exc:
+            raise DatabaseArtifactSecurityError(
+                f"Authoritative database identity validation failed: {exc}"
+            ) from exc
     return repo_db
+
+
+def _publish_encrypted_repository_pair(
+    source_tmp: Path,
+    repo_db: Path,
+    key: bytes,
+) -> None:
+    """Install DB + signed identity as one rollback-safe publication boundary."""
+    manifest = identity_manifest_path(repo_db)
+
+    # Existing signed repositories must validate before their stable identity is
+    # reused. A legacy repository without a sidecar is allowed to bootstrap only
+    # through this controlled publication path.
+    if repo_db.exists() and manifest.exists():
+        validate_database_artifact(repo_db, encryption_required=True, key=key)
+        validate_and_pin_identity(repo_db, key)
+
+    identity_document = next_identity_document(source_tmp, key, repo_db)
+    identity_tmp = manifest.with_name(f".{manifest.name}.publish-{uuid.uuid4().hex}.tmp")
+    write_identity_document(identity_tmp, identity_document)
+
+    previous_db = repo_db.with_name(f".{repo_db.name}.previous-{uuid.uuid4().hex}")
+    previous_manifest = manifest.with_name(f".{manifest.name}.previous-{uuid.uuid4().hex}")
+    db_preserved = False
+    manifest_preserved = False
+    db_installed = False
+    manifest_installed = False
+    try:
+        if repo_db.exists():
+            os.replace(repo_db, previous_db)
+            db_preserved = True
+        if manifest.exists():
+            os.replace(manifest, previous_manifest)
+            manifest_preserved = True
+
+        os.replace(source_tmp, repo_db)
+        db_installed = True
+        os.replace(identity_tmp, manifest)
+        manifest_installed = True
+
+        validate_database_artifact(repo_db, encryption_required=True, key=key)
+        validate_and_pin_identity(repo_db, key)
+    except Exception:
+        if manifest_installed and manifest.exists():
+            manifest.unlink(missing_ok=True)
+        if db_installed and repo_db.exists():
+            repo_db.unlink(missing_ok=True)
+        if manifest_preserved and previous_manifest.exists():
+            os.replace(previous_manifest, manifest)
+        if db_preserved and previous_db.exists():
+            os.replace(previous_db, repo_db)
+        raise
+    finally:
+        identity_tmp.unlink(missing_ok=True)
+
+    previous_db.unlink(missing_ok=True)
+    previous_manifest.unlink(missing_ok=True)
 
 
 def materialize_runtime_database_to_repository() -> Path:
     """Atomically publish the current runtime DB into the Git working tree.
 
     Validation occurs before and after the copy. In encrypted production mode
-    this guarantees both source and authoritative repository artifact are
-    SQLCipher ciphertext authenticated by the shared workspace key. The temp
-    artifact is ciphertext because this is a byte-for-byte file materialization.
+    the repository DB is also published together with a signed stable identity,
+    exact SHA-256 and monotonic generation. A failure installing either half
+    restores the previous authoritative DB/identity pair.
     """
     paths = get_paths()
     runtime_db = paths.database_dir / "center.db"
     repo_db = authoritative_repository_database_path()
     encrypted = database_encryption_required()
 
-    # Unit/integration providers on non-production hosts may exercise Git
-    # orchestration without a runtime DB. Do not make those mocks manufacture a
-    # database merely for the security boundary. Production remains fail-closed.
     if not encrypted and not runtime_db.exists():
         return repo_db
 
@@ -136,9 +208,16 @@ def materialize_runtime_database_to_repository() -> Path:
             handle.flush()
             os.fsync(handle.fileno())
         validate_database_artifact(tmp, encryption_required=encrypted, key=key)
-        os.replace(tmp, repo_db)
-        validate_database_artifact(repo_db, encryption_required=encrypted, key=key)
+
+        if encrypted:
+            _publish_encrypted_repository_pair(tmp, repo_db, key)
+            tmp = None
+        else:
+            os.replace(tmp, repo_db)
+            tmp = None
+            validate_database_artifact(repo_db, encryption_required=False)
     except Exception:
-        tmp.unlink(missing_ok=True)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
         raise
     return repo_db
