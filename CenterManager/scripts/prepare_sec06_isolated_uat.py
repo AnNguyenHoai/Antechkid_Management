@@ -5,7 +5,8 @@
 The helper never mutates the source runtime or the real production data repo.
 It copies an existing release package to a new target, creates a fresh SQLCipher
 DB + DPAPI key inside that copy, seeds the default admin, creates a signed SEC-05
-identity, and publishes the pair to a LOCAL bare Git repository.
+identity, and publishes a complete authoritative repository to a LOCAL bare Git
+repository.
 
 Windows only. The target and local remote must not already exist.
 """
@@ -17,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +79,19 @@ def _assert_safe(source: Path, target: Path, remote: Path) -> None:
         raise UATPreparationError("Place UAT target/remote outside the CenterManager source tree")
 
 
+def _write_initial_repository_manifest(repo: Path) -> Path:
+    """Create the minimum authoritative manifest expected by publish/version flow."""
+    manifest_path = repo / "manifest.json"
+    manifest = {
+        "runtime_version": 1,
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "published_by": "SEC06-UAT",
+        "description": "Disposable isolated SEC-06 UAT generation 1",
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest_path
+
+
 def prepare(package: Path, target: Path, remote: Path) -> None:
     if os.name != "nt":
         raise UATPreparationError("SEC-06 packaged UAT preparation requires Windows DPAPI")
@@ -117,10 +132,17 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     validate_authoritative_repository_database()
 
     repo = target / "runtime" / "repository"
+    manifest = _write_initial_repository_manifest(repo)
     _git("init", "-b", "main", cwd=repo)
     _git("config", "user.name", "SEC06 UAT", cwd=repo)
     _git("config", "user.email", "sec06-uat@local.invalid", cwd=repo)
-    _git("add", "database/center.db", "database/center.db.identity.json", cwd=repo)
+    _git(
+        "add",
+        "database/center.db",
+        "database/center.db.identity.json",
+        manifest.name,
+        cwd=repo,
+    )
     _git("commit", "-m", "SEC06 isolated UAT generation 1", cwd=repo)
 
     remote.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +170,7 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     print(f"[OK] SQLCipher DB     : {db}")
     print(f"[OK] DPAPI key        : {key_store.bundle_path}")
     print(f"[OK] SEC-05 pair      : {repo_db} + identity sidecar")
+    print(f"[OK] Repo manifest    : {manifest} (runtime_version=1)")
     print("[NEXT] Launch CenterManager.exe from the isolated package.")
     print("[UAT-09] Login with the documented default admin credential; password-change UI MUST appear before normal workspace access.")
     print("[SAFETY] This fixture uses a local file:// Git remote and cannot publish to the production data repository.")
