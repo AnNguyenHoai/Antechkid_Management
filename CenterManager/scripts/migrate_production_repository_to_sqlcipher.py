@@ -70,15 +70,20 @@ def _build_provider():
     return provider, config.branch, paths.runtime_root
 
 
-def _write_first_identity(repo_db: Path, key: bytes) -> Path:
+def _write_migrated_identity(repo_db: Path, key: bytes) -> tuple[Path, bool]:
+    """Sign migrated ciphertext, preserving a valid predecessor identity if present.
+
+    A legacy plaintext authoritative DB may already carry a SEC-05 sidecar from
+    an earlier controlled publication/bootstrap. That sidecar is not ambiguous:
+    ``next_identity_document`` authenticates it with the workspace key, preserves
+    its stable database_id, and increments generation. Malformed or forged
+    sidecars still fail closed inside that identity boundary.
+    """
     manifest = identity_manifest_path(repo_db)
-    if manifest.exists():
-        raise RuntimeError(
-            "Legacy plaintext migration unexpectedly found an identity sidecar; refusing ambiguous enrollment"
-        )
+    had_predecessor = manifest.is_file()
     document = next_identity_document(repo_db, key, repo_db)
     write_identity_document(manifest, document)
-    return manifest
+    return manifest, had_predecessor
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,8 +136,11 @@ def main(argv: list[str] | None = None) -> int:
         validate_database_artifact(repo_db, encryption_required=True, key=key)
         print("[OK] Authoritative database encrypted in place; logical source data preserved.")
 
-        manifest = _write_first_identity(repo_db, key)
-        print(f"[OK] Signed SEC-05 identity created: {manifest}")
+        manifest, rotated = _write_migrated_identity(repo_db, key)
+        if rotated:
+            print(f"[OK] Signed SEC-05 identity rotated from authenticated predecessor: {manifest}")
+        else:
+            print(f"[OK] Signed SEC-05 identity created: {manifest}")
 
         # Stage only the migration pair. Normal publish() mirrors runtime
         # attachments, which is intentionally excluded from this one-time DB migration.
