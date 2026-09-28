@@ -316,25 +316,26 @@ class BackupService:
             old_db = paths.database_dir / f".center.db.previous-{uuid.uuid4().hex}"
             old_meta = meta_target.parent / f".metadata.previous-{uuid.uuid4().hex}"
 
-            # Preserve WAL/SHM alongside the old database. A staged restored DB
-            # must never see sidecars belonging to the previous runtime DB.
-            for suffix in ("-wal", "-shm"):
-                sidecar = Path(str(runtime_db) + suffix)
-                if sidecar.exists():
-                    preserved = paths.database_dir / (
-                        f".{sidecar.name}.previous-{uuid.uuid4().hex}"
-                    )
-                    os.replace(sidecar, preserved)
-                    preserved_sidecars.append((sidecar, preserved))
-
-            if runtime_db.exists():
-                os.replace(runtime_db, old_db)
-                db_preserved = True
-            if meta_target.exists():
-                os.replace(meta_target, old_meta)
-                meta_preserved = True
-
+            # All live mutations, including preservation, participate in one
+            # rollback boundary. A failure while moving WAL/SHM, the runtime DB,
+            # or live metadata must restore everything already moved.
             try:
+                for suffix in ("-wal", "-shm"):
+                    sidecar = Path(str(runtime_db) + suffix)
+                    if sidecar.exists():
+                        preserved = paths.database_dir / (
+                            f".{sidecar.name}.previous-{uuid.uuid4().hex}"
+                        )
+                        os.replace(sidecar, preserved)
+                        preserved_sidecars.append((sidecar, preserved))
+
+                if runtime_db.exists():
+                    os.replace(runtime_db, old_db)
+                    db_preserved = True
+                if meta_target.exists():
+                    os.replace(meta_target, old_meta)
+                    meta_preserved = True
+
                 os.replace(db_tmp, runtime_db)
                 db_tmp = None
                 db_installed = True
@@ -367,7 +368,7 @@ class BackupService:
                     os.replace(old_db, runtime_db)
                 if meta_preserved and old_meta is not None and old_meta.exists():
                     os.replace(old_meta, meta_target)
-                for live, preserved in preserved_sidecars:
+                for live, preserved in reversed(preserved_sidecars):
                     if preserved.exists():
                         os.replace(preserved, live)
                 try:
