@@ -3,7 +3,7 @@ from pathlib import Path
 
 def test_restore_refreshes_runtime_sessions_after_file_replacement():
     source = Path("src/centermanager/platform/backup/backup_service.py").read_text(encoding="utf-8")
-    assert "os.replace(db_tmp, paths.database_dir / \"center.db\")" in source
+    assert "os.replace(db_tmp, runtime_db)" in source
     assert "refresh_runtime_db()" in source
 
 
