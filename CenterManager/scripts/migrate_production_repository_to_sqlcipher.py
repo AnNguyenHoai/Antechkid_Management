@@ -2,11 +2,8 @@
 # -*- coding: utf-8 -*-
 """Controlled data-preserving SEC-01 migration of authoritative Git DB.
 
-The remote plaintext database is first fenced by the collaboration WRITE lock
-and remote MAIN commit. The checked-out authoritative DB is then encrypted in
-place, enrolled into SEC-05 identity, committed, and pushed with Git CAS. The
-runtime DB is intentionally not used as migration input, so a fresh/disposable
-runtime database cannot overwrite existing authoritative business data.
+The fenced remote plaintext DB is the migration source. Runtime DB contents are
+never used, preventing a fresh/disposable runtime from replacing business data.
 """
 from __future__ import annotations
 
@@ -24,14 +21,12 @@ from centermanager.core.git_locator import locate_git
 from centermanager.core.paths import get_paths
 from centermanager.database.artifact_identity import (
     identity_manifest_path,
+    local_identity_state_path,
     next_identity_document,
     validate_and_pin_identity,
     write_identity_document,
 )
-from centermanager.database.artifact_security import (
-    authoritative_repository_database_path,
-    validate_database_artifact,
-)
+from centermanager.database.artifact_security import authoritative_repository_database_path, validate_database_artifact
 from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required, is_plaintext_sqlite_file
 from centermanager.database.encryption_migration import encrypt_plaintext_database_in_place
 from centermanager.events.event_bus import EventBus
@@ -75,21 +70,19 @@ def _build_provider():
     return provider, config.branch, paths.runtime_root
 
 
-def _enroll_identity(repo_db: Path, key: bytes) -> Path:
+def _write_first_identity(repo_db: Path, key: bytes) -> Path:
     manifest = identity_manifest_path(repo_db)
     if manifest.exists():
-        validate_and_pin_identity(repo_db, key)
-        return manifest
+        raise RuntimeError(
+            "Legacy plaintext migration unexpectedly found an identity sidecar; refusing ambiguous enrollment"
+        )
     document = next_identity_document(repo_db, key, repo_db)
     write_identity_document(manifest, document)
-    validate_and_pin_identity(repo_db, key)
     return manifest
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Encrypt the existing authoritative plaintext Git DB without replacing its data."
-    )
+    parser = argparse.ArgumentParser(description="Encrypt existing authoritative plaintext Git DB without replacing its data.")
     parser.add_argument("--apply", action="store_true", help="Perform migration and remote publication.")
     parser.add_argument("--confirm", help=f"Required with --apply: {CONFIRM}")
     args = parser.parse_args(argv)
@@ -124,29 +117,25 @@ def main(argv: list[str] | None = None) -> int:
 
         expected_main = _remote_main(provider, branch)
         print(f"[OK] WRITE acquired; remote {branch} fenced at {expected_main}")
-
-        # Reconstruct the migration source from the exact fenced remote commit.
-        # This intentionally discards any unpublished local repository working
-        # tree state so it cannot be mistaken for authoritative data.
         provider._run_git_command(["fetch", "origin", branch])
         provider._run_git_command(["reset", "--hard", expected_main])
         if not repo_db.is_file():
             raise RuntimeError(f"Authoritative database is missing at fenced remote MAIN: {repo_db}")
+        if not is_plaintext_sqlite_file(repo_db):
+            raise RuntimeError(
+                "Fenced authoritative DB is not plaintext. This one-time migration is only for the legacy plaintext boundary."
+            )
 
         key = DatabaseKeyStore().load()
-        if is_plaintext_sqlite_file(repo_db):
-            encrypt_plaintext_database_in_place(repo_db, key)
-            print("[OK] Authoritative database encrypted in place; logical source data preserved.")
-        else:
-            validate_database_artifact(repo_db, encryption_required=True, key=key)
-            print("[OK] Authoritative database is already valid SQLCipher; continuing identity enrollment.")
-
+        encrypt_plaintext_database_in_place(repo_db, key)
         validate_database_artifact(repo_db, encryption_required=True, key=key)
-        manifest = _enroll_identity(repo_db, key)
-        print(f"[OK] SEC-05 identity validated: {manifest}")
+        print("[OK] Authoritative database encrypted in place; logical source data preserved.")
 
-        # Stage only the migration pair. Do not run normal publish() here: that
-        # path mirrors runtime attachments and could mutate unrelated remote data.
+        manifest = _write_first_identity(repo_db, key)
+        print(f"[OK] Signed SEC-05 identity created: {manifest}")
+
+        # Stage only the migration pair. Normal publish() mirrors runtime
+        # attachments, which is intentionally excluded from this one-time DB migration.
         provider._run_git_command(["add", "--force", DB_RELATIVE_PATH, IDENTITY_RELATIVE_PATH])
         staged = provider._run_git_command(["diff", "--cached", "--name-only"])
         staged_paths = {line.strip() for line in staged.splitlines() if line.strip()}
@@ -154,8 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         unexpected = staged_paths - allowed
         if unexpected:
             raise RuntimeError(f"Unexpected staged paths; refusing migration commit: {sorted(unexpected)}")
-        if not staged_paths:
-            raise RuntimeError("Migration produced no staged DB/identity changes")
+        if staged_paths != allowed:
+            raise RuntimeError(f"Migration must stage exactly DB+identity, got: {sorted(staged_paths)}")
 
         provider._run_git_command(["commit", "-m", f"{OPERATOR}: {COMMIT_MESSAGE}"])
         provider._push_only(expected_remote_commit=expected_main)
@@ -163,13 +152,21 @@ def main(argv: list[str] | None = None) -> int:
         remote_main = _remote_main(provider, branch)
         local_head = provider._run_git_command(["rev-parse", "HEAD"]).strip()
         if remote_main != local_head or remote_main == expected_main:
-            raise RuntimeError(
-                f"Remote verification failed: before={expected_main}, remote={remote_main}, local={local_head}"
-            )
+            raise RuntimeError(f"Remote verification failed: before={expected_main}, remote={remote_main}, local={local_head}")
         provider._run_git_command(["cat-file", "-e", f"{remote_main}:{DB_RELATIVE_PATH}"])
         provider._run_git_command(["cat-file", "-e", f"{remote_main}:{IDENTITY_RELATIVE_PATH}"])
+
+        # A previous local-only SEC-05 bootstrap may have pinned a disposable DB
+        # identity. Only after the migrated pair is durably remote-authoritative
+        # may this one-time legacy migration replace that local TOFU state.
+        pin = local_identity_state_path()
+        if pin.exists():
+            pin.unlink()
+            print("[OK] Replaced pre-migration local identity pin after remote commit succeeded.")
+        validate_and_pin_identity(repo_db, key)
+
         print(f"[OK] Remote {branch} advanced: {expected_main} -> {remote_main}")
-        print("[OK] Remote commit contains encrypted DB + signed SEC-05 identity.")
+        print("[OK] Remote commit contains encrypted DB + signed SEC-05 identity; identity pinned locally.")
         result = 0
     except Exception as exc:
         print(f"[ERROR] Controlled authoritative migration failed: {exc}")
