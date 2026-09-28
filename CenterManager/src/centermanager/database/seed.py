@@ -203,7 +203,7 @@ def _create_admin_user(session: Session, admin_role: Role) -> None:
     if existing:
         if existing.role_id != admin_role.id:
             existing.role_id = admin_role.id
-            existing.force_password_change = False
+            #existing.force_password_change = False
             existing.login_attempts = 0
             existing.locked_until = None
             session.flush()
