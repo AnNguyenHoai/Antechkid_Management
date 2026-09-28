@@ -104,6 +104,10 @@ def test_metadata_swap_failure_rolls_database_and_metadata_back(tmp_path, monkey
 
 def test_live_metadata_preserve_failure_restores_db_metadata_and_sidecars(tmp_path, monkeypatch):
     service, snapshot, database_dir, runtime_db, metadata_dir = _runtime_fixture(tmp_path, monkeypatch)
+    # Capture the closed, checkpointed database before creating synthetic
+    # sidecars.  The sidecars below are sentinel bytes, not valid SQLite WAL/SHM
+    # files, so reopening SQLite while they are present is intentionally avoided.
+    old_db_bytes = runtime_db.read_bytes()
     wal = backup_module.Path(str(runtime_db) + "-wal")
     shm = backup_module.Path(str(runtime_db) + "-shm")
     wal.write_bytes(b"old-wal")
@@ -126,7 +130,7 @@ def test_live_metadata_preserve_failure_restores_db_metadata_and_sidecars(tmp_pa
 
     assert result.success is False
     assert "metadata preserve failure" in result.error
-    assert _read_marker(runtime_db) == "old"
+    assert runtime_db.read_bytes() == old_db_bytes
     assert (metadata_dir / "state.txt").read_text(encoding="utf-8") == "old"
     assert wal.read_bytes() == b"old-wal"
     assert shm.read_bytes() == b"old-shm"
