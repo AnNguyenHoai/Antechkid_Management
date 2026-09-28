@@ -18,7 +18,6 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +38,9 @@ from centermanager.database.encryption import DatabaseKeyStore, is_plaintext_sql
 from centermanager.database.engine import create_production_engine, get_database_path, initialize_runtime_database
 from centermanager.database.migration import upgrade_fresh_runtime_database_to_head
 from centermanager.database.seed import seed_roles_and_permissions
+from centermanager.platform.repository.manifest_loader import ManifestLoader
+from centermanager.platform.repository.repository_manager import RepositoryManager
+from centermanager.platform.repository.repository_state import RepositoryState
 
 CONFIRM = "PREPARE-ISOLATED-SEC06-UAT"
 
@@ -79,17 +81,47 @@ def _assert_safe(source: Path, target: Path, remote: Path) -> None:
         raise UATPreparationError("Place UAT target/remote outside the CenterManager source tree")
 
 
-def _write_initial_repository_manifest(repo: Path) -> Path:
-    """Create the minimum authoritative manifest expected by publish/version flow."""
+def _load_canonical_package_manifest(package: Path) -> dict:
+    """Load the release runtime manifest through the production validator.
+
+    The authoritative UAT repository must publish the same runtime-manifest
+    schema/version contract as the packaged executable.  A synthetic/minimal
+    manifest can pass Git setup but make BootstrapManager classify the runtime
+    as CORRUPTED immediately after startup synchronization.
+    """
+    manifest_path = package / "runtime" / "manifest.json"
+    try:
+        return ManifestLoader(manifest_path).load()
+    except Exception as exc:
+        raise UATPreparationError(
+            f"Release package runtime manifest is not canonical: {exc}"
+        ) from exc
+
+
+def _write_initial_repository_manifest(repo: Path, canonical_manifest: dict) -> Path:
+    """Publish a canonical copy of the packaged runtime manifest."""
     manifest_path = repo / "manifest.json"
-    manifest = {
-        "runtime_version": 1,
-        "published_at": datetime.now(timezone.utc).isoformat(),
-        "published_by": "SEC06-UAT",
-        "description": "Disposable isolated SEC-06 UAT generation 1",
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(canonical_manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    # Validate the exact artifact that Git will publish, not just the source.
+    try:
+        ManifestLoader(manifest_path).load()
+    except Exception as exc:
+        raise UATPreparationError(
+            f"Generated authoritative runtime manifest is invalid: {exc}"
+        ) from exc
     return manifest_path
+
+
+def _validate_runtime_contract(target: Path) -> None:
+    """Fail preparation unless the package is READY by production rules."""
+    manager = RepositoryManager(runtime_root=target / "runtime")
+    state = manager.detect()
+    if state is not RepositoryState.READY:
+        raise UATPreparationError(
+            f"Prepared package violates production runtime contract: state={state.value}"
+        )
 
 
 def prepare(package: Path, target: Path, remote: Path) -> None:
@@ -98,8 +130,12 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     package, target, remote = package.resolve(), target.resolve(), remote.resolve()
     _assert_safe(package, target, remote)
 
+    # Validate and capture the release contract before creating any UAT files.
+    canonical_manifest = _load_canonical_package_manifest(package)
+
     shutil.copytree(package, target)
     # Never inherit release/runtime security state or an old Git working tree.
+    # Keep runtime/manifest.json: it is part of the executable/runtime contract.
     for relative in ("runtime/Database", "runtime/repository", "runtime/Config"):
         path = target / relative
         if path.exists():
@@ -132,7 +168,12 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     validate_authoritative_repository_database()
 
     repo = target / "runtime" / "repository"
-    manifest = _write_initial_repository_manifest(repo)
+    manifest = _write_initial_repository_manifest(repo, canonical_manifest)
+
+    # Catch manifest/directory incompatibility before Git publication. This is
+    # the same repository-state boundary BootstrapManager checks after sync.
+    _validate_runtime_contract(target)
+
     _git("init", "-b", "main", cwd=repo)
     _git("config", "user.name", "SEC06 UAT", cwd=repo)
     _git("config", "user.email", "sec06-uat@local.invalid", cwd=repo)
@@ -165,12 +206,19 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
+    # Config recreation must not disturb the canonical runtime contract.
+    _validate_runtime_contract(target)
+
     print(f"[OK] Isolated package : {target}")
     print(f"[OK] Local Git remote : {remote}")
     print(f"[OK] SQLCipher DB     : {db}")
     print(f"[OK] DPAPI key        : {key_store.bundle_path}")
     print(f"[OK] SEC-05 pair      : {repo_db} + identity sidecar")
-    print(f"[OK] Repo manifest    : {manifest} (runtime_version=1)")
+    print(
+        f"[OK] Repo manifest    : {manifest} "
+        f"(runtime_version={canonical_manifest['runtime_version']})"
+    )
+    print("[OK] Runtime contract : READY under production RepositoryManager")
     print("[NEXT] Launch CenterManager.exe from the isolated package.")
     print("[UAT-09] Login with the documented default admin credential; password-change UI MUST appear before normal workspace access.")
     print("[SAFETY] This fixture uses a local file:// Git remote and cannot publish to the production data repository.")
