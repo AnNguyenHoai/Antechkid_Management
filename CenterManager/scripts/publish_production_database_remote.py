@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Controlled SEC-06 publication of encrypted DB+identity to remote Git MAIN.
 
-This operational/UAT command composes the existing SEC-05 artifact boundary,
-Git synchronization provider, and collaboration WRITE lock. It deliberately
-does not invoke raw ad-hoc git add/commit/push outside those boundaries.
+This command is for normal encrypted-to-encrypted publication. It deliberately
+refuses to replace a legacy plaintext authoritative database with an unrelated
+runtime database; that boundary requires the data-preserving SEC-01 migration.
 """
 from __future__ import annotations
 
@@ -21,10 +21,11 @@ if str(SRC_ROOT) not in sys.path:
 from centermanager.core.git_locator import locate_git
 from centermanager.core.paths import get_paths
 from centermanager.database.artifact_security import (
+    authoritative_repository_database_path,
     materialize_runtime_database_to_repository,
     validate_authoritative_repository_database,
 )
-from centermanager.database.encryption import database_encryption_required
+from centermanager.database.encryption import database_encryption_required, is_plaintext_sqlite_file
 from centermanager.database.engine import get_database_path
 from centermanager.events.event_bus import EventBus
 from centermanager.platform.collaboration import CollaborationManager
@@ -67,9 +68,7 @@ def _build_provider():
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Publish encrypted production DB+SEC-05 identity to remote Git MAIN."
-    )
+    parser = argparse.ArgumentParser(description="Publish encrypted production DB+SEC-05 identity to remote Git MAIN.")
     parser.add_argument("--apply", action="store_true", help="Perform remote publication.")
     parser.add_argument("--confirm", help=f"Required with --apply: {CONFIRM}")
     args = parser.parse_args(argv)
@@ -98,47 +97,35 @@ def main(argv: list[str] | None = None) -> int:
     result = 1
     try:
         provider, branch, runtime_root = _build_provider()
-        collaboration = CollaborationManager(
-            runtime_root=runtime_root,
-            event_bus=EventBus(),
-            sync_provider=provider,
-        )
-        collaboration.initialize(
-            user_id="sec06-uat",
-            username=OPERATOR,
-            role="admin",
-            runtime_version=0,
-        )
-        write = collaboration.request_write("SEC-06 controlled encrypted DB first publication")
+        collaboration = CollaborationManager(runtime_root=runtime_root, event_bus=EventBus(), sync_provider=provider)
+        collaboration.initialize(user_id="sec06-uat", username=OPERATOR, role="admin", runtime_version=0)
+        write = collaboration.request_write("SEC-06 controlled encrypted DB publication")
         if not write.is_granted:
             raise RuntimeError(f"WRITE lock not granted: {write.result.value}: {write.message}")
 
         expected_main = _remote_main(provider, branch)
         print(f"[OK] WRITE acquired; remote {branch} fenced at {expected_main}")
 
+        repo_db = authoritative_repository_database_path()
+        if repo_db.is_file() and is_plaintext_sqlite_file(repo_db):
+            raise RuntimeError(
+                "Refusing to replace a plaintext authoritative DB with the runtime DB. "
+                "Run the controlled data-preserving SEC-01 remote encryption migration first."
+            )
+
         published = materialize_runtime_database_to_repository()
         validate_authoritative_repository_database()
         identity = published.with_name(published.name + ".identity.json")
         if not identity.is_file():
             raise RuntimeError(f"SEC-05 identity was not created: {identity}")
-
-        # The identity sidecar is security metadata and must be staged even if a
-        # production-data repository has a legacy ignore rule for database/*.
         provider._run_git_command(["add", "--force", IDENTITY_RELATIVE_PATH])
         print(f"[OK] Local encrypted DB+identity prepared: {published}")
 
-        provider.publish_only(
-            COMMIT_MESSAGE,
-            OPERATOR,
-            expected_main_commit=expected_main,
-        )
-
+        provider.publish_only(COMMIT_MESSAGE, OPERATOR, expected_main_commit=expected_main)
         remote_main = _remote_main(provider, branch)
         local_head = provider._run_git_command(["rev-parse", "HEAD"]).strip()
         if remote_main != local_head:
-            raise RuntimeError(
-                f"Remote verification failed: remote={remote_main}, local={local_head}"
-            )
+            raise RuntimeError(f"Remote verification failed: remote={remote_main}, local={local_head}")
         provider._run_git_command(["cat-file", "-e", f"{remote_main}:{IDENTITY_RELATIVE_PATH}"])
         print(f"[OK] Remote {branch} advanced: {expected_main} -> {remote_main}")
         print("[OK] Remote commit contains the signed SEC-05 identity sidecar.")
@@ -149,10 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if collaboration is not None:
             try:
-                if getattr(collaboration, "_is_writing", False):
-                    if not collaboration.release_write():
-                        print("[ERROR] WRITE release failed.")
-                        result = 1
+                if getattr(collaboration, "_is_writing", False) and not collaboration.release_write():
+                    print("[ERROR] WRITE release failed.")
+                    result = 1
                 collaboration.shutdown()
             except Exception as exc:
                 print(f"[ERROR] WRITE cleanup failed: {exc}")
