@@ -1,6 +1,7 @@
-"""Locale-independent subprocess output boundary for the active Git provider."""
+"""Locale-independent, windowless subprocess boundary for the active Git provider."""
 
 import logging
+import os
 import subprocess
 from typing import Any
 
@@ -22,13 +23,37 @@ def _decode(value) -> str:
     return str(value)
 
 
+def _windows_hidden_process_kwargs() -> dict:
+    """Prevent child console windows from flashing for packaged GUI builds."""
+    if os.name != "nt":
+        return {}
+
+    kwargs = {}
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if create_no_window:
+        kwargs["creationflags"] = create_no_window
+
+    startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
+    startf_use_showwindow = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    sw_hide = getattr(subprocess, "SW_HIDE", 0)
+    if startupinfo_cls is not None and startf_use_showwindow:
+        startupinfo = startupinfo_cls()
+        startupinfo.dwFlags |= startf_use_showwindow
+        startupinfo.wShowWindow = sw_hide
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def install_git_output_safety(provider_cls: Any) -> None:
-    """Install a byte-capturing Git runner before credential/log wrappers.
+    """Install byte-safe, windowless Git runner before credential/log wrappers.
 
     Windows text-mode subprocess decoding uses the host locale and can fail in
     reader threads before the provider receives stderr. Capturing bytes avoids
     that failure; UTF-8 replacement decoding keeps diagnostics available while
     later credential-safety wrappers still sanitize argv and surfaced errors.
+
+    Packaged CenterManager is a GUI application, so Git is infrastructure and
+    must not create transient console windows during clone/fetch/pull/push.
     """
     if getattr(provider_cls, "_git_output_safety_installed", False):
         return
@@ -53,6 +78,7 @@ def install_git_output_safety(provider_cls: Any) -> None:
             text=False,
             env=env,
             check=False,
+            **_windows_hidden_process_kwargs(),
         )
         stdout = _decode(result.stdout)
         stderr = _decode(result.stderr)
