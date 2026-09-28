@@ -66,12 +66,12 @@ def _setup(monkeypatch, tmp_path):
     monkeypatch.setattr(migration_cli, "encrypt_plaintext_database_in_place", lambda path, key: path.write_bytes(b"encrypted-preserved-data") or path)
     monkeypatch.setattr(migration_cli, "validate_database_artifact", lambda *a, **k: None)
 
-    def first_identity(path, key):
+    def migrated_identity(path, key):
         manifest = path.with_name(path.name + ".identity.json")
         manifest.write_text("{}", encoding="utf-8")
-        return manifest
+        return manifest, False
 
-    monkeypatch.setattr(migration_cli, "_write_first_identity", first_identity)
+    monkeypatch.setattr(migration_cli, "_write_migrated_identity", migrated_identity)
     monkeypatch.setattr(migration_cli, "validate_and_pin_identity", lambda path, key: pin.write_text("new-pin", encoding="utf-8"))
     return provider, repo_db, pin
 
