@@ -9,6 +9,7 @@ monotonic generation so decryptability alone is not treated as provenance.
 """
 from __future__ import annotations
 
+import filecmp
 import os
 import shutil
 import sqlite3
@@ -130,15 +131,28 @@ def _publish_encrypted_repository_pair(
     repo_db: Path,
     key: bytes,
 ) -> None:
-    """Install DB + signed identity as one rollback-safe publication boundary."""
+    """Install DB + signed identity as one rollback-safe publication boundary.
+
+    A legacy transaction path may have already copied the validated runtime DB
+    over ``repo_db`` before this security boundary is reached. In that narrow
+    case the old signed sidecar no longer matches the repository bytes. Permit
+    identity rotation only when the repository bytes are *exactly identical* to
+    ``source_tmp`` (which was copied from and validated against the runtime DB).
+    Any other identity mismatch remains fail-closed.
+    """
     manifest = identity_manifest_path(repo_db)
 
-    # Existing signed repositories must validate before their stable identity is
-    # reused. A legacy repository without a sidecar is allowed to bootstrap only
-    # through this controlled publication path.
     if repo_db.exists() and manifest.exists():
         validate_database_artifact(repo_db, encryption_required=True, key=key)
-        validate_and_pin_identity(repo_db, key)
+        try:
+            validate_and_pin_identity(repo_db, key)
+        except DatabaseArtifactIdentityError:
+            if not filecmp.cmp(repo_db, source_tmp, shallow=False):
+                raise
+            # The signed manifest itself is still authenticated by
+            # next_identity_document(); only its byte hash is stale because the
+            # legacy transaction path copied these exact validated runtime bytes
+            # before entering the atomic publication boundary.
 
     identity_document = next_identity_document(source_tmp, key, repo_db)
     identity_tmp = manifest.with_name(f".{manifest.name}.publish-{uuid.uuid4().hex}.tmp")
