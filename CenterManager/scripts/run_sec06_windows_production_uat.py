@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """SEC-06 real-Windows production security UAT harness.
 
-This tool is deliberately evidence-oriented.  It runs non-destructive checks
-it can prove locally and prints MANUAL checks for scenarios that require a
-second Windows profile/machine, the packaged application UI, Git publication,
-or deliberate fault injection.
+This tool is deliberately evidence-oriented. It runs non-destructive checks it
+can prove locally and prints MANUAL checks for scenarios that require a second
+Windows profile/machine, the packaged application UI, Git publication, or
+deliberate fault injection.
 
 Run from an isolated production-UAT workspace, never against live center data.
 """
@@ -26,12 +26,14 @@ SRC_ROOT = CENTERMANAGER_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from centermanager.core.paths import get_paths
 from centermanager.database.artifact_identity import (
     identity_manifest_path,
     validate_and_pin_identity,
 )
-from centermanager.database.artifact_security import validate_database_artifact
+from centermanager.database.artifact_security import (
+    authoritative_repository_database_path,
+    validate_database_artifact,
+)
 from centermanager.database.encryption import DatabaseKeyStore, is_plaintext_sqlite_file
 from centermanager.database.engine import get_database_path
 
@@ -69,7 +71,6 @@ def run_checks() -> list[Check]:
     if os.name != "nt":
         return checks
 
-    paths = get_paths()
     db_path = get_database_path()
     key_store = DatabaseKeyStore()
 
@@ -108,28 +109,52 @@ def run_checks() -> list[Check]:
     try:
         validate_database_artifact(db_path, encryption_required=True, key=key)
         checks.append(Check(
-            "SEC06-06", "PASS", "SQLCipher integrity/authentication validation succeeds.",
-            "validate_database_artifact(encryption_required=True) succeeded.",
+            "SEC06-06", "PASS", "SQLCipher runtime artifact validation succeeds.",
+            "validate_database_artifact(runtime DB, encryption_required=True) succeeded.",
         ))
     except Exception as exc:
-        checks.append(Check("SEC06-06", "FAIL", "SQLCipher integrity/authentication validation succeeds.", str(exc)))
+        checks.append(Check("SEC06-06", "FAIL", "SQLCipher runtime artifact validation succeeds.", str(exc)))
 
-    manifest = identity_manifest_path(db_path)
-    checks.append(Check(
-        "SEC06-07",
-        "PASS" if manifest.is_file() else "FAIL",
-        "Runtime/authoritative DB has a signed SEC-05 identity sidecar.",
-        str(manifest),
-    ))
-    if manifest.is_file():
+    # SEC-05 identity belongs to the Git-authoritative repository artifact, not
+    # to the mutable runtime working copy. A freshly initialized runtime DB is
+    # therefore expected to have no identity until controlled publication.
+    repo_db = authoritative_repository_database_path()
+    manifest = identity_manifest_path(repo_db)
+    if not repo_db.is_file():
+        checks.append(_manual(
+            "SEC06-07",
+            "Git-authoritative production DB and signed SEC-05 identity are published.",
+            f"Authoritative DB not published yet: {repo_db}. Run the controlled publication path; do not create/copy an identity sidecar by hand.",
+        ))
+    elif not manifest.is_file():
+        checks.append(Check(
+            "SEC06-07", "FAIL",
+            "Published Git-authoritative DB has a signed SEC-05 identity sidecar.",
+            f"Authoritative DB exists but identity is missing: {manifest}",
+        ))
+    else:
         try:
-            identity = validate_and_pin_identity(db_path, key)
+            validate_database_artifact(repo_db, encryption_required=True, key=key)
             checks.append(Check(
-                "SEC06-08", "PASS", "Signed DB identity/hash/generation validates and pins.",
-                f"database_id={identity.database_id} generation={identity.generation} sha256={identity.sha256}",
+                "SEC06-07", "PASS",
+                "Published Git-authoritative DB is valid SQLCipher and has a signed SEC-05 identity sidecar.",
+                f"database={repo_db}; identity={manifest}",
             ))
         except Exception as exc:
-            checks.append(Check("SEC06-08", "FAIL", "Signed DB identity/hash/generation validates and pins.", str(exc)))
+            checks.append(Check(
+                "SEC06-07", "FAIL",
+                "Published Git-authoritative DB is valid SQLCipher and has a signed SEC-05 identity sidecar.",
+                str(exc),
+            ))
+
+        try:
+            signed_identity = validate_and_pin_identity(repo_db, key)
+            checks.append(Check(
+                "SEC06-08", "PASS", "Authoritative DB identity/hash/generation validates and pins.",
+                f"database_id={signed_identity.database_id} generation={signed_identity.generation} sha256={signed_identity.sha256}",
+            ))
+        except Exception as exc:
+            checks.append(Check("SEC06-08", "FAIL", "Authoritative DB identity/hash/generation validates and pins.", str(exc)))
 
     checks.extend([
         _manual("SEC06-09", "Fresh default admin is forced to change password at first login.",
@@ -137,15 +162,15 @@ def run_checks() -> list[Check]:
         _manual("SEC06-10", "Missing/wrong DPAPI workspace key fails closed without creating a replacement key.",
                 "Temporarily move the UAT key bundle aside, launch packaged build, capture failure, then restore bundle."),
         _manual("SEC06-11", "Copied encrypted DB cannot be opened from another Windows profile/machine without provisioning the shared key.",
-                "Copy only DB+identity to a clean Windows profile/machine and capture fail-closed startup."),
+                "Copy the authoritative encrypted DB+identity to a clean Windows profile/machine but do not provision the key; capture fail-closed startup."),
         _manual("SEC06-12", "Production backup is ciphertext and plaintext/wrong-key restore is rejected.",
                 "Create UAT backup; inspect header; attempt controlled invalid restore and capture rejection."),
         _manual("SEC06-13", "Authorized encrypted backup restore succeeds and preserves application data.",
                 "Create marker data, backup, mutate marker, restore with Admin+WRITE+reason+typed confirmation, verify marker."),
-        _manual("SEC06-14", "Tampering one byte of a disposable DB copy is rejected by SEC-05 identity validation.",
-                "Use a copied UAT DB+identity pair only; flip one byte and run startup/preflight."),
-        _manual("SEC06-15", "Replacing DB+manifest with an older signed generation is rejected after a newer generation was pinned.",
-                "Preserve two UAT generations, pin newer, then substitute older pair and capture rollback rejection."),
+        _manual("SEC06-14", "Tampering one byte of a disposable authoritative DB copy is rejected by SEC-05 identity validation.",
+                "Use a copied authoritative UAT DB+identity pair only; flip one byte and run startup/preflight."),
+        _manual("SEC06-15", "Replacing authoritative DB+manifest with an older signed generation is rejected after a newer generation was pinned.",
+                "Preserve two authoritative UAT generations, pin newer, then substitute older pair and capture rollback rejection."),
         _manual("SEC06-16", "Normal production Git pull/publish preserves DB identity and advances generation.",
                 "Perform one isolated production-data-repository publish/pull cycle and record generation before/after."),
         _manual("SEC06-17", "Publication/restore failure does not leave split DB/identity/WAL/SHM state.",
