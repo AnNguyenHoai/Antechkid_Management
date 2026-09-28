@@ -12,8 +12,9 @@ Run only in an isolated UAT workspace with disposable data and a disposable priv
 - Current `main_repos` packaged/frozen build or source run with `ANTECHKIDS_DEPLOYMENT_PROFILE=production` for diagnostics.
 - SQLCipher runtime packaged successfully.
 - Fresh UAT workspace initialized with `scripts/initialize_production_database.py`.
-- SEC-05 identity sidecar created through the controlled publication path before normal startup.
 - Test Admin account and collaboration WRITE ownership available.
+
+SEC-05 identity is a contract of the **Git-authoritative repository DB**, not the mutable runtime DB. A fresh production initialization creates the encrypted runtime DB and DPAPI key first. SEC-05 identity appears only after that runtime DB is published through the controlled repository publication path. Never create or copy the identity sidecar by hand.
 
 ## Automated evidence probe
 
@@ -38,22 +39,26 @@ The harness never prints raw SQLCipher key material.
 | SEC06-01 | Real Windows host | PASS |
 | SEC06-02 | Production runtime DB exists | PASS |
 | SEC06-03 | DPAPI key bundle exists | PASS |
-| SEC06-04 | DB header is not plaintext SQLite | PASS |
+| SEC06-04 | Runtime DB header is not plaintext SQLite | PASS |
 | SEC06-05 | Current Windows profile can unseal DPAPI key | PASS |
-| SEC06-06 | SQLCipher artifact validation succeeds | PASS |
-| SEC06-07 | Signed SEC-05 identity sidecar exists | PASS |
-| SEC06-08 | Identity/hash/generation validates and pins | PASS |
+| SEC06-06 | Runtime SQLCipher artifact validation succeeds | PASS |
+| SEC06-07 | Git-authoritative DB is published with signed SEC-05 identity | MANUAL before first publication, then PASS |
+| SEC06-08 | Authoritative identity/hash/generation validates and pins | PASS after SEC06-07 publication |
 | SEC06-09 | Fresh default Admin must change password | PASS |
 | SEC06-10 | Missing/wrong local key fails closed; no replacement key appears | PASS |
-| SEC06-11 | DB copied to unprovisioned Windows profile/machine cannot start | PASS |
+| SEC06-11 | Authoritative DB copied to unprovisioned Windows profile/machine cannot start | PASS |
 | SEC06-12 | Backup is ciphertext; plaintext/wrong-key restore is rejected | PASS |
 | SEC06-13 | Authorized encrypted restore succeeds | PASS |
-| SEC06-14 | One-byte DB tamper is rejected | PASS |
-| SEC06-15 | Older signed generation is rejected after newer generation was pinned | PASS |
+| SEC06-14 | One-byte authoritative DB tamper is rejected | PASS |
+| SEC06-15 | Older signed authoritative generation is rejected after newer generation was pinned | PASS |
 | SEC06-16 | Normal Git publish/pull preserves database ID and advances generation | PASS |
 | SEC06-17 | Injected publication/restore failure leaves no split artifact state | PASS |
 
 ## Manual execution notes
+
+### SEC06-07/08 — first authoritative publication
+
+After fresh initialization, the runtime DB is intentionally unsigned. Publish it only through the application's controlled production repository publication path. That operation creates `repository/database/center.db` together with `center.db.identity.json`, then validates and locally pins the signed identity. Do not copy the runtime DB into the repository and do not synthesize a sidecar manually.
 
 ### SEC06-09 — first-login password change
 
@@ -65,7 +70,7 @@ Close CenterManager. Move the UAT key bundle to a temporary safe location outsid
 
 ### SEC06-11 — DPAPI/profile boundary
 
-Copy only the encrypted UAT DB and signed identity sidecar to a clean Windows profile or second UAT machine. Do not copy/provision the key. Startup must fail closed. This proves ciphertext portability does not imply key portability.
+Copy only the encrypted authoritative UAT DB and signed identity sidecar to a clean Windows profile or second UAT machine. Do not copy/provision the key. Startup must fail closed. This proves ciphertext portability does not imply key portability.
 
 ### SEC06-12/13 — backup and restore
 
@@ -73,11 +78,11 @@ Create recognizable disposable marker data and an encrypted backup. Confirm its 
 
 ### SEC06-14 — tamper
 
-Work on a disposable copy of the DB+identity pair. Flip one byte in the DB without changing the sidecar. Startup/preflight must reject the pair because the SHA-256 no longer matches the signed identity.
+Work on a disposable copy of the authoritative DB+identity pair. Flip one byte in the DB without changing the sidecar. Startup/preflight must reject the pair because the SHA-256 no longer matches the signed identity.
 
 ### SEC06-15 — rollback
 
-Retain generation N and N+1 of the same UAT database. Let the workstation validate/pin N+1, then substitute the signed N pair. Startup/preflight must reject it as older than the locally trusted generation. Do not delete the local identity pin between these steps.
+Retain generation N and N+1 of the same authoritative UAT database. Let the workstation validate/pin N+1, then substitute the signed N pair. Startup/preflight must reject it as older than the locally trusted generation. Do not delete the local identity pin between these steps.
 
 ### SEC06-16 — publication lifecycle
 
