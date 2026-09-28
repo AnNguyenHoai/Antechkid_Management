@@ -29,7 +29,7 @@ from centermanager.database.engine import (
     get_database_path,
     initialize_runtime_database,
 )
-from centermanager.database.migration import upgrade_database_to_head
+from centermanager.database.migration import upgrade_fresh_runtime_database_to_head
 from centermanager.database.seed import seed_roles_and_permissions
 
 
@@ -71,7 +71,11 @@ def initialize_blank_production_database() -> Path:
         created_db = db_path.exists()
         created_key = key_store.bundle_path.exists()
 
-        upgrade_database_to_head()
+        # A freshly-created encrypted container intentionally has no schema yet,
+        # so normal production lifecycle inspection classifies it INVALID_SCHEMA.
+        # Use the narrow first-run migration path; normal startup remains
+        # fail-closed and cannot use this bypass.
+        upgrade_fresh_runtime_database_to_head()
 
         engine = create_production_engine(echo=False)
         try:

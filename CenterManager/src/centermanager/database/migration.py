@@ -12,6 +12,7 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
+from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required
 from centermanager.database.engine import (
     create_engine_for_path,
     create_production_engine,
@@ -71,10 +72,10 @@ def get_alembic_config(database_path: Path | None = None) -> Config:
 def _upgrade_database_with_engine(database_path: Path, engine) -> None:
     """Upgrade one database using an already-correct SQLAlchemy engine.
 
-    Production passes the SQLCipher-keyed production engine. Disposable/dev
-    callers can continue to use a plain SQLite engine. Alembic receives the
-    existing connection through Config.attributes so it never reopens an
-    encrypted file through the plain sqlite driver.
+    Production passes a SQLCipher-keyed engine. Disposable/dev callers can
+    continue to use a plain SQLite engine. Alembic receives the existing
+    connection through Config.attributes so it never reopens an encrypted file
+    through the plain sqlite driver.
     """
     database_path = Path(database_path).resolve()
     with engine.connect() as connection:
@@ -106,8 +107,37 @@ def upgrade_database_path_to_head(database_path: Path) -> None:
         engine.dispose()
 
 
+def upgrade_fresh_runtime_database_to_head() -> None:
+    """Migrate the explicit first-run runtime container to Alembic head.
+
+    This narrow entry point exists only for controlled initialization after
+    ``initialize_runtime_database()`` has created the empty DB container and,
+    in production, provisioned its workspace key. It intentionally bypasses
+    the normal lifecycle ``AVAILABLE`` gate because a brand-new container has
+    no tables yet and is therefore ``INVALID_SCHEMA`` by operational rules.
+
+    Normal startup and normal production engines remain fail-closed.
+    """
+    database_path = get_database_path()
+    if not database_path.is_file() or database_path.stat().st_size == 0:
+        raise RuntimeError("Fresh runtime database container is missing or empty")
+
+    encrypted = database_encryption_required()
+    key = DatabaseKeyStore().load() if encrypted else None
+    engine = create_engine_for_path(
+        database_path,
+        allow_create=True,
+        encrypted=encrypted,
+        encryption_key=key,
+    )
+    try:
+        _upgrade_database_with_engine(database_path, engine)
+    finally:
+        engine.dispose()
+
+
 def upgrade_database_to_head() -> None:
-    """Upgrade the canonical runtime DB using the active deployment engine."""
+    """Upgrade an operational canonical runtime DB using the active engine."""
     database_path = get_database_path()
     engine = create_production_engine(echo=False)
     try:
