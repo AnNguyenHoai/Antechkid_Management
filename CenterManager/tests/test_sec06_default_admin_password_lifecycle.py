@@ -3,7 +3,8 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.database.base import Base
 from centermanager.database.seed import _create_admin_user
-from centermanager.models.user import Role, User
+from centermanager.models.role import Role
+from centermanager.models.user import User
 from centermanager.services.permission_service import PermissionService
 
 
