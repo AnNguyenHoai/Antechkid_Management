@@ -3,10 +3,9 @@
 
 import json
 import logging
-import time
 import threading
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, Any
 
 from centermanager.platform.repository.atomic_file_writer import AtomicFileWriter
@@ -20,11 +19,11 @@ class HeartbeatRepository:
     Stores heartbeat files in collaboration/heartbeat/.
     Each session has its own heartbeat file.
     """
-    
+
     def __init__(self, heartbeat_dir: Path):
         self._heartbeat_dir = heartbeat_dir
         self._heartbeat_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def update(self, session: RuntimeSession) -> None:
         """Update heartbeat for a session."""
         session.update_heartbeat()
@@ -39,7 +38,7 @@ class HeartbeatRepository:
             "runtime_version": session.runtime_version,
             "is_active": session.is_active,
         })
-    
+
     def get_all(self) -> Dict[str, Dict[str, Any]]:
         """Get all heartbeat entries."""
         result = {}
@@ -51,14 +50,14 @@ class HeartbeatRepository:
             except Exception as e:
                 logger.warning(f"Failed to load heartbeat from {file}: {e}")
         return result
-    
+
     def remove(self, session_id: str) -> None:
         """Remove heartbeat file for a session."""
         file_path = self._heartbeat_dir / f"{session_id}.json"
         if file_path.exists():
             file_path.unlink()
             logger.info(f"Removed heartbeat for session {session_id}")
-    
+
     def is_expired(self, session_id: str, timeout_seconds: int = 30) -> bool:
         """Check if a session's heartbeat has expired."""
         file_path = self._heartbeat_dir / f"{session_id}.json"
@@ -77,8 +76,12 @@ class HeartbeatManager:
     """
     Manages heartbeat updates for the current session.
     Runs in a background thread.
+
+    The stop event is also the interval wait primitive. This lets shutdown wake
+    a sleeping heartbeat immediately instead of leaving daemon threads alive for
+    the remainder of a long ``time.sleep`` interval.
     """
-    
+
     def __init__(
         self,
         repo: HeartbeatRepository,
@@ -92,36 +95,57 @@ class HeartbeatManager:
         self._callback = callback
         self._running = False
         self._thread: Optional[threading.Thread] = None
-    
+        self._stop_event = threading.Event()
+
     def start(self) -> None:
         """Start the heartbeat thread."""
         if self._running:
             return
+        self._stop_event.clear()
         self._running = True
-        self._thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name=f"heartbeat-{self._session.session_id}",
+            daemon=True,
+        )
         self._thread.start()
         logger.info(f"Started heartbeat for session {self._session.session_id}")
-    
+
     def stop(self) -> None:
-        """Stop the heartbeat thread."""
+        """Stop the heartbeat thread and wait until it is no longer alive."""
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2)
+        self._stop_event.set()
+
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.warning(
+                    "Heartbeat thread did not stop within timeout for session %s",
+                    self._session.session_id,
+                )
+            else:
+                self._thread = None
+
         self._repo.remove(self._session.session_id)
         logger.info(f"Stopped heartbeat for session {self._session.session_id}")
-    
+
     def update(self) -> None:
         """Update heartbeat immediately."""
         self._repo.update(self._session)
         if self._callback:
             self._callback(self._session)
-    
+
     def _heartbeat_loop(self) -> None:
-        """Background heartbeat loop."""
-        while self._running:
-            try:
-                self.update()
-                time.sleep(self._interval)
-            except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
-                time.sleep(self._interval)
+        """Background heartbeat loop with interruptible interval waits."""
+        try:
+            while self._running and not self._stop_event.is_set():
+                try:
+                    self.update()
+                except Exception as e:
+                    logger.error(f"Heartbeat error: {e}")
+
+                if self._stop_event.wait(self._interval):
+                    break
+        finally:
+            self._running = False
