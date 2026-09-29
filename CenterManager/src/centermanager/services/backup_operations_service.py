@@ -7,6 +7,10 @@ from centermanager.platform.backup.recovery_authority import (
     RecoveryAuthority,
     RecoveryAuthorityError,
 )
+from centermanager.platform.backup.recovery_publisher import (
+    AuthoritativeRecoveryPublisher,
+    RecoveryPublishError,
+)
 from centermanager.platform.backup.restore_authorization import issue_restore_authorization
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
@@ -29,8 +33,9 @@ class BackupOperationsService:
 
     Restore is intentionally treated as a destructive security boundary. UI
     checks are convenience only; this service validates the real principal,
-    capability, dedicated recovery authority, reason and typed confirmation
-    before mutating runtime state.
+    capability, dedicated recovery authority, reason and typed confirmation,
+    then publishes the restored state authoritatively before releasing recovery
+    authority.
     """
 
     def __init__(
@@ -39,12 +44,14 @@ class BackupOperationsService:
         backup_service=None,
         audit_service=None,
         collaboration_manager=None,
+        recovery_publisher=None,
     ):
         self._backup = backup_service or BackupService()
         self._audit = audit_service or (
             AuditService(session_factory) if session_factory is not None else None
         )
         self._collaboration_manager = collaboration_manager
+        self._recovery_publisher = recovery_publisher
 
     def list_backups(self):
         return self._backup.list_backups()
@@ -124,9 +131,6 @@ class BackupOperationsService:
             raise BackupRestoreAuthorizationError(str(exc)) from exc
 
         try:
-            # Recovery owns the distributed exclusion primitive but remains in
-            # READ from the normal edit-mode perspective. Create the mandatory
-            # rollback point only after exclusive authority is established.
             if not authority.validate():
                 raise BackupRestoreAuthorizationError(
                     "Exclusive recovery authority was lost before safety backup."
@@ -139,8 +143,6 @@ class BackupOperationsService:
                     error=f"Pre-restore backup failed: {safety.error or 'unknown error'}",
                 )
 
-            # Revalidate/renew immediately before the destructive platform call.
-            # This prevents a stale/lost recovery lease from authorizing restore.
             if not authority.renew():
                 raise BackupRestoreAuthorizationError(
                     "Exclusive recovery authority was lost before restore."
@@ -155,7 +157,37 @@ class BackupOperationsService:
                 backup_path,
                 authorization=authorization,
             )
-            if result.success and self._audit:
+            if not result.success:
+                return result
+
+            # SEC06-13R-C: local recovery is not authoritative until the restored
+            # runtime is published while the same exclusive recovery authority is
+            # still live. Never silently fall back to normal Finish Editing.
+            publisher = self._recovery_publisher
+            if publisher is None:
+                return BackupResult(
+                    success=False,
+                    error=(
+                        "Restore completed locally but authoritative recovery publish "
+                        "is unavailable; recovery remains incomplete."
+                    ),
+                )
+            try:
+                publisher.publish(
+                    authority=authority,
+                    actor_name=str(getattr(actor, "username", "") or "system"),
+                    backup_name=backup_path.name,
+                )
+            except RecoveryPublishError as exc:
+                return BackupResult(
+                    success=False,
+                    error=(
+                        "Restore completed locally but authoritative recovery publish "
+                        f"failed: {exc}"
+                    ),
+                )
+
+            if self._audit:
                 self._audit.record(
                     "BACKUP_RESTORED",
                     "admin",
@@ -168,6 +200,7 @@ class BackupOperationsService:
                         "pre_restore_backup": str(safety.backup_path),
                         "restored_backup": str(backup_path),
                         "authority": "RECOVERY",
+                        "authoritative_publish": True,
                     },
                     summary=f"Admin restored backup {backup_path.name}",
                 )
