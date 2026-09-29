@@ -47,14 +47,16 @@ class AdminWorkspaceShell(QWidget):
             "diagnostics": PermissionDefinitions.SETTING_UPDATE, "audit": PermissionDefinitions.AUDIT_VIEW,
             "backup": PermissionDefinitions.BACKUP_VIEW,
         }
-        self._setup_ui()
-        self._connect_signals()
-        self.navigate_to("users")
+        self._setup_ui(); self._connect_signals(); self.navigate_to("users")
+
+    def _live_sync_service(self):
+        if self._sync_service is not None:
+            return self._sync_service
+        return getattr(self.window(), "_sync_service", None)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
-        self.header = WorkspaceHeader("Admin Workspace", "Users")
-        self.header.back_home_clicked.connect(self.go_home.emit); layout.addWidget(self.header)
+        self.header = WorkspaceHeader("Admin Workspace", "Users"); self.header.back_home_clicked.connect(self.go_home.emit); layout.addWidget(self.header)
         body = QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
         pages = [
             {"id": "users", "icon": "👤", "label": "Users"}, {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
@@ -72,23 +74,16 @@ class AdminWorkspaceShell(QWidget):
         self.system_operations_service = SystemOperationsService(self._collaboration_manager, self._git_config_service)
         self.admin_data_reset_service = AdminDataResetService(session_factory, collaboration_manager=self._collaboration_manager, audit_service=self.audit_service)
         self.system_operations_page = SystemOperationsPage(self.system_operations_service, data_reset_service=self.admin_data_reset_service, notification_service=self._notification_service); self.content_stack.addWidget(self.system_operations_page)
-
-        recovery_publisher = AuthoritativeRecoveryPublisher(self._sync_service) if self._sync_service is not None else None
-        self.backup_operations_service = BackupOperationsService(
-            audit_service=self.audit_service,
-            collaboration_manager=self._collaboration_manager,
-            recovery_publisher=recovery_publisher,
-        )
-        self.backup_page = BackupRecoveryPage(self.backup_operations_service, self._permission_service, self._collaboration_manager, self._notification_service)
-        self.content_stack.addWidget(self.backup_page)
+        recovery_publisher = AuthoritativeRecoveryPublisher(self._live_sync_service)
+        self.backup_operations_service = BackupOperationsService(audit_service=self.audit_service, collaboration_manager=self._collaboration_manager, recovery_publisher=recovery_publisher)
+        self.backup_page = BackupRecoveryPage(self.backup_operations_service, self._permission_service, self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.backup_page)
         self.git_settings_page = GitSettingsPage(self._git_config_service, self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.git_settings_page)
         self.diagnostics_page = DiagnosticsPage(self._collaboration_manager); self.content_stack.addWidget(self.diagnostics_page)
         body.addWidget(self.content_stack, 1); layout.addLayout(body)
 
     def _connect_signals(self) -> None:
         panel = getattr(self.system_operations_page, "data_management_panel", None)
-        if panel is not None:
-            panel.data_reset_completed.connect(self._on_data_reset_completed)
+        if panel is not None: panel.data_reset_completed.connect(self._on_data_reset_completed)
         self.backup_page.recovery_restart_required.connect(self.recovery_restart_required.emit)
 
     def _on_data_reset_completed(self, scope: str) -> None:
@@ -98,28 +93,18 @@ class AdminWorkspaceShell(QWidget):
         user = get_current_user(); return bool(user is not None and user.is_admin)
 
     def navigate_to(self, page_id: str) -> None:
-        if not self._has_page_permission(page_id):
-            self._notification_service.notify(f"Permission denied for {page_id}.", "warning"); return
-        if page_id == "users":
-            self.content_stack.setCurrentWidget(self.users_page); self.nav.set_active_page("users"); self.header.set_context("Admin Workspace", "Users"); self.users_page.refresh()
-        elif page_id == "roles":
-            self.content_stack.setCurrentWidget(self.roles_page); self.nav.set_active_page("roles"); self.header.set_context("Admin Workspace", "Roles & Permissions"); self.roles_page.refresh()
-        elif page_id == "audit":
-            self.content_stack.setCurrentWidget(self.audit_page); self.nav.set_active_page("audit"); self.header.set_context("Admin Workspace", "Audit Log"); self.audit_page.refresh()
-        elif page_id == "settings":
-            self.content_stack.setCurrentWidget(self.settings_page); self.nav.set_active_page("settings"); self.header.set_context("Admin Workspace", "Settings")
-        elif page_id == "operations":
-            self.content_stack.setCurrentWidget(self.system_operations_page); self.nav.set_active_page("operations"); self.header.set_context("Admin Workspace", "System Operations"); self.system_operations_page.refresh()
-        elif page_id == "backup":
-            self.content_stack.setCurrentWidget(self.backup_page); self.nav.set_active_page("backup"); self.header.set_context("Admin Workspace", "Backup & Recovery"); self.backup_page.refresh()
-        elif page_id == "git":
-            self.content_stack.setCurrentWidget(self.git_settings_page); self.nav.set_active_page("git"); self.header.set_context("Admin Workspace", "Git Config"); self.git_settings_page.refresh()
-        elif page_id == "diagnostics":
-            self.content_stack.setCurrentWidget(self.diagnostics_page); self.nav.set_active_page("diagnostics"); self.header.set_context("Admin Workspace", "Diagnostics"); self.diagnostics_page.refresh()
+        if not self._has_page_permission(page_id): self._notification_service.notify(f"Permission denied for {page_id}.", "warning"); return
+        if page_id == "users": self.content_stack.setCurrentWidget(self.users_page); self.nav.set_active_page("users"); self.header.set_context("Admin Workspace", "Users"); self.users_page.refresh()
+        elif page_id == "roles": self.content_stack.setCurrentWidget(self.roles_page); self.nav.set_active_page("roles"); self.header.set_context("Admin Workspace", "Roles & Permissions"); self.roles_page.refresh()
+        elif page_id == "audit": self.content_stack.setCurrentWidget(self.audit_page); self.nav.set_active_page("audit"); self.header.set_context("Admin Workspace", "Audit Log"); self.audit_page.refresh()
+        elif page_id == "settings": self.content_stack.setCurrentWidget(self.settings_page); self.nav.set_active_page("settings"); self.header.set_context("Admin Workspace", "Settings")
+        elif page_id == "operations": self.content_stack.setCurrentWidget(self.system_operations_page); self.nav.set_active_page("operations"); self.header.set_context("Admin Workspace", "System Operations"); self.system_operations_page.refresh()
+        elif page_id == "backup": self.content_stack.setCurrentWidget(self.backup_page); self.nav.set_active_page("backup"); self.header.set_context("Admin Workspace", "Backup & Recovery"); self.backup_page.refresh()
+        elif page_id == "git": self.content_stack.setCurrentWidget(self.git_settings_page); self.nav.set_active_page("git"); self.header.set_context("Admin Workspace", "Git Config"); self.git_settings_page.refresh()
+        elif page_id == "diagnostics": self.content_stack.setCurrentWidget(self.diagnostics_page); self.nav.set_active_page("diagnostics"); self.header.set_context("Admin Workspace", "Diagnostics"); self.diagnostics_page.refresh()
 
     def refresh(self) -> None:
-        self.set_write_enabled(self._current_write_enabled())
-        current = self.content_stack.currentWidget()
+        self.set_write_enabled(self._current_write_enabled()); current = self.content_stack.currentWidget()
         if current is self.users_page: self.users_page.refresh()
         elif current is self.roles_page: self.roles_page.refresh()
         elif current is self.audit_page: self.audit_page.refresh()
@@ -134,5 +119,4 @@ class AdminWorkspaceShell(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         for page in (self.users_page, self.roles_page, self.settings_page, self.system_operations_page, self.backup_page, self.git_settings_page):
-            if hasattr(page, "set_write_enabled"):
-                page.set_write_enabled(enabled)
+            if hasattr(page, "set_write_enabled"): page.set_write_enabled(enabled)
