@@ -76,9 +76,18 @@ def _upgrade_database_with_engine(database_path: Path, engine) -> None:
     continue to use a plain SQLite engine. Alembic receives the existing
     connection through Config.attributes so it never reopens an encrypted file
     through the plain sqlite driver.
+
+    The connection is transactional on purpose. SQLite DDL itself may be
+    non-transactional, but Alembic records the applied revision using DML in
+    ``alembic_version``.  Using ``engine.connect()`` here lets SQLAlchemy roll
+    that revision write back when the connection closes, leaving a database
+    whose tables exist but whose migration history is empty.  The next launch
+    then attempts the initial migration again and fails with "table ... already
+    exists".  ``engine.begin()`` commits the Alembic revision together with the
+    successful migration lifecycle.
     """
     database_path = Path(database_path).resolve()
-    with engine.connect() as connection:
+    with engine.begin() as connection:
         inspector = inspect(connection)
         tables = set(inspector.get_table_names())
 
