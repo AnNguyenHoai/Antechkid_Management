@@ -16,6 +16,7 @@ from centermanager.services.audit_service import AuditService
 from centermanager.services.admin_data_reset import AdminDataResetService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
+from centermanager.platform.backup.recovery_publisher import AuthoritativeRecoveryPublisher
 from centermanager.models.permission import PermissionDefinitions
 from centermanager.core.current_user import get_current_user
 from centermanager.services.system_operations_service import SystemOperationsService
@@ -35,6 +36,7 @@ class AdminWorkspaceShell(QWidget):
         platform_context=None,
         collaboration_manager=None,
         notification_service=None,
+        runtime_sync_service=None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -42,6 +44,7 @@ class AdminWorkspaceShell(QWidget):
         self._git_config_service = git_config_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
+        self._runtime_sync_service = runtime_sync_service
         self._notification_service = notification_service or NotificationService()
         self._page_permissions = {
             "users": PermissionDefinitions.USER_VIEW,
@@ -128,9 +131,15 @@ class AdminWorkspaceShell(QWidget):
         )
         self.content_stack.addWidget(self.system_operations_page)
 
+        recovery_publisher = (
+            AuthoritativeRecoveryPublisher(self._runtime_sync_service)
+            if self._runtime_sync_service is not None
+            else None
+        )
         self.backup_operations_service = BackupOperationsService(
             audit_service=self.audit_service,
             collaboration_manager=self._collaboration_manager,
+            recovery_publisher=recovery_publisher,
         )
         self.backup_page = BackupRecoveryPage(
             self.backup_operations_service,
