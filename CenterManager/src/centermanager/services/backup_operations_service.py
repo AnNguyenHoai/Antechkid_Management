@@ -28,6 +28,27 @@ class BackupRestoreValidationError(BackupRestoreError):
     pass
 
 
+class BackupRestoreResult(BackupResult):
+    """Restore outcome carrying the process-lifecycle safety boundary.
+
+    Once the runtime database has been destructively replaced, the current
+    process must never continue normal work, irrespective of whether the
+    authoritative publish subsequently succeeds.  ``requires_restart`` is
+    therefore set only after local restore mutation has succeeded.
+    """
+
+    def __init__(
+        self,
+        success: bool,
+        backup_path=None,
+        error=None,
+        *,
+        requires_restart: bool = False,
+    ):
+        super().__init__(success=success, backup_path=backup_path, error=error)
+        self.requires_restart = bool(requires_restart)
+
+
 class BackupOperationsService:
     """Admin-facing backup/recovery orchestration with audit hooks.
 
@@ -138,9 +159,10 @@ class BackupOperationsService:
 
             safety = self._backup.create_backup(label="pre_restore")
             if not safety.success or safety.backup_path is None:
-                return BackupResult(
+                return BackupRestoreResult(
                     success=False,
                     error=f"Pre-restore backup failed: {safety.error or 'unknown error'}",
+                    requires_restart=False,
                 )
 
             if not authority.renew():
@@ -158,19 +180,25 @@ class BackupOperationsService:
                 authorization=authorization,
             )
             if not result.success:
-                return result
+                return BackupRestoreResult(
+                    success=False,
+                    backup_path=result.backup_path,
+                    error=result.error,
+                    requires_restart=False,
+                )
 
-            # SEC06-13R-C: local recovery is not authoritative until the restored
-            # runtime is published while the same exclusive recovery authority is
-            # still live. Never silently fall back to normal Finish Editing.
+            # From this point onward the live process is stale: the runtime DB
+            # was replaced underneath long-lived engines/services.  No hot reload
+            # is permitted.  Every return path must force a controlled shutdown.
             publisher = self._recovery_publisher
             if publisher is None:
-                return BackupResult(
+                return BackupRestoreResult(
                     success=False,
                     error=(
                         "Restore completed locally but authoritative recovery publish "
                         "is unavailable; recovery remains incomplete."
                     ),
+                    requires_restart=True,
                 )
             try:
                 publisher.publish(
@@ -179,12 +207,13 @@ class BackupOperationsService:
                     backup_name=backup_path.name,
                 )
             except RecoveryPublishError as exc:
-                return BackupResult(
+                return BackupRestoreResult(
                     success=False,
                     error=(
                         "Restore completed locally but authoritative recovery publish "
                         f"failed: {exc}"
                     ),
+                    requires_restart=True,
                 )
 
             if self._audit:
@@ -201,9 +230,15 @@ class BackupOperationsService:
                         "restored_backup": str(backup_path),
                         "authority": "RECOVERY",
                         "authoritative_publish": True,
+                        "restart_required": True,
                     },
                     summary=f"Admin restored backup {backup_path.name}",
                 )
-            return result
+            return BackupRestoreResult(
+                success=True,
+                backup_path=result.backup_path,
+                error=result.error,
+                requires_restart=True,
+            )
         finally:
             authority.release()
