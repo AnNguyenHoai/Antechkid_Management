@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QInputDialog,
+    QLineEdit,
 )
 
 from centermanager.ui.admin_workspace.access import can_write, notify
@@ -43,9 +45,10 @@ class BackupRecoveryPage(QWidget):
         layout.addLayout(head)
 
         self.info = QLabel(
-            "Restore is a maintenance recovery operation and cannot run inside a normal "
-            "editing session. Dedicated recovery authority is being introduced before "
-            "Restore is re-enabled."
+            "Restore is a destructive maintenance recovery operation. It is available "
+            "only from READ mode for an integrity-validated backup and requires a "
+            "reason plus typed confirmation. Recovery publishes the restored runtime "
+            "authoritatively before success is reported."
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
@@ -86,12 +89,17 @@ class BackupRecoveryPage(QWidget):
         self.create_btn.setEnabled(write and self._ps.has_permission("backup.create"))
         backup = self._selected_backup()
         restore_eligible = bool(backup and self._is_restore_eligible(backup))
+        permitted = self._ps.has_permission("backup.restore")
 
-        # SEC06-13R-A: fail closed. Restore must not run inside the normal
-        # Start Editing -> Finish Editing lifecycle. Phase B will enable the
-        # action from READ only after dedicated recovery authority exists.
-        self.restore_btn.setEnabled(False)
-        if backup and not restore_eligible:
+        # SEC06-13R-C2: recovery is deliberately separate from the normal
+        # Start Editing -> Finish Editing transaction. It may enter only from
+        # READ mode, with an integrity-valid backup and explicit capability.
+        self.restore_btn.setEnabled(
+            bool(not write and restore_eligible and permitted)
+        )
+        if not backup:
+            self.restore_btn.setToolTip("Select a validated backup to restore.")
+        elif not restore_eligible:
             self.restore_btn.setToolTip(
                 "Restore is disabled because this backup did not pass integrity validation."
             )
@@ -99,9 +107,11 @@ class BackupRecoveryPage(QWidget):
             self.restore_btn.setToolTip(
                 "Finish or cancel the current editing session before starting recovery."
             )
+        elif not permitted:
+            self.restore_btn.setToolTip("Backup restore capability is required.")
         else:
             self.restore_btn.setToolTip(
-                "Restore is temporarily disabled until dedicated recovery authority is available."
+                "Restore this backup using dedicated recovery authority."
             )
 
     def refresh(self):
@@ -131,6 +141,30 @@ class BackupRecoveryPage(QWidget):
         else:
             notify(self._ns, f"Backup failed: {result.error}", "error")
 
+    def _collect_restore_intent(self, backup_path):
+        reason, ok = QInputDialog.getMultiLineText(
+            self,
+            "Restore backup",
+            "Reason for this destructive recovery operation:",
+        )
+        reason = str(reason or "").strip()
+        if not ok:
+            return None
+        if not reason:
+            notify(self._ns, "Restore reason is required.", "warning")
+            return None
+
+        expected = self._service.confirmation_phrase(backup_path)
+        confirmation, ok = QInputDialog.getText(
+            self,
+            "Confirm restore",
+            f'Type "{expected}" to confirm:',
+            QLineEdit.EchoMode.Normal,
+        )
+        if not ok:
+            return None
+        return reason, str(confirmation or "")
+
     def restore_selected(self):
         backup = self._selected_backup()
         if backup is None:
@@ -141,18 +175,50 @@ class BackupRecoveryPage(QWidget):
                 "Restore rejected: selected backup did not pass integrity validation.",
                 "error",
             )
-
-        # Defense in depth for programmatic/direct invocation. The button is
-        # disabled in Phase A, but this guard prevents the old destructive flow
-        # from being entered through a direct slot call.
         if can_write(self._cm):
             return notify(
                 self._ns,
                 "Finish or cancel the current editing session before starting recovery.",
                 "warning",
             )
-        return notify(
-            self._ns,
-            "Restore is temporarily disabled until dedicated recovery authority is available.",
-            "warning",
-        )
+        if not self._ps.has_permission("backup.restore"):
+            return notify(self._ns, "Backup restore capability is required.", "error")
+
+        backup_path = backup.get("path")
+        if not backup_path:
+            return notify(self._ns, "Restore rejected: backup path is missing.", "error")
+
+        intent = self._collect_restore_intent(backup_path)
+        if intent is None:
+            return
+        reason, confirmation = intent
+
+        try:
+            result = self._service.restore_backup(
+                backup_path,
+                reason=reason,
+                confirmation=confirmation,
+            )
+        except Exception as exc:
+            # Service-side authorization/validation is authoritative. Keep this
+            # UI path fail-closed and never route recovery through Finish Editing.
+            return notify(self._ns, f"Restore rejected: {exc}", "error")
+
+        if result.success:
+            notify(
+                self._ns,
+                "Backup restored and authoritative recovery publish completed.",
+                "success",
+            )
+            self.refresh()
+            return
+
+        error = result.error or "unknown recovery error"
+        if "authoritative recovery publish" in str(error).lower():
+            notify(
+                self._ns,
+                f"Recovery incomplete: {error}",
+                "error",
+            )
+        else:
+            notify(self._ns, f"Restore failed: {error}", "error")
