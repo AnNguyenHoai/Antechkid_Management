@@ -111,11 +111,52 @@ class BackupOperationsService:
 
         # All destructive-operation intent checks happen before any mutation,
         # including the safety backup creation.
-        self._require_admin_and_capability()
+        actor = self._require_admin_and_capability()
         self._require_recovery_entry_state()
 
-        # Unreachable in SEC06-13R-A. Kept as a fail-closed defensive boundary
-        # until SEC06-13R-B replaces it with dedicated recovery authority.
-        raise BackupRestoreAuthorizationError(
-            "Recovery authority is not available yet; Restore is temporarily disabled."
+        clean_reason = str(reason or "").strip()
+        if not clean_reason:
+            raise BackupRestoreValidationError("A restore reason is required.")
+
+        expected = self.confirmation_phrase(backup_path)
+        if str(confirmation or "").strip() != expected:
+            raise BackupRestoreValidationError(
+                f'Type "{expected}" to confirm this destructive operation.'
+            )
+
+        safety = self._backup.create_backup(label="pre_restore")
+        if not safety.success or safety.backup_path is None:
+            return BackupResult(
+                success=False,
+                error=f"Pre-restore backup failed: {safety.error or 'unknown error'}",
+            )
+
+        # SEC06-13R-B will revalidate dedicated recovery authority here before
+        # issuing raw platform authorization. The Phase-A entry gate above is
+        # intentionally fail-closed, so this code cannot currently be reached.
+        self._require_recovery_entry_state()
+        authorization = issue_restore_authorization(
+            actor=actor,
+            reason=clean_reason,
+            confirmation=expected,
         )
+        result = self._backup.restore_backup(
+            backup_path,
+            authorization=authorization,
+        )
+        if result.success and self._audit:
+            self._audit.record(
+                "BACKUP_RESTORED",
+                "admin",
+                target_type="backup",
+                target_id=str(backup_path),
+                target_name=backup_path.name,
+                actor=actor,
+                details={
+                    "reason": clean_reason,
+                    "pre_restore_backup": str(safety.backup_path),
+                    "restored_backup": str(backup_path),
+                },
+                summary=f"Admin restored backup {backup_path.name}",
+            )
+        return result
