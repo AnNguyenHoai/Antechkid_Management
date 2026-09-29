@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Authoritative publication boundary for destructive recovery.
-
-A successful local restore is not complete until the restored runtime database is
-published through the synchronization provider while exclusive RecoveryAuthority
-is still held.  This adapter deliberately reuses the existing safe publish-only
-pipeline (which materializes the runtime database and performs the provider's
-optimistic-main check) without entering normal CollaborationManager WRITE mode.
-"""
+"""Authoritative publication boundary for destructive recovery."""
 from __future__ import annotations
 
 import logging
@@ -22,7 +15,16 @@ class RecoveryPublishError(RuntimeError):
 
 @dataclass
 class AuthoritativeRecoveryPublisher:
+    # May be a RuntimeSyncService or a zero-argument resolver returning the live
+    # service. The resolver form lets UI composition bind after MainWindow has
+    # been re-parented without creating a second synchronization manager.
     runtime_sync_service: Any
+
+    def _runtime_sync(self):
+        candidate = self.runtime_sync_service
+        if callable(candidate) and not hasattr(candidate, "publish_only"):
+            candidate = candidate()
+        return candidate
 
     def publish(
         self,
@@ -32,22 +34,17 @@ class AuthoritativeRecoveryPublisher:
         backup_name: str,
         expected_main_commit: Optional[str] = None,
     ) -> None:
-        """Publish restored state while proving recovery authority is still live.
-
-        Fail closed before and after publication.  The postcondition prevents a
-        caller from treating a publish as authoritative if the recovery lease was
-        lost during the remote operation.
-        """
         if authority is None or not bool(authority.validate()):
             raise RecoveryPublishError(
                 "Exclusive recovery authority is required for authoritative publish."
             )
-        if self.runtime_sync_service is None:
+        runtime_sync = self._runtime_sync()
+        if runtime_sync is None or not callable(getattr(runtime_sync, "publish_only", None)):
             raise RecoveryPublishError("Recovery publisher is unavailable.")
 
         message = f"Recovery restore: {backup_name}"
         try:
-            published = self.runtime_sync_service.publish_only(
+            published = runtime_sync.publish_only(
                 message=message,
                 user=str(actor_name or "system"),
                 expected_main_commit=expected_main_commit,
@@ -61,5 +58,4 @@ class AuthoritativeRecoveryPublisher:
             raise RecoveryPublishError(
                 "Exclusive recovery authority was lost during authoritative publish."
             )
-
         logger.info("Authoritative recovery publish completed for %s", backup_name)
