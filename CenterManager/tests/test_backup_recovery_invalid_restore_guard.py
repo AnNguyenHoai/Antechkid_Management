@@ -22,21 +22,32 @@ def test_restore_eligibility_is_fail_closed():
     assert 'backup.get("status") or ""' in source
 
 
-def test_restore_button_requires_integrity_valid_backup():
+def test_restore_button_requires_integrity_valid_backup_and_stays_disabled_in_phase_a():
     source = _source()
 
     assert "restore_eligible = bool(backup and self._is_restore_eligible(backup))" in source
-    assert "self.restore_btn.setEnabled(write and admin and restore_eligible)" in source
+    assert "self.restore_btn.setEnabled(False)" in source
+    assert "self.restore_btn.setEnabled(write and admin and restore_eligible)" not in source
 
 
-def test_restore_handler_rechecks_integrity_before_destructive_flow():
+def test_restore_handler_rechecks_integrity_before_phase_a_recovery_guards():
     source = _source()
 
-    guard = "if not self._is_restore_eligible(backup):"
-    restore_call = "result = self._service.restore_backup("
-    confirmation = "expected = self._service.confirmation_phrase(backup_path)"
+    integrity_guard = "if not self._is_restore_eligible(backup):"
+    write_guard = "if can_write(self._cm):"
+    disabled_message = (
+        "Restore is temporarily disabled until dedicated recovery authority is available."
+    )
 
-    assert guard in source
-    assert source.index(guard) < source.index(confirmation)
-    assert source.index(guard) < source.index(restore_call)
+    assert integrity_guard in source
+    assert write_guard in source
+    assert source.index(integrity_guard) < source.index(write_guard)
     assert "Restore rejected: selected backup did not pass integrity validation." in source
+    assert disabled_message in source
+
+
+def test_phase_a_ui_contains_no_destructive_restore_service_call():
+    source = _source()
+
+    assert "result = self._service.restore_backup(" not in source
+    assert "expected = self._service.confirmation_phrase(backup_path)" not in source
