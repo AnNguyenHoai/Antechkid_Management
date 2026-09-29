@@ -6,6 +6,7 @@ import pytest
 from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import CurrentUserContext
 from centermanager.platform.backup.backup_service import BackupService
+from centermanager.platform.backup.recovery_authority import RecoveryAuthority
 from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.backup_operations_service import (
     BackupOperationsService,
@@ -14,11 +15,12 @@ from centermanager.services.backup_operations_service import (
 
 
 class FakeCollaborationManager:
-    def __init__(self, writing=True):
+    def __init__(self, writing=True, initialized=True):
         self.writing = writing
+        self.initialized = initialized
 
     def is_initialized(self):
-        return True
+        return self.initialized
 
     def is_writing(self):
         return self.writing
@@ -30,11 +32,11 @@ class FakeBackupService:
 
     def create_backup(self, label="manual"):
         self.calls.append(("create", label))
-        raise AssertionError("Phase A recovery gate must reject before backup mutation")
+        raise AssertionError("Rejected restore must not reach backup mutation")
 
     def restore_backup(self, backup_path, *, authorization=None):
         self.calls.append(("restore", Path(backup_path), authorization))
-        raise AssertionError("Phase A recovery gate must reject before raw restore")
+        raise AssertionError("Rejected restore must not reach raw restore")
 
 
 def principal(role_name, *, is_admin=False, permissions=()):
@@ -51,11 +53,14 @@ def principal(role_name, *, is_admin=False, permissions=()):
     )
 
 
-def build_service(*, writing=True):
+def build_service(*, writing=True, initialized=True):
     backup = FakeBackupService()
     service = BackupOperationsService(
         backup_service=backup,
-        collaboration_manager=FakeCollaborationManager(writing=writing),
+        collaboration_manager=FakeCollaborationManager(
+            writing=writing,
+            initialized=initialized,
+        ),
     )
     return service, backup
 
@@ -80,7 +85,6 @@ def test_raw_backup_restore_rejects_missing_authorization_before_platform_access
     [
         (principal("manager", is_admin=False), True, "Administrator"),
         (principal("admin", is_admin=True), True, "Finish or cancel the current editing session"),
-        (principal("admin", is_admin=True), False, "Recovery authority is not available yet"),
     ],
 )
 def test_restore_rejections_happen_before_safety_backup(user, writing, error_match):
@@ -98,7 +102,7 @@ def test_restore_rejections_happen_before_safety_backup(user, writing, error_mat
     assert backup.calls == []
 
 
-def test_phase_a_blocks_restore_inside_normal_write_session_before_mutation():
+def test_restore_blocks_normal_write_session_before_mutation():
     service, backup = build_service(writing=True)
     actor = principal("admin", is_admin=True)
     target = Path("/managed/snapshot")
@@ -117,15 +121,26 @@ def test_phase_a_blocks_restore_inside_normal_write_session_before_mutation():
     assert backup.calls == []
 
 
-def test_phase_a_blocks_restore_from_read_until_recovery_authority_exists():
+def test_read_state_exposes_dedicated_recovery_authority_without_entering_write_mode():
     service, backup = build_service(writing=False)
+
+    authority = service._recovery_authority()
+
+    assert isinstance(authority, RecoveryAuthority)
+    assert authority.manager is service._collaboration_manager
+    assert service._collaboration_manager.is_writing() is False
+    assert backup.calls == []
+
+
+def test_restore_fails_closed_when_collaboration_session_is_uninitialized():
+    service, backup = build_service(writing=False, initialized=False)
     actor = principal("admin", is_admin=True)
     target = Path("/managed/snapshot")
 
     with CurrentUserContext(actor):
         with pytest.raises(
             BackupRestoreAuthorizationError,
-            match="Recovery authority is not available yet",
+            match="initialized collaboration session",
         ):
             service.restore_backup(
                 target,
