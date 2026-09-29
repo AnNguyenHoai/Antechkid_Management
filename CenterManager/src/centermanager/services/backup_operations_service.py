@@ -3,6 +3,10 @@ from pathlib import Path
 from centermanager.core.capabilities import Capability
 from centermanager.core.current_user import get_current_user
 from centermanager.platform.backup.backup_service import BackupResult, BackupService
+from centermanager.platform.backup.recovery_authority import (
+    RecoveryAuthority,
+    RecoveryAuthorityError,
+)
 from centermanager.platform.backup.restore_authorization import issue_restore_authorization
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
@@ -25,8 +29,8 @@ class BackupOperationsService:
 
     Restore is intentionally treated as a destructive security boundary. UI
     checks are convenience only; this service validates the real principal,
-    capability, recovery entry state, reason and typed confirmation before
-    creating even the pre-restore safety snapshot.
+    capability, dedicated recovery authority, reason and typed confirmation
+    before mutating runtime state.
     """
 
     def __init__(
@@ -78,14 +82,7 @@ class BackupOperationsService:
             ) from exc
         return actor
 
-    def _require_recovery_entry_state(self) -> None:
-        """Fail closed until dedicated recovery authority exists.
-
-        SEC06-13R separates Restore from the normal Start Editing -> Finish
-        Editing transaction. Phase A blocks the legacy behavior where Restore
-        ran while the current client owned normal WRITE. Phase B will add a
-        dedicated recovery-authority path for READ state.
-        """
+    def _recovery_authority(self) -> RecoveryAuthority:
         manager = self._collaboration_manager
         try:
             initialized = bool(manager is not None and manager.is_initialized())
@@ -94,26 +91,22 @@ class BackupOperationsService:
             raise BackupRestoreAuthorizationError(
                 "Unable to verify recovery entry state."
             ) from exc
-
+        if not initialized:
+            raise BackupRestoreAuthorizationError(
+                "Recovery requires an initialized collaboration session."
+            )
         if writing:
             raise BackupRestoreAuthorizationError(
                 "Finish or cancel the current editing session before starting recovery."
             )
-
-        # Phase A intentionally leaves Restore unavailable from READ as well.
-        # Dedicated exclusive recovery authority is introduced in SEC06-13R-B.
-        raise BackupRestoreAuthorizationError(
-            "Recovery authority is not available yet; Restore is temporarily disabled."
-        )
+        return RecoveryAuthority(manager)
 
     def restore_backup(self, backup_path, *, reason: str, confirmation: str):
         backup_path = Path(backup_path)
 
-        # All destructive-operation intent checks happen before any mutation,
-        # including the safety backup creation.
+        # Validate user intent before acquiring authority or creating any safety
+        # snapshot. Invalid/unauthorized requests must be mutation-free.
         actor = self._require_admin_and_capability()
-        self._require_recovery_entry_state()
-
         clean_reason = str(reason or "").strip()
         if not clean_reason:
             raise BackupRestoreValidationError("A restore reason is required.")
@@ -124,39 +117,60 @@ class BackupOperationsService:
                 f'Type "{expected}" to confirm this destructive operation.'
             )
 
-        safety = self._backup.create_backup(label="pre_restore")
-        if not safety.success or safety.backup_path is None:
-            return BackupResult(
-                success=False,
-                error=f"Pre-restore backup failed: {safety.error or 'unknown error'}",
-            )
+        authority = self._recovery_authority()
+        try:
+            authority.acquire()
+        except RecoveryAuthorityError as exc:
+            raise BackupRestoreAuthorizationError(str(exc)) from exc
 
-        # SEC06-13R-B will revalidate dedicated recovery authority here before
-        # issuing raw platform authorization. The Phase-A entry gate above is
-        # intentionally fail-closed, so this code cannot currently be reached.
-        self._require_recovery_entry_state()
-        authorization = issue_restore_authorization(
-            actor=actor,
-            reason=clean_reason,
-            confirmation=expected,
-        )
-        result = self._backup.restore_backup(
-            backup_path,
-            authorization=authorization,
-        )
-        if result.success and self._audit:
-            self._audit.record(
-                "BACKUP_RESTORED",
-                "admin",
-                target_type="backup",
-                target_id=str(backup_path),
-                target_name=backup_path.name,
+        try:
+            # Recovery owns the distributed exclusion primitive but remains in
+            # READ from the normal edit-mode perspective. Create the mandatory
+            # rollback point only after exclusive authority is established.
+            if not authority.validate():
+                raise BackupRestoreAuthorizationError(
+                    "Exclusive recovery authority was lost before safety backup."
+                )
+
+            safety = self._backup.create_backup(label="pre_restore")
+            if not safety.success or safety.backup_path is None:
+                return BackupResult(
+                    success=False,
+                    error=f"Pre-restore backup failed: {safety.error or 'unknown error'}",
+                )
+
+            # Revalidate/renew immediately before the destructive platform call.
+            # This prevents a stale/lost recovery lease from authorizing restore.
+            if not authority.renew():
+                raise BackupRestoreAuthorizationError(
+                    "Exclusive recovery authority was lost before restore."
+                )
+
+            authorization = issue_restore_authorization(
                 actor=actor,
-                details={
-                    "reason": clean_reason,
-                    "pre_restore_backup": str(safety.backup_path),
-                    "restored_backup": str(backup_path),
-                },
-                summary=f"Admin restored backup {backup_path.name}",
+                reason=clean_reason,
+                confirmation=expected,
             )
-        return result
+            result = self._backup.restore_backup(
+                backup_path,
+                authorization=authorization,
+            )
+            if result.success and self._audit:
+                self._audit.record(
+                    "BACKUP_RESTORED",
+                    "admin",
+                    target_type="backup",
+                    target_id=str(backup_path),
+                    target_name=backup_path.name,
+                    actor=actor,
+                    details={
+                        "reason": clean_reason,
+                        "pre_restore_backup": str(safety.backup_path),
+                        "restored_backup": str(backup_path),
+                        "authority": "RECOVERY",
+                    },
+                    summary=f"Admin restored backup {backup_path.name}",
+                )
+            return result
+        finally:
+            authority.release()
