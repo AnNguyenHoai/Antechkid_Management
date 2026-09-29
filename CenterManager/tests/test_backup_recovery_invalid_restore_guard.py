@@ -15,6 +15,12 @@ def _source():
     return SOURCE.read_text(encoding="utf-8")
 
 
+def _restore_handler_source(source: str) -> str:
+    """Limit ordering assertions to restore_selected, not other page handlers."""
+    start = source.index("    def restore_selected(self):")
+    return source[start:]
+
+
 def test_restore_eligibility_is_fail_closed():
     source = _source()
 
@@ -33,7 +39,7 @@ def test_restore_button_requires_integrity_valid_backup_and_dedicated_recovery_e
 
 
 def test_restore_handler_rechecks_integrity_before_recovery_guards():
-    source = _source()
+    source = _restore_handler_source(_source())
 
     integrity_guard = "if not self._is_restore_eligible(backup):"
     write_guard = "if can_write(self._cm):"

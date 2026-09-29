@@ -51,10 +51,11 @@ class BackupRecoveryPage(QWidget):
         layout.addLayout(head)
 
         self.info = QLabel(
-            "Restore is a destructive maintenance recovery operation. It is available "
-            "only from READ mode for an integrity-validated backup and requires a "
-            "reason plus typed confirmation. Recovery publishes the restored runtime "
-            "authoritatively before success is reported."
+            "Create Backup and Restore are maintenance operations that run only from "
+            "READ mode. Finish Editing first so backups represent a committed, stable "
+            "generation. Restore additionally requires an integrity-validated backup, "
+            "a reason, typed confirmation, exclusive recovery authority and an "
+            "authoritative publish before success is reported."
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
@@ -72,6 +73,40 @@ class BackupRecoveryPage(QWidget):
         foot.addWidget(self.restore_btn)
         foot.addStretch()
         layout.addLayout(foot)
+
+    def _notification_target(self):
+        """Use the application notification service once this page is parented.
+
+        Older AdminWorkspace construction paths created an isolated
+        NotificationService with no listeners. Recovery feedback is safety
+        critical, so prefer MainWindow's live service and only use the injected
+        fallback when no application-level service is available.
+        """
+        try:
+            root = self.window()
+            application_service = getattr(root, "_notification_service", None)
+            if application_service is not None:
+                return application_service
+        except Exception:
+            pass
+        return self._ns
+
+    def _notify(self, message: str, severity: str = "info") -> None:
+        target = self._notification_target()
+        listeners = getattr(target, "_listeners", None) if target is not None else None
+        if target is not None and (listeners is None or bool(listeners)):
+            notify(target, message, severity)
+            return
+
+        # Fail visibly if the notification service is absent or isolated. Silent
+        # recovery rejection is unsafe because the operator cannot tell whether
+        # destructive mutation happened.
+        if severity == "error":
+            QMessageBox.critical(self, "Backup & Recovery", message)
+        elif severity == "warning":
+            QMessageBox.warning(self, "Backup & Recovery", message)
+        else:
+            QMessageBox.information(self, "Backup & Recovery", message)
 
     def set_write_enabled(self, enabled):
         self._update_actions()
@@ -92,7 +127,17 @@ class BackupRecoveryPage(QWidget):
 
     def _update_actions(self):
         write = can_write(self._cm)
-        self.create_btn.setEnabled(write and self._ps.has_permission("backup.create"))
+        create_permitted = self._ps.has_permission("backup.create")
+        self.create_btn.setEnabled(bool(not write and create_permitted))
+        if write:
+            self.create_btn.setToolTip(
+                "Finish Editing before creating a backup so it captures a committed generation."
+            )
+        elif not create_permitted:
+            self.create_btn.setToolTip("Backup create capability is required.")
+        else:
+            self.create_btn.setToolTip("Create a backup of the current committed runtime state.")
+
         backup = self._selected_backup()
         restore_eligible = bool(backup and self._is_restore_eligible(backup))
         permitted = self._ps.has_permission("backup.restore")
@@ -116,8 +161,12 @@ class BackupRecoveryPage(QWidget):
             )
 
     def refresh(self):
+        selected = self._selected_backup()
+        selected_path = str(selected.get("path")) if selected and selected.get("path") else None
+
         self._rows = self._service.list_backups()
         self.table.setRowCount(len(self._rows))
+        selected_row = None
         for row, backup in enumerate(self._rows):
             self.table.setItem(
                 row,
@@ -130,17 +179,27 @@ class BackupRecoveryPage(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(str(backup.get("path", ""))))
             status = backup.get("status") or "available"
             self.table.setItem(row, 3, QTableWidgetItem(str(status).title()))
+            if selected_path and str(backup.get("path")) == selected_path:
+                selected_row = row
+        if selected_row is not None:
+            self.table.selectRow(selected_row)
         self._update_actions()
 
     def create_backup(self):
-        if not can_write(self._cm):
-            return notify(self._ns, "WRITE mode is required.", "warning")
+        if can_write(self._cm):
+            return self._notify(
+                "Finish Editing before creating a backup. Backups must capture a committed READ-mode generation.",
+                "warning",
+            )
+        if not self._ps.has_permission("backup.create"):
+            return self._notify("Backup create capability is required.", "error")
+
         result = self._service.create_backup("manual")
         if result.success:
-            notify(self._ns, f"Backup created: {result.backup_path}", "success")
+            self._notify(f"Backup created: {result.backup_path}", "success")
             self.refresh()
         else:
-            notify(self._ns, f"Backup failed: {result.error}", "error")
+            self._notify(f"Backup failed: {result.error}", "error")
 
     def _collect_restore_intent(self, backup_path):
         reason, ok = QInputDialog.getMultiLineText(
@@ -152,7 +211,7 @@ class BackupRecoveryPage(QWidget):
         if not ok:
             return None
         if not reason:
-            notify(self._ns, "Restore reason is required.", "warning")
+            self._notify("Restore reason is required.", "warning")
             return None
 
         expected = self._service.confirmation_phrase(backup_path)
@@ -204,25 +263,23 @@ class BackupRecoveryPage(QWidget):
     def restore_selected(self):
         backup = self._selected_backup()
         if backup is None:
-            return
+            return self._notify("Select a validated backup to restore.", "warning")
         if not self._is_restore_eligible(backup):
-            return notify(
-                self._ns,
+            return self._notify(
                 "Restore rejected: selected backup did not pass integrity validation.",
                 "error",
             )
         if can_write(self._cm):
-            return notify(
-                self._ns,
+            return self._notify(
                 "Finish or cancel the current editing session before starting recovery.",
                 "warning",
             )
         if not self._ps.has_permission("backup.restore"):
-            return notify(self._ns, "Backup restore capability is required.", "error")
+            return self._notify("Backup restore capability is required.", "error")
 
         backup_path = backup.get("path")
         if not backup_path:
-            return notify(self._ns, "Restore rejected: backup path is missing.", "error")
+            return self._notify("Restore rejected: backup path is missing.", "error")
 
         intent = self._collect_restore_intent(backup_path)
         if intent is None:
@@ -237,12 +294,11 @@ class BackupRecoveryPage(QWidget):
                 confirmation=confirmation,
             )
         except Exception as exc:
-            return notify(self._ns, f"Restore rejected: {exc}", "error")
+            return self._notify(f"Restore rejected: {exc}", "error")
 
         restart_required = bool(getattr(result, "requires_restart", False))
         if result.success:
-            notify(
-                self._ns,
+            self._notify(
                 "Backup restored and authoritative recovery publish completed.",
                 "success",
             )
@@ -252,9 +308,9 @@ class BackupRecoveryPage(QWidget):
 
         error = result.error or "unknown recovery error"
         if restart_required:
-            notify(self._ns, f"Recovery incomplete: {error}", "error")
+            self._notify(f"Recovery incomplete: {error}", "error")
             self._terminate_for_recovery_restart(success=False, error=str(error))
         elif "authoritative recovery publish" in str(error).lower():
-            notify(self._ns, f"Recovery incomplete: {error}", "error")
+            self._notify(f"Recovery incomplete: {error}", "error")
         else:
-            notify(self._ns, f"Restore failed: {error}", "error")
+            self._notify(f"Restore failed: {error}", "error")
