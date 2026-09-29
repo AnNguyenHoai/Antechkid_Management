@@ -44,10 +44,9 @@ def quiesce_runtime_db() -> None:
     # Close ORM sessions first so checked-out SQLite connections are returned to
     # the engine before the pool is disposed. This is intentionally process-wide
     # because restore is already protected by exclusive recovery authority.
-    try:
-        close_all_sessions()
-    except Exception as e:
-        logger.warning(f"Failed to close active runtime DB sessions: {e}")
+    # Do not swallow failures here: recovery must fail before the destructive
+    # rename if process-owned handles could not be released safely.
+    close_all_sessions()
 
     try:
         if factory is not None:
@@ -55,8 +54,8 @@ def quiesce_runtime_db() -> None:
             if engine is not None:
                 engine.dispose()
     finally:
-        # Fail closed against stale pooled handles even when dispose itself
-        # raises; a subsequent refresh will build a new factory/engine.
+        # Never allow reuse of a factory that may still reference the pre-restore
+        # database. A subsequent refresh will build a new factory/engine.
         _session_factory = None
 
     logger.info("Runtime database connections quiesced")
