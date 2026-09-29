@@ -16,6 +16,7 @@ from centermanager.services.audit_service import AuditService
 from centermanager.services.admin_data_reset import AdminDataResetService
 from centermanager.ui.diagnostics_page import DiagnosticsPage
 from centermanager.platform.notification import NotificationService
+from centermanager.platform.backup.recovery_publisher import AuthoritativeRecoveryPublisher
 from centermanager.models.permission import PermissionDefinitions
 from centermanager.core.current_user import get_current_user
 from centermanager.services.system_operations_service import SystemOperationsService
@@ -27,226 +28,111 @@ from centermanager.services.backup_operations_service import BackupOperationsSer
 class AdminWorkspaceShell(QWidget):
     go_home = Signal()
     data_reset_completed = Signal(str)
+    recovery_restart_required = Signal(str)
 
-    def __init__(
-        self,
-        permission_service,
-        git_config_service=None,
-        platform_context=None,
-        collaboration_manager=None,
-        notification_service=None,
-        parent: Optional[QWidget] = None,
-    ) -> None:
+    def __init__(self, permission_service, git_config_service=None, platform_context=None,
+                 collaboration_manager=None, notification_service=None, sync_service=None,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._permission_service = permission_service
         self._git_config_service = git_config_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
+        self._sync_service = sync_service
         self._notification_service = notification_service or NotificationService()
         self._page_permissions = {
-            "users": PermissionDefinitions.USER_VIEW,
-            "roles": PermissionDefinitions.ROLE_MANAGE,
-            "settings": PermissionDefinitions.SETTING_UPDATE,
-            "git": PermissionDefinitions.SETTING_UPDATE,
+            "users": PermissionDefinitions.USER_VIEW, "roles": PermissionDefinitions.ROLE_MANAGE,
+            "settings": PermissionDefinitions.SETTING_UPDATE, "git": PermissionDefinitions.SETTING_UPDATE,
             "operations": PermissionDefinitions.SYSTEM_DIAGNOSTICS_VIEW,
-            "diagnostics": PermissionDefinitions.SETTING_UPDATE,
-            "audit": PermissionDefinitions.AUDIT_VIEW,
+            "diagnostics": PermissionDefinitions.SETTING_UPDATE, "audit": PermissionDefinitions.AUDIT_VIEW,
             "backup": PermissionDefinitions.BACKUP_VIEW,
         }
-
         self._setup_ui()
         self._connect_signals()
         self.navigate_to("users")
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
+        layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
         self.header = WorkspaceHeader("Admin Workspace", "Users")
-        self.header.back_home_clicked.connect(self.go_home.emit)
-        layout.addWidget(self.header)
-
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-
+        self.header.back_home_clicked.connect(self.go_home.emit); layout.addWidget(self.header)
+        body = QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
         pages = [
-            {"id": "users", "icon": "👤", "label": "Users"},
-            {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
-            {"id": "audit", "icon": "📋", "label": "Audit Log"},
-            {"id": "settings", "icon": "⚙️", "label": "Settings"},
-            {"id": "operations", "icon": "🖥️", "label": "System Operations"},
-            {"id": "backup", "icon": "🗄️", "label": "Backup & Recovery"},
-            {"id": "git", "icon": "🔐", "label": "Git Config"},
-            {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
+            {"id": "users", "icon": "👤", "label": "Users"}, {"id": "roles", "icon": "🛡️", "label": "Roles & Permissions"},
+            {"id": "audit", "icon": "📋", "label": "Audit Log"}, {"id": "settings", "icon": "⚙️", "label": "Settings"},
+            {"id": "operations", "icon": "🖥️", "label": "System Operations"}, {"id": "backup", "icon": "🗄️", "label": "Backup & Recovery"},
+            {"id": "git", "icon": "🔐", "label": "Git Config"}, {"id": "diagnostics", "icon": "🔍", "label": "Diagnostics"},
         ]
-        self.nav = WorkspaceNavigation("Admin Workspace", pages)
-        self.nav.page_selected.connect(self.navigate_to)
-        body.addWidget(self.nav)
-
-        self.content_stack = QStackedWidget()
-        self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
-
-        self.users_page = UserListPage(
-            self._permission_service,
-            self._collaboration_manager,
-            self._notification_service,
-        )
-        self.content_stack.addWidget(self.users_page)
-
-        self.roles_page = RoleListPage(
-            self._permission_service,
-            self._collaboration_manager,
-            self._notification_service,
-        )
-        self.content_stack.addWidget(self.roles_page)
-
+        self.nav = WorkspaceNavigation("Admin Workspace", pages); self.nav.page_selected.connect(self.navigate_to); body.addWidget(self.nav)
+        self.content_stack = QStackedWidget(); self.content_stack.setFrameShape(QFrame.Shape.NoFrame)
+        self.users_page = UserListPage(self._permission_service, self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.users_page)
+        self.roles_page = RoleListPage(self._permission_service, self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.roles_page)
         session_factory = getattr(self._permission_service, "_session_factory")
-        self.audit_service = AuditService(session_factory)
-        self.audit_page = AuditLogPage(self.audit_service, self._notification_service)
-        self.content_stack.addWidget(self.audit_page)
+        self.audit_service = AuditService(session_factory); self.audit_page = AuditLogPage(self.audit_service, self._notification_service); self.content_stack.addWidget(self.audit_page)
+        self.settings_page = SettingsPage(self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.settings_page)
+        self.system_operations_service = SystemOperationsService(self._collaboration_manager, self._git_config_service)
+        self.admin_data_reset_service = AdminDataResetService(session_factory, collaboration_manager=self._collaboration_manager, audit_service=self.audit_service)
+        self.system_operations_page = SystemOperationsPage(self.system_operations_service, data_reset_service=self.admin_data_reset_service, notification_service=self._notification_service); self.content_stack.addWidget(self.system_operations_page)
 
-        self.settings_page = SettingsPage(
-            self._collaboration_manager,
-            self._notification_service,
-        )
-        self.content_stack.addWidget(self.settings_page)
-
-        self.system_operations_service = SystemOperationsService(
-            self._collaboration_manager, self._git_config_service
-        )
-        self.admin_data_reset_service = AdminDataResetService(
-            session_factory,
-            collaboration_manager=self._collaboration_manager,
-            audit_service=self.audit_service,
-        )
-        self.system_operations_page = SystemOperationsPage(
-            self.system_operations_service,
-            data_reset_service=self.admin_data_reset_service,
-            notification_service=self._notification_service,
-        )
-        self.content_stack.addWidget(self.system_operations_page)
-
+        recovery_publisher = AuthoritativeRecoveryPublisher(self._sync_service) if self._sync_service is not None else None
         self.backup_operations_service = BackupOperationsService(
             audit_service=self.audit_service,
             collaboration_manager=self._collaboration_manager,
+            recovery_publisher=recovery_publisher,
         )
-        self.backup_page = BackupRecoveryPage(
-            self.backup_operations_service,
-            self._permission_service,
-            self._collaboration_manager,
-            self._notification_service,
-        )
+        self.backup_page = BackupRecoveryPage(self.backup_operations_service, self._permission_service, self._collaboration_manager, self._notification_service)
         self.content_stack.addWidget(self.backup_page)
-
-        self.git_settings_page = GitSettingsPage(
-            self._git_config_service,
-            self._collaboration_manager,
-            self._notification_service,
-        )
-        self.content_stack.addWidget(self.git_settings_page)
-
-        self.diagnostics_page = DiagnosticsPage(self._collaboration_manager)
-        self.content_stack.addWidget(self.diagnostics_page)
-
-        body.addWidget(self.content_stack, 1)
-        layout.addLayout(body)
+        self.git_settings_page = GitSettingsPage(self._git_config_service, self._collaboration_manager, self._notification_service); self.content_stack.addWidget(self.git_settings_page)
+        self.diagnostics_page = DiagnosticsPage(self._collaboration_manager); self.content_stack.addWidget(self.diagnostics_page)
+        body.addWidget(self.content_stack, 1); layout.addLayout(body)
 
     def _connect_signals(self) -> None:
         panel = getattr(self.system_operations_page, "data_management_panel", None)
         if panel is not None:
             panel.data_reset_completed.connect(self._on_data_reset_completed)
+        self.backup_page.recovery_restart_required.connect(self.recovery_restart_required.emit)
 
     def _on_data_reset_completed(self, scope: str) -> None:
-        self.audit_page.refresh()
-        self.system_operations_page.refresh()
-        self.data_reset_completed.emit(scope)
+        self.audit_page.refresh(); self.system_operations_page.refresh(); self.data_reset_completed.emit(scope)
 
     def _has_page_permission(self, page_id: str) -> bool:
-        """The Admin Workspace is an admin-only navigation surface."""
-        user = get_current_user()
-        return bool(user is not None and user.is_admin)
+        user = get_current_user(); return bool(user is not None and user.is_admin)
 
     def navigate_to(self, page_id: str) -> None:
         if not self._has_page_permission(page_id):
-            self._notification_service.notify(
-                f"Permission denied for {page_id}.", "warning"
-            )
-            return
+            self._notification_service.notify(f"Permission denied for {page_id}.", "warning"); return
         if page_id == "users":
-            self.content_stack.setCurrentWidget(self.users_page)
-            self.nav.set_active_page("users")
-            self.header.set_context("Admin Workspace", "Users")
-            self.users_page.refresh()
+            self.content_stack.setCurrentWidget(self.users_page); self.nav.set_active_page("users"); self.header.set_context("Admin Workspace", "Users"); self.users_page.refresh()
         elif page_id == "roles":
-            self.content_stack.setCurrentWidget(self.roles_page)
-            self.nav.set_active_page("roles")
-            self.header.set_context("Admin Workspace", "Roles & Permissions")
-            self.roles_page.refresh()
+            self.content_stack.setCurrentWidget(self.roles_page); self.nav.set_active_page("roles"); self.header.set_context("Admin Workspace", "Roles & Permissions"); self.roles_page.refresh()
         elif page_id == "audit":
-            self.content_stack.setCurrentWidget(self.audit_page)
-            self.nav.set_active_page("audit")
-            self.header.set_context("Admin Workspace", "Audit Log")
-            self.audit_page.refresh()
+            self.content_stack.setCurrentWidget(self.audit_page); self.nav.set_active_page("audit"); self.header.set_context("Admin Workspace", "Audit Log"); self.audit_page.refresh()
         elif page_id == "settings":
-            self.content_stack.setCurrentWidget(self.settings_page)
-            self.nav.set_active_page("settings")
-            self.header.set_context("Admin Workspace", "Settings")
+            self.content_stack.setCurrentWidget(self.settings_page); self.nav.set_active_page("settings"); self.header.set_context("Admin Workspace", "Settings")
         elif page_id == "operations":
-            self.content_stack.setCurrentWidget(self.system_operations_page)
-            self.nav.set_active_page("operations")
-            self.header.set_context("Admin Workspace", "System Operations")
-            self.system_operations_page.refresh()
+            self.content_stack.setCurrentWidget(self.system_operations_page); self.nav.set_active_page("operations"); self.header.set_context("Admin Workspace", "System Operations"); self.system_operations_page.refresh()
         elif page_id == "backup":
-            self.content_stack.setCurrentWidget(self.backup_page)
-            self.nav.set_active_page("backup")
-            self.header.set_context("Admin Workspace", "Backup & Recovery")
-            self.backup_page.refresh()
+            self.content_stack.setCurrentWidget(self.backup_page); self.nav.set_active_page("backup"); self.header.set_context("Admin Workspace", "Backup & Recovery"); self.backup_page.refresh()
         elif page_id == "git":
-            self.content_stack.setCurrentWidget(self.git_settings_page)
-            self.nav.set_active_page("git")
-            self.header.set_context("Admin Workspace", "Git Config")
-            self.git_settings_page.refresh()
+            self.content_stack.setCurrentWidget(self.git_settings_page); self.nav.set_active_page("git"); self.header.set_context("Admin Workspace", "Git Config"); self.git_settings_page.refresh()
         elif page_id == "diagnostics":
-            self.content_stack.setCurrentWidget(self.diagnostics_page)
-            self.nav.set_active_page("diagnostics")
-            self.header.set_context("Admin Workspace", "Diagnostics")
-            self.diagnostics_page.refresh()
+            self.content_stack.setCurrentWidget(self.diagnostics_page); self.nav.set_active_page("diagnostics"); self.header.set_context("Admin Workspace", "Diagnostics"); self.diagnostics_page.refresh()
 
     def refresh(self) -> None:
         self.set_write_enabled(self._current_write_enabled())
         current = self.content_stack.currentWidget()
-        if current is self.users_page:
-            self.users_page.refresh()
-        elif current is self.roles_page:
-            self.roles_page.refresh()
-        elif current is self.audit_page:
-            self.audit_page.refresh()
-        elif current is self.system_operations_page:
-            self.system_operations_page.refresh()
-        elif current is self.backup_page:
-            self.backup_page.refresh()
-        elif current is self.git_settings_page:
-            self.git_settings_page.refresh()
-        elif current is self.diagnostics_page:
-            self.diagnostics_page.refresh()
+        if current is self.users_page: self.users_page.refresh()
+        elif current is self.roles_page: self.roles_page.refresh()
+        elif current is self.audit_page: self.audit_page.refresh()
+        elif current is self.system_operations_page: self.system_operations_page.refresh()
+        elif current is self.backup_page: self.backup_page.refresh()
+        elif current is self.git_settings_page: self.git_settings_page.refresh()
+        elif current is self.diagnostics_page: self.diagnostics_page.refresh()
 
     def _current_write_enabled(self) -> bool:
         from centermanager.ui.admin_workspace.access import can_write
-
         return can_write(self._collaboration_manager)
 
     def set_write_enabled(self, enabled: bool) -> None:
-        if hasattr(self.users_page, "set_write_enabled"):
-            self.users_page.set_write_enabled(enabled)
-        if hasattr(self.roles_page, "set_write_enabled"):
-            self.roles_page.set_write_enabled(enabled)
-        if hasattr(self.settings_page, "set_write_enabled"):
-            self.settings_page.set_write_enabled(enabled)
-        if hasattr(self.system_operations_page, "set_write_enabled"):
-            self.system_operations_page.set_write_enabled(enabled)
-        if hasattr(self.backup_page, "set_write_enabled"):
-            self.backup_page.set_write_enabled(enabled)
-        if hasattr(self.git_settings_page, "set_write_enabled"):
-            self.git_settings_page.set_write_enabled(enabled)
+        for page in (self.users_page, self.roles_page, self.settings_page, self.system_operations_page, self.backup_page, self.git_settings_page):
+            if hasattr(page, "set_write_enabled"):
+                page.set_write_enabled(enabled)
