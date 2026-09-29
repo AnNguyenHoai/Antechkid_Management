@@ -78,7 +78,7 @@ def test_raw_backup_restore_rejects_missing_authorization_before_platform_access
 @pytest.mark.parametrize(
     "user,writing,error_match",
     [
-        (principal("manager", is_admin=False), True, "administrator"),
+        (principal("manager", is_admin=False), True, "Administrator"),
         (principal("admin", is_admin=True), True, "Finish or cancel the current editing session"),
         (principal("admin", is_admin=True), False, "Recovery authority is not available yet"),
     ],
