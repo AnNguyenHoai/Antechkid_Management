@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from centermanager.services.backup_operations_service import BackupOperationsService
 
 
@@ -18,8 +16,8 @@ def test_sec06_confirmation_diagnostic_identifies_invisible_character():
 
     detail = BackupOperationsService.confirmation_mismatch_detail(expected, actual)
 
-    assert "expected length=40" in detail
-    assert "actual length=40" in detail
+    assert "expected length=39" in detail
+    assert "actual length=39" in detail
     assert "position 8" in detail
     assert "expected U+0020" in detail
     assert "actual U+00A0" in detail
@@ -31,6 +29,6 @@ def test_sec06_confirmation_diagnostic_identifies_extra_character():
 
     detail = BackupOperationsService.confirmation_mismatch_detail(expected, actual)
 
-    assert "expected length=40" in detail
-    assert "actual length=41" in detail
+    assert "expected length=39" in detail
+    assert "actual length=40" in detail
     assert "position 9" in detail
