@@ -6,11 +6,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QMessageBox,
-    QInputDialog,
 )
 
-from centermanager.core.current_user import get_current_user
 from centermanager.ui.admin_workspace.access import can_write, notify
 
 
