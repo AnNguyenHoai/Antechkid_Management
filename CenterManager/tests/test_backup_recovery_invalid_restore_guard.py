@@ -22,32 +22,39 @@ def test_restore_eligibility_is_fail_closed():
     assert 'backup.get("status") or ""' in source
 
 
-def test_restore_button_requires_integrity_valid_backup_and_stays_disabled_in_phase_a():
+def test_restore_button_requires_integrity_valid_backup_and_dedicated_recovery_entry():
+    """SEC06-13R-C2 supersedes the Phase-A always-disabled restore contract."""
     source = _source()
 
     assert "restore_eligible = bool(backup and self._is_restore_eligible(backup))" in source
-    assert "self.restore_btn.setEnabled(False)" in source
+    assert 'permitted = self._ps.has_permission("backup.restore")' in source
+    assert "bool(not write and restore_eligible and permitted)" in source
     assert "self.restore_btn.setEnabled(write and admin and restore_eligible)" not in source
 
 
-def test_restore_handler_rechecks_integrity_before_phase_a_recovery_guards():
+def test_restore_handler_rechecks_integrity_before_recovery_guards():
     source = _source()
 
     integrity_guard = "if not self._is_restore_eligible(backup):"
     write_guard = "if can_write(self._cm):"
-    disabled_message = (
-        "Restore is temporarily disabled until dedicated recovery authority is available."
-    )
+    capability_guard = 'if not self._ps.has_permission("backup.restore"):'
 
     assert integrity_guard in source
     assert write_guard in source
+    assert capability_guard in source
     assert source.index(integrity_guard) < source.index(write_guard)
+    assert source.index(write_guard) < source.index(capability_guard)
     assert "Restore rejected: selected backup did not pass integrity validation." in source
-    assert disabled_message in source
+    assert "Finish or cancel the current editing session before starting recovery." in source
 
 
-def test_phase_a_ui_contains_no_destructive_restore_service_call():
+def test_c2_ui_routes_destructive_restore_through_guarded_service_boundary():
+    """C2 activates GUI restore only through the hardened orchestration service."""
     source = _source()
 
-    assert "result = self._service.restore_backup(" not in source
-    assert "expected = self._service.confirmation_phrase(backup_path)" not in source
+    assert "expected = self._service.confirmation_phrase(backup_path)" in source
+    assert "result = self._service.restore_backup(" in source
+    assert "reason=reason" in source
+    assert "confirmation=confirmation" in source
+    assert "authoritative recovery publish completed" in source
+    assert "Recovery incomplete:" in source
