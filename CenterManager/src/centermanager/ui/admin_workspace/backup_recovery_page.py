@@ -69,14 +69,34 @@ class BackupRecoveryPage(QWidget):
     def set_write_enabled(self, enabled):
         self._update_actions()
 
+    @staticmethod
+    def _is_restore_eligible(backup):
+        """Return True only for backups that passed integrity validation."""
+        return str(backup.get("status") or "").strip().lower() == "valid"
+
+    def _selected_backup(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        row = rows[0].row()
+        if row < 0 or row >= len(self._rows):
+            return None
+        return self._rows[row]
+
     def _update_actions(self):
         write = can_write(self._cm)
         self.create_btn.setEnabled(write and self._ps.has_permission("backup.create"))
         actor = get_current_user()
         admin = bool(actor is not None and getattr(actor, "is_admin", False))
-        self.restore_btn.setEnabled(
-            write and admin and bool(self.table.selectionModel().selectedRows())
-        )
+        backup = self._selected_backup()
+        restore_eligible = bool(backup and self._is_restore_eligible(backup))
+        self.restore_btn.setEnabled(write and admin and restore_eligible)
+        if backup and not restore_eligible:
+            self.restore_btn.setToolTip(
+                "Restore is disabled because this backup did not pass integrity validation."
+            )
+        else:
+            self.restore_btn.setToolTip("")
 
     def refresh(self):
         self._rows = self._service.list_backups()
@@ -106,13 +126,18 @@ class BackupRecoveryPage(QWidget):
             notify(self._ns, f"Backup failed: {result.error}", "error")
 
     def restore_selected(self):
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
+        backup = self._selected_backup()
+        if backup is None:
             return
         if not can_write(self._cm):
             return notify(self._ns, "WRITE mode is required.", "warning")
+        if not self._is_restore_eligible(backup):
+            return notify(
+                self._ns,
+                "Restore rejected: selected backup did not pass integrity validation.",
+                "error",
+            )
 
-        backup = self._rows[rows[0].row()]
         backup_path = backup["path"]
         expected = self._service.confirmation_phrase(backup_path)
 
