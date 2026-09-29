@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -8,9 +9,14 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QInputDialog,
     QLineEdit,
+    QMessageBox,
 )
 
+from centermanager.platform.backup.recovery_publisher import AuthoritativeRecoveryPublisher
 from centermanager.ui.admin_workspace.access import can_write, notify
+
+
+RECOVERY_RESTART_EXIT_CODE = 86
 
 
 class BackupRecoveryPage(QWidget):
@@ -91,12 +97,7 @@ class BackupRecoveryPage(QWidget):
         restore_eligible = bool(backup and self._is_restore_eligible(backup))
         permitted = self._ps.has_permission("backup.restore")
 
-        # SEC06-13R-C2: recovery is deliberately separate from the normal
-        # Start Editing -> Finish Editing transaction. It may enter only from
-        # READ mode, with an integrity-valid backup and explicit capability.
-        self.restore_btn.setEnabled(
-            bool(not write and restore_eligible and permitted)
-        )
+        self.restore_btn.setEnabled(bool(not write and restore_eligible and permitted))
         if not backup:
             self.restore_btn.setToolTip("Select a validated backup to restore.")
         elif not restore_eligible:
@@ -165,6 +166,41 @@ class BackupRecoveryPage(QWidget):
             return None
         return reason, str(confirmation or "")
 
+    def _ensure_recovery_publisher(self):
+        """Bind the already-running sync service without creating a second pipeline."""
+        if getattr(self._service, "_recovery_publisher", None) is not None:
+            return
+        root = self.window()
+        runtime_sync = getattr(root, "_sync_service", None)
+        if runtime_sync is not None:
+            self._service._recovery_publisher = AuthoritativeRecoveryPublisher(runtime_sync)
+
+    def _terminate_for_recovery_restart(self, *, success: bool, error: str = ""):
+        """End the stale process after any successful local DB replacement.
+
+        This intentionally does not hot-reload services and does not route through
+        Finish Editing. The next process startup will execute normal authoritative
+        startup synchronization before creating the production engine.
+        """
+        if success:
+            text = (
+                "Recovery was published successfully. CenterManager must now close "
+                "so the restored authoritative generation can be loaded by the normal "
+                "startup synchronization. Please reopen CenterManager."
+            )
+            QMessageBox.information(self, "Recovery complete - restart required", text)
+        else:
+            text = (
+                "The local database was restored, but authoritative publication did not "
+                "complete. This process is no longer safe to use and must close now. "
+                "On the next start, the authoritative remote database will win.\n\n"
+                f"Details: {error}"
+            )
+            QMessageBox.critical(self, "Recovery incomplete - restart required", text)
+        app = QApplication.instance()
+        if app is not None:
+            app.exit(RECOVERY_RESTART_EXIT_CODE)
+
     def restore_selected(self):
         backup = self._selected_backup()
         if backup is None:
@@ -192,6 +228,7 @@ class BackupRecoveryPage(QWidget):
         if intent is None:
             return
         reason, confirmation = intent
+        self._ensure_recovery_publisher()
 
         try:
             result = self._service.restore_backup(
@@ -200,25 +237,24 @@ class BackupRecoveryPage(QWidget):
                 confirmation=confirmation,
             )
         except Exception as exc:
-            # Service-side authorization/validation is authoritative. Keep this
-            # UI path fail-closed and never route recovery through Finish Editing.
             return notify(self._ns, f"Restore rejected: {exc}", "error")
 
+        restart_required = bool(getattr(result, "requires_restart", False))
         if result.success:
             notify(
                 self._ns,
                 "Backup restored and authoritative recovery publish completed.",
                 "success",
             )
-            self.refresh()
+            if restart_required:
+                self._terminate_for_recovery_restart(success=True)
             return
 
         error = result.error or "unknown recovery error"
-        if "authoritative recovery publish" in str(error).lower():
-            notify(
-                self._ns,
-                f"Recovery incomplete: {error}",
-                "error",
-            )
+        if restart_required:
+            notify(self._ns, f"Recovery incomplete: {error}", "error")
+            self._terminate_for_recovery_restart(success=False, error=str(error))
+        elif "authoritative recovery publish" in str(error).lower():
+            notify(self._ns, f"Recovery incomplete: {error}", "error")
         else:
             notify(self._ns, f"Restore failed: {error}", "error")
