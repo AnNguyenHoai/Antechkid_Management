@@ -23,6 +23,8 @@ class RecoveryAuthorityError(RuntimeError):
 class RecoveryAuthority:
     manager: Any
     _acquired: bool = False
+    _session_id: Optional[str] = None
+    _username: Optional[str] = None
 
     def acquire(self) -> bool:
         manager = self.manager
@@ -74,30 +76,63 @@ class RecoveryAuthority:
 
             # Intentionally do NOT set CollaborationManager._is_writing. Recovery
             # is an independent destructive-operation authority, not edit mode.
+            # Capture the acquisition principal so later validation cannot silently
+            # follow a replaced/reinitialized collaboration session.
+            self._session_id = str(session.session_id)
+            self._username = str(session.username)
             self._acquired = True
             logger.info("Exclusive recovery authority acquired by %s", session.username)
             return True
 
     def validate(self) -> bool:
-        if not self._acquired:
+        if not self._acquired or not self._session_id or not self._username:
             return False
         manager = self.manager
         session = manager.get_session() if manager is not None else None
-        if session is None or manager.is_writing():
+        if session is None:
             return False
+        if (
+            str(getattr(session, "session_id", "")) != self._session_id
+            or str(getattr(session, "username", "")) != self._username
+        ):
+            return False
+
         try:
             if manager._sync_provider is not None:
                 status = manager._get_remote_lock_status()
+                # GitSynchronizationProvider persists the complete lock payload,
+                # including authority_mode=RECOVERY, on the isolated lock branch.
+                # Its public remote_lock_status() projection historically omitted
+                # authority_mode/reason. An absent projected mode therefore cannot
+                # by itself mean that a freshly acquired recovery lease was lost.
+                # If a provider does expose a mode, it must still be RECOVERY.
+                projected_mode = status.get("authority_mode")
+                if projected_mode not in (None, "", "RECOVERY"):
+                    return False
+
+                # In remote mode the distributed lease is authoritative. Do not
+                # trust CollaborationManager._is_writing here: background local
+                # projection can transiently mark this process' own recovery lease
+                # as WRITE even though no WRITE lease was acquired. Session identity,
+                # owner and lease validity fence the destructive operation.
+                owner = status.get("owner") or status.get("username")
                 return bool(
                     status.get("locked", False)
-                    and status.get("session_id") == session.session_id
-                    and status.get("authority_mode") == "RECOVERY"
+                    and str(status.get("session_id") or "") == self._session_id
+                    and str(owner or "") == self._username
                     and manager._is_lease_valid(status.get("lease_expires_at"))
                 )
+
+            # Local-only mode has the complete lock file, so retain the strict
+            # RECOVERY mode check and reject any concurrent WRITE state.
+            if manager.is_writing():
+                return False
             status = manager._lock.get_lock_info()
+            owner = status.get("owner") or status.get("username")
             return bool(
                 status.get("locked", False)
-                and status.get("session_id") == session.session_id
+                and str(status.get("session_id") or "") == self._session_id
+                and str(owner or "") == self._username
                 and status.get("authority_mode") == "RECOVERY"
             )
         except Exception:
@@ -112,6 +147,8 @@ class RecoveryAuthority:
         if manager._sync_provider is None:
             return True
         session = manager.get_session()
+        if session is None:
+            return False
         try:
             renewed = manager._sync_provider.renew_lock(session.username, session.session_id)
             return bool(renewed and self.validate())
@@ -134,6 +171,8 @@ class RecoveryAuthority:
                     manager._lock.release(session)
         finally:
             self._acquired = False
+            self._session_id = None
+            self._username = None
             logger.info("Exclusive recovery authority released")
 
     def __enter__(self) -> "RecoveryAuthority":
