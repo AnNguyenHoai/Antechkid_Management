@@ -29,44 +29,18 @@ class BackupRestoreValidationError(BackupRestoreError):
 
 
 class BackupRestoreResult(BackupResult):
-    """Restore outcome carrying the process-lifecycle safety boundary.
+    """Restore outcome carrying the process-lifecycle safety boundary."""
 
-    Once the runtime database has been destructively replaced, the current
-    process must never continue normal work, irrespective of whether the
-    authoritative publish subsequently succeeds.  ``requires_restart`` is
-    therefore set only after local restore mutation has succeeded.
-    """
-
-    def __init__(
-        self,
-        success: bool,
-        backup_path=None,
-        error=None,
-        *,
-        requires_restart: bool = False,
-    ):
+    def __init__(self, success: bool, backup_path=None, error=None, *, requires_restart: bool = False):
         super().__init__(success=success, backup_path=backup_path, error=error)
         self.requires_restart = bool(requires_restart)
 
 
 class BackupOperationsService:
-    """Admin-facing backup/recovery orchestration with audit hooks.
+    """Admin-facing backup/recovery orchestration with audit hooks."""
 
-    Restore is intentionally treated as a destructive security boundary. UI
-    checks are convenience only; this service validates the real principal,
-    capability, dedicated recovery authority, reason and typed confirmation,
-    then publishes the restored state authoritatively before releasing recovery
-    authority.
-    """
-
-    def __init__(
-        self,
-        session_factory=None,
-        backup_service=None,
-        audit_service=None,
-        collaboration_manager=None,
-        recovery_publisher=None,
-    ):
+    def __init__(self, session_factory=None, backup_service=None, audit_service=None,
+                 collaboration_manager=None, recovery_publisher=None):
         self._backup = backup_service or BackupService()
         self._audit = audit_service or (
             AuditService(session_factory) if session_factory is not None else None
@@ -82,12 +56,8 @@ class BackupOperationsService:
         if result.success and self._audit:
             actor = get_current_user()
             self._audit.record(
-                "BACKUP_CREATED",
-                "admin",
-                target_type="backup",
-                target_id=str(result.backup_path),
-                target_name=label,
-                actor=actor,
+                "BACKUP_CREATED", "admin", target_type="backup",
+                target_id=str(result.backup_path), target_name=label, actor=actor,
                 details={"path": str(result.backup_path)},
             )
         return result
@@ -98,6 +68,28 @@ class BackupOperationsService:
         return f"RESTORE {name}"
 
     @staticmethod
+    def confirmation_mismatch_detail(expected: str, actual: str) -> str:
+        """Describe an exact-match failure without relaxing the security guard.
+
+        The phrase contains only the non-secret backup identifier. Code points are
+        included so packaged Windows UAT can distinguish invisible whitespace and
+        look-alike Unicode characters that are indistinguishable in a Qt dialog.
+        """
+        expected = str(expected)
+        actual = str(actual)
+        limit = min(len(expected), len(actual))
+        mismatch = next((i for i in range(limit) if expected[i] != actual[i]), None)
+        if mismatch is None:
+            mismatch = limit
+        expected_cp = f"U+{ord(expected[mismatch]):04X}" if mismatch < len(expected) else "<end>"
+        actual_cp = f"U+{ord(actual[mismatch]):04X}" if mismatch < len(actual) else "<end>"
+        return (
+            f"expected length={len(expected)}, actual length={len(actual)}, "
+            f"first difference at position {mismatch + 1}: "
+            f"expected {expected_cp}, actual {actual_cp}"
+        )
+
+    @staticmethod
     def _require_admin_and_capability():
         actor = get_current_user()
         if actor is None or not bool(getattr(actor, "is_admin", False)):
@@ -105,9 +97,7 @@ class BackupOperationsService:
         try:
             AuthorizationService.require(actor, Capability.BACKUP_RESTORE)
         except Exception as exc:
-            raise BackupRestoreAuthorizationError(
-                "Backup restore capability is required."
-            ) from exc
+            raise BackupRestoreAuthorizationError("Backup restore capability is required.") from exc
         return actor
 
     def _recovery_authority(self) -> RecoveryAuthority:
@@ -116,13 +106,9 @@ class BackupOperationsService:
             initialized = bool(manager is not None and manager.is_initialized())
             writing = bool(initialized and manager.is_writing())
         except Exception as exc:
-            raise BackupRestoreAuthorizationError(
-                "Unable to verify recovery entry state."
-            ) from exc
+            raise BackupRestoreAuthorizationError("Unable to verify recovery entry state.") from exc
         if not initialized:
-            raise BackupRestoreAuthorizationError(
-                "Recovery requires an initialized collaboration session."
-            )
+            raise BackupRestoreAuthorizationError("Recovery requires an initialized collaboration session.")
         if writing:
             raise BackupRestoreAuthorizationError(
                 "Finish or cancel the current editing session before starting recovery."
@@ -131,18 +117,17 @@ class BackupOperationsService:
 
     def restore_backup(self, backup_path, *, reason: str, confirmation: str):
         backup_path = Path(backup_path)
-
-        # Validate user intent before acquiring authority or creating any safety
-        # snapshot. Invalid/unauthorized requests must be mutation-free.
         actor = self._require_admin_and_capability()
         clean_reason = str(reason or "").strip()
         if not clean_reason:
             raise BackupRestoreValidationError("A restore reason is required.")
 
         expected = self.confirmation_phrase(backup_path)
-        if str(confirmation or "").strip() != expected:
+        actual = str(confirmation or "").strip()
+        if actual != expected:
+            detail = self.confirmation_mismatch_detail(expected, actual)
             raise BackupRestoreValidationError(
-                f'Type "{expected}" to confirm this destructive operation.'
+                f'Type "{expected}" to confirm this destructive operation. ({detail})'
             )
 
         authority = self._recovery_authority()
@@ -171,33 +156,21 @@ class BackupOperationsService:
                 )
 
             authorization = issue_restore_authorization(
-                actor=actor,
-                reason=clean_reason,
-                confirmation=expected,
+                actor=actor, reason=clean_reason, confirmation=expected,
             )
-            result = self._backup.restore_backup(
-                backup_path,
-                authorization=authorization,
-            )
+            result = self._backup.restore_backup(backup_path, authorization=authorization)
             if not result.success:
                 return BackupRestoreResult(
-                    success=False,
-                    backup_path=result.backup_path,
-                    error=result.error,
-                    requires_restart=False,
+                    success=False, backup_path=result.backup_path,
+                    error=result.error, requires_restart=False,
                 )
 
-            # From this point onward the live process is stale: the runtime DB
-            # was replaced underneath long-lived engines/services.  No hot reload
-            # is permitted.  Every return path must force a controlled shutdown.
             publisher = self._recovery_publisher
             if publisher is None:
                 return BackupRestoreResult(
                     success=False,
-                    error=(
-                        "Restore completed locally but authoritative recovery publish "
-                        "is unavailable; recovery remains incomplete."
-                    ),
+                    error=("Restore completed locally but authoritative recovery publish "
+                           "is unavailable; recovery remains incomplete."),
                     requires_restart=True,
                 )
             try:
@@ -209,21 +182,15 @@ class BackupOperationsService:
             except RecoveryPublishError as exc:
                 return BackupRestoreResult(
                     success=False,
-                    error=(
-                        "Restore completed locally but authoritative recovery publish "
-                        f"failed: {exc}"
-                    ),
+                    error=("Restore completed locally but authoritative recovery publish "
+                           f"failed: {exc}"),
                     requires_restart=True,
                 )
 
             if self._audit:
                 self._audit.record(
-                    "BACKUP_RESTORED",
-                    "admin",
-                    target_type="backup",
-                    target_id=str(backup_path),
-                    target_name=backup_path.name,
-                    actor=actor,
+                    "BACKUP_RESTORED", "admin", target_type="backup",
+                    target_id=str(backup_path), target_name=backup_path.name, actor=actor,
                     details={
                         "reason": clean_reason,
                         "pre_restore_backup": str(safety.backup_path),
@@ -235,10 +202,8 @@ class BackupOperationsService:
                     summary=f"Admin restored backup {backup_path.name}",
                 )
             return BackupRestoreResult(
-                success=True,
-                backup_path=result.backup_path,
-                error=result.error,
-                requires_restart=True,
+                success=True, backup_path=result.backup_path,
+                error=result.error, requires_restart=True,
             )
         finally:
             authority.release()
