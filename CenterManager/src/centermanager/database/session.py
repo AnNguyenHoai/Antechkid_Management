@@ -11,8 +11,13 @@ from centermanager.database.engine import (
     create_production_engine,
     dispose_runtime_engines,
     end_runtime_db_maintenance,
+    get_database_path,
     runtime_db_maintenance_active,
     runtime_dbapi_connection_count,
+)
+from centermanager.platform.backup.windows_lock_diagnostics import (
+    format_lock_owners,
+    windows_lock_owners,
 )
 
 _session_factory = None
@@ -51,6 +56,21 @@ def quiesce_runtime_db() -> None:
                 f"Runtime database quiesce incomplete: {remaining} DBAPI handle(s) remain"
             )
         _session_factory = None
+
+        # The DBAPI registry proves only that CenterManager's guarded production
+        # connection path is empty. On Windows, ask Restart Manager for the OS
+        # truth before the destructive rename. This identifies both untracked
+        # same-process handles and external processes without killing either.
+        try:
+            owners = windows_lock_owners(get_database_path())
+        except Exception:
+            logger.exception("Windows file-lock ownership diagnostics failed")
+        else:
+            if owners:
+                raise RuntimeError(
+                    "Runtime database is still locked after quiesce; Windows lock owner(s): "
+                    + format_lock_owners(owners)
+                )
     except Exception:
         end_runtime_db_maintenance()
         raise
