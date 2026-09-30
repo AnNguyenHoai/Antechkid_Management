@@ -1,0 +1,1 @@
+SEC06 lifecycle tests explicitly unregister handles they create. The production registry is process-global by design.

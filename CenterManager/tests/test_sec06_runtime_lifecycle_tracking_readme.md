@@ -1,0 +1,3 @@
+# SEC06 runtime lifecycle lock regression
+
+These tests cover the production SQLCipher lifecycle connection that was outside the guarded DBAPI registry. Packaged production requires SQLCipher. The connector must acquire the same maintenance gate as SQLAlchemy runtime connections, register the raw handle before returning it, unregister only after a successful native close, and refuse new opens while destructive recovery is fenced.
