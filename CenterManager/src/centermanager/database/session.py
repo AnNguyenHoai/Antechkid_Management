@@ -37,8 +37,14 @@ def get_session_factory() -> sessionmaker:
     return _session_factory
 
 
-def quiesce_runtime_db() -> None:
-    """Fence access and prove zero process-owned DBAPI handles before restore."""
+def quiesce_runtime_db(*, release_fence_on_failure: bool = True) -> None:
+    """Fence access and prove zero process-owned DBAPI handles before restore.
+
+    ``release_fence_on_failure`` is true for the initial pre-mutation quiesce so
+    a failed restore attempt does not unnecessarily strand normal DB access. Once
+    live restore mutation has started, callers pass false: failure to prove zero
+    handles must then leave the process fenced rather than race a rollback rename.
+    """
     global _session_factory
     import logging
 
@@ -92,7 +98,13 @@ def quiesce_runtime_db() -> None:
                     + owner_text
                 )
     except Exception:
-        end_runtime_db_maintenance()
+        if release_fence_on_failure:
+            end_runtime_db_maintenance()
+        else:
+            logger.error(
+                "Runtime database quiesce failed after live restore mutation; "
+                "maintenance fence remains enabled"
+            )
         raise
 
     logger.info(
@@ -125,8 +137,10 @@ def refresh_runtime_db() -> None:
         )
         # create_session_factory() may have created/tracked an Engine or DBAPI
         # handle before failing. Re-quiesce drains any partial state and restores
-        # the fence before restore_backup() attempts rollback rename/unlink.
-        quiesce_runtime_db()
+        # the fence before restore_backup() attempts rollback rename/unlink. From
+        # this point failure must keep the process fenced because live mutation
+        # has already occurred.
+        quiesce_runtime_db(release_fence_on_failure=False)
         raise
 
     _session_factory = new_factory
