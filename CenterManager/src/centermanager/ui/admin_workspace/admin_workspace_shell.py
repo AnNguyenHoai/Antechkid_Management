@@ -140,6 +140,7 @@ class AdminWorkspaceShell(QWidget):
             audit_service=self.audit_service,
             collaboration_manager=self._collaboration_manager,
             recovery_publisher=recovery_publisher,
+            runtime_sync_service=self._runtime_sync_service,
         )
         self.backup_page = BackupRecoveryPage(
             self.backup_operations_service,
