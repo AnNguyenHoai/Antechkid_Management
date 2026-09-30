@@ -251,8 +251,20 @@ def _connect_encrypted(
 class _TrackedLifecycleConnection:
     """Small adapter that keeps lifecycle close ordering fail-closed."""
 
-    def __init__(self, raw):
+    def __init__(self, raw, *, owner: str):
         self._raw = raw
+        ident = id(raw)
+        with _runtime_db_gate:
+            if ident in _runtime_dbapi_connections:
+                return
+            if _runtime_db_maintenance:
+                try:
+                    raw.close()
+                finally:
+                    raise RuntimeDatabaseMaintenanceError(
+                        "Runtime database is temporarily unavailable during backup restore"
+                    )
+            _register_runtime_dbapi_connection(raw, owner=owner)
 
     def execute(self, *args, **kwargs):
         return self._raw.execute(*args, **kwargs)
@@ -276,7 +288,7 @@ def _runtime_lifecycle(
                 lambda: _connect_plain(path, allow_create=False, readonly=True),
                 owner="runtime-lifecycle-plain",
             )
-            return _TrackedLifecycleConnection(raw)
+            return _TrackedLifecycleConnection(raw, owner="runtime-lifecycle-plain")
 
         return DatabaseLifecycle(db_path, readonly_connector=readonly_plain_connector)
 
@@ -290,7 +302,7 @@ def _runtime_lifecycle(
         )
         if not runtime_guarded:
             return connection
-        return _TrackedLifecycleConnection(connection)
+        return _TrackedLifecycleConnection(connection, owner="runtime-lifecycle-encrypted")
 
     return DatabaseLifecycle(db_path, readonly_connector=readonly_encrypted_connector)
 
