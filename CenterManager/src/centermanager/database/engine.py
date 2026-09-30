@@ -95,6 +95,7 @@ def acquire_runtime_dbapi_connection(
     opener: Callable[[], object],
     *,
     owner: str,
+    maintenance_owned: bool = False,
 ) -> object:
     """Atomically open and register a handle to the live runtime database.
 
@@ -102,11 +103,21 @@ def acquire_runtime_dbapi_connection(
     boundary. The maintenance gate is held across both the OS-level open and
     registry insertion, so once maintenance begins there can be no invisible
     race where a new live handle exists but quiesce cannot see it.
+
+    ``maintenance_owned`` is intentionally narrow: restore code may use it only
+    while it already owns the maintenance fence, for example to validate the
+    newly installed live DB before either committing or rolling back the swap.
+    Normal runtime callers remain blocked for the entire maintenance window.
     """
     with _runtime_db_gate:
         if _runtime_db_maintenance:
+            if not maintenance_owned:
+                raise RuntimeDatabaseMaintenanceError(
+                    "Runtime database is temporarily unavailable during backup restore"
+                )
+        elif maintenance_owned:
             raise RuntimeDatabaseMaintenanceError(
-                "Runtime database is temporarily unavailable during backup restore"
+                "Maintenance-owned runtime database access requires an active maintenance fence"
             )
         connection = opener()
         _register_runtime_dbapi_connection(connection, owner=owner)
@@ -132,9 +143,14 @@ def runtime_dbapi_connection(
     opener: Callable[[], object],
     *,
     owner: str,
+    maintenance_owned: bool = False,
 ) -> Iterator[object]:
     """Context-manager form of the process-wide runtime DB ownership boundary."""
-    connection = acquire_runtime_dbapi_connection(opener, owner=owner)
+    connection = acquire_runtime_dbapi_connection(
+        opener,
+        owner=owner,
+        maintenance_owned=maintenance_owned,
+    )
     try:
         yield connection
     finally:
