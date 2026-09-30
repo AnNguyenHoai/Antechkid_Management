@@ -364,9 +364,24 @@ def create_engine_for_path(
         cursor.execute("PRAGMA foreign_keys = ON;")
         cursor.close()
 
-    @event.listens_for(engine, "close")
-    def unregister_closed_connection(dbapi_connection, connection_record):
+    # SQLAlchemy's PoolEvents.close fires *before* dialect.do_close().
+    # Unregistering in that event creates a false-zero window where the registry
+    # says the handle is gone while Windows still sees the native SQLite handle.
+    # Wrap the dialect close boundary instead and unregister only after the
+    # driver's close/terminate call succeeds.
+    original_do_close = engine.dialect.do_close
+    original_do_terminate = engine.dialect.do_terminate
+
+    def tracked_do_close(dbapi_connection):
+        original_do_close(dbapi_connection)
         _unregister_runtime_dbapi_connection(dbapi_connection)
+
+    def tracked_do_terminate(dbapi_connection):
+        original_do_terminate(dbapi_connection)
+        _unregister_runtime_dbapi_connection(dbapi_connection)
+
+    engine.dialect.do_close = tracked_do_close  # type: ignore[method-assign]
+    engine.dialect.do_terminate = tracked_do_terminate  # type: ignore[method-assign]
 
     return engine
 
