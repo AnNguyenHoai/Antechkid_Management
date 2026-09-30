@@ -2,7 +2,9 @@
 import logging
 import sqlite3
 from pathlib import Path
+from threading import RLock
 from urllib.parse import quote
+from weakref import WeakSet
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -19,6 +21,58 @@ from centermanager.database.lifecycle import DatabaseLifecycle, DatabaseLifecycl
 from centermanager.security.protected_storage import assert_direct_database_access_allowed
 
 logger = logging.getLogger(__name__)
+
+# SEC06 destructive restore must fence *every* production engine, not only the
+# session factory owned by database.session. app.py also creates a long-lived
+# production engine/sessionmaker and background services may retain it. A
+# disposed SQLAlchemy Engine is reusable, so disposal alone is not a fence: its
+# creator must reject new connections until the filesystem swap/rollback is
+# complete.
+_runtime_db_gate = RLock()
+_runtime_db_maintenance = False
+_runtime_engines: WeakSet[Engine] = WeakSet()
+
+
+class RuntimeDatabaseMaintenanceError(RuntimeError):
+    """Raised when runtime DB access is attempted during destructive recovery."""
+
+
+def runtime_db_maintenance_active() -> bool:
+    with _runtime_db_gate:
+        return _runtime_db_maintenance
+
+
+def begin_runtime_db_maintenance() -> None:
+    """Fence creation of new production DB connections.
+
+    Taking the same gate used by guarded engine creators waits for any
+    connection currently being opened to finish before maintenance becomes
+    active. After this function returns, existing connections may be closed and
+    engines disposed without a new production connection racing the restore.
+    """
+    global _runtime_db_maintenance
+    with _runtime_db_gate:
+        if _runtime_db_maintenance:
+            return
+        _runtime_db_maintenance = True
+    logger.info("Runtime database maintenance fence enabled")
+
+
+def end_runtime_db_maintenance() -> None:
+    """Allow production DB connections after a stable swap or rollback."""
+    global _runtime_db_maintenance
+    with _runtime_db_gate:
+        _runtime_db_maintenance = False
+    logger.info("Runtime database maintenance fence disabled")
+
+
+def dispose_runtime_engines() -> None:
+    """Dispose every production Engine created by this process."""
+    with _runtime_db_gate:
+        engines = list(_runtime_engines)
+    for engine in engines:
+        engine.dispose()
+    logger.info("Disposed %d tracked production database engine(s)", len(engines))
 
 
 def get_database_path() -> Path:
@@ -86,13 +140,15 @@ def create_engine_for_path(
     allow_create: bool = True,
     encrypted: bool = False,
     encryption_key: bytes | None = None,
+    runtime_guarded: bool = False,
 ) -> Engine:
     """Create a database engine for a specific path.
 
     The historical low-level helper remains plain SQLite by default so tests
     can create disposable databases. Production explicitly enables encryption
     on Windows and never falls back to stdlib SQLite if SQLCipher/key loading
-    fails.
+    fails. Production engines opt into ``runtime_guarded`` so an old retained
+    sessionmaker cannot reopen ``center.db`` during destructive restore.
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,7 +158,7 @@ def create_engine_for_path(
 
     lifecycle = _runtime_lifecycle(db_path, encryption_key if encrypted else None)
 
-    def connect_database():
+    def open_connection():
         if not allow_create:
             lifecycle.require_available()
         if encrypted:
@@ -116,6 +172,18 @@ def create_engine_for_path(
             uri=True,
             check_same_thread=False,
         )
+
+    def connect_database():
+        if not runtime_guarded:
+            return open_connection()
+        # Hold the gate through the actual OS open. begin_runtime_db_maintenance
+        # therefore cannot return while a connection creation is in-flight.
+        with _runtime_db_gate:
+            if _runtime_db_maintenance:
+                raise RuntimeDatabaseMaintenanceError(
+                    "Runtime database is temporarily unavailable during backup restore"
+                )
+            return open_connection()
 
     engine = create_engine(
         "sqlite://",
@@ -166,22 +234,35 @@ def initialize_runtime_database() -> Path:
 
 
 def create_production_engine(echo: bool = False) -> Engine:
-    """Create production engine without auto-creating DB or encryption keys."""
+    """Create a tracked, maintenance-fenced production engine."""
     assert_direct_database_access_allowed()
-    db_path = get_database_path()
-    encrypted = database_encryption_required()
-    key = DatabaseKeyStore().load() if encrypted else None
-    state = _runtime_lifecycle(db_path, key if encrypted else None).inspect()
 
-    if state is not DatabaseLifecycleState.AVAILABLE:
-        logger.warning(
-            "Runtime database is not currently available: state=%s; recovery is required before first use",
-            state.value,
+    # Serialize engine construction/lifecycle inspection against the start of a
+    # destructive restore. This prevents an engine from slipping into existence
+    # between the maintenance check and registration.
+    with _runtime_db_gate:
+        if _runtime_db_maintenance:
+            raise RuntimeDatabaseMaintenanceError(
+                "Runtime database is temporarily unavailable during backup restore"
+            )
+
+        db_path = get_database_path()
+        encrypted = database_encryption_required()
+        key = DatabaseKeyStore().load() if encrypted else None
+        state = _runtime_lifecycle(db_path, key if encrypted else None).inspect()
+
+        if state is not DatabaseLifecycleState.AVAILABLE:
+            logger.warning(
+                "Runtime database is not currently available: state=%s; recovery is required before first use",
+                state.value,
+            )
+        engine = create_engine_for_path(
+            db_path,
+            echo=echo,
+            allow_create=False,
+            encrypted=encrypted,
+            encryption_key=key,
+            runtime_guarded=True,
         )
-    return create_engine_for_path(
-        db_path,
-        echo=echo,
-        allow_create=False,
-        encrypted=encrypted,
-        encryption_key=key,
-    )
+        _runtime_engines.add(engine)
+        return engine
