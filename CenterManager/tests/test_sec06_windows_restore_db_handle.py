@@ -9,8 +9,20 @@ import centermanager.database.session as db_session
 from centermanager.platform.backup.backup_service import BackupService
 
 
-def _reset_maintenance_fence():
+@pytest.fixture(autouse=True)
+def _isolate_runtime_db_maintenance_fence():
+    """Keep the process-global maintenance fence isolated between tests.
+
+    Several restore/rollback tests intentionally monkeypatch refresh_runtime_db.
+    Since quiesce_runtime_db now owns a real process-global fence, those older
+    mocked refresh paths can otherwise leave maintenance enabled for a later
+    test even though no production restore is still in progress.
+    """
     db_engine.end_runtime_db_maintenance()
+    try:
+        yield
+    finally:
+        db_engine.end_runtime_db_maintenance()
 
 
 def test_quiesce_fences_then_closes_sessions_and_all_runtime_engines(monkeypatch):
@@ -97,7 +109,6 @@ def test_retained_runtime_engine_cannot_reopen_database_while_restore_fenced(tmp
         with engine.connect() as connection:
             assert connection.execute(text("SELECT count(*) FROM probe")).scalar_one() == 0
     finally:
-        _reset_maintenance_fence()
         engine.dispose()
 
 
