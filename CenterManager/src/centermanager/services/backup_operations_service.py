@@ -112,13 +112,7 @@ class BackupOperationsService:
         return RecoveryAuthority(manager)
 
     def _suspend_write_handoff_sync(self) -> None:
-        """Fail closed for queued handoffs while recovery drains RuntimeSync.
-
-        The collaboration poller owns a different thread from RuntimeSyncService.
-        Merely stopping RuntimeSync's worker does not stop that poller from calling
-        execute_write_handoff_sync().  Replacing the handoff guard with a fail-closed
-        guard closes that entry point before we inspect/drain active sync work.
-        """
+        """Fail closed for queued handoffs while recovery drains RuntimeSync."""
         manager = self._collaboration_manager
         if manager is None:
             return
@@ -136,34 +130,36 @@ class BackupOperationsService:
 
     @staticmethod
     def _sync_operation_active(service) -> bool:
-        """Return whether any RuntimeSync operation is still in its mutation window."""
+        """Return whether a RuntimeSync operation is in its mutation window.
+
+        current_state() is an optional extension to the legacy recovery contract.
+        Older RuntimeSync-compatible test doubles/services only expose worker
+        lifecycle state. Once their worker has been stopped and joined there is no
+        separate operation state to drain, so preserve that established contract.
+        """
+        current_state = getattr(service, "current_state", None)
+        if not callable(current_state):
+            return False
         try:
-            state = service.current_state()
+            state = current_state()
         except Exception as exc:
             raise BackupRestoreAuthorizationError(
                 "Unable to verify synchronization quiescence; restore was not started."
             ) from exc
+        if not isinstance(state, dict):
+            raise BackupRestoreAuthorizationError(
+                "Unable to verify synchronization quiescence; restore was not started."
+            )
         status = str(state.get("status", "")).lower()
         return status in {"checking", "synchronizing"}
 
     def _pause_runtime_sync_for_recovery(self) -> bool:
-        """Close all known sync entry points and drain in-flight sync operations.
-
-        RuntimeSync's background worker is not the only caller of _perform_sync().
-        CollaborationPoller can synchronously enter execute_write_handoff_sync() on
-        its own QThread.  Recovery therefore first fails closed the handoff guard,
-        then stops the worker, and finally waits until RuntimeSync leaves CHECKING /
-        SYNCHRONIZING before any center.db snapshot or replacement is allowed.
-        """
+        """Close known sync entry points and drain in-flight sync operations."""
         service = self._runtime_sync_service
         if service is None:
             return False
 
         was_running = bool(getattr(service, "_running", False))
-
-        # Close the independent CollaborationPoller -> handoff -> RuntimeSync path
-        # before stopping the RuntimeSync worker. An already-entered handoff is
-        # allowed to finish and is drained below.
         self._suspend_write_handoff_sync()
 
         if was_running:
@@ -180,10 +176,6 @@ class BackupOperationsService:
                 "Background synchronization did not quiesce; restore was not started."
             )
 
-        # stop()/join() only proves the worker thread is gone. A handoff sync may
-        # already be executing on CollaborationPoller's QThread, so wait for the
-        # service-level operation state as well. No new handoff can enter because
-        # the guard above now fails closed.
         deadline = time.monotonic() + drain_timeout
         while self._sync_operation_active(service):
             if time.monotonic() >= deadline:
@@ -296,8 +288,6 @@ class BackupOperationsService:
             )
         finally:
             authority.release()
-            # A successful local restore crosses the restart boundary. Otherwise
-            # restore both RuntimeSync and the collaboration handoff guard.
             if not local_restore_completed:
                 self._resume_write_handoff_sync()
                 if sync_was_running:
