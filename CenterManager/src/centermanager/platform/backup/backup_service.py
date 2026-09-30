@@ -153,6 +153,7 @@ class BackupService:
         db_path: Path,
         *,
         runtime_guarded: bool = False,
+        maintenance_owned: bool = False,
     ) -> Optional[str]:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return "Database backup is missing or empty"
@@ -165,6 +166,7 @@ class BackupService:
                 with runtime_dbapi_connection(
                     open_connection,
                     owner="backup-plain-validation",
+                    maintenance_owned=maintenance_owned,
                 ) as con:
                     row = con.execute("PRAGMA integrity_check").fetchone()
             else:
@@ -185,6 +187,7 @@ class BackupService:
         key: bytes,
         *,
         runtime_guarded: bool = False,
+        maintenance_owned: bool = False,
     ) -> Optional[str]:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return "Database backup is missing or empty"
@@ -207,6 +210,7 @@ class BackupService:
                 with runtime_dbapi_connection(
                     open_connection,
                     owner="backup-encrypted-validation",
+                    maintenance_owned=maintenance_owned,
                 ) as con:
                     row = con.execute("PRAGMA integrity_check").fetchone()
             else:
@@ -234,6 +238,7 @@ class BackupService:
         encrypted: bool,
         key: Optional[bytes],
         runtime_guarded: bool = False,
+        maintenance_owned: bool = False,
     ) -> Optional[str]:
         if encrypted:
             if key is None:
@@ -242,8 +247,13 @@ class BackupService:
                 db_path,
                 key,
                 runtime_guarded=runtime_guarded,
+                maintenance_owned=maintenance_owned,
             )
-        return self._validate_plain_sqlite(db_path, runtime_guarded=runtime_guarded)
+        return self._validate_plain_sqlite(
+            db_path,
+            runtime_guarded=runtime_guarded,
+            maintenance_owned=maintenance_owned,
+        )
 
     def _is_owned_backup(self, backup_path: Path) -> bool:
         try:
@@ -453,14 +463,18 @@ class BackupService:
                 meta_tmp = None
                 meta_installed = True
 
-                # Recovery owns the maintenance fence at this point. This direct
-                # validation is intentionally not registered because the old live
-                # file has already been replaced; no further destructive rename
-                # depends on this handle being absent.
+                # Post-swap validation still sits inside the rollback boundary:
+                # a validation/refresh failure below can unlink the new live DB
+                # and replace it with old_db. Recovery therefore uses the same
+                # process-wide ownership registry while explicitly bypassing the
+                # maintenance fence as its current owner. The context manager
+                # proves native close/unregister before rollback can mutate paths.
                 final_error = self._validate_database(
                     runtime_db,
                     encrypted=encrypted,
                     key=key,
+                    runtime_guarded=True,
+                    maintenance_owned=True,
                 )
                 if final_error:
                     raise RuntimeError(
