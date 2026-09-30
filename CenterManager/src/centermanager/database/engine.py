@@ -25,10 +25,6 @@ logger = logging.getLogger(__name__)
 _runtime_db_gate = RLock()
 _runtime_db_maintenance = False
 _runtime_engines: WeakSet[Engine] = WeakSet()
-# DBAPI connection objects (sqlite3 / SQLCipher) are not weak-referenceable on
-# every supported driver, so keep an identity keyed registry. Production uses
-# NullPool: Engine.dispose() cannot be treated as proof that a checked-out raw
-# connection no longer owns center.db on Windows.
 _runtime_dbapi_connections: dict[int, object] = {}
 
 
@@ -42,7 +38,6 @@ def runtime_db_maintenance_active() -> bool:
 
 
 def runtime_dbapi_connection_count() -> int:
-    """Return the number of process-owned production DBAPI handles."""
     with _runtime_db_gate:
         return len(_runtime_dbapi_connections)
 
@@ -58,14 +53,7 @@ def _unregister_runtime_dbapi_connection(connection: object) -> None:
 
 
 def close_runtime_dbapi_connections() -> None:
-    """Force-close every tracked production DBAPI connection.
-
-    This runs only after the maintenance fence is active, so no guarded
-    production creator can add another handle while the registry is drained.
-    A handle is removed from the registry only after close() succeeds.  This is
-    deliberately fail-closed: on Windows a failed close can still own center.db,
-    so reporting zero handles would make a destructive os.replace unsafe.
-    """
+    """Force-close every tracked production DBAPI connection, fail closed."""
     with _runtime_db_gate:
         connections = list(_runtime_dbapi_connections.values())
     failures = []
@@ -74,13 +62,8 @@ def close_runtime_dbapi_connections() -> None:
         try:
             connection.close()  # type: ignore[attr-defined]
         except Exception as exc:
-            # Preserve failed handles in the registry.  Recovery callers can then
-            # distinguish a real quiescent process from a close attempt that failed.
             failures.append((id(connection), exc))
-            logger.exception(
-                "Failed to close tracked production DBAPI handle id=%s",
-                id(connection),
-            )
+            logger.exception("Failed to close tracked production DBAPI handle id=%s", id(connection))
         else:
             _unregister_runtime_dbapi_connection(connection)
             closed += 1
@@ -88,8 +71,7 @@ def close_runtime_dbapi_connections() -> None:
         remaining = runtime_dbapi_connection_count()
         details = ", ".join(f"id={ident}: {exc}" for ident, exc in failures)
         raise RuntimeDatabaseMaintenanceError(
-            "Failed to close "
-            f"{len(failures)} runtime database handle(s); "
+            f"Failed to close {len(failures)} runtime database handle(s); "
             f"{remaining} handle(s) remain registered: {details}"
         )
     remaining = runtime_dbapi_connection_count()
@@ -101,7 +83,6 @@ def close_runtime_dbapi_connections() -> None:
 
 
 def begin_runtime_db_maintenance() -> None:
-    """Fence creation of new production DB connections."""
     global _runtime_db_maintenance
     with _runtime_db_gate:
         if _runtime_db_maintenance:
@@ -111,7 +92,6 @@ def begin_runtime_db_maintenance() -> None:
 
 
 def end_runtime_db_maintenance() -> None:
-    """Allow production DB connections after a stable swap or rollback."""
     global _runtime_db_maintenance
     with _runtime_db_gate:
         _runtime_db_maintenance = False
@@ -119,7 +99,6 @@ def end_runtime_db_maintenance() -> None:
 
 
 def dispose_runtime_engines() -> None:
-    """Dispose every production Engine created by this process."""
     with _runtime_db_gate:
         engines = list(_runtime_engines)
     for engine in engines:
@@ -136,28 +115,85 @@ def _database_uri(db_path: Path, *, allow_create: bool, readonly: bool = False) 
     return f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode={mode}"
 
 
-def _connect_encrypted(db_path: Path, key: bytes, *, allow_create: bool, readonly: bool = False):
-    sqlcipher = load_sqlcipher_driver()
-    connection = sqlcipher.connect(
-        _database_uri(db_path, allow_create=allow_create, readonly=readonly),
-        uri=True,
-        check_same_thread=False,
-    )
-    try:
-        apply_sqlcipher_key(connection, key)
-        connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+def _connect_encrypted(
+    db_path: Path,
+    key: bytes,
+    *,
+    allow_create: bool,
+    readonly: bool = False,
+    runtime_guarded: bool = False,
+):
+    """Open SQLCipher, optionally under the process-wide runtime maintenance gate.
+
+    Runtime lifecycle inspection used to open an untracked readonly SQLCipher
+    handle while create_production_engine() held the gate.  On Windows that
+    handle can survive long enough to make Restart Manager report this process as
+    the owner even after all SQLAlchemy handles were drained.  Guard and register
+    every SQLCipher open that targets the live runtime DB.
+    """
+    def open_connection():
+        sqlcipher = load_sqlcipher_driver()
+        connection = sqlcipher.connect(
+            _database_uri(db_path, allow_create=allow_create, readonly=readonly),
+            uri=True,
+            check_same_thread=False,
+        )
+        try:
+            apply_sqlcipher_key(connection, key)
+            connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            return connection
+        except Exception:
+            connection.close()
+            raise
+
+    if not runtime_guarded:
+        return open_connection()
+    with _runtime_db_gate:
+        if _runtime_db_maintenance:
+            raise RuntimeDatabaseMaintenanceError(
+                "Runtime database is temporarily unavailable during backup restore"
+            )
+        connection = open_connection()
+        _runtime_dbapi_connections[id(connection)] = connection
         return connection
-    except Exception:
-        connection.close()
-        raise
 
 
-def _runtime_lifecycle(db_path: Path, key: bytes | None = None) -> DatabaseLifecycle:
+def _runtime_lifecycle(
+    db_path: Path,
+    key: bytes | None = None,
+    *,
+    runtime_guarded: bool = False,
+) -> DatabaseLifecycle:
     if key is None:
         return DatabaseLifecycle(db_path)
 
     def readonly_connector(path: Path):
-        return _connect_encrypted(path, key, allow_create=False, readonly=True)
+        connection = _connect_encrypted(
+            path,
+            key,
+            allow_create=False,
+            readonly=True,
+            runtime_guarded=runtime_guarded,
+        )
+        if not runtime_guarded:
+            return connection
+
+        class _TrackedLifecycleConnection:
+            def __init__(self, raw):
+                self._raw = raw
+
+            def execute(self, *args, **kwargs):
+                return self._raw.execute(*args, **kwargs)
+
+            def close(self):
+                try:
+                    self._raw.close()
+                except Exception:
+                    raise
+                else:
+                    _unregister_runtime_dbapi_connection(self._raw)
+
+        return _TrackedLifecycleConnection(connection)
 
     return DatabaseLifecycle(db_path, readonly_connector=readonly_connector)
 
@@ -172,7 +208,7 @@ def inspect_runtime_database() -> DatabaseLifecycleState:
     except Exception:
         logger.exception("Encrypted runtime database key is unavailable")
         return DatabaseLifecycleState.RECOVERY_REQUIRED
-    return _runtime_lifecycle(db_path, key).inspect()
+    return _runtime_lifecycle(db_path, key, runtime_guarded=True).inspect()
 
 
 def create_engine_for_path(
@@ -188,14 +224,21 @@ def create_engine_for_path(
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if encrypted and encryption_key is None:
         raise ValueError("encryption_key is required for an encrypted database")
-    lifecycle = _runtime_lifecycle(db_path, encryption_key if encrypted else None)
+    lifecycle = _runtime_lifecycle(
+        db_path,
+        encryption_key if encrypted else None,
+        runtime_guarded=runtime_guarded,
+    )
 
     def open_connection():
         if not allow_create:
             lifecycle.require_available()
         if encrypted:
             return _connect_encrypted(
-                db_path, encryption_key, allow_create=allow_create  # type: ignore[arg-type]
+                db_path,
+                encryption_key,  # type: ignore[arg-type]
+                allow_create=allow_create,
+                runtime_guarded=False,
             )
         return sqlite3.connect(
             _database_uri(db_path, allow_create=allow_create),
@@ -206,9 +249,6 @@ def create_engine_for_path(
     def connect_database():
         if not runtime_guarded:
             return open_connection()
-        # Hold the gate through OS open *and* registry insertion. Once
-        # begin_runtime_db_maintenance() returns, every pre-existing production
-        # handle is visible to close_runtime_dbapi_connections().
         with _runtime_db_gate:
             if _runtime_db_maintenance:
                 raise RuntimeDatabaseMaintenanceError(
@@ -218,9 +258,7 @@ def create_engine_for_path(
             _runtime_dbapi_connections[id(connection)] = connection
             return connection
 
-    engine = create_engine(
-        "sqlite://", echo=echo, creator=connect_database, poolclass=NullPool
-    )
+    engine = create_engine("sqlite://", echo=echo, creator=connect_database, poolclass=NullPool)
 
     @event.listens_for(engine, "connect")
     def set_foreign_keys(dbapi_connection, connection_record):
@@ -251,10 +289,7 @@ def initialize_runtime_database() -> Path:
         connection.commit()
     finally:
         connection.close()
-    logger.info(
-        "Initialized new runtime database container (encrypted=%s)",
-        database_encryption_required(),
-    )
+    logger.info("Initialized new runtime database container (encrypted=%s)", database_encryption_required())
     return db_path
 
 
@@ -268,7 +303,11 @@ def create_production_engine(echo: bool = False) -> Engine:
         db_path = get_database_path()
         encrypted = database_encryption_required()
         key = DatabaseKeyStore().load() if encrypted else None
-        state = _runtime_lifecycle(db_path, key if encrypted else None).inspect()
+        state = _runtime_lifecycle(
+            db_path,
+            key if encrypted else None,
+            runtime_guarded=True,
+        ).inspect()
         if state is not DatabaseLifecycleState.AVAILABLE:
             logger.warning(
                 "Runtime database is not currently available: state=%s; recovery is required before first use",
