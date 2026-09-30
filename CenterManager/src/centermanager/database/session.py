@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Database session management with context manager pattern."""
+import os
 from contextlib import contextmanager
 from typing import Generator
 
@@ -14,6 +15,7 @@ from centermanager.database.engine import (
     get_database_path,
     runtime_db_maintenance_active,
     runtime_dbapi_connection_count,
+    runtime_dbapi_connection_details,
 )
 from centermanager.platform.backup.windows_lock_diagnostics import (
     format_lock_owners,
@@ -52,8 +54,14 @@ def quiesce_runtime_db() -> None:
         close_runtime_dbapi_connections()
         remaining = runtime_dbapi_connection_count()
         if remaining:
+            details = runtime_dbapi_connection_details()
+            summary = "; ".join(
+                f"id={ident}, owner={info.owner}, thread={info.thread_id}"
+                for ident, info in details
+            )
             raise RuntimeError(
                 f"Runtime database quiesce incomplete: {remaining} DBAPI handle(s) remain"
+                + (f": {summary}" if summary else "")
             )
         _session_factory = None
 
@@ -67,9 +75,21 @@ def quiesce_runtime_db() -> None:
             logger.exception("Windows file-lock ownership diagnostics failed")
         else:
             if owners:
+                same_process = [owner for owner in owners if owner.pid == os.getpid()]
+                owner_text = format_lock_owners(owners)
+                if same_process and runtime_dbapi_connection_count() == 0:
+                    logger.error(
+                        "UNTRACKED SAME-PROCESS HANDLE DETECTED for runtime DB: %s",
+                        owner_text,
+                    )
+                    raise RuntimeError(
+                        "Runtime database is still locked after quiesce; "
+                        "UNTRACKED SAME-PROCESS HANDLE DETECTED; Windows lock owner(s): "
+                        + owner_text
+                    )
                 raise RuntimeError(
                     "Runtime database is still locked after quiesce; Windows lock owner(s): "
-                    + format_lock_owners(owners)
+                    + owner_text
                 )
     except Exception:
         end_runtime_db_maintenance()
