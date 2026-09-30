@@ -62,30 +62,42 @@ def close_runtime_dbapi_connections() -> None:
 
     This runs only after the maintenance fence is active, so no guarded
     production creator can add another handle while the registry is drained.
-    Closing a checked-out connection may make a retained SQLAlchemy Connection
-    unusable, which is intentional: successful recovery requires process restart.
+    A handle is removed from the registry only after close() succeeds.  This is
+    deliberately fail-closed: on Windows a failed close can still own center.db,
+    so reporting zero handles would make a destructive os.replace unsafe.
     """
     with _runtime_db_gate:
         connections = list(_runtime_dbapi_connections.values())
     failures = []
+    closed = 0
     for connection in connections:
         try:
             connection.close()  # type: ignore[attr-defined]
         except Exception as exc:
+            # Preserve failed handles in the registry.  Recovery callers can then
+            # distinguish a real quiescent process from a close attempt that failed.
             failures.append((id(connection), exc))
-        finally:
+            logger.exception(
+                "Failed to close tracked production DBAPI handle id=%s",
+                id(connection),
+            )
+        else:
             _unregister_runtime_dbapi_connection(connection)
+            closed += 1
     if failures:
+        remaining = runtime_dbapi_connection_count()
         details = ", ".join(f"id={ident}: {exc}" for ident, exc in failures)
         raise RuntimeDatabaseMaintenanceError(
-            f"Failed to close {len(failures)} runtime database handle(s): {details}"
+            "Failed to close "
+            f"{len(failures)} runtime database handle(s); "
+            f"{remaining} handle(s) remain registered: {details}"
         )
     remaining = runtime_dbapi_connection_count()
     if remaining:
         raise RuntimeDatabaseMaintenanceError(
             f"Runtime database quiesce incomplete: {remaining} DBAPI handle(s) remain"
         )
-    logger.info("Closed %d tracked production DBAPI connection(s)", len(connections))
+    logger.info("Closed %d tracked production DBAPI connection(s)", closed)
 
 
 def begin_runtime_db_maintenance() -> None:
