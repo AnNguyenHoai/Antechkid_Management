@@ -101,14 +101,36 @@ def quiesce_runtime_db() -> None:
 
 
 def refresh_runtime_db() -> None:
+    """Rebuild the runtime session factory without leaving rollback unfenced.
+
+    Creating the new production engine requires the maintenance fence to be
+    released. If factory creation fails after that release, immediately
+    re-quiesce before propagating the error so a restore caller can safely run
+    its destructive rollback without a stale/reopened handle racing it.
+    """
     global _session_factory
     import logging
 
+    logger = logging.getLogger(__name__)
     if not runtime_db_maintenance_active():
         quiesce_runtime_db()
+
+    _session_factory = None
     end_runtime_db_maintenance()
-    _session_factory = create_session_factory()
-    logging.getLogger(__name__).info("Runtime database session factory refreshed")
+    try:
+        new_factory = create_session_factory()
+    except Exception:
+        logger.exception(
+            "Runtime database session factory rebuild failed; re-entering maintenance fence"
+        )
+        # create_session_factory() may have created/tracked an Engine or DBAPI
+        # handle before failing. Re-quiesce drains any partial state and restores
+        # the fence before restore_backup() attempts rollback rename/unlink.
+        quiesce_runtime_db()
+        raise
+
+    _session_factory = new_factory
+    logger.info("Runtime database session factory refreshed")
 
 
 @contextmanager
