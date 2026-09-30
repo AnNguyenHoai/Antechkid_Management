@@ -19,7 +19,7 @@ from typing import Optional
 from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
 from centermanager.events.collaboration_events import BackupCreated, BackupFailed
-from centermanager.database.session import refresh_runtime_db
+from centermanager.database.session import quiesce_runtime_db, refresh_runtime_db
 from centermanager.database.encryption import (
     DatabaseEncryptionError,
     DatabaseKeyStore,
@@ -315,6 +315,11 @@ class BackupService:
             runtime_db = paths.database_dir / "center.db"
             old_db = paths.database_dir / f".center.db.previous-{uuid.uuid4().hex}"
             old_meta = meta_target.parent / f".metadata.previous-{uuid.uuid4().hex}"
+
+            # All validation/staging above is non-destructive. Before the first
+            # live rename, release process-owned SQLAlchemy/SQLite handles. This
+            # is required on Windows where an open center.db cannot be renamed.
+            quiesce_runtime_db()
 
             # All live mutations, including preservation, participate in one
             # rollback boundary. A failure while moving WAL/SHM, the runtime DB,
