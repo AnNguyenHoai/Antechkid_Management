@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,41 @@ def test_lifecycle_wrapper_adopts_untracked_handle_without_double_close_on_unwin
 
     assert raw.close_calls == 1
     assert id(raw) not in database_engine._runtime_dbapi_connections
+
+
+def test_sqlalchemy_registry_remains_visible_until_native_driver_close(tmp_path, monkeypatch):
+    events = []
+    real_connect = sqlite3.connect
+
+    class _TrackingConnection(sqlite3.Connection):
+        def close(self):
+            assert id(self) in database_engine._runtime_dbapi_connections
+            events.append("native-close")
+            return super().close()
+
+    def fake_connect_plain(path, *, allow_create, readonly=False):
+        return real_connect(
+            path,
+            factory=_TrackingConnection,
+            check_same_thread=False,
+        )
+
+    monkeypatch.setattr(database_engine, "_connect_plain", fake_connect_plain)
+    engine = database_engine.create_engine_for_path(
+        tmp_path / "center.db",
+        allow_create=True,
+        runtime_guarded=True,
+    )
+
+    connection = engine.connect()
+    raw = connection.connection.driver_connection
+    assert id(raw) in database_engine._runtime_dbapi_connections
+
+    connection.close()
+
+    assert events == ["native-close"]
+    assert id(raw) not in database_engine._runtime_dbapi_connections
+    engine.dispose()
 
 
 def test_artifact_runtime_validation_is_visible_to_process_registry(tmp_path, monkeypatch):
