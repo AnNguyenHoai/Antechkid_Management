@@ -67,6 +67,34 @@ def test_runtime_db_boundary_rejects_new_open_while_maintenance_is_active():
     assert opened == []
 
 
+def test_lifecycle_wrapper_adopts_untracked_handle_without_double_close_on_unwind():
+    class _CountingConnection:
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    raw = _CountingConnection()
+    wrapper = database_engine._TrackedLifecycleConnection(
+        raw,
+        owner="unit-test-lifecycle",
+    )
+
+    assert id(raw) in database_engine._runtime_dbapi_connections
+    details = dict(database_engine.runtime_dbapi_connection_details())
+    assert details[id(raw)].owner == "unit-test-lifecycle"
+
+    # Simulate recovery force-close: native handle closes and leaves the active
+    # registry before the original lifecycle owner unwinds its context.
+    raw.close()
+    database_engine._unregister_runtime_dbapi_connection(raw)
+    wrapper.close()
+
+    assert raw.close_calls == 1
+    assert id(raw) not in database_engine._runtime_dbapi_connections
+
+
 def test_artifact_runtime_validation_is_visible_to_process_registry(tmp_path, monkeypatch):
     db_path = tmp_path / "center.db"
     db_path.write_bytes(b"not-empty")
