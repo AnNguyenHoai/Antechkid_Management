@@ -40,13 +40,15 @@ class BackupOperationsService:
     """Admin-facing backup/recovery orchestration with audit hooks."""
 
     def __init__(self, session_factory=None, backup_service=None, audit_service=None,
-                 collaboration_manager=None, recovery_publisher=None):
+                 collaboration_manager=None, recovery_publisher=None,
+                 runtime_sync_service=None):
         self._backup = backup_service or BackupService()
         self._audit = audit_service or (
             AuditService(session_factory) if session_factory is not None else None
         )
         self._collaboration_manager = collaboration_manager
         self._recovery_publisher = recovery_publisher
+        self._runtime_sync_service = runtime_sync_service
 
     def list_backups(self):
         return self._backup.list_backups()
@@ -115,6 +117,41 @@ class BackupOperationsService:
             )
         return RecoveryAuthority(manager)
 
+    def _pause_runtime_sync_for_recovery(self) -> bool:
+        """Stop and drain the background sync worker before DB replacement.
+
+        Recovery and RuntimeSyncService both mutate runtime/Database/center.db and
+        both refresh the process-wide SQLAlchemy lifecycle.  The DB maintenance
+        fence alone cannot serialize them: an already-running sync can otherwise
+        refresh sessions and release the recovery fence while Windows restore is
+        about to rename center.db.  Recovery therefore drains the worker before
+        its first safety snapshot and keeps it stopped until recovery either
+        fails safely or requires a process restart.
+        """
+        service = self._runtime_sync_service
+        if service is None:
+            return False
+
+        was_running = bool(getattr(service, "_running", False))
+        if not was_running:
+            return False
+
+        service.stop()
+        thread = getattr(service, "_thread", None)
+        if thread is not None and thread.is_alive():
+            # stop() only joins briefly.  The poll loop may still be sleeping for
+            # poll_interval seconds, or an in-flight sync may still own DB/Git
+            # resources.  Wait for the worker to exit; never enter destructive
+            # recovery while that ownership is ambiguous.
+            poll_interval = float(getattr(service, "_poll_interval", 5) or 5)
+            thread.join(timeout=max(5.0, poll_interval + 5.0))
+
+        if thread is not None and thread.is_alive():
+            raise BackupRestoreAuthorizationError(
+                "Background synchronization did not quiesce; restore was not started."
+            )
+        return True
+
     def restore_backup(self, backup_path, *, reason: str, confirmation: str):
         backup_path = Path(backup_path)
         actor = self._require_admin_and_capability()
@@ -131,6 +168,8 @@ class BackupOperationsService:
             )
 
         authority = self._recovery_authority()
+        sync_was_running = False
+        local_restore_completed = False
         try:
             authority.acquire()
         except RecoveryAuthorityError as exc:
@@ -140,6 +179,17 @@ class BackupOperationsService:
             if not authority.validate():
                 raise BackupRestoreAuthorizationError(
                     "Exclusive recovery authority was lost before safety backup."
+                )
+
+            # SEC06 Windows boundary: the background sync service can both replace
+            # the runtime DB and call refresh_runtime_db().  Drain it before any
+            # recovery snapshot/swap so it cannot reopen center.db or clear the
+            # process maintenance fence during os.replace().
+            sync_was_running = self._pause_runtime_sync_for_recovery()
+
+            if not authority.validate():
+                raise BackupRestoreAuthorizationError(
+                    "Exclusive recovery authority was lost while quiescing synchronization."
                 )
 
             safety = self._backup.create_backup(label="pre_restore")
@@ -164,6 +214,7 @@ class BackupOperationsService:
                     success=False, backup_path=result.backup_path,
                     error=result.error, requires_restart=False,
                 )
+            local_restore_completed = True
 
             publisher = self._recovery_publisher
             if publisher is None:
@@ -207,3 +258,11 @@ class BackupOperationsService:
             )
         finally:
             authority.release()
+            # A successful local restore always crosses the restart boundary, so
+            # do not restart background sync against a process that must exit.
+            # Pre-destructive/rolled-back failures may safely resume normal sync.
+            if sync_was_running and not local_restore_completed:
+                try:
+                    self._runtime_sync_service.start()
+                except Exception:
+                    pass
