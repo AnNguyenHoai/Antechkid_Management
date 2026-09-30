@@ -22,15 +22,14 @@ from centermanager.security.protected_storage import assert_direct_database_acce
 
 logger = logging.getLogger(__name__)
 
-# SEC06 destructive restore must fence *every* production engine, not only the
-# session factory owned by database.session. app.py also creates a long-lived
-# production engine/sessionmaker and background services may retain it. A
-# disposed SQLAlchemy Engine is reusable, so disposal alone is not a fence: its
-# creator must reject new connections until the filesystem swap/rollback is
-# complete.
 _runtime_db_gate = RLock()
 _runtime_db_maintenance = False
 _runtime_engines: WeakSet[Engine] = WeakSet()
+# DBAPI connection objects (sqlite3 / SQLCipher) are not weak-referenceable on
+# every supported driver, so keep an identity keyed registry. Production uses
+# NullPool: Engine.dispose() cannot be treated as proof that a checked-out raw
+# connection no longer owns center.db on Windows.
+_runtime_dbapi_connections: dict[int, object] = {}
 
 
 class RuntimeDatabaseMaintenanceError(RuntimeError):
@@ -42,14 +41,55 @@ def runtime_db_maintenance_active() -> bool:
         return _runtime_db_maintenance
 
 
-def begin_runtime_db_maintenance() -> None:
-    """Fence creation of new production DB connections.
+def runtime_dbapi_connection_count() -> int:
+    """Return the number of process-owned production DBAPI handles."""
+    with _runtime_db_gate:
+        return len(_runtime_dbapi_connections)
 
-    Taking the same gate used by guarded engine creators waits for any
-    connection currently being opened to finish before maintenance becomes
-    active. After this function returns, existing connections may be closed and
-    engines disposed without a new production connection racing the restore.
+
+def _register_runtime_dbapi_connection(connection: object) -> None:
+    with _runtime_db_gate:
+        _runtime_dbapi_connections[id(connection)] = connection
+
+
+def _unregister_runtime_dbapi_connection(connection: object) -> None:
+    with _runtime_db_gate:
+        _runtime_dbapi_connections.pop(id(connection), None)
+
+
+def close_runtime_dbapi_connections() -> None:
+    """Force-close every tracked production DBAPI connection.
+
+    This runs only after the maintenance fence is active, so no guarded
+    production creator can add another handle while the registry is drained.
+    Closing a checked-out connection may make a retained SQLAlchemy Connection
+    unusable, which is intentional: successful recovery requires process restart.
     """
+    with _runtime_db_gate:
+        connections = list(_runtime_dbapi_connections.values())
+    failures = []
+    for connection in connections:
+        try:
+            connection.close()  # type: ignore[attr-defined]
+        except Exception as exc:
+            failures.append((id(connection), exc))
+        finally:
+            _unregister_runtime_dbapi_connection(connection)
+    if failures:
+        details = ", ".join(f"id={ident}: {exc}" for ident, exc in failures)
+        raise RuntimeDatabaseMaintenanceError(
+            f"Failed to close {len(failures)} runtime database handle(s): {details}"
+        )
+    remaining = runtime_dbapi_connection_count()
+    if remaining:
+        raise RuntimeDatabaseMaintenanceError(
+            f"Runtime database quiesce incomplete: {remaining} DBAPI handle(s) remain"
+        )
+    logger.info("Closed %d tracked production DBAPI connection(s)", len(connections))
+
+
+def begin_runtime_db_maintenance() -> None:
+    """Fence creation of new production DB connections."""
     global _runtime_db_maintenance
     with _runtime_db_gate:
         if _runtime_db_maintenance:
@@ -76,15 +116,11 @@ def dispose_runtime_engines() -> None:
 
 
 def get_database_path() -> Path:
-    """Return the runtime database path without creating the database file."""
     return get_paths().database_dir / "center.db"
 
 
 def _database_uri(db_path: Path, *, allow_create: bool, readonly: bool = False) -> str:
-    if readonly:
-        mode = "ro"
-    else:
-        mode = "rwc" if allow_create else "rw"
+    mode = "ro" if readonly else ("rwc" if allow_create else "rw")
     return f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode={mode}"
 
 
@@ -115,12 +151,6 @@ def _runtime_lifecycle(db_path: Path, key: bytes | None = None) -> DatabaseLifec
 
 
 def inspect_runtime_database() -> DatabaseLifecycleState:
-    """Inspect the runtime DB using the same encryption boundary as production.
-
-    Missing/unreadable key material fails closed as RECOVERY_REQUIRED rather
-    than retrying with plain SQLite. In SEC-02 enforced mode the desktop process
-    is forbidden from opening the database directly at all.
-    """
     assert_direct_database_access_allowed()
     db_path = get_database_path()
     if not database_encryption_required():
@@ -142,20 +172,10 @@ def create_engine_for_path(
     encryption_key: bytes | None = None,
     runtime_guarded: bool = False,
 ) -> Engine:
-    """Create a database engine for a specific path.
-
-    The historical low-level helper remains plain SQLite by default so tests
-    can create disposable databases. Production explicitly enables encryption
-    on Windows and never falls back to stdlib SQLite if SQLCipher/key loading
-    fails. Production engines opt into ``runtime_guarded`` so an old retained
-    sessionmaker cannot reopen ``center.db`` during destructive restore.
-    """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-
     if encrypted and encryption_key is None:
         raise ValueError("encryption_key is required for an encrypted database")
-
     lifecycle = _runtime_lifecycle(db_path, encryption_key if encrypted else None)
 
     def open_connection():
@@ -163,9 +183,7 @@ def create_engine_for_path(
             lifecycle.require_available()
         if encrypted:
             return _connect_encrypted(
-                db_path,
-                encryption_key,  # type: ignore[arg-type]
-                allow_create=allow_create,
+                db_path, encryption_key, allow_create=allow_create  # type: ignore[arg-type]
             )
         return sqlite3.connect(
             _database_uri(db_path, allow_create=allow_create),
@@ -176,20 +194,20 @@ def create_engine_for_path(
     def connect_database():
         if not runtime_guarded:
             return open_connection()
-        # Hold the gate through the actual OS open. begin_runtime_db_maintenance
-        # therefore cannot return while a connection creation is in-flight.
+        # Hold the gate through OS open *and* registry insertion. Once
+        # begin_runtime_db_maintenance() returns, every pre-existing production
+        # handle is visible to close_runtime_dbapi_connections().
         with _runtime_db_gate:
             if _runtime_db_maintenance:
                 raise RuntimeDatabaseMaintenanceError(
                     "Runtime database is temporarily unavailable during backup restore"
                 )
-            return open_connection()
+            connection = open_connection()
+            _runtime_dbapi_connections[id(connection)] = connection
+            return connection
 
     engine = create_engine(
-        "sqlite://",
-        echo=echo,
-        creator=connect_database,
-        poolclass=NullPool,
+        "sqlite://", echo=echo, creator=connect_database, poolclass=NullPool
     )
 
     @event.listens_for(engine, "connect")
@@ -198,29 +216,24 @@ def create_engine_for_path(
         cursor.execute("PRAGMA foreign_keys = ON;")
         cursor.close()
 
+    @event.listens_for(engine, "close")
+    def unregister_closed_connection(dbapi_connection, connection_record):
+        _unregister_runtime_dbapi_connection(dbapi_connection)
+
     return engine
 
 
 def initialize_runtime_database() -> Path:
-    """Create the runtime database container during explicit first-run setup.
-
-    Windows production creates a SQLCipher database and a random 256-bit DB key
-    protected by DPAPI. Existing database files are never overwritten and a
-    missing key for an existing DB is never silently replaced. SEC-02 enforced
-    mode forbids this desktop-owned initialization path.
-    """
     assert_direct_database_access_allowed()
     db_path = get_database_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
         return db_path
-
     if database_encryption_required():
         key = DatabaseKeyStore().load_or_create(allow_create=True)
         connection = _connect_encrypted(db_path, key, allow_create=True)
     else:
         connection = sqlite3.connect(db_path)
-
     try:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.commit()
@@ -234,23 +247,16 @@ def initialize_runtime_database() -> Path:
 
 
 def create_production_engine(echo: bool = False) -> Engine:
-    """Create a tracked, maintenance-fenced production engine."""
     assert_direct_database_access_allowed()
-
-    # Serialize engine construction/lifecycle inspection against the start of a
-    # destructive restore. This prevents an engine from slipping into existence
-    # between the maintenance check and registration.
     with _runtime_db_gate:
         if _runtime_db_maintenance:
             raise RuntimeDatabaseMaintenanceError(
                 "Runtime database is temporarily unavailable during backup restore"
             )
-
         db_path = get_database_path()
         encrypted = database_encryption_required()
         key = DatabaseKeyStore().load() if encrypted else None
         state = _runtime_lifecycle(db_path, key if encrypted else None).inspect()
-
         if state is not DatabaseLifecycleState.AVAILABLE:
             logger.warning(
                 "Runtime database is not currently available: state=%s; recovery is required before first use",
