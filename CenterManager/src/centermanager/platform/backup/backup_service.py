@@ -28,6 +28,7 @@ from centermanager.database.encryption import (
     is_plaintext_sqlite_file,
     load_sqlcipher_driver,
 )
+from centermanager.database.engine import runtime_dbapi_connection
 from centermanager.platform.backup.restore_authorization import (
     validate_restore_authorization,
 )
@@ -63,16 +64,34 @@ class BackupService:
             os.fsync(handle.fileno())
 
     @staticmethod
-    def _copy_plain_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
+    def _copy_plain_sqlite_snapshot(
+        source_path: Path,
+        destination_path: Path,
+        *,
+        runtime_guarded: bool = False,
+    ) -> None:
         """Create a transactionally consistent plaintext SQLite snapshot."""
         source_uri = source_path.resolve().as_uri() + "?mode=ro"
-        source = sqlite3.connect(source_uri, uri=True)
+
+        def open_source():
+            return sqlite3.connect(source_uri, uri=True)
+
         destination = sqlite3.connect(destination_path)
         try:
-            source.backup(destination)
+            if runtime_guarded:
+                with runtime_dbapi_connection(
+                    open_source,
+                    owner="backup-plain-snapshot-source",
+                ) as source:
+                    source.backup(destination)
+            else:
+                source = open_source()
+                try:
+                    source.backup(destination)
+                finally:
+                    source.close()
         finally:
             destination.close()
-            source.close()
 
     @staticmethod
     def _copy_sqlite_snapshot(source_path: Path, destination_path: Path) -> None:
@@ -84,7 +103,13 @@ class BackupService:
         BackupService._copy_plain_sqlite_snapshot(source_path, destination_path)
 
     @staticmethod
-    def _copy_encrypted_sqlite_snapshot(source_path: Path, destination_path: Path, key: bytes) -> None:
+    def _copy_encrypted_sqlite_snapshot(
+        source_path: Path,
+        destination_path: Path,
+        key: bytes,
+        *,
+        runtime_guarded: bool = False,
+    ) -> None:
         """Create a logical SQLCipher snapshot into a keyed destination.
 
         Both connections are keyed before schema/page access. SQLite's online
@@ -93,28 +118,61 @@ class BackupService:
         """
         sqlcipher = load_sqlcipher_driver()
         source_uri = source_path.resolve().as_uri() + "?mode=ro"
-        source = sqlcipher.connect(source_uri, uri=True)
+
+        def open_source():
+            source = sqlcipher.connect(source_uri, uri=True)
+            try:
+                apply_sqlcipher_key(source, key)
+                source.execute("SELECT count(*) FROM sqlite_master").fetchone()
+                return source
+            except Exception:
+                source.close()
+                raise
+
         destination = sqlcipher.connect(str(destination_path))
         try:
-            apply_sqlcipher_key(source, key)
-            source.execute("SELECT count(*) FROM sqlite_master").fetchone()
             apply_sqlcipher_key(destination, key)
-            source.backup(destination)
+            if runtime_guarded:
+                with runtime_dbapi_connection(
+                    open_source,
+                    owner="backup-encrypted-snapshot-source",
+                ) as source:
+                    source.backup(destination)
+            else:
+                source = open_source()
+                try:
+                    source.backup(destination)
+                finally:
+                    source.close()
             destination.commit()
         finally:
             destination.close()
-            source.close()
 
     @staticmethod
-    def _validate_plain_sqlite(db_path: Path) -> Optional[str]:
+    def _validate_plain_sqlite(
+        db_path: Path,
+        *,
+        runtime_guarded: bool = False,
+    ) -> Optional[str]:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return "Database backup is missing or empty"
+
+        def open_connection():
+            return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
         try:
-            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                row = con.execute("PRAGMA integrity_check").fetchone()
-            finally:
-                con.close()
+            if runtime_guarded:
+                with runtime_dbapi_connection(
+                    open_connection,
+                    owner="backup-plain-validation",
+                ) as con:
+                    row = con.execute("PRAGMA integrity_check").fetchone()
+            else:
+                con = open_connection()
+                try:
+                    row = con.execute("PRAGMA integrity_check").fetchone()
+                finally:
+                    con.close()
             if not row or row[0] != "ok":
                 return f"SQLite integrity check failed: {row[0] if row else 'unknown'}"
         except sqlite3.Error as exc:
@@ -122,20 +180,41 @@ class BackupService:
         return None
 
     @staticmethod
-    def _validate_encrypted_sqlite(db_path: Path, key: bytes) -> Optional[str]:
+    def _validate_encrypted_sqlite(
+        db_path: Path,
+        key: bytes,
+        *,
+        runtime_guarded: bool = False,
+    ) -> Optional[str]:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return "Database backup is missing or empty"
         if is_plaintext_sqlite_file(db_path):
             return "Plaintext SQLite database is forbidden by the production encryption policy"
-        try:
+
+        def open_connection():
             sqlcipher = load_sqlcipher_driver()
             con = sqlcipher.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
             try:
                 apply_sqlcipher_key(con, key)
                 con.execute("SELECT count(*) FROM sqlite_master").fetchone()
-                row = con.execute("PRAGMA integrity_check").fetchone()
-            finally:
+                return con
+            except Exception:
                 con.close()
+                raise
+
+        try:
+            if runtime_guarded:
+                with runtime_dbapi_connection(
+                    open_connection,
+                    owner="backup-encrypted-validation",
+                ) as con:
+                    row = con.execute("PRAGMA integrity_check").fetchone()
+            else:
+                con = open_connection()
+                try:
+                    row = con.execute("PRAGMA integrity_check").fetchone()
+                finally:
+                    con.close()
             if not row or row[0] != "ok":
                 return f"SQLCipher integrity check failed: {row[0] if row else 'unknown'}"
         except Exception as exc:
@@ -148,12 +227,23 @@ class BackupService:
             return False, None
         return True, DatabaseKeyStore().load()
 
-    def _validate_database(self, db_path: Path, *, encrypted: bool, key: Optional[bytes]) -> Optional[str]:
+    def _validate_database(
+        self,
+        db_path: Path,
+        *,
+        encrypted: bool,
+        key: Optional[bytes],
+        runtime_guarded: bool = False,
+    ) -> Optional[str]:
         if encrypted:
             if key is None:
                 return "Production database key is unavailable"
-            return self._validate_encrypted_sqlite(db_path, key)
-        return self._validate_plain_sqlite(db_path)
+            return self._validate_encrypted_sqlite(
+                db_path,
+                key,
+                runtime_guarded=runtime_guarded,
+            )
+        return self._validate_plain_sqlite(db_path, runtime_guarded=runtime_guarded)
 
     def _is_owned_backup(self, backup_path: Path) -> bool:
         try:
@@ -213,16 +303,30 @@ class BackupService:
             if not db_src.is_file():
                 raise FileNotFoundError(f"Runtime database not found: {db_src}")
 
-            source_error = self._validate_database(db_src, encrypted=encrypted, key=key)
+            source_error = self._validate_database(
+                db_src,
+                encrypted=encrypted,
+                key=key,
+                runtime_guarded=True,
+            )
             if source_error:
                 raise RuntimeError(source_error)
 
             db_dst = backup_path / "center.db"
             if encrypted:
                 assert key is not None
-                self._copy_encrypted_sqlite_snapshot(db_src, db_dst, key)
+                self._copy_encrypted_sqlite_snapshot(
+                    db_src,
+                    db_dst,
+                    key,
+                    runtime_guarded=True,
+                )
             else:
-                self._copy_plain_sqlite_snapshot(db_src, db_dst)
+                self._copy_plain_sqlite_snapshot(
+                    db_src,
+                    db_dst,
+                    runtime_guarded=True,
+                )
             self._fsync_file(db_dst)
 
             error = self._validate_database(db_dst, encrypted=encrypted, key=key)
@@ -349,6 +453,10 @@ class BackupService:
                 meta_tmp = None
                 meta_installed = True
 
+                # Recovery owns the maintenance fence at this point. This direct
+                # validation is intentionally not registered because the old live
+                # file has already been replaced; no further destructive rename
+                # depends on this handle being absent.
                 final_error = self._validate_database(
                     runtime_db,
                     encrypted=encrypted,
