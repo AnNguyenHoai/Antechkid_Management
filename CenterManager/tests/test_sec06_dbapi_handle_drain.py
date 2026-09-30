@@ -8,6 +8,18 @@ import pytest
 from centermanager.database import engine as engine_module
 
 
+def _create_lifecycle_valid_database(db_path):
+    """Create the smallest SQLite DB accepted by DatabaseLifecycle."""
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "CREATE TABLE sec06_probe (id INTEGER PRIMARY KEY)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 @pytest.fixture(autouse=True)
 def reset_runtime_handle_registry():
     engine_module.end_runtime_db_maintenance()
@@ -19,7 +31,7 @@ def reset_runtime_handle_registry():
 
 def test_guarded_engine_tracks_checked_out_dbapi_connection(tmp_path):
     db_path = tmp_path / "center.db"
-    sqlite3.connect(db_path).close()
+    _create_lifecycle_valid_database(db_path)
     engine = engine_module.create_engine_for_path(
         db_path, allow_create=False, runtime_guarded=True
     )
@@ -33,7 +45,7 @@ def test_guarded_engine_tracks_checked_out_dbapi_connection(tmp_path):
 
 def test_drain_force_closes_checked_out_connection_and_reaches_zero(tmp_path):
     db_path = tmp_path / "center.db"
-    sqlite3.connect(db_path).close()
+    _create_lifecycle_valid_database(db_path)
     engine = engine_module.create_engine_for_path(
         db_path, allow_create=False, runtime_guarded=True
     )
@@ -54,7 +66,7 @@ def test_drain_force_closes_checked_out_connection_and_reaches_zero(tmp_path):
 
 def test_maintenance_fence_prevents_reacquiring_handle(tmp_path):
     db_path = tmp_path / "center.db"
-    sqlite3.connect(db_path).close()
+    _create_lifecycle_valid_database(db_path)
     engine = engine_module.create_engine_for_path(
         db_path, allow_create=False, runtime_guarded=True
     )
