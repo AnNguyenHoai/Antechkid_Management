@@ -44,7 +44,10 @@ class AdminWorkspaceShell(QWidget):
         self._git_config_service = git_config_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
-        self._runtime_sync_service = runtime_sync_service
+        self._runtime_sync_service = self._resolve_runtime_sync_service(
+            runtime_sync_service,
+            collaboration_manager,
+        )
         self._notification_service = notification_service or NotificationService()
         self._page_permissions = {
             "users": PermissionDefinitions.USER_VIEW,
@@ -60,6 +63,29 @@ class AdminWorkspaceShell(QWidget):
         self._setup_ui()
         self._connect_signals()
         self.navigate_to("users")
+
+    @staticmethod
+    def _resolve_runtime_sync_service(runtime_sync_service, collaboration_manager):
+        """Resolve the production RuntimeSyncService used by recovery.
+
+        MainWindow historically omitted the runtime_sync_service argument when
+        constructing AdminWorkspaceShell. The collaboration manager already owns
+        the write-handoff callback bound to that exact RuntimeSyncService instance,
+        so use its bound-method owner as a compatibility bridge. This keeps SEC06
+        recovery wired to the live service and allows it to stop/drain the worker
+        before touching center.db. An explicitly supplied service always wins.
+        """
+        if runtime_sync_service is not None:
+            return runtime_sync_service
+        if collaboration_manager is None:
+            return None
+        guard = getattr(collaboration_manager, "_write_handoff_guard", None)
+        candidate = getattr(guard, "__self__", None)
+        if candidate is None:
+            return None
+        if candidate.__class__.__name__ != "RuntimeSyncService":
+            return None
+        return candidate
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
