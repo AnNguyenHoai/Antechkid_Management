@@ -6,9 +6,14 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy.orm import Session, close_all_sessions, sessionmaker
-from sqlalchemy import event
 
-from centermanager.database.engine import create_production_engine
+from centermanager.database.engine import (
+    begin_runtime_db_maintenance,
+    create_production_engine,
+    dispose_runtime_engines,
+    end_runtime_db_maintenance,
+    runtime_db_maintenance_active,
+)
 
 
 _session_factory = None
@@ -29,50 +34,60 @@ def get_session_factory() -> sessionmaker:
 
 
 def quiesce_runtime_db() -> None:
-    """Release process-owned SQLAlchemy/SQLite handles to the runtime DB.
+    """Fence and release process-owned runtime database handles.
 
-    Destructive recovery on Windows must close active ORM sessions and dispose
-    the pooled engine *before* renaming ``center.db`` or its WAL/SHM sidecars.
-    The global factory is cleared so no stale pooled connection can be reused.
+    The application owns more than one production sessionmaker/Engine (notably
+    the long-lived engine created by app.py). Merely disposing the engine bound
+    to this module's global factory is therefore insufficient on Windows. The
+    maintenance fence prevents retained/background sessionmakers from opening a
+    new connection while all known Sessions and all tracked production Engines
+    are being closed.
+
+    The fence intentionally remains active after this function returns. The
+    restore transaction releases it only through ``refresh_runtime_db()`` after
+    either a successful filesystem swap or a completed rollback.
     """
     global _session_factory
     import logging
 
     logger = logging.getLogger(__name__)
-    factory = _session_factory
-
-    # Close ORM sessions first so checked-out SQLite connections are returned to
-    # the engine before the pool is disposed. This is intentionally process-wide
-    # because restore is already protected by exclusive recovery authority.
-    # Do not swallow failures here: recovery must fail before the destructive
-    # rename if process-owned handles could not be released safely.
-    close_all_sessions()
-
+    begin_runtime_db_maintenance()
     try:
-        if factory is not None:
-            engine = factory.kw.get('bind')
-            if engine is not None:
-                engine.dispose()
-    finally:
-        # Never allow reuse of a factory that may still reference the pre-restore
-        # database. A subsequent refresh will build a new factory/engine.
+        # Close caller-owned ORM sessions first. This returns checked-out SQLite
+        # handles before disposing every production Engine registered by
+        # database.engine, including app.py's independent engine.
+        close_all_sessions()
+        dispose_runtime_engines()
         _session_factory = None
+    except Exception:
+        # No destructive rename has happened yet when quiesce is entered from
+        # BackupService, so do not strand the running app behind the fence.
+        end_runtime_db_maintenance()
+        raise
 
-    logger.info("Runtime database connections quiesced")
+    logger.info("Runtime database connections quiesced under maintenance fence")
 
 
 def refresh_runtime_db() -> None:
-    """
-    Refresh runtime database connections after database file replacement.
-    This invalidates the global session factory and creates a new one.
+    """Re-enable runtime DB access and rebuild this module's session factory.
+
+    Call only after the restore filesystem state is stable (success or rollback).
+    Existing app-level sessionmakers remain valid because their tracked Engines
+    are reusable after dispose; their guarded creators can reconnect only after
+    the maintenance fence is released.
     """
     global _session_factory
-    quiesce_runtime_db()
-
-    # Create new session factory only after the filesystem swap/rollback has
-    # reached a stable state.
-    _session_factory = create_session_factory()
     import logging
+
+    # Be tolerant of callers outside restore: establish a quiesced state first.
+    if not runtime_db_maintenance_active():
+        quiesce_runtime_db()
+
+    # The on-disk database is stable at this point. Release the fence before
+    # create_production_engine(), whose lifecycle inspection legitimately opens
+    # the restored runtime database.
+    end_runtime_db_maintenance()
+    _session_factory = create_session_factory()
     logging.getLogger(__name__).info("Runtime database session factory refreshed")
 
 
