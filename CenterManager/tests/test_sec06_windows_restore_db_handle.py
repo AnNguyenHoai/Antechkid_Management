@@ -136,6 +136,34 @@ def test_refresh_releases_fence_before_rebuilding_factory(monkeypatch):
     assert db_session._session_factory is new_factory
 
 
+def test_refresh_requiesces_before_propagating_factory_rebuild_failure(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(db_session, "runtime_db_maintenance_active", lambda: True)
+    monkeypatch.setattr(
+        db_session,
+        "end_runtime_db_maintenance",
+        lambda: events.append("end_fence"),
+    )
+
+    def _create():
+        events.append("create")
+        raise RuntimeError("factory rebuild failed")
+
+    def _requiesce(*, release_fence_on_failure=True):
+        events.append(("requiesce", release_fence_on_failure))
+
+    monkeypatch.setattr(db_session, "create_session_factory", _create)
+    monkeypatch.setattr(db_session, "quiesce_runtime_db", _requiesce)
+    monkeypatch.setattr(db_session, "_session_factory", SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="factory rebuild failed"):
+        db_session.refresh_runtime_db()
+
+    assert events == ["end_fence", "create", ("requiesce", False)]
+    assert db_session._session_factory is None
+
+
 def test_restore_keeps_maintenance_fence_across_live_database_rename():
     source = inspect.getsource(BackupService.restore_backup)
 

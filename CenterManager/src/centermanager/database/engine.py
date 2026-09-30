@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 import logging
 import sqlite3
+import threading
+import time
+import traceback
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
+from typing import Callable, Iterator
 from urllib.parse import quote
 from weakref import WeakSet
 
@@ -28,6 +34,19 @@ _runtime_engines: WeakSet[Engine] = WeakSet()
 _runtime_dbapi_connections: dict[int, object] = {}
 
 
+@dataclass(frozen=True)
+class RuntimeDatabaseHandleInfo:
+    """Diagnostic metadata for one process-owned handle to the live runtime DB."""
+
+    owner: str
+    thread_id: int
+    opened_at: float
+    stack: str
+
+
+_runtime_dbapi_connection_info: dict[int, RuntimeDatabaseHandleInfo] = {}
+
+
 class RuntimeDatabaseMaintenanceError(RuntimeError):
     """Raised when runtime DB access is attempted during destructive recovery."""
 
@@ -42,14 +61,100 @@ def runtime_dbapi_connection_count() -> int:
         return len(_runtime_dbapi_connections)
 
 
-def _register_runtime_dbapi_connection(connection: object) -> None:
+def runtime_dbapi_connection_details() -> list[tuple[int, RuntimeDatabaseHandleInfo]]:
+    """Return a stable diagnostic snapshot of all currently tracked handles."""
     with _runtime_db_gate:
-        _runtime_dbapi_connections[id(connection)] = connection
+        active_ids = set(_runtime_dbapi_connections)
+        return [
+            (ident, info)
+            for ident, info in _runtime_dbapi_connection_info.items()
+            if ident in active_ids
+        ]
+
+
+def _register_runtime_dbapi_connection(connection: object, *, owner: str = "unknown") -> None:
+    ident = id(connection)
+    with _runtime_db_gate:
+        _runtime_dbapi_connections[ident] = connection
+        _runtime_dbapi_connection_info[ident] = RuntimeDatabaseHandleInfo(
+            owner=str(owner or "unknown"),
+            thread_id=threading.get_ident(),
+            opened_at=time.time(),
+            stack="".join(traceback.format_stack(limit=12)[:-1]),
+        )
 
 
 def _unregister_runtime_dbapi_connection(connection: object) -> None:
+    ident = id(connection)
     with _runtime_db_gate:
-        _runtime_dbapi_connections.pop(id(connection), None)
+        _runtime_dbapi_connections.pop(ident, None)
+        _runtime_dbapi_connection_info.pop(ident, None)
+
+
+def acquire_runtime_dbapi_connection(
+    opener: Callable[[], object],
+    *,
+    owner: str,
+    maintenance_owned: bool = False,
+) -> object:
+    """Atomically open and register a handle to the live runtime database.
+
+    Every direct live ``center.db`` open outside SQLAlchemy should use this
+    boundary. The maintenance gate is held across both the OS-level open and
+    registry insertion, so once maintenance begins there can be no invisible
+    race where a new live handle exists but quiesce cannot see it.
+
+    ``maintenance_owned`` is intentionally narrow: restore code may use it only
+    while it already owns the maintenance fence, for example to validate the
+    newly installed live DB before either committing or rolling back the swap.
+    Normal runtime callers remain blocked for the entire maintenance window.
+    """
+    with _runtime_db_gate:
+        if _runtime_db_maintenance:
+            if not maintenance_owned:
+                raise RuntimeDatabaseMaintenanceError(
+                    "Runtime database is temporarily unavailable during backup restore"
+                )
+        elif maintenance_owned:
+            raise RuntimeDatabaseMaintenanceError(
+                "Maintenance-owned runtime database access requires an active maintenance fence"
+            )
+        connection = opener()
+        _register_runtime_dbapi_connection(connection, owner=owner)
+        return connection
+
+
+def release_runtime_dbapi_connection(connection: object) -> None:
+    """Close a tracked runtime handle and unregister only after close succeeds.
+
+    Recovery may force-close a registered handle while its owner is unwinding.
+    In that case the handle has already been natively closed and removed, so the
+    owner must not issue a second driver ``close()`` against an invalid object.
+    """
+    with _runtime_db_gate:
+        if id(connection) not in _runtime_dbapi_connections:
+            return
+    connection.close()  # type: ignore[attr-defined]
+    _unregister_runtime_dbapi_connection(connection)
+
+
+@contextmanager
+def runtime_dbapi_connection(
+    opener: Callable[[], object],
+    *,
+    owner: str,
+    maintenance_owned: bool = False,
+) -> Iterator[object]:
+    """Context-manager form of the process-wide runtime DB ownership boundary."""
+    connection = acquire_runtime_dbapi_connection(
+        opener,
+        owner=owner,
+        maintenance_owned=maintenance_owned,
+    )
+    try:
+        yield connection
+    finally:
+        release_runtime_dbapi_connection(connection)
 
 
 def close_runtime_dbapi_connections() -> None:
@@ -115,6 +220,19 @@ def _database_uri(db_path: Path, *, allow_create: bool, readonly: bool = False) 
     return f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode={mode}"
 
 
+def _connect_plain(
+    db_path: Path,
+    *,
+    allow_create: bool,
+    readonly: bool = False,
+):
+    return sqlite3.connect(
+        _database_uri(db_path, allow_create=allow_create, readonly=readonly),
+        uri=True,
+        check_same_thread=False,
+    )
+
+
 def _connect_encrypted(
     db_path: Path,
     key: bytes,
@@ -122,15 +240,10 @@ def _connect_encrypted(
     allow_create: bool,
     readonly: bool = False,
     runtime_guarded: bool = False,
+    owner: str = "encrypted-runtime",
 ):
-    """Open SQLCipher, optionally under the process-wide runtime maintenance gate.
+    """Open SQLCipher, optionally under the process-wide runtime ownership gate."""
 
-    Runtime lifecycle inspection used to open an untracked readonly SQLCipher
-    handle while create_production_engine() held the gate.  On Windows that
-    handle can survive long enough to make Restart Manager report this process as
-    the owner even after all SQLAlchemy handles were drained.  Guard and register
-    every SQLCipher open that targets the live runtime DB.
-    """
     def open_connection():
         sqlcipher = load_sqlcipher_driver()
         connection = sqlcipher.connect(
@@ -148,14 +261,32 @@ def _connect_encrypted(
 
     if not runtime_guarded:
         return open_connection()
-    with _runtime_db_gate:
-        if _runtime_db_maintenance:
-            raise RuntimeDatabaseMaintenanceError(
-                "Runtime database is temporarily unavailable during backup restore"
-            )
-        connection = open_connection()
-        _runtime_dbapi_connections[id(connection)] = connection
-        return connection
+    return acquire_runtime_dbapi_connection(open_connection, owner=owner)
+
+
+class _TrackedLifecycleConnection:
+    """Small adapter that keeps lifecycle close ordering fail-closed."""
+
+    def __init__(self, raw, *, owner: str):
+        self._raw = raw
+        ident = id(raw)
+        with _runtime_db_gate:
+            if ident in _runtime_dbapi_connections:
+                return
+            if _runtime_db_maintenance:
+                try:
+                    raw.close()
+                finally:
+                    raise RuntimeDatabaseMaintenanceError(
+                        "Runtime database is temporarily unavailable during backup restore"
+                    )
+            _register_runtime_dbapi_connection(raw, owner=owner)
+
+    def execute(self, *args, **kwargs):
+        return self._raw.execute(*args, **kwargs)
+
+    def close(self):
+        release_runtime_dbapi_connection(self._raw)
 
 
 def _runtime_lifecycle(
@@ -165,9 +296,19 @@ def _runtime_lifecycle(
     runtime_guarded: bool = False,
 ) -> DatabaseLifecycle:
     if key is None:
-        return DatabaseLifecycle(db_path)
+        if not runtime_guarded:
+            return DatabaseLifecycle(db_path)
 
-    def readonly_connector(path: Path):
+        def readonly_plain_connector(path: Path):
+            raw = acquire_runtime_dbapi_connection(
+                lambda: _connect_plain(path, allow_create=False, readonly=True),
+                owner="runtime-lifecycle-plain",
+            )
+            return _TrackedLifecycleConnection(raw, owner="runtime-lifecycle-plain")
+
+        return DatabaseLifecycle(db_path, readonly_connector=readonly_plain_connector)
+
+    def readonly_encrypted_connector(path: Path):
         connection = _connect_encrypted(
             path,
             key,
@@ -177,32 +318,16 @@ def _runtime_lifecycle(
         )
         if not runtime_guarded:
             return connection
+        return _TrackedLifecycleConnection(connection, owner="runtime-lifecycle-encrypted")
 
-        class _TrackedLifecycleConnection:
-            def __init__(self, raw):
-                self._raw = raw
-
-            def execute(self, *args, **kwargs):
-                return self._raw.execute(*args, **kwargs)
-
-            def close(self):
-                try:
-                    self._raw.close()
-                except Exception:
-                    raise
-                else:
-                    _unregister_runtime_dbapi_connection(self._raw)
-
-        return _TrackedLifecycleConnection(connection)
-
-    return DatabaseLifecycle(db_path, readonly_connector=readonly_connector)
+    return DatabaseLifecycle(db_path, readonly_connector=readonly_encrypted_connector)
 
 
 def inspect_runtime_database() -> DatabaseLifecycleState:
     assert_direct_database_access_allowed()
     db_path = get_database_path()
     if not database_encryption_required():
-        return DatabaseLifecycle(db_path).inspect()
+        return _runtime_lifecycle(db_path, runtime_guarded=True).inspect()
     try:
         key = DatabaseKeyStore().load()
     except Exception:
@@ -240,23 +365,12 @@ def create_engine_for_path(
                 allow_create=allow_create,
                 runtime_guarded=False,
             )
-        return sqlite3.connect(
-            _database_uri(db_path, allow_create=allow_create),
-            uri=True,
-            check_same_thread=False,
-        )
+        return _connect_plain(db_path, allow_create=allow_create)
 
     def connect_database():
         if not runtime_guarded:
             return open_connection()
-        with _runtime_db_gate:
-            if _runtime_db_maintenance:
-                raise RuntimeDatabaseMaintenanceError(
-                    "Runtime database is temporarily unavailable during backup restore"
-                )
-            connection = open_connection()
-            _runtime_dbapi_connections[id(connection)] = connection
-            return connection
+        return acquire_runtime_dbapi_connection(open_connection, owner="sqlalchemy-runtime-engine")
 
     engine = create_engine("sqlite://", echo=echo, creator=connect_database, poolclass=NullPool)
 
@@ -266,9 +380,24 @@ def create_engine_for_path(
         cursor.execute("PRAGMA foreign_keys = ON;")
         cursor.close()
 
-    @event.listens_for(engine, "close")
-    def unregister_closed_connection(dbapi_connection, connection_record):
+    # SQLAlchemy's PoolEvents.close fires *before* dialect.do_close().
+    # Unregistering in that event creates a false-zero window where the registry
+    # says the handle is gone while Windows still sees the native SQLite handle.
+    # Wrap the dialect close boundary instead and unregister only after the
+    # driver's close/terminate call succeeds.
+    original_do_close = engine.dialect.do_close
+    original_do_terminate = engine.dialect.do_terminate
+
+    def tracked_do_close(dbapi_connection):
+        original_do_close(dbapi_connection)
         _unregister_runtime_dbapi_connection(dbapi_connection)
+
+    def tracked_do_terminate(dbapi_connection):
+        original_do_terminate(dbapi_connection)
+        _unregister_runtime_dbapi_connection(dbapi_connection)
+
+    engine.dialect.do_close = tracked_do_close  # type: ignore[method-assign]
+    engine.dialect.do_terminate = tracked_do_terminate  # type: ignore[method-assign]
 
     return engine
 
