@@ -62,9 +62,14 @@ def runtime_dbapi_connection_count() -> int:
 
 
 def runtime_dbapi_connection_details() -> list[tuple[int, RuntimeDatabaseHandleInfo]]:
-    """Return a stable diagnostic snapshot of all tracked live DB handles."""
+    """Return a stable diagnostic snapshot of all currently tracked handles."""
     with _runtime_db_gate:
-        return list(_runtime_dbapi_connection_info.items())
+        active_ids = set(_runtime_dbapi_connections)
+        return [
+            (ident, info)
+            for ident, info in _runtime_dbapi_connection_info.items()
+            if ident in active_ids
+        ]
 
 
 def _register_runtime_dbapi_connection(connection: object, *, owner: str = "unknown") -> None:
@@ -109,7 +114,15 @@ def acquire_runtime_dbapi_connection(
 
 
 def release_runtime_dbapi_connection(connection: object) -> None:
-    """Close a tracked runtime handle and unregister only after close succeeds."""
+    """Close a tracked runtime handle and unregister only after close succeeds.
+
+    Recovery may force-close a registered handle while its owner is unwinding.
+    In that case the handle has already been natively closed and removed, so the
+    owner must not issue a second driver ``close()`` against an invalid object.
+    """
+    with _runtime_db_gate:
+        if id(connection) not in _runtime_dbapi_connections:
+            return
     connection.close()  # type: ignore[attr-defined]
     _unregister_runtime_dbapi_connection(connection)
 
@@ -274,7 +287,6 @@ def _runtime_lifecycle(
             allow_create=False,
             readonly=True,
             runtime_guarded=runtime_guarded,
-            owner="runtime-lifecycle-encrypted",
         )
         if not runtime_guarded:
             return connection
