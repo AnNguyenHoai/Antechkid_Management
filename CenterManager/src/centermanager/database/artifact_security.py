@@ -33,21 +33,33 @@ from centermanager.database.encryption import (
     is_plaintext_sqlite_file,
     load_sqlcipher_driver,
 )
+from centermanager.database.engine import runtime_dbapi_connection
 
 
 class DatabaseArtifactSecurityError(DatabaseEncryptionError):
     """Raised when a runtime/repository DB artifact violates security policy."""
 
 
-def _validate_plain_database(path: Path) -> None:
+def _validate_plain_database(path: Path, *, runtime_guarded: bool = False) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise DatabaseArtifactSecurityError(f"Database artifact is missing or empty: {path}")
+
+    def open_connection():
+        return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+
     try:
-        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
-        try:
-            row = connection.execute("PRAGMA integrity_check").fetchone()
-        finally:
-            connection.close()
+        if runtime_guarded:
+            with runtime_dbapi_connection(
+                open_connection,
+                owner="artifact-security-plain-validation",
+            ) as connection:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+        else:
+            connection = open_connection()
+            try:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                connection.close()
     except sqlite3.Error as exc:
         raise DatabaseArtifactSecurityError(f"Invalid SQLite database artifact: {path}") from exc
     if not row or row[0] != "ok":
@@ -61,12 +73,19 @@ def validate_database_artifact(
     *,
     encryption_required: Optional[bool] = None,
     key: Optional[bytes] = None,
+    runtime_guarded: bool = False,
 ) -> None:
-    """Validate a DB artifact under the active runtime security policy."""
+    """Validate a DB artifact under the active runtime security policy.
+
+    ``runtime_guarded`` must be true when *path* is the live runtime ``center.db``.
+    Repository, staged-restore and temporary artifacts remain intentionally
+    outside the runtime ownership registry because they cannot block replacement
+    of the live database file.
+    """
     path = Path(path)
     encrypted = database_encryption_required() if encryption_required is None else encryption_required
     if not encrypted:
-        _validate_plain_database(path)
+        _validate_plain_database(path, runtime_guarded=runtime_guarded)
         return
 
     if not path.is_file() or path.stat().st_size == 0:
@@ -76,15 +95,31 @@ def validate_database_artifact(
             f"Plaintext SQLite artifact is forbidden in production: {path}"
         )
     workspace_key = key if key is not None else DatabaseKeyStore().load()
-    try:
+
+    def open_connection():
         sqlcipher = load_sqlcipher_driver()
         connection = sqlcipher.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             apply_sqlcipher_key(connection, workspace_key)
             connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
-            row = connection.execute("PRAGMA integrity_check").fetchone()
-        finally:
+            return connection
+        except Exception:
             connection.close()
+            raise
+
+    try:
+        if runtime_guarded:
+            with runtime_dbapi_connection(
+                open_connection,
+                owner="artifact-security-encrypted-validation",
+            ) as connection:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+        else:
+            connection = open_connection()
+            try:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                connection.close()
     except DatabaseEncryptionError:
         raise
     except Exception as exc:
@@ -213,7 +248,12 @@ def materialize_runtime_database_to_repository() -> Path:
         return repo_db
 
     key = DatabaseKeyStore().load() if encrypted else None
-    validate_database_artifact(runtime_db, encryption_required=encrypted, key=key)
+    validate_database_artifact(
+        runtime_db,
+        encryption_required=encrypted,
+        key=key,
+        runtime_guarded=True,
+    )
     repo_db.parent.mkdir(parents=True, exist_ok=True)
     tmp = repo_db.with_name(f".{repo_db.name}.publish-{uuid.uuid4().hex}.tmp")
     try:
