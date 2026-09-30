@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from centermanager.core.capabilities import Capability
@@ -7,10 +8,7 @@ from centermanager.platform.backup.recovery_authority import (
     RecoveryAuthority,
     RecoveryAuthorityError,
 )
-from centermanager.platform.backup.recovery_publisher import (
-    AuthoritativeRecoveryPublisher,
-    RecoveryPublishError,
-)
+from centermanager.platform.backup.recovery_publisher import RecoveryPublishError
 from centermanager.platform.backup.restore_authorization import issue_restore_authorization
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
@@ -49,6 +47,7 @@ class BackupOperationsService:
         self._collaboration_manager = collaboration_manager
         self._recovery_publisher = recovery_publisher
         self._runtime_sync_service = runtime_sync_service
+        self._sync_handoff_guard_suspended = False
 
     def list_backups(self):
         return self._backup.list_backups()
@@ -71,12 +70,7 @@ class BackupOperationsService:
 
     @staticmethod
     def confirmation_mismatch_detail(expected: str, actual: str) -> str:
-        """Describe an exact-match failure without relaxing the security guard.
-
-        The phrase contains only the non-secret backup identifier. Code points are
-        included so packaged Windows UAT can distinguish invisible whitespace and
-        look-alike Unicode characters that are indistinguishable in a Qt dialog.
-        """
+        """Describe an exact-match failure without relaxing the security guard."""
         expected = str(expected)
         actual = str(actual)
         limit = min(len(expected), len(actual))
@@ -117,40 +111,88 @@ class BackupOperationsService:
             )
         return RecoveryAuthority(manager)
 
-    def _pause_runtime_sync_for_recovery(self) -> bool:
-        """Stop and drain the background sync worker before DB replacement.
+    def _suspend_write_handoff_sync(self) -> None:
+        """Fail closed for queued handoffs while recovery drains RuntimeSync.
 
-        Recovery and RuntimeSyncService both mutate runtime/Database/center.db and
-        both refresh the process-wide SQLAlchemy lifecycle.  The DB maintenance
-        fence alone cannot serialize them: an already-running sync can otherwise
-        refresh sessions and release the recovery fence while Windows restore is
-        about to rename center.db.  Recovery therefore drains the worker before
-        its first safety snapshot and keeps it stopped until recovery either
-        fails safely or requires a process restart.
+        The collaboration poller owns a different thread from RuntimeSyncService.
+        Merely stopping RuntimeSync's worker does not stop that poller from calling
+        execute_write_handoff_sync().  Replacing the handoff guard with a fail-closed
+        guard closes that entry point before we inspect/drain active sync work.
+        """
+        manager = self._collaboration_manager
+        if manager is None:
+            return
+        manager.set_write_handoff_guard(lambda: False)
+        self._sync_handoff_guard_suspended = True
+
+    def _resume_write_handoff_sync(self) -> None:
+        if not self._sync_handoff_guard_suspended:
+            return
+        manager = self._collaboration_manager
+        service = self._runtime_sync_service
+        if manager is not None and service is not None:
+            manager.set_write_handoff_guard(service.execute_write_handoff_sync)
+        self._sync_handoff_guard_suspended = False
+
+    @staticmethod
+    def _sync_operation_active(service) -> bool:
+        """Return whether any RuntimeSync operation is still in its mutation window."""
+        try:
+            state = service.current_state()
+        except Exception as exc:
+            raise BackupRestoreAuthorizationError(
+                "Unable to verify synchronization quiescence; restore was not started."
+            ) from exc
+        status = str(state.get("status", "")).lower()
+        return status in {"checking", "synchronizing"}
+
+    def _pause_runtime_sync_for_recovery(self) -> bool:
+        """Close all known sync entry points and drain in-flight sync operations.
+
+        RuntimeSync's background worker is not the only caller of _perform_sync().
+        CollaborationPoller can synchronously enter execute_write_handoff_sync() on
+        its own QThread.  Recovery therefore first fails closed the handoff guard,
+        then stops the worker, and finally waits until RuntimeSync leaves CHECKING /
+        SYNCHRONIZING before any center.db snapshot or replacement is allowed.
         """
         service = self._runtime_sync_service
         if service is None:
             return False
 
         was_running = bool(getattr(service, "_running", False))
-        if not was_running:
-            return False
 
-        service.stop()
+        # Close the independent CollaborationPoller -> handoff -> RuntimeSync path
+        # before stopping the RuntimeSync worker. An already-entered handoff is
+        # allowed to finish and is drained below.
+        self._suspend_write_handoff_sync()
+
+        if was_running:
+            service.stop()
+
         thread = getattr(service, "_thread", None)
-        if thread is not None and thread.is_alive():
-            # stop() only joins briefly.  The poll loop may still be sleeping for
-            # poll_interval seconds, or an in-flight sync may still own DB/Git
-            # resources.  Wait for the worker to exit; never enter destructive
-            # recovery while that ownership is ambiguous.
-            poll_interval = float(getattr(service, "_poll_interval", 5) or 5)
-            thread.join(timeout=max(5.0, poll_interval + 5.0))
+        poll_interval = float(getattr(service, "_poll_interval", 5) or 5)
+        drain_timeout = max(15.0, poll_interval + 10.0)
 
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=drain_timeout)
         if thread is not None and thread.is_alive():
             raise BackupRestoreAuthorizationError(
                 "Background synchronization did not quiesce; restore was not started."
             )
-        return True
+
+        # stop()/join() only proves the worker thread is gone. A handoff sync may
+        # already be executing on CollaborationPoller's QThread, so wait for the
+        # service-level operation state as well. No new handoff can enter because
+        # the guard above now fails closed.
+        deadline = time.monotonic() + drain_timeout
+        while self._sync_operation_active(service):
+            if time.monotonic() >= deadline:
+                raise BackupRestoreAuthorizationError(
+                    "An in-flight synchronization operation did not quiesce; restore was not started."
+                )
+            time.sleep(0.05)
+
+        return was_running
 
     def restore_backup(self, backup_path, *, reason: str, confirmation: str):
         backup_path = Path(backup_path)
@@ -181,10 +223,6 @@ class BackupOperationsService:
                     "Exclusive recovery authority was lost before safety backup."
                 )
 
-            # SEC06 Windows boundary: the background sync service can both replace
-            # the runtime DB and call refresh_runtime_db().  Drain it before any
-            # recovery snapshot/swap so it cannot reopen center.db or clear the
-            # process maintenance fence during os.replace().
             sync_was_running = self._pause_runtime_sync_for_recovery()
 
             if not authority.validate():
@@ -258,11 +296,12 @@ class BackupOperationsService:
             )
         finally:
             authority.release()
-            # A successful local restore always crosses the restart boundary, so
-            # do not restart background sync against a process that must exit.
-            # Pre-destructive/rolled-back failures may safely resume normal sync.
-            if sync_was_running and not local_restore_completed:
-                try:
-                    self._runtime_sync_service.start()
-                except Exception:
-                    pass
+            # A successful local restore crosses the restart boundary. Otherwise
+            # restore both RuntimeSync and the collaboration handoff guard.
+            if not local_restore_completed:
+                self._resume_write_handoff_sync()
+                if sync_was_running:
+                    try:
+                        self._runtime_sync_service.start()
+                    except Exception:
+                        pass
