@@ -68,6 +68,48 @@ def test_runtime_db_boundary_rejects_new_open_while_maintenance_is_active():
     assert opened == []
 
 
+def test_maintenance_owned_handle_requires_active_fence():
+    raw = _FakeConnection()
+
+    with pytest.raises(database_engine.RuntimeDatabaseMaintenanceError):
+        database_engine.acquire_runtime_dbapi_connection(
+            lambda: raw,
+            owner="recovery-only",
+            maintenance_owned=True,
+        )
+
+    assert raw.closed is False
+    assert id(raw) not in database_engine._runtime_dbapi_connections
+
+
+def test_backup_post_swap_validation_is_tracked_during_maintenance(tmp_path, monkeypatch):
+    db_path = tmp_path / "center.db"
+    db_path.write_bytes(b"not-empty")
+    raw = _FakeConnection()
+    observations = []
+
+    def fake_connect(*args, **kwargs):
+        observations.append(database_engine.runtime_db_maintenance_active())
+        return raw
+
+    monkeypatch.setattr(backup_service.sqlite3, "connect", fake_connect)
+
+    database_engine.begin_runtime_db_maintenance()
+    try:
+        error = backup_service.BackupService._validate_plain_sqlite(
+            db_path,
+            runtime_guarded=True,
+            maintenance_owned=True,
+        )
+    finally:
+        database_engine.end_runtime_db_maintenance()
+
+    assert error is None
+    assert observations == [True]
+    assert raw.closed is True
+    assert id(raw) not in database_engine._runtime_dbapi_connections
+
+
 def test_lifecycle_wrapper_adopts_untracked_handle_without_double_close_on_unwind():
     class _CountingConnection:
         def __init__(self):
