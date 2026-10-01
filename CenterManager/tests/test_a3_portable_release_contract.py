@@ -31,8 +31,12 @@ def test_portable_smoke_entrypoint_is_available():
     assert "_portable_smoke_check" in source
 
 
-def test_startup_does_not_require_git_configuration():
-    source = (ROOT / "src/centermanager/app.py").read_text(encoding="utf-8")
-    assert 'starting in local/offline mode' in source
-    assert 'No Git configuration found' in source
-    assert 'Git configuration is required to synchronize data' not in source
+def test_startup_prompts_for_missing_git_configuration():
+    source = (
+        ROOT
+        / "src/centermanager/platform/bootstrap/bootstrap_manager.py"
+    ).read_text(encoding="utf-8")
+    assert "GitConfigDialog" in source
+    assert "Git configuration missing or invalid; requesting first-run configuration" in source
+    assert "dialog.exec() != dialog.DialogCode.Accepted" in source
+    assert "starting in local/offline mode" not in source

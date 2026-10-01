@@ -58,6 +58,7 @@ class WriteTransactionManager:
         self._waiting_position: int = 0
         self._waiting_request_id: str = ""
         self._session = None
+        self._last_start_error: str = ""
 
         # FINISHING fields
         self._finishing_started_at: Optional[datetime] = None
@@ -96,6 +97,10 @@ class WriteTransactionManager:
     @property
     def has_changes(self) -> bool:
         return self._has_changes
+
+    @property
+    def last_start_error(self) -> str:
+        return self._last_start_error
 
     def set_sync_service(self, sync_service) -> None:
         self._sync_service = sync_service
@@ -173,7 +178,7 @@ class WriteTransactionManager:
                 shutil.copy2(db_path, snapshot_path)
                 self._snapshot_path = snapshot_path
                 logger.info(f"Snapshot created at {snapshot_path}")
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to create snapshot")
 
     def _delete_snapshot(self) -> None:
@@ -187,7 +192,6 @@ class WriteTransactionManager:
                 logger.info("Snapshot deleted: %s", snapshot_path)
             self._snapshot_path = None
         except Exception:
-            # Do not fail a successfully published transaction because cleanup failed.
             logger.exception("Failed to delete snapshot: %s", snapshot_path)
 
     def _restore_snapshot(self) -> bool:
@@ -198,39 +202,103 @@ class WriteTransactionManager:
                 shutil.copy2(self._snapshot_path, db_path)
                 logger.info("Snapshot restored")
                 return True
-            except Exception as e:
+            except Exception:
                 logger.exception("Failed to restore snapshot")
         return False
 
+    def _release_grant_after_failed_consistency_check(self) -> None:
+        """Release a just-acquired WRITE lease when runtime verification fails."""
+        try:
+            if self._collab_manager.is_writing():
+                if not self._collab_manager.release_write():
+                    logger.error("WRITE lease release reported failure after consistency rejection")
+        except Exception:
+            logger.exception("Failed to release WRITE lease after consistency rejection")
+
+    def _verify_first_writer_consistency(self) -> bool:
+        """Run the mandatory runtime/repository/remote barrier while WRITE is held."""
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if provider is None:
+            return True
+        if self._sync_service is None:
+            self._last_start_error = "Write consistency verification is unavailable."
+            logger.error(self._last_start_error)
+            return False
+        try:
+            if self._sync_service.execute_write_handoff_sync():
+                return True
+        except Exception:
+            logger.exception("First-writer consistency verification raised")
+        self._last_start_error = (
+            "Write lock was acquired, but authoritative data consistency verification failed."
+        )
+        logger.error(self._last_start_error)
+        return False
+
+    def _waiting_is_authoritative(self) -> bool:
+        """WAITING is valid only when another live remote lease actually exists."""
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if provider is None:
+            return True
+        try:
+            remote = provider.remote_lock_status()
+            return bool(
+                remote.get("locked", False)
+                and self._collab_manager._is_lease_valid(remote.get("lease_expires_at"))
+            )
+        except Exception:
+            logger.exception("Unable to verify remote writer after lock acquisition failure")
+            return False
+
     # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
+        self._last_start_error = ""
         self.reset_finishing()
+        logger.info("Start Editing requested; transaction_state=%s", self._state.name)
 
         if self._state == WriteTransactionState.WAITING:
-            logger.info("Already waiting for write lock")
+            self._last_start_error = "Already waiting for the active writer to release the lock."
+            logger.info(self._last_start_error)
             return False
 
         if self._state != WriteTransactionState.IDLE:
-            logger.warning(f"Start editing called in state {self._state}, ignoring")
+            self._last_start_error = f"Start Editing is unavailable while transaction state is {self._state.name}."
+            logger.warning(self._last_start_error)
             return False
 
         if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
+            self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
 
         result = self._collab_manager.request_write()
+        logger.info(
+            "Start Editing collaboration result=%s message=%s position=%s",
+            result.result.value,
+            result.message,
+            result.position,
+        )
         if result.is_granted:
+            # Immediate writers previously skipped the consistency barrier that
+            # queued writers execute during handoff. Run it now while this
+            # session owns the distributed lock; on failure, release the grant
+            # before returning to IDLE.
+            if not self._verify_first_writer_consistency():
+                self._release_grant_after_failed_consistency_check()
+                self._transition_to(WriteTransactionState.IDLE, "consistency verification failed")
+                return False
+
             if not self._transition_to(WriteTransactionState.EDITING, "write granted"):
+                self._release_grant_after_failed_consistency_check()
+                self._last_start_error = "Write lock was acquired but the transaction could not enter EDITING."
                 return False
             self._save_callback = save_callback
             self._has_changes = False
             self._session = self._collab_manager.get_session()
             self._is_editing = True
 
-            # Capture expected generation
             self._expected_generation = self._collab_manager.get_lock_generation()
             logger.info(f"Expected generation captured: {self._expected_generation}")
 
-            # Capture base MAIN commit for optimistic concurrency
             self._base_main_commit = None
             if self._collab_manager._sync_provider:
                 try:
@@ -243,14 +311,25 @@ class WriteTransactionManager:
             logger.info("Write transaction started: EDITING")
             return True
         elif result.is_waiting:
+            if not self._waiting_is_authoritative():
+                self._collab_manager.cancel_waiting_request()
+                self._transition_to(WriteTransactionState.IDLE, "false waiting rejected")
+                self._last_start_error = (
+                    "Unable to acquire the remote write lock even though no active writer owns it. "
+                    "Check Git connectivity/credentials and try again."
+                )
+                logger.error(self._last_start_error)
+                return False
             self._transition_to(WriteTransactionState.WAITING, "queued")
             self._waiting_position = result.position
             self._waiting_request_id = result.request_id
+            self._last_start_error = result.message or f"Waiting for write lock (position {result.position})."
             logger.info(f"Write transaction waiting (position {result.position})")
             return False
         else:
             self._transition_to(WriteTransactionState.IDLE, "request rejected")
-            logger.warning(f"Failed to acquire write lock: {result.message}")
+            self._last_start_error = result.message or "Write lock request was rejected."
+            logger.warning(f"Failed to acquire write lock: {self._last_start_error}")
             return False
 
     def finish_editing(self,
@@ -277,7 +356,6 @@ class WriteTransactionManager:
             self._reset_to_idle()
             return True
 
-        # Try to enter FINISHING (which includes all validations)
         result = self.enter_finishing()
         if not result.get("success"):
             if self._state in (WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
@@ -289,7 +367,6 @@ class WriteTransactionManager:
                 logger.error(f"Unexpected failure entering finishing: {result.get('reason')}")
                 return False
 
-        # Now in FINISHING state
         save_fn = save_callback or self._save_callback
         if save_fn is not None:
             try:
@@ -298,7 +375,7 @@ class WriteTransactionManager:
                     logger.error("Local save failed")
                     self._state = WriteTransactionState.FAILED
                     return False
-            except Exception as e:
+            except Exception:
                 logger.exception("Local save exception")
                 self._state = WriteTransactionState.FAILED
                 return False
@@ -307,19 +384,16 @@ class WriteTransactionManager:
         self._on_publish_success = on_publish_success
         self._on_publish_failure = on_publish_failure
 
-        # Create pending version
         if not self._create_pending_version():
             logger.error("Pending version creation failed")
             self._state = WriteTransactionState.FAILED
             return False
 
-        # Publish database + manifest
         if not self._publish_database_and_manifest():
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
             return False
 
-        # Perform actual publish (commit+push)
         return self._publish()
 
     def cancel_editing(self, force: bool = False) -> bool:
@@ -346,7 +420,6 @@ class WriteTransactionManager:
 
         if self._collab_manager.is_writing():
             self._collab_manager.release_write()
-        # Cancelled transactions are terminal: restored/no-longer-needed snapshots can be removed.
         self._delete_snapshot()
         self._reset_to_idle()
         logger.info("Transaction: IDLE (cancelled)")
@@ -439,7 +512,6 @@ class WriteTransactionManager:
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
                     self._on_publish_success()
-                # Clear finishing data on success
                 self._collab_manager._lock.clear_finishing_data()
                 self._finishing_deadline = None
                 self._finishing_started_at = None
@@ -507,11 +579,7 @@ class WriteTransactionManager:
         return self._waiting_position
 
     def cancel_waiting(self, reason: str = "Waiting request expired or was removed") -> None:
-        """Leave WAITING when the collaboration layer no longer owns our request.
-
-        This is intentionally narrower than cancel_editing(): a waiting
-        transaction has no business edits or snapshot to roll back.
-        """
+        """Leave WAITING when the collaboration layer no longer owns our request."""
         if self._state != WriteTransactionState.WAITING:
             return
         logger.warning(f"Transaction: WAITING -> IDLE ({reason})")
@@ -528,13 +596,7 @@ class WriteTransactionManager:
         return self._transition_to(WriteTransactionState.GRANTING, "remote handoff")
 
     def on_write_granted(self) -> None:
-        """
-        Apply an authoritative remote write grant exactly once.
-
-        Collaboration observations may be repeated by the poller/event bus.
-        The first grant consumes the WAITING/GRANTING -> EDITING transition and
-        performs its side effects. Later copies of the same grant are no-ops.
-        """
+        """Apply an authoritative remote write grant exactly once."""
         if self._state == WriteTransactionState.EDITING:
             logger.debug("Duplicate write grant ignored: transaction already EDITING")
             return
@@ -549,10 +611,6 @@ class WriteTransactionManager:
             )
             return
 
-        # A remote grant can legitimately be observed while the local
-        # transaction is still WAITING.  The authoritative handoff path must
-        # consume that observation through the explicit GRANTING gate rather
-        # than attempting the forbidden WAITING -> EDITING shortcut.
         if self._state == WriteTransactionState.WAITING:
             if not self._transition_to(
                 WriteTransactionState.GRANTING,
@@ -566,8 +624,6 @@ class WriteTransactionManager:
         ):
             return
 
-        # All grant side effects live behind the successful transition gate.
-        # This is what makes repeated WRITE_GRANTED events idempotent.
         self._is_editing = True
         self._session = self._collab_manager.get_session()
         self._expected_generation = self._collab_manager.get_lock_generation()
@@ -586,8 +642,7 @@ class WriteTransactionManager:
         self._create_snapshot()
 
         logger.info(
-            "Transaction: WAITING/GRANTING -> EDITING (auto-grant), "
-            "expected gen: %s",
+            "Transaction: WAITING/GRANTING -> EDITING (auto-grant), expected gen: %s",
             self._expected_generation,
         )
 
@@ -611,13 +666,10 @@ class WriteTransactionManager:
             logger.warning(f"Entered FINISHING_WAITING_FOR_COLLABORATION due to: {reason}")
             return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
 
-        # 1. Validate collaboration authority (includes availability, lease, heartbeat)
         auth = self._collab_manager.validate_write_authority(session)
 
         if not auth.get("valid", False):
             reason = auth.get("reason", "Unknown authority failure")
-
-            # Check for collaboration unavailable specifically
             if "unavailable" in reason.lower():
                 self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
                 logger.warning(f"Entered FINISHING_WAITING_FOR_COLLABORATION due to: {reason}")
@@ -627,7 +679,6 @@ class WriteTransactionManager:
                 logger.warning(f"Entered FINISHING_STALE due to: {reason}")
                 return {"success": False, "reason": reason, "state": "STALE"}
 
-        # 2. Generation fencing
         current_gen = self._collab_manager.get_lock_generation()
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
@@ -635,7 +686,6 @@ class WriteTransactionManager:
             logger.warning(f"Entered FINISHING_STALE due to: {reason}")
             return {"success": False, "reason": reason, "state": "STALE"}
 
-        # 3. MAIN optimistic concurrency
         if self._collab_manager._sync_provider:
             try:
                 current_main = self._collab_manager._sync_provider.get_remote_main_commit()
@@ -663,7 +713,6 @@ class WriteTransactionManager:
                 logger.warning(f"Entered PUBLISH_CONFLICT due to: {reason}")
                 return {"success": False, "reason": reason, "state": "CONFLICT"}
 
-        # All validations passed - enter FINISHING
         now = datetime.now()
         deadline = now + timedelta(seconds=120)
         self._finishing_started_at = now
@@ -689,7 +738,6 @@ class WriteTransactionManager:
         ):
             return {"success": False, "reason": f"Not in finishing state: {self._state.name}"}
 
-        # Once already waiting, the finishing deadline remains absolute.
         if (
             self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
             and self._finishing_deadline
@@ -699,8 +747,6 @@ class WriteTransactionManager:
             logger.warning("Finishing deadline expired while waiting -> FINISHING_STALE")
             return {"success": False, "reason": "Deadline expired", "state": "STALE"}
 
-        # Collaboration availability is the highest-priority gate for a normal
-        # FINISHING refresh.
         if not self._collab_manager.is_collaboration_available():
             if self._state != WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
                 self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
@@ -711,9 +757,6 @@ class WriteTransactionManager:
                 "state": "WAITING_FOR_COLLABORATION",
             }
 
-        # Once collaboration is available again, restore FINISHING and only
-        # then evaluate deadline/authority. This preserves the explicit paused
-        # state expected by the finishing-authority contract.
         if self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
             self._state = WriteTransactionState.FINISHING
             logger.info("Collaboration restored -> FINISHING")
@@ -770,8 +813,6 @@ class WriteTransactionManager:
                 "state": "WAITING_FOR_COLLABORATION",
             }
 
-        # Preserve the special optimistic-concurrency fence for a lease
-        # observation gap while remote identity still proves our session.
         provider = getattr(self._collab_manager, "_sync_provider", None)
         if (
             "lease expired or missing" in reason.lower()
@@ -808,6 +849,7 @@ class WriteTransactionManager:
         self._state = WriteTransactionState.FINISHING_STALE
         logger.warning(f"Authority invalid -> FINISHING_STALE: {reason}")
         return {"success": False, "reason": reason, "state": "STALE"}
+
     def is_finishing_deadline_expired(self) -> bool:
         if self._finishing_deadline is None:
             return False
@@ -820,7 +862,6 @@ class WriteTransactionManager:
         if self._collab_manager is None:
             return
 
-        # Prefer a public CollaborationManager API.
         clear_remote = getattr(
             self._collab_manager,
             "clear_finishing_data",
@@ -831,9 +872,6 @@ class WriteTransactionManager:
             clear_remote()
             return
 
-        # Backward-compatible fallback for the production collaboration lock.
-        # Do not assume _lock is the remote lock: test doubles may use a
-        # threading.RLock for internal synchronization.
         remote_lock = getattr(self._collab_manager, "_lock", None)
         clear_lock_data = getattr(
             remote_lock,

@@ -130,26 +130,43 @@ def test_startup_sync_fails_if_database_session_refresh_fails(tmp_path, monkeypa
 
 
 def test_app_materializes_git_database_before_creating_production_engine():
-    source = (
-        Path(__file__).resolve().parents[1] / "src/centermanager/app.py"
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "src/centermanager/app.py").read_text(encoding="utf-8")
+    bootstrap_source = (
+        root / "src/centermanager/platform/bootstrap/bootstrap_manager.py"
     ).read_text(encoding="utf-8")
 
-    sync_marker = 'logger.info("[STARTUP] Running startup synchronization...")'
-    engine_marker = "engine = create_production_engine(echo=False)"
-    initialize_marker = "initialize_runtime_database()"
+    main_start = app_source.index("def main()")
+    bootstrap_marker = app_source.index("if not bootstrap.run():", main_start)
+    initialize_marker = app_source.index(
+        "initialize_runtime_database()", bootstrap_marker
+    )
+    engine_marker = app_source.index(
+        "engine = create_production_engine(echo=False)", initialize_marker
+    )
+    schema_marker = app_source.index("ensure_schema()", engine_marker)
 
-    assert source.index(sync_marker) < source.index(initialize_marker)
-    assert source.index(initialize_marker) < source.index(engine_marker)
-    assert source.index(engine_marker) < source.index("        # ENSURE DATABASE SCHEMA (after Git DB materialization)")
+    assert bootstrap_marker < initialize_marker < engine_marker < schema_marker
+    assert "if not self._ensure_authoritative_runtime_database(paths):" in bootstrap_source
+    assert "if not StartupSynchronization(provider).run():" in bootstrap_source
 
 
 def test_app_refuses_configured_startup_sync_failure():
-    source = (
-        Path(__file__).resolve().parents[1] / "src/centermanager/app.py"
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "src/centermanager/app.py").read_text(encoding="utf-8")
+    bootstrap_source = (
+        root / "src/centermanager/platform/bootstrap/bootstrap_manager.py"
     ).read_text(encoding="utf-8")
 
-    assert "refusing to start with a non-authoritative database" in source
-    assert "return 1" in source[source.index("refusing to start"):source.index("refusing to start") + 500]
+    sync_failure = bootstrap_source.index("if not StartupSynchronization(provider).run():")
+    failure_block = bootstrap_source[sync_failure:sync_failure + 300]
+    assert "Authoritative Git synchronization failed" in failure_block
+    assert "return False" in failure_block
+
+    bootstrap_failure = app_source.index("if not bootstrap.run():")
+    app_failure_block = app_source[bootstrap_failure:bootstrap_failure + 300]
+    assert "Bootstrap failed" in app_failure_block
+    assert "return 1" in app_failure_block
 
 
 def test_startup_sync_contract_is_remote_database_source_of_truth():
