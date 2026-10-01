@@ -340,6 +340,8 @@ class MainWindow(QMainWindow):
             git_config_service=self._git_config_service,
             platform_context=self._platform_context,
             collaboration_manager=self._collaboration_manager,
+            notification_service=self._notification_service,
+            runtime_sync_service=self._sync_service,
         )
         self.admin_workspace.go_home.connect(self._go_home)
         self.central_stack.addWidget(self.admin_workspace)
