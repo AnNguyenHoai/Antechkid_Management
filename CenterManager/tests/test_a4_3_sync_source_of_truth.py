@@ -33,6 +33,16 @@ def test_runtime_sync_only_reports_success_after_runtime_materialization():
     assert 'raise RuntimeError("Authoritative repository database could not be materialized into runtime")' in source[apply_pos:complete_pos]
 
 
+def test_write_handoff_materializes_runtime_when_repository_matches_remote():
+    source = _read("src/centermanager/platform/sync/runtime_sync_service.py")
+    block = _method_block(source, "execute_write_handoff_sync", "execute_sync")
+    equal_branch = block.index("elif remote_version == current_version:")
+    materialize = block.index("if not self._apply_runtime_update():", equal_branch)
+    verify = block.index("if runtime_version != remote_version or repository_version != remote_version:", materialize)
+    assert equal_branch < materialize < verify
+    assert "repository already authoritative" in block[equal_branch:materialize]
+
+
 def test_publish_does_not_continue_after_failed_repository_pull():
     source = _read("src/centermanager/platform/synchronization/git_synchronization_provider.py")
     start = source.index("    def publish(self, message: str, user: str) -> bool:")

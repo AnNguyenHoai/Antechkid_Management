@@ -135,6 +135,20 @@ class RuntimeSyncService:
             elif remote_version < current_version:
                 logger.error("Write handoff refused: local repository version %s ahead of remote %s", current_version, remote_version)
                 return False
+            elif remote_version == current_version:
+                # The repository can already be authoritative while the runtime
+                # still contains the previous writer's snapshot. The handoff
+                # barrier must materialize repository -> runtime even when no
+                # remote pull is required.
+                logger.info(
+                    "Write handoff repository already authoritative at version %s; materializing runtime",
+                    remote_version,
+                )
+                if not self._apply_runtime_update():
+                    logger.error(
+                        "Write handoff failed: authoritative repository could not be materialized into runtime"
+                    )
+                    return False
 
             paths = get_paths()
             runtime_manifest = paths.runtime_root / "manifest.json"
