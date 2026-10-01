@@ -13,6 +13,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME, APPLICATION_PRODUCT_NAME
+from centermanager.ui.application_icon import build_application_icon
 from centermanager.ui.design_system.desktop import ElidedLabel, install_desktop_polish
 from centermanager.ui.design_system.feedback import (
     FeedbackController,
@@ -129,12 +131,12 @@ class ApplicationTopBar(QFrame):
         brand_layout = QVBoxLayout()
         brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(0)
-        brand_label = QLabel("AN TECHKIDS")
+        brand_label = QLabel("ANTECHKIDS")
         brand_label.setStyleSheet(
             f"color: {COLORS['action_primary']}; font-size: {TYPOGRAPHY['body_small']}px; "
             f"font-weight: {FONT_WEIGHTS['bold']}; letter-spacing: 0.6px;"
         )
-        product_label = QLabel("Center Manager")
+        product_label = QLabel(APPLICATION_PRODUCT_NAME)
         product_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body']}px; "
             f"font-weight: {FONT_WEIGHTS['semibold']};"
@@ -211,8 +213,6 @@ class ApplicationTopBar(QFrame):
 
         shell_layout.addWidget(self.header)
 
-        # UI-PROD-07: one application-level feedback path. Page empty/loading/
-        # error states remain owned by StateView in the page content area.
         self.feedback_controller = feedback_controller or FeedbackController(self)
         self.feedback_host = FeedbackHost(self.feedback_controller, parent=self)
         shell_layout.addWidget(self.feedback_host)
@@ -236,7 +236,6 @@ class ApplicationTopBar(QFrame):
             """
         )
 
-        # Compatibility aliases used by MainWindow's existing transaction code.
         self.mode_label = self.mode_badge
         self.waiting_indicator = self.editor_badge
         self.tx_state_label = self.transaction_label
@@ -244,17 +243,17 @@ class ApplicationTopBar(QFrame):
         self.finish_edit_btn = self.finish_edit_button
         self.cancel_btn = self.cancel_edit_button
 
-        # A standalone QWidget starts with Qt's default 640x480 geometry before
-        # it enters a parent layout. Preserve UI-PROD-03's immediate 60px idle
-        # contract without fixing the maximum height: FeedbackHost can still make
-        # the shell grow naturally when feedback or busy state becomes visible.
         self.resize(self.width(), COMPONENT_METRICS["app_top_bar_height"])
 
-        # UI-PROD-09 is installed from the application shell so MainWindow's
-        # transaction/close behavior stays untouched. Standalone top-bar tests
-        # are intentionally a no-op because their top-level widget is not a
-        # QMainWindow.
-        install_desktop_polish(self.window())
+        # MainWindow previously hard-coded the legacy CenterManager title.
+        # The shell is built immediately afterwards, so apply the canonical
+        # visible identity here without renaming any runtime/package paths.
+        top_level = self.window()
+        if top_level is not self:
+            top_level.setWindowTitle(APPLICATION_DISPLAY_NAME)
+            top_level.setWindowIcon(build_application_icon())
+
+        install_desktop_polish(top_level)
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         self.mode_badge.setText(f"Mode: {mode}")
@@ -275,7 +274,6 @@ class ApplicationTopBar(QFrame):
     def set_sync_status(self, status: str) -> None:
         self.sync_label.setText(f"Sync: {status}")
 
-    # ---- UI-PROD-07 shell feedback API ---------------------------------
     def show_feedback(self, request: FeedbackRequest) -> FeedbackRequest:
         return self.feedback_controller.publish(request)
 
