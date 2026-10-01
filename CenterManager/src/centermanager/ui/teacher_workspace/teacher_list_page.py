@@ -9,7 +9,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QComboBox, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QMenu, QSizePolicy
+    QFrame, QMessageBox, QMenu, QSizePolicy, QHeaderView
 )
 from PySide6.QtGui import QAction
 
@@ -68,7 +68,6 @@ class TeacherListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
         toolbar = QWidget()
         toolbar.setStyleSheet(f"""
             background: {COLORS['surface']};
@@ -113,23 +112,21 @@ class TeacherListPage(QWidget):
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
 
-        toolbar_layout.addLayout(top_row)
-        layout.addWidget(toolbar)
-
-        # Bulk actions bar
-        self.bulk_bar = QWidget()
+        # Selection controls live in the toolbar so selecting a row does not
+        # insert a new vertical strip and move the table.
+        self.bulk_bar = QWidget(toolbar)
         self.bulk_bar.setStyleSheet(f"""
             background: {COLORS['primary_hover']};
-            padding: {SPACING['xs']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
+            padding: {SPACING['xs']}px {SPACING['sm']}px;
+            border-radius: 4px;
         """)
         self.bulk_bar.setVisible(False)
         bulk_layout = QHBoxLayout(self.bulk_bar)
         bulk_layout.setContentsMargins(0, 0, 0, 0)
+        bulk_layout.setSpacing(SPACING['xs'])
         self.bulk_count_label = QLabel("0 selected")
         self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
         bulk_layout.addWidget(self.bulk_count_label)
-        bulk_layout.addStretch()
         self.bulk_archive_btn = QPushButton("Archive Selected")
         self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
         self.bulk_archive_btn.clicked.connect(self._bulk_archive)
@@ -137,9 +134,11 @@ class TeacherListPage(QWidget):
         self.bulk_clear_btn = QPushButton("Clear")
         self.bulk_clear_btn.clicked.connect(self._clear_selection)
         bulk_layout.addWidget(self.bulk_clear_btn)
-        layout.addWidget(self.bulk_bar)
+        top_row.addWidget(self.bulk_bar)
 
-        # Data Table
+        toolbar_layout.addLayout(top_row)
+        layout.addWidget(toolbar)
+
         columns = [
             {"key": "teacher_code", "label": "Code", "sortable": True},
             {"key": "full_name", "label": "Name", "sortable": True},
@@ -149,6 +148,8 @@ class TeacherListPage(QWidget):
             {"key": "classes", "label": "Assigned Classes", "sortable": False},
         ]
         self.data_table = DataTable(columns, page_size=20)
+        self.data_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.data_table.table.horizontalHeader().setStretchLastSection(False)
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.selection_changed.connect(self._on_selection_changed)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -242,9 +243,10 @@ class TeacherListPage(QWidget):
 
     def _on_selection_changed(self, indices: List[int]) -> None:
         self._selected_ids = []
-        for idx in indices:
-            if idx < len(self._filtered):
-                self._selected_ids.append(self._filtered[idx].id)
+        for visible_row in indices:
+            data_index = self.data_table.data_index_for_visible_row(visible_row)
+            if 0 <= data_index < len(self._filtered):
+                self._selected_ids.append(self._filtered[data_index].id)
         self._update_bulk_bar()
 
     def _update_bulk_bar(self) -> None:
@@ -281,13 +283,15 @@ class TeacherListPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to archive teachers.")
 
     def _on_row_double_clicked(self, row: int) -> None:
-        if row < len(self._filtered):
-            self.teacher_selected.emit(self._filtered[row].id)
+        data_index = self.data_table.data_index_for_visible_row(row)
+        if 0 <= data_index < len(self._filtered):
+            self.teacher_selected.emit(self._filtered[data_index].id)
 
     def _on_context_menu(self, pos, row: int) -> None:
-        if row < 0 or row >= len(self._filtered):
+        data_index = self.data_table.data_index_for_visible_row(row)
+        if data_index < 0 or data_index >= len(self._filtered):
             return
-        teacher = self._filtered[row]
+        teacher = self._filtered[data_index]
         menu = QMenu(self)
         view_action = QAction("View Teacher", self)
         view_action.triggered.connect(lambda: self.teacher_selected.emit(teacher.id))

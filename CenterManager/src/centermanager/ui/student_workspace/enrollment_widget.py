@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QInputDialog, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QVBoxLayout, QWidget
 
 from centermanager.core.clock import get_clock
 from centermanager.services.enrollment_service import (
@@ -74,9 +74,12 @@ class EnrollmentWidget(QWidget):
             parent=self,
         )
         overview_wrap = QWidget(self.overview_section)
-        self.overview_layout = QHBoxLayout(overview_wrap)
+        self.overview_layout = QGridLayout(overview_wrap)
         self.overview_layout.setContentsMargins(0, 0, 0, 0)
-        self.overview_layout.setSpacing(SPACING["sm"])
+        self.overview_layout.setHorizontalSpacing(SPACING["sm"])
+        self.overview_layout.setVerticalSpacing(SPACING["sm"])
+        self.overview_layout.setColumnStretch(0, 1)
+        self.overview_layout.setColumnStretch(1, 1)
         self.overview_section.add_widget(overview_wrap)
         layout.addWidget(self.overview_section)
         action_card = Card(
@@ -89,7 +92,7 @@ class EnrollmentWidget(QWidget):
         action.setContentsMargins(0, 0, 0, 0)
         action.setSpacing(SPACING["sm"])
         self.class_combo = Select([], parent=action_wrap)
-        self.class_combo.setMinimumWidth(280)
+        self.class_combo.setMinimumWidth(220)
         self.class_combo.setAccessibleName("Class to enroll or transfer into")
         self.class_combo.setToolTip("Select an active class for enrollment or transfer")
         self.enroll_btn = Button("Enroll in class", variant=ButtonVariant.PRIMARY, parent=action_wrap)
@@ -161,7 +164,8 @@ class EnrollmentWidget(QWidget):
         self._update_action_state()
 
     def _populate_overview(self, active, completed, withdrawn, history) -> None:
-        for label, value in (("Active", len(active)), ("Completed", len(completed)), ("Withdrawn", len(withdrawn)), ("Total records", len(history))):
+        metrics = (("Active", len(active)), ("Completed", len(completed)), ("Withdrawn", len(withdrawn)), ("Total records", len(history)))
+        for index, (label, value) in enumerate(metrics):
             metric = Card(parent=self)
             value_label = QLabel(str(value), metric)
             value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -173,7 +177,7 @@ class EnrollmentWidget(QWidget):
             text_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;")
             metric.add_widget(value_label)
             metric.add_widget(text_label)
-            self.overview_layout.addWidget(metric)
+            self.overview_layout.addWidget(metric, index // 2, index % 2)
 
     def _reload_classes(self) -> None:
         current = self.class_combo.currentData()
@@ -207,11 +211,11 @@ class EnrollmentWidget(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         name = QLabel(enrollment.class_name or f"Class #{enrollment.class_id}", header)
+        name.setWordWrap(True)
         name.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body']}px; font-weight: {FONT_WEIGHTS['semibold']};"
         )
-        header_layout.addWidget(name)
-        header_layout.addStretch()
+        header_layout.addWidget(name, 1)
         header_layout.addWidget(Badge.from_status(enrollment.status, parent=header))
         card.add_widget(header)
         metadata = []
@@ -222,14 +226,18 @@ class EnrollmentWidget(QWidget):
         if enrollment.level:
             metadata.append(f"Level: {enrollment.level}")
         if metadata:
-            card.add_widget(QLabel(" • ".join(metadata), card))
+            metadata_label = QLabel(" • ".join(metadata), card)
+            metadata_label.setWordWrap(True)
+            card.add_widget(metadata_label)
         dates = []
         if enrollment.start_date:
             dates.append(f"Start: {enrollment.start_date.strftime('%d/%m/%Y')}")
         if enrollment.end_date:
             dates.append(f"End: {enrollment.end_date.strftime('%d/%m/%Y')}")
         if dates:
-            card.add_widget(QLabel("   ".join(dates), card))
+            dates_label = QLabel("   ".join(dates), card)
+            dates_label.setWordWrap(True)
+            card.add_widget(dates_label)
         duration = self._format_duration(enrollment.start_date, enrollment.end_date, current)
         if duration:
             duration_label = QLabel(duration, card)
@@ -244,13 +252,15 @@ class EnrollmentWidget(QWidget):
             else:
                 text = f"Latest tuition pause: sessions {latest.start_session}–{latest.end_session}"
             pause_label = QLabel(text, card)
+            pause_label.setWordWrap(True)
             pause_label.setStyleSheet(f"color: {COLORS['text_muted']};")
             card.add_widget(pause_label)
         if current:
             actions = QWidget(card)
-            actions_layout = QHBoxLayout(actions)
+            actions_layout = QGridLayout(actions)
             actions_layout.setContentsMargins(0, 0, 0, 0)
-            actions_layout.setSpacing(SPACING["sm"])
+            actions_layout.setHorizontalSpacing(SPACING["sm"])
+            actions_layout.setVerticalSpacing(SPACING["sm"])
             transfer_btn = Button("Transfer class", variant=ButtonVariant.SECONDARY, parent=actions)
             transfer_btn.setEnabled(self._write_enabled and open_freeze is None)
             transfer_btn.clicked.connect(lambda _=False, item=enrollment: self._transfer(item))
@@ -272,14 +282,11 @@ class EnrollmentWidget(QWidget):
             withdraw = Button("Withdraw", variant=ButtonVariant.DANGER, parent=actions)
             withdraw.setEnabled(self._write_enabled and open_freeze is None)
             withdraw.clicked.connect(lambda _=False, eid=enrollment.id: self._transition(eid, "withdraw"))
-            actions_layout.addWidget(transfer_btn)
-            actions_layout.addWidget(refund_btn)
-            actions_layout.addWidget(credit_btn)
-            actions_layout.addWidget(freeze_btn)
-            actions_layout.addWidget(resume_btn)
-            actions_layout.addWidget(complete)
-            actions_layout.addWidget(withdraw)
-            actions_layout.addStretch()
+            buttons = [transfer_btn, refund_btn, credit_btn, freeze_btn, resume_btn, complete, withdraw]
+            for index, button in enumerate(buttons):
+                actions_layout.addWidget(button, index // 3, index % 3)
+            for column in range(3):
+                actions_layout.setColumnStretch(column, 1)
             card.add_widget(actions)
         return card
 

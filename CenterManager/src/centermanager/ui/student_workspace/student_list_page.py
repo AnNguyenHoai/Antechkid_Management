@@ -119,9 +119,10 @@ class StudentListPage(WorkspaceBase):
         self.import_btn = toolbar.add_action("Import", self.show_import_dialog, variant=ButtonVariant.SECONDARY)
         self.export_btn = toolbar.add_action("Export", self.export_students, variant=ButtonVariant.SECONDARY)
         self.add_btn = toolbar.add_action("Add student", self.show_add_dialog, variant=ButtonVariant.PRIMARY)
-        layout.addWidget(toolbar)
 
-        self.bulk_bar = BulkActionBar(self)
+        # Keep selection feedback/actions inside the existing toolbar. Toggling
+        # selection must not insert/remove a vertical row and move the table.
+        self.bulk_bar = BulkActionBar(toolbar)
         self.bulk_delete_btn = self.bulk_bar.add_action(
             "delete", "Delete selected", self._bulk_delete, variant=ButtonVariant.DANGER
         )
@@ -131,7 +132,8 @@ class StudentListPage(WorkspaceBase):
         self.bulk_bar.clear_requested.connect(self._clear_selection)
         self.bulk_count_label = self.bulk_bar.count_label
         self.bulk_clear_btn = self.bulk_bar.clear_button
-        layout.addWidget(self.bulk_bar)
+        toolbar.add_widget(self.bulk_bar, align="end")
+        layout.addWidget(toolbar)
 
         columns = [
             {"key": "student_code", "label": "Code", "sortable": True},

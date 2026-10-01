@@ -11,7 +11,7 @@ from datetime import date
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHeaderView, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from centermanager.dto.outstanding_dto import StudentOutstandingSummary
 from centermanager.models.income import Income
@@ -98,6 +98,7 @@ class StudentFinancialWidget(QWidget):
             parent=self.content,
         )
         self.period_label = QLabel("Finance period: —", header)
+        self.period_label.setWordWrap(True)
         self.period_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['body_small']}px;"
         )
@@ -112,20 +113,24 @@ class StudentFinancialWidget(QWidget):
         layout.addWidget(header)
 
         summary_wrap = QWidget(self.content)
-        summary_layout = QHBoxLayout(summary_wrap)
+        summary_layout = QGridLayout(summary_wrap)
         summary_layout.setContentsMargins(0, 0, 0, 0)
-        summary_layout.setSpacing(SPACING["md"])
+        summary_layout.setHorizontalSpacing(SPACING["md"])
+        summary_layout.setVerticalSpacing(SPACING["md"])
         self.total_expected_label = self._create_summary_card("Expected tuition", "0 VND")
         self.total_paid_label = self._create_summary_card("Paid", "0 VND")
         self.outstanding_label = self._create_summary_card("Outstanding", "0 VND")
         self.status_label = self._create_summary_card("Status", "No data")
-        for card in (
+        summary_cards = (
             self.total_expected_label,
             self.total_paid_label,
             self.outstanding_label,
             self.status_label,
-        ):
-            summary_layout.addWidget(card)
+        )
+        for index, card in enumerate(summary_cards):
+            summary_layout.addWidget(card, index // 2, index % 2)
+        summary_layout.setColumnStretch(0, 1)
+        summary_layout.setColumnStretch(1, 1)
         layout.addWidget(summary_wrap)
 
         class_card = Card(
@@ -147,6 +152,8 @@ class StudentFinancialWidget(QWidget):
             empty_message="Tuition details will appear when the student has a configured enrollment.",
             parent=class_card,
         )
+        self.detail_data_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.detail_data_table.table.horizontalHeader().setStretchLastSection(False)
         class_card.add_widget(self.detail_data_table)
         layout.addWidget(class_card)
 
@@ -170,6 +177,8 @@ class StudentFinancialWidget(QWidget):
             empty_message="Payments for this finance period will appear here.",
             parent=history_card,
         )
+        self.payment_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.payment_table.table.horizontalHeader().setStretchLastSection(False)
         history_card.add_widget(self.payment_table)
         layout.addWidget(history_card, 1)
 
@@ -184,10 +193,12 @@ class StudentFinancialWidget(QWidget):
     def _create_summary_card(self, label: str, value: str) -> Card:
         card = Card(parent=self.content)
         label_widget = QLabel(label, card)
+        label_widget.setWordWrap(True)
         label_widget.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;"
         )
         value_widget = QLabel(value, card)
+        value_widget.setWordWrap(True)
         value_widget.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['section_title']}px; "
             f"font-weight: {FONT_WEIGHTS['semibold']};"
