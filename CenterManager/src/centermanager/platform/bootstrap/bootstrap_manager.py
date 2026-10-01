@@ -45,6 +45,11 @@ class BootstrapManager:
         self._workspace_registry = WorkspaceRegistry()
         self._repo_manager = RepositoryManager()
         self._context_manager = RuntimeContextManager()
+        # The provider that performed the authoritative startup synchronization
+        # remains owned by BootstrapManager for the lifetime of the application.
+        # Keeping the same instance preserves its connected repository and
+        # non-interactive credential helper for collaboration/write locking.
+        self._sync_provider = None
 
     def run(self) -> bool:
         """Execute startup sequence."""
@@ -184,6 +189,10 @@ class BootstrapManager:
             )
             return False
 
+        # Retain the exact provider that connected/synchronized the authoritative
+        # repository. app.main() must reuse it instead of constructing a second
+        # provider and running StartupSynchronization a second time.
+        self._sync_provider = provider
         logger.info("[BOOTSTRAP] Authoritative Git database materialized successfully")
         return True
 
@@ -241,3 +250,7 @@ class BootstrapManager:
     def get_repository_manager(self) -> RepositoryManager:
         """Get repository manager."""
         return self._repo_manager
+
+    def get_sync_provider(self):
+        """Return the authoritative Git provider retained from bootstrap."""
+        return self._sync_provider
