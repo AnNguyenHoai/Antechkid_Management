@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Database session management with context manager pattern."""
+import gc
 import os
 from contextlib import contextmanager
 from typing import Generator
@@ -37,8 +38,52 @@ def get_session_factory() -> sessionmaker:
     return _session_factory
 
 
+def _windows_lock_owners_after_finalization(logger):
+    """Return OS lock owners after one fail-closed finalization pass.
+
+    SQLAlchemy/SQLite/SQLCipher wrappers may participate in Python reference
+    cycles. A driver ``close()`` can therefore have completed while an otherwise
+    unreachable wrapper/cursor/result object has not yet been finalized. On
+    Windows that can leave the native file object visible to Restart Manager even
+    though the guarded DBAPI registry is correctly empty.
+
+    We never use sleep/retry here. First ask Windows for the OS truth. Only when
+    the *current process* is the sole unexplained owner and the guarded registry
+    is empty do we force cyclic-GC finalization, then ask Windows once more. The
+    restore may proceed only if Windows confirms the lock is actually gone.
+    """
+    db_path = get_database_path()
+    owners = windows_lock_owners(db_path)
+    if not owners or runtime_dbapi_connection_count() != 0:
+        return owners
+
+    same_process = [owner for owner in owners if owner.pid == os.getpid()]
+    if not same_process:
+        return owners
+
+    collected = gc.collect()
+    owners_after_gc = windows_lock_owners(db_path)
+    if not owners_after_gc:
+        logger.warning(
+            "SEC06 native runtime DB lock disappeared only after cyclic GC "
+            "finalization; collected=%d. This indicates an unreachable Python "
+            "wrapper/cursor/result retained the native file object after DBAPI drain.",
+            collected,
+        )
+        return []
+
+    logger.error(
+        "SEC06 same-process native DB lock survived cyclic GC finalization; "
+        "collected=%d, owners_before=%s, owners_after=%s",
+        collected,
+        format_lock_owners(owners),
+        format_lock_owners(owners_after_gc),
+    )
+    return owners_after_gc
+
+
 def quiesce_runtime_db(*, release_fence_on_failure: bool = True) -> None:
-    """Fence access and prove zero process-owned DBAPI handles before restore.
+    """Fence access and prove zero process-owned DBAPI/native handles before restore.
 
     ``release_fence_on_failure`` is true for the initial pre-mutation quiesce so
     a failed restore attempt does not unnecessarily strand normal DB access. Once
@@ -72,11 +117,12 @@ def quiesce_runtime_db(*, release_fence_on_failure: bool = True) -> None:
         _session_factory = None
 
         # The DBAPI registry proves only that CenterManager's guarded production
-        # connection path is empty. On Windows, ask Restart Manager for the OS
-        # truth before the destructive rename. This identifies both untracked
-        # same-process handles and external processes without killing either.
+        # connection path is empty. On Windows, Restart Manager is the OS truth.
+        # If it reports only this process while the registry is zero, finalize
+        # unreachable Python cycles once and re-query. This is not a timing retry:
+        # recovery proceeds only if the native lock is observably gone afterward.
         try:
-            owners = windows_lock_owners(get_database_path())
+            owners = _windows_lock_owners_after_finalization(logger)
         except Exception:
             logger.exception("Windows file-lock ownership diagnostics failed")
         else:
@@ -85,13 +131,14 @@ def quiesce_runtime_db(*, release_fence_on_failure: bool = True) -> None:
                 owner_text = format_lock_owners(owners)
                 if same_process and runtime_dbapi_connection_count() == 0:
                     logger.error(
-                        "UNTRACKED SAME-PROCESS HANDLE DETECTED for runtime DB: %s",
+                        "UNTRACKED SAME-PROCESS HANDLE DETECTED for runtime DB after "
+                        "forced finalization: %s",
                         owner_text,
                     )
                     raise RuntimeError(
-                        "Runtime database is still locked after quiesce; "
-                        "UNTRACKED SAME-PROCESS HANDLE DETECTED; Windows lock owner(s): "
-                        + owner_text
+                        "Runtime database is still locked after quiesce and cyclic GC "
+                        "finalization; UNTRACKED SAME-PROCESS HANDLE DETECTED; "
+                        "Windows lock owner(s): " + owner_text
                     )
                 raise RuntimeError(
                     "Runtime database is still locked after quiesce; Windows lock owner(s): "

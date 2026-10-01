@@ -1,4 +1,5 @@
 import inspect
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -11,13 +12,7 @@ from centermanager.platform.backup.backup_service import BackupService
 
 @pytest.fixture(autouse=True)
 def _isolate_runtime_db_maintenance_fence():
-    """Keep the process-global maintenance fence isolated between tests.
-
-    Several restore/rollback tests intentionally monkeypatch refresh_runtime_db.
-    Since quiesce_runtime_db now owns a real process-global fence, those older
-    mocked refresh paths can otherwise leave maintenance enabled for a later
-    test even though no production restore is still in progress.
-    """
+    """Keep the process-global maintenance fence isolated between tests."""
     db_engine.end_runtime_db_maintenance()
     try:
         yield
@@ -81,13 +76,82 @@ def test_quiesce_releases_fence_if_sessions_cannot_close(monkeypatch):
     assert db_session._session_factory is old_factory
 
 
-def test_retained_runtime_engine_cannot_reopen_database_while_restore_fenced(tmp_path):
-    """Regression for packaged WinError 32 after the first SEC06 handle fix.
+def test_same_process_os_lock_gets_one_gc_finalization_pass(monkeypatch):
+    owner = SimpleNamespace(pid=os.getpid(), app_name="CenterManager Desktop Application")
+    observations = [[owner], []]
+    gc_calls = []
 
-    app.py owns an independent long-lived Engine/sessionmaker. Disposing an
-    Engine does not make it unusable: without the maintenance fence that stale
-    owner can immediately reconnect to center.db between quiesce and rename.
-    """
+    monkeypatch.setattr(db_session, "get_database_path", lambda: "center.db")
+    monkeypatch.setattr(db_session, "runtime_dbapi_connection_count", lambda: 0)
+    monkeypatch.setattr(
+        db_session,
+        "windows_lock_owners",
+        lambda path: observations.pop(0),
+    )
+    monkeypatch.setattr(
+        db_session.gc,
+        "collect",
+        lambda: gc_calls.append(True) or 3,
+    )
+
+    owners = db_session._windows_lock_owners_after_finalization(
+        SimpleNamespace(warning=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
+    )
+
+    assert owners == []
+    assert gc_calls == [True]
+    assert observations == []
+
+
+def test_same_process_os_lock_surviving_gc_remains_fail_closed(monkeypatch):
+    owner = SimpleNamespace(pid=os.getpid(), app_name="CenterManager Desktop Application")
+    observations = [[owner], [owner]]
+
+    monkeypatch.setattr(db_session, "get_database_path", lambda: "center.db")
+    monkeypatch.setattr(db_session, "runtime_dbapi_connection_count", lambda: 0)
+    monkeypatch.setattr(
+        db_session,
+        "windows_lock_owners",
+        lambda path: observations.pop(0),
+    )
+    monkeypatch.setattr(db_session.gc, "collect", lambda: 2)
+    monkeypatch.setattr(
+        db_session,
+        "format_lock_owners",
+        lambda owners: "pid=current, app=CenterManager",
+    )
+
+    owners = db_session._windows_lock_owners_after_finalization(
+        SimpleNamespace(warning=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
+    )
+
+    assert owners == [owner]
+    assert observations == []
+
+
+def test_external_os_lock_does_not_trigger_gc_finalization(monkeypatch):
+    owner = SimpleNamespace(pid=os.getpid() + 1000, app_name="Other Application")
+    gc_calls = []
+
+    monkeypatch.setattr(db_session, "get_database_path", lambda: "center.db")
+    monkeypatch.setattr(db_session, "runtime_dbapi_connection_count", lambda: 0)
+    monkeypatch.setattr(db_session, "windows_lock_owners", lambda path: [owner])
+    monkeypatch.setattr(
+        db_session.gc,
+        "collect",
+        lambda: gc_calls.append(True) or 0,
+    )
+
+    owners = db_session._windows_lock_owners_after_finalization(
+        SimpleNamespace(warning=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
+    )
+
+    assert owners == [owner]
+    assert gc_calls == []
+
+
+def test_retained_runtime_engine_cannot_reopen_database_while_restore_fenced(tmp_path):
+    """Regression for packaged WinError 32 after the first SEC06 handle fix."""
     db_path = tmp_path / "center.db"
     engine = db_engine.create_engine_for_path(
         db_path,
