@@ -9,6 +9,7 @@ from .git_credential_safety import install_git_credential_safety
 from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
 from .git_provider_safety import install_git_command_serialization
+from .lock_acquisition_diagnostics import install_lock_acquisition_diagnostics
 from .synchronization_policy import SynchronizationPolicy, SyncPolicy
 from .version_resolver import VersionResolver, VersionStatus
 from .synchronization_result import SynchronizationResult, SyncResult
@@ -60,6 +61,11 @@ install_origin_reconciliation(GitSynchronizationProvider)
 # the same time. Serialize subprocess-based Git access per provider instance;
 # different clients/providers remain independent.
 install_git_command_serialization(GitSynchronizationProvider)
+
+# Preserve the exact reason a distributed write-lock acquisition failed.  This
+# wrapper runs after the Git safety wrappers so any subprocess diagnostics have
+# already passed through credential/output sanitization.
+install_lock_acquisition_diagnostics(GitSynchronizationProvider)
 
 __all__ = [
     "SynchronizationManager",
