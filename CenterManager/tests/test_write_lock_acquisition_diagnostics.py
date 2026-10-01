@@ -7,6 +7,7 @@ from centermanager.platform.synchronization.lock_acquisition_diagnostics import 
 
 class _BaseFakeProvider:
     _lease_duration_seconds = 60
+    _lock_branch = "lock-main"
 
     def acquire_lock(self, lock_data):  # replaced by installer
         raise AssertionError("diagnostic wrapper was not installed")
@@ -16,6 +17,9 @@ class _BaseFakeProvider:
 
     def _create_lock_commit_plumbing(self, lock_data, expected_oid=None):
         return "new-lock-commit"
+
+    def _has_remote_origin(self):
+        return True
 
 
 class _ContendedProvider(_BaseFakeProvider):
@@ -36,6 +40,9 @@ class _ContendedProvider(_BaseFakeProvider):
     def _push_lock_branch(self, commit_sha, expected_oid=None):
         raise AssertionError("push must not run while another valid lease exists")
 
+    def _run_git_command(self, args, check=True):
+        raise AssertionError("git push must not run while another valid lease exists")
+
 
 class _PushRejectedProvider(_BaseFakeProvider):
     def _remote_lock_oid(self):
@@ -49,6 +56,21 @@ class _PushRejectedProvider(_BaseFakeProvider):
 
     def _push_lock_branch(self, commit_sha, expected_oid=None):
         return False
+
+    def _run_git_command(self, args, check=True):
+        assert args[:2] == ["push", "origin"]
+        raise RuntimeError(
+            "remote: permission denied to update refs/heads/lock-main\n"
+            "error: failed to push some refs"
+        )
+
+
+class _NoOriginProvider(_PushRejectedProvider):
+    def _has_remote_origin(self):
+        return False
+
+    def _run_git_command(self, args, check=True):
+        raise AssertionError("git must not run without an origin")
 
 
 def test_acquire_lock_classifies_real_remote_contention():
@@ -64,7 +86,7 @@ def test_acquire_lock_classifies_real_remote_contention():
     assert provider.get_last_lock_error() == "Write lock is held by alice."
 
 
-def test_acquire_lock_preserves_push_failure_when_remote_is_free():
+def test_acquire_lock_preserves_exact_push_failure_when_remote_is_free():
     install_lock_acquisition_diagnostics(_PushRejectedProvider)
     provider = _PushRejectedProvider()
 
@@ -75,5 +97,23 @@ def test_acquire_lock_preserves_push_failure_when_remote_is_free():
     assert acquired is False
     assert provider.last_lock_failure_was_contention() is False
     message = provider.get_last_lock_error()
-    assert "Remote rejected the write-lock update" in message
-    assert "Git write permission" in message
+    assert message.startswith("Remote write-lock update failed:")
+    assert "permission denied to update refs/heads/lock-main" in message
+    assert "failed to push some refs" in message
+    assert "\n" not in message
+
+
+def test_acquire_lock_reports_missing_remote_origin():
+    install_lock_acquisition_diagnostics(_NoOriginProvider)
+    provider = _NoOriginProvider()
+
+    acquired = provider.acquire_lock(
+        {"owner": "bob", "session_id": "current-session"}
+    )
+
+    assert acquired is False
+    assert provider.last_lock_failure_was_contention() is False
+    assert (
+        provider.get_last_lock_error()
+        == "Remote write-lock update failed: No remote origin is configured for the write-lock repository."
+    )

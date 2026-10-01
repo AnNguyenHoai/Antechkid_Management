@@ -1,7 +1,7 @@
 """Write-lock acquisition diagnostics for GitSynchronizationProvider.
 
 This compatibility layer keeps the existing provider implementation intact while
-making lock-acquisition failures observable.  A failed acquisition is classified
+making lock-acquisition failures observable. A failed acquisition is classified
 as either real contention (another valid remote lease exists) or an operational
 failure such as commit creation, push rejection, or ownership verification.
 """
@@ -15,6 +15,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _clean_diagnostic(value: object, limit: int = 700) -> str:
+    """Keep a compact, already-sanitized diagnostic suitable for logs and UI."""
+    text = " ".join(str(value or "").split()).strip()
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
 def install_lock_acquisition_diagnostics(provider_cls) -> None:
     """Install precise lock-acquisition failure reporting once."""
     if getattr(provider_cls, "_lock_acquisition_diagnostics_installed", False):
@@ -26,10 +34,45 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
     def last_lock_failure_was_contention(self) -> bool:
         return bool(getattr(self, "_last_lock_contention", False))
 
+    # The restored provider's _push_lock_branch() deliberately returned only a
+    # bool and swallowed the Git exception. Capture the exception here, after
+    # git output/credential safety wrappers are installed, so the acquisition
+    # layer can surface the real sanitized remote failure instead of guessing.
+    original_push = getattr(provider_cls, "_push_lock_branch", None)
+
+    if callable(original_push):
+        @wraps(original_push)
+        def push_lock_branch(self, commit_sha: str, expected_oid=None) -> bool:
+            self._last_lock_push_error = ""
+
+            if not self._has_remote_origin():
+                self._last_lock_push_error = "No remote origin is configured for the write-lock repository."
+                logger.error(self._last_lock_push_error)
+                return False
+
+            if expected_oid is None:
+                args = ["push", "origin", f"{commit_sha}:refs/heads/{self._lock_branch}"]
+            else:
+                args = ["push", "origin", f"{commit_sha}:refs/heads/{self._lock_branch}"]
+                args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
+
+            try:
+                self._run_git_command(args, check=True)
+                logger.info("Lock branch pushed successfully: %s", self._lock_branch)
+                return True
+            except Exception as exc:
+                detail = _clean_diagnostic(exc) or exc.__class__.__name__
+                self._last_lock_push_error = detail
+                logger.error("Lock branch push failed: %s", detail)
+                return False
+
+        provider_cls._push_lock_branch = push_lock_branch
+
     @wraps(provider_cls.acquire_lock)
     def acquire_lock(self, lock_data: dict) -> bool:
         self._last_lock_error = ""
         self._last_lock_contention = False
+        self._last_lock_push_error = ""
         logger.info("Atomic lock acquisition started: owner=%s", lock_data.get("owner"))
 
         try:
@@ -58,8 +101,9 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 return False
 
             if not self._push_lock_branch(commit_sha, expected_oid):
-                # A failed CAS may be a legitimate race. Re-read authority before
-                # classifying it as a Git/credential failure.
+                # A failed CAS may still be a legitimate race. Re-read the
+                # authoritative lock before classifying it as an operational
+                # Git failure.
                 current_oid = self._remote_lock_oid()
                 if current_oid is not None:
                     current_lock = self._read_lock_from_oid(current_oid)
@@ -76,10 +120,18 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                         logger.info(self._last_lock_error)
                         return False
 
-                self._last_lock_error = (
-                    "Remote rejected the write-lock update. Check Git write permission, "
-                    "credentials, network connectivity, and branch/ruleset policy."
+                push_detail = _clean_diagnostic(
+                    getattr(self, "_last_lock_push_error", "")
                 )
+                if push_detail:
+                    self._last_lock_error = (
+                        f"Remote write-lock update failed: {push_detail}"
+                    )
+                else:
+                    self._last_lock_error = (
+                        "Remote write-lock update failed without an active competing writer. "
+                        "No Git diagnostic was returned."
+                    )
                 logger.error(self._last_lock_error)
                 return False
 
@@ -113,9 +165,10 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
 
         except Exception as exc:
             # The provider safety wrappers sanitize Git command output before it
-            # reaches this layer. Still keep the user-facing prefix stable so UI
-            # and diagnostics can distinguish an operational failure from contention.
-            self._last_lock_error = f"Write-lock acquisition failed: {exc}"
+            # reaches this layer. Keep the failure concise but preserve the root
+            # exception so support logs and UI expose the actionable cause.
+            detail = _clean_diagnostic(exc) or exc.__class__.__name__
+            self._last_lock_error = f"Write-lock acquisition failed: {detail}"
             logger.exception(self._last_lock_error)
             return False
 
