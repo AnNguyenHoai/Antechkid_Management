@@ -5,6 +5,7 @@ from centermanager.core.application_identity import (
     APPLICATION_INTERNAL_NAME,
     APPLICATION_PRODUCT_NAME,
 )
+from centermanager.core.config import Config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,11 @@ def test_visible_app_identity_changes_without_renaming_internal_runtime_identity
     assert APPLICATION_DISPLAY_NAME == "AnTechKids - Management App"
     assert APPLICATION_PRODUCT_NAME == "AnTechKids Management App"
     assert APPLICATION_INTERNAL_NAME == "CenterManager"
+
+
+def test_runtime_config_keeps_centermanager_identity():
+    config = Config({"application": {"name": APPLICATION_DISPLAY_NAME}})
+    assert config.get("application.name") == "CenterManager"
 
 
 def test_student_selection_controls_do_not_add_a_dynamic_vertical_row():
