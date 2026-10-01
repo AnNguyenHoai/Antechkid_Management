@@ -5,10 +5,10 @@ import sys
 import logging
 import traceback
 
+from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from centermanager.core.paths import get_paths
-from centermanager.core.git_locator import locate_git
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
 from centermanager.core.current_user import set_current_user
@@ -22,14 +22,12 @@ from centermanager.platform import (
     RuntimeState,
     CollaborationManager,
     SynchronizationManager,
-    GitSynchronizationProvider,
     SynchronizationPolicy,
     RuntimeSyncService,
     BusinessModuleRegistry,
 )
-from centermanager.platform.sync import StartupSynchronization
 from centermanager.platform.business import BusinessModule
-from centermanager.platform.collaboration import CollaborationPoller, PollerMode  # <-- THÊM
+from centermanager.platform.collaboration import CollaborationPoller, PollerMode
 
 from centermanager.ui.main_window import MainWindow
 from centermanager.services.student_service import StudentService
@@ -73,8 +71,7 @@ from centermanager.services.expense_timeline_service import ExpenseTimelineServi
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.attendance_service import AttendanceService
-from centermanager.platform import BootstrapManager, PlatformContext, PlatformLifecycleState
-from centermanager.platform.collaboration import CollaborationManager
+from centermanager.platform import PlatformContext, PlatformLifecycleState
 from centermanager.platform.synchronization.git.git_provider import GitProvider
 from centermanager.platform.synchronization.git.git_credentials import GitCredentials
 from centermanager.platform.notification import NotificationService
@@ -114,6 +111,22 @@ def main() -> int:
         qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
         qapp.setOrganizationName("CenterManager")
 
+        # One CenterManager process owns one runtime workspace. Running a stale
+        # process alongside a newly started process makes collaboration state,
+        # the SQLite runtime and the Git lock projection ambiguous. Fence that
+        # condition before any bootstrap/materialization work starts.
+        instance_lock = QLockFile(str(paths.runtime_root / ".centermanager.instance.lock"))
+        instance_lock.setStaleLockTime(30_000)
+        if not instance_lock.tryLock(0):
+            logger.error("[STARTUP] Another CenterManager process owns this runtime workspace")
+            QMessageBox.warning(
+                None,
+                "CenterManager already running",
+                "Another CenterManager process is already using this runtime workspace.\n\n"
+                "Close the existing CenterManager window/process before starting a new one.",
+            )
+            return 2
+
         # ============================================
         # PLATFORM BOOTSTRAP
         # ============================================
@@ -127,65 +140,36 @@ def main() -> int:
         context_manager = bootstrap._context_manager
         workspace_registry = bootstrap.get_workspace_registry()
         lifecycle = bootstrap.get_lifecycle()
+        sync_provider = bootstrap.get_sync_provider()
 
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
+
+        # Bootstrap is the single owner of authoritative startup synchronization.
+        # Reuse the exact provider that cloned/fetched/reset/materialized the
+        # runtime. Creating a second provider here previously ran startup sync a
+        # second time and split provider/credential lifetime from PlatformContext.
+        if sync_provider is None:
+            logger.error("[STARTUP] Bootstrap completed without an authoritative synchronization provider")
+            QMessageBox.critical(
+                None,
+                "Synchronization Error",
+                "CenterManager could not retain the authoritative Git synchronization context.",
+            )
+            return 1
+        logger.info("[STARTUP] Reusing authoritative Git provider from bootstrap; startup sync already complete")
 
         # ============================================
         # DATABASE + GIT STARTUP ORDER
         # ============================================
-        # Git is the database source of truth. Do not create the production
-        # engine until the startup synchronization has materialized the Git
-        # database into runtime/Database/center.db.
+        # Git is the database source of truth. Bootstrap has already materialized
+        # runtime/Database/center.db before any production engine is created.
         from sqlalchemy.orm import sessionmaker
 
-        # ============================================
-        # OPTIONAL GIT CONFIGURATION
-        # ============================================
         git_config_service = GitConfigService()
-        git_executable = locate_git()
-        git_config = None
-        sync_provider = None
-
-        if not git_executable:
-            logger.warning("[STARTUP] Git executable unavailable; starting in local/offline mode")
-        elif git_config_service.has_config():
-            git_config = git_config_service.get_config()
-            if git_config is None:
-                logger.warning("[STARTUP] Git configuration is invalid; starting in local/offline mode")
-            else:
-                repo_path = paths.runtime_root / "repository"
-                sync_provider = GitSynchronizationProvider(
-                    repo_path=repo_path,
-                    repository_url=git_config.repository_url,
-                    token=git_config.token,
-                    username=git_config.username,
-                    branch=git_config.branch,
-                    email=git_config.email or "",
-                    git_executable=str(git_executable),
-                )
-
-                logger.info("[STARTUP] Running startup synchronization...")
-                startup_sync = StartupSynchronization(sync_provider)
-                if not startup_sync.run():
-                    # A configured Git repository is authoritative for the
-                    # runtime database. Never fall back to a stale local DB.
-                    logger.error("[STARTUP] Startup synchronization failed; refusing to start with a non-authoritative database")
-                    QMessageBox.critical(
-                        None,
-                        "Synchronization Error",
-                        "Unable to synchronize the authoritative Git database.\\n"
-                        "CenterManager will not start with a stale local database.\\n\\n"
-                        "Please check the network connection and Git configuration.",
-                    )
-                    return 1
-                logger.info("[STARTUP] Startup synchronization completed")
-        else:
-            logger.info("[STARTUP] No Git configuration found; starting in local/offline mode")
 
         # A4.2: create the local container only after Git synchronization has
-        # had the opportunity to materialize the authoritative database. In
-        # configured mode this is a no-op; in true local/offline mode it is the
-        # explicit first-run lifecycle transition from A4.1.
+        # materialized the authoritative database. In configured production mode
+        # this is a no-op.
         initialize_runtime_database()
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
@@ -263,7 +247,7 @@ def main() -> int:
         )
 
         # ============================================
-        # COLLABORATION POLLER (NEW)
+        # COLLABORATION POLLER
         # ============================================
         poller = CollaborationPoller(
             collaboration_manager=collaboration_manager,
@@ -362,7 +346,7 @@ def main() -> int:
         finance_dashboard_service = FinanceDashboardService(
             income_service, expense_service, outstanding_service
         )
-        
+
         attendance_service = AttendanceService(
             session_factory=session_factory,
             timeline_service=timeline_service,
@@ -463,7 +447,7 @@ def main() -> int:
             notification_service=notification_service,
             git_config_service=git_config_service,
             event_bus=event_bus,
-            poller=poller,  # <-- THÊM poller vào MainWindow
+            poller=poller,
         )
 
         logger.info("[STARTUP] MainWindow instance created")
@@ -479,12 +463,12 @@ def main() -> int:
         # Shutdown
         if sync_service is not None:
             sync_service.stop()
-        poller.stop()  # <-- STOP POLLER
+        poller.stop()
         collaboration_manager.shutdown()
 
         return exit_code
 
-    except Exception as e:
+    except Exception:
         logger.exception("[STARTUP] Fatal error")
         traceback.print_exc()
         return 1
