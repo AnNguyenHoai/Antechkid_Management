@@ -136,10 +136,15 @@ def test_app_materializes_git_database_before_creating_production_engine():
         root / "src/centermanager/platform/bootstrap/bootstrap_manager.py"
     ).read_text(encoding="utf-8")
 
-    bootstrap_marker = app_source.index("if not bootstrap.run():")
-    initialize_marker = app_source.index("initialize_runtime_database()")
-    engine_marker = app_source.index("engine = create_production_engine(echo=False)")
-    schema_marker = app_source.index("ensure_schema()")
+    main_start = app_source.index("def main()")
+    bootstrap_marker = app_source.index("if not bootstrap.run():", main_start)
+    initialize_marker = app_source.index(
+        "initialize_runtime_database()", bootstrap_marker
+    )
+    engine_marker = app_source.index(
+        "engine = create_production_engine(echo=False)", initialize_marker
+    )
+    schema_marker = app_source.index("ensure_schema()", engine_marker)
 
     assert bootstrap_marker < initialize_marker < engine_marker < schema_marker
     assert "if not self._ensure_authoritative_runtime_database(paths):" in bootstrap_source
