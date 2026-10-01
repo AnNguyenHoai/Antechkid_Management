@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME
 from centermanager.core.paths import get_paths
 from centermanager.core.version import APPLICATION_VERSION
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "application": {
-        "name": APPLICATION_DISPLAY_NAME,
+        "name": "CenterManager",
         "version": APPLICATION_VERSION,
     }
 }
@@ -33,7 +32,7 @@ def _with_runtime_identity(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(application, dict):
         application = {}
         normalized["application"] = application
-    application["name"] = APPLICATION_DISPLAY_NAME
+    application["name"] = "CenterManager"
     application["version"] = APPLICATION_VERSION
     return normalized
 
