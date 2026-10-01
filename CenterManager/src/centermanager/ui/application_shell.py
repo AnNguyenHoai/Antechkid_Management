@@ -253,7 +253,7 @@ class ApplicationTopBar(QFrame):
             top_level.setWindowTitle(APPLICATION_DISPLAY_NAME)
             top_level.setWindowIcon(build_application_icon())
 
-        install_desktop_polish(top_level)
+        install_desktop_polish(self.window())
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         self.mode_badge.setText(f"Mode: {mode}")
@@ -274,6 +274,7 @@ class ApplicationTopBar(QFrame):
     def set_sync_status(self, status: str) -> None:
         self.sync_label.setText(f"Sync: {status}")
 
+    # ---- UI-PROD-07 feedback API ----
     def show_feedback(self, request: FeedbackRequest) -> FeedbackRequest:
         return self.feedback_controller.publish(request)
 
