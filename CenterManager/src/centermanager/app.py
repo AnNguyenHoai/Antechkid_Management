@@ -5,7 +5,7 @@ import sys
 import logging
 import traceback
 
-from PySide6.QtCore import QLockFile
+from PySide6.QtCore import QLockFile, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from centermanager.core.paths import get_paths
@@ -77,7 +77,7 @@ from centermanager.platform.synchronization.git.git_credentials import GitCreden
 from centermanager.platform.notification import NotificationService
 from centermanager.platform.collaboration.json_metadata_repository import JsonMetadataRepository
 from centermanager.platform.version import VersionManager
-from centermanager.services.write_transaction import WriteTransactionManager
+from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 from centermanager.services.enrollment_service import EnrollmentService
 
 logger = logging.getLogger(__name__)
@@ -111,10 +111,6 @@ def main() -> int:
         qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
         qapp.setOrganizationName("CenterManager")
 
-        # One CenterManager process owns one runtime workspace. Running a stale
-        # process alongside a newly started process makes collaboration state,
-        # the SQLite runtime and the Git lock projection ambiguous. Fence that
-        # condition before any bootstrap/materialization work starts.
         instance_lock = QLockFile(str(paths.runtime_root / ".centermanager.instance.lock"))
         instance_lock.setStaleLockTime(30_000)
         if not instance_lock.tryLock(0):
@@ -127,9 +123,6 @@ def main() -> int:
             )
             return 2
 
-        # ============================================
-        # PLATFORM BOOTSTRAP
-        # ============================================
         bootstrap = BootstrapManager()
         if not bootstrap.run():
             logger.error("[STARTUP] Bootstrap failed")
@@ -144,10 +137,6 @@ def main() -> int:
 
         logger.info(f"[STARTUP] Platform ready: {platform_context.runtime.state.current.name}")
 
-        # Bootstrap is the single owner of authoritative startup synchronization.
-        # Reuse the exact provider that cloned/fetched/reset/materialized the
-        # runtime. Creating a second provider here previously ran startup sync a
-        # second time and split provider/credential lifetime from PlatformContext.
         if sync_provider is None:
             logger.error("[STARTUP] Bootstrap completed without an authoritative synchronization provider")
             QMessageBox.critical(
@@ -158,36 +147,19 @@ def main() -> int:
             return 1
         logger.info("[STARTUP] Reusing authoritative Git provider from bootstrap; startup sync already complete")
 
-        # ============================================
-        # DATABASE + GIT STARTUP ORDER
-        # ============================================
-        # Git is the database source of truth. Bootstrap has already materialized
-        # runtime/Database/center.db before any production engine is created.
         from sqlalchemy.orm import sessionmaker
 
         git_config_service = GitConfigService()
 
-        # A4.2: create the local container only after Git synchronization has
-        # materialized the authoritative database. In configured production mode
-        # this is a no-op.
         initialize_runtime_database()
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
 
-        # ============================================
-        # ENSURE DATABASE SCHEMA (after Git DB materialization)
-        # ============================================
         ensure_schema()
         logger.info("[STARTUP] Schema ensured")
 
-        # ============================================
-        # PERMISSION SERVICE (for login)
-        # ============================================
         permission_service = PermissionService(session_factory)
 
-        # ============================================
-        # LOGIN
-        # ============================================
         login_dialog = LoginDialog(permission_service)
         if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
             logger.info("[STARTUP] Login cancelled. Exiting.")
@@ -201,12 +173,8 @@ def main() -> int:
         set_current_user(current_user)
         logger.info(f"[STARTUP] User authenticated: {current_user.username}")
 
-        # ============================================
-        # PLATFORM SERVICES (after login)
-        # ============================================
         event_bus = EventBus()
 
-        # Synchronization manager (for background sync)
         sync_policy = SynchronizationPolicy.from_config(config.raw.get("collaboration", {}))
         sync_manager = SynchronizationManager(
             provider=sync_provider,
@@ -214,7 +182,6 @@ def main() -> int:
             event_bus=event_bus,
         )
 
-        # Collaboration
         collaboration_manager = CollaborationManager(
             runtime_root=paths.runtime_root,
             event_bus=event_bus,
@@ -229,9 +196,6 @@ def main() -> int:
             runtime_version=platform_context.runtime.manifest.runtime_version,
         )
 
-        # ============================================
-        # RUNTIME SYNC SERVICE (background)
-        # ============================================
         sync_service = RuntimeSyncService(
             sync_manager=sync_manager,
             collab_manager=collaboration_manager,
@@ -240,15 +204,10 @@ def main() -> int:
             poll_interval=30,
         )
 
-        # Install the mandatory data-consistency barrier BEFORE the collaboration
-        # poller can grant any queued writer.
         collaboration_manager.set_write_handoff_guard(
             sync_service.execute_write_handoff_sync
         )
 
-        # ============================================
-        # COLLABORATION POLLER
-        # ============================================
         poller = CollaborationPoller(
             collaboration_manager=collaboration_manager,
             event_bus=event_bus,
@@ -261,12 +220,8 @@ def main() -> int:
         logger.info("[STARTUP] CollaborationPoller started")
         sync_service.start()
 
-        # ============================================
-        # BUSINESS MODULES REGISTRATION
-        # ============================================
         module_registry = BusinessModuleRegistry()
 
-        # Initialize business services - CORRECT ORDER
         timeline_service = TimelineService(session_factory)
 
         student_service = StudentService(
@@ -386,12 +341,10 @@ def main() -> int:
             report_service=report_service,
         )
 
-        # Create Version Manager
         metadata_dir = paths.runtime_root / "metadata"
         metadata_repo = JsonMetadataRepository(metadata_dir)
         version_manager = VersionManager(metadata_repo, event_bus)
 
-        # Create Write Transaction Manager
         transaction_manager = WriteTransactionManager(collaboration_manager)
         if sync_service is not None:
             transaction_manager.set_sync_service(sync_service)
@@ -399,9 +352,6 @@ def main() -> int:
             logger.warning("[STARTUP] WriteTransactionManager: sync service disabled")
         transaction_manager.set_version_manager(version_manager)
 
-        # ============================================
-        # MAIN WINDOW
-        # ============================================
         window = MainWindow(
             student_service=student_service,
             parent_service=parent_service,
@@ -452,6 +402,24 @@ def main() -> int:
 
         logger.info("[STARTUP] MainWindow instance created")
 
+        # MainWindow owns the write-state transition. Publish the detailed
+        # transaction rejection reason on the next event-loop turn so operator
+        # feedback reflects the final GRANTED/WAITING/ERROR result instead of a
+        # generic three-second status-bar message.
+        def report_start_edit_outcome() -> None:
+            def publish_result() -> None:
+                message = transaction_manager.last_start_error
+                if not message or transaction_manager.is_editing:
+                    return
+                if transaction_manager.state == WriteTransactionState.WAITING:
+                    window.app_top_bar.notify_warning(message)
+                elif transaction_manager.state == WriteTransactionState.IDLE:
+                    window.app_top_bar.notify_error(message)
+
+            QTimer.singleShot(0, publish_result)
+
+        window.app_top_bar.start_edit_requested.connect(report_start_edit_outcome)
+
         auto_report_service.run_daily_check()
 
         window.show()
@@ -460,7 +428,6 @@ def main() -> int:
         exit_code = qapp.exec()
         logger.info(f"[STARTUP] QApplication.exec finished with code {exit_code}")
 
-        # Shutdown
         if sync_service is not None:
             sync_service.stop()
         poller.stop()
