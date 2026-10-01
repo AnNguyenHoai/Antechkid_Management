@@ -30,6 +30,17 @@ def _lease_is_active(lock_data: dict) -> bool:
         return False
 
 
+def _provider_failure_reason(provider) -> str:
+    getter = getattr(provider, "get_last_lock_error", None)
+    if not callable(getter):
+        return ""
+    try:
+        return str(getter() or "").strip()
+    except Exception:
+        logger.debug("Unable to read provider lock diagnostic", exc_info=True)
+        return ""
+
+
 def install_false_waiting_guard(manager_cls) -> None:
     """Install the guard once on the restored CollaborationManager class."""
     if getattr(manager_cls, "_false_waiting_guard_installed", False):
@@ -63,10 +74,12 @@ def install_false_waiting_guard(manager_cls) -> None:
             if owner_session != session_id and _lease_is_active(remote):
                 return result
 
+            first_failure = _provider_failure_reason(provider)
             logger.warning(
                 "False WAITING detected for session=%s: remote lock is not actively "
-                "held by another session; retrying acquisition",
+                "held by another session; retrying acquisition%s",
                 session_id,
+                f"; provider={first_failure}" if first_failure else "",
             )
 
             retry = original(self, reason)
@@ -74,15 +87,25 @@ def install_false_waiting_guard(manager_cls) -> None:
                 return retry
 
             # If acquisition still failed while there is no active competing
-            # lease, surface an explicit error instead of misleading the UI.
+            # lease, surface the provider's concrete acquisition diagnostic.
             remote_after = self._get_remote_lock_status()
             if not _lease_is_active(remote_after):
                 from .collaboration_manager import WriteRequestInfo, WriteRequestResult
+
+                provider_reason = _provider_failure_reason(provider) or first_failure
+                message = provider_reason or (
+                    "Write lock is currently unavailable; no active writer was detected. "
+                    "Please retry."
+                )
+                logger.error(
+                    "Write acquisition failed without an active competing lease: %s",
+                    message,
+                )
                 return WriteRequestInfo(
                     WriteRequestResult.ERROR,
                     getattr(retry, "request_id", ""),
                     0,
-                    "Write lock is currently unavailable; no active writer was detected. Please retry.",
+                    message,
                 )
             return retry
         except Exception:
