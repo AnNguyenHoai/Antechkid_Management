@@ -124,12 +124,19 @@ def test_finish_editing_blocks_on_main_conflict(collab_manager):
     cm.request_write()
     tx = WriteTransactionManager(cm)
 
+    # This test patches a remote provider before Start Editing. Satisfy the
+    # mandatory first-writer consistency barrier explicitly so the test reaches
+    # the MAIN conflict path it is intended to exercise.
+    mock_sync = MagicMock()
+    mock_sync.execute_write_handoff_sync.return_value = True
+    tx.set_sync_service(mock_sync)
+
     base_commit = "abc123"
     current_commit = "def456"
 
     with patch.object(cm, '_sync_provider') as mock_provider:
         mock_provider.get_remote_main_commit.return_value = current_commit
-        tx.start_editing(lambda: True)
+        assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = base_commit
 
         with patch.object(cm, 'validate_write_authority', return_value={
@@ -197,9 +204,13 @@ def test_main_unavailable_blocks_publish(collab_manager):
     cm.request_write()
     tx = WriteTransactionManager(cm)
 
+    mock_sync = MagicMock()
+    mock_sync.execute_write_handoff_sync.return_value = True
+    tx.set_sync_service(mock_sync)
+
     with patch.object(cm, '_sync_provider') as mock_provider:
         mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
-        tx.start_editing(lambda: True)
+        assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = None
 
         with patch.object(cm, 'validate_write_authority', return_value={
@@ -264,9 +275,13 @@ def test_base_main_commit_none_blocks_publish(collab_manager):
     cm.request_write()
     tx = WriteTransactionManager(cm)
 
+    mock_sync = MagicMock()
+    mock_sync.execute_write_handoff_sync.return_value = True
+    tx.set_sync_service(mock_sync)
+
     with patch.object(cm, '_sync_provider') as mock_provider:
         mock_provider.get_remote_main_commit.return_value = "def456"
-        tx.start_editing(lambda: True)
+        assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = None
 
         with patch.object(cm, 'validate_write_authority', return_value={

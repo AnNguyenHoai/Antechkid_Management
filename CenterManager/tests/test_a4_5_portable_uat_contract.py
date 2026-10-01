@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "build_release.py"
 WORKFLOW = ROOT.parent / ".github" / "workflows" / "windows-prototype-release.yml"
 APP = ROOT / "src" / "centermanager" / "app.py"
+BOOTSTRAP = ROOT / "src" / "centermanager" / "platform" / "bootstrap" / "bootstrap_manager.py"
 STARTUP_SYNC = ROOT / "src" / "centermanager" / "platform" / "sync" / "startup_sync.py"
 
 
@@ -25,10 +26,16 @@ def test_release_workflow_has_syntax_gate_before_build():
 
 
 def test_configured_startup_never_creates_engine_before_authoritative_sync():
-    source = _read(APP)
-    sync_marker = source.index('logger.info("[STARTUP] Running startup synchronization...")')
-    engine_marker = source.index("engine = create_production_engine(echo=False)")
-    assert sync_marker < engine_marker
+    app_source = _read(APP)
+    bootstrap_source = _read(BOOTSTRAP)
+
+    bootstrap_marker = app_source.index("if not bootstrap.run():")
+    initialize_marker = app_source.index("initialize_runtime_database()")
+    engine_marker = app_source.index("engine = create_production_engine(echo=False)")
+
+    assert bootstrap_marker < initialize_marker < engine_marker
+    assert "if not self._ensure_authoritative_runtime_database(paths):" in bootstrap_source
+    assert "if not StartupSynchronization(provider).run():" in bootstrap_source
 
 
 def test_startup_sync_requires_authoritative_database_before_success():

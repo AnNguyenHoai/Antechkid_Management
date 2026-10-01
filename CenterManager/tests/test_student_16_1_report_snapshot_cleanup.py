@@ -20,5 +20,10 @@ def test_snapshot_deleted_after_successful_publish():
 
 def test_snapshot_deleted_after_cancel():
     t = read("src/centermanager/services/write_transaction.py")
-    assert "Cancelled transactions are terminal" in t
-    assert "self._delete_snapshot()\n        self._reset_to_idle()" in t
+    cancel_start = t.index("    def cancel_editing")
+    cancel_end = t.index("    # ---- Publish helpers", cancel_start)
+    cancel_block = t[cancel_start:cancel_end]
+
+    delete_marker = cancel_block.index("self._delete_snapshot()")
+    reset_marker = cancel_block.index("self._reset_to_idle()", delete_marker)
+    assert delete_marker < reset_marker
