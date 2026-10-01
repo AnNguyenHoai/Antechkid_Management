@@ -235,11 +235,12 @@ class BackupRecoveryPage(QWidget):
             self._service._recovery_publisher = AuthoritativeRecoveryPublisher(runtime_sync)
 
     def _terminate_for_recovery_restart(self, *, success: bool, error: str = ""):
-        """End the stale process after any successful local DB replacement.
+        """Fence the stale process immediately after any successful local DB replacement.
 
-        This intentionally does not hot-reload services and does not route through
-        Finish Editing. The next process startup will execute normal authoritative
-        startup synchronization before creating the production engine.
+        Recovery deliberately does not hot-reload the restored database. RuntimeSync and
+        write handoff stay quiesced until a fresh process performs normal authoritative
+        startup synchronization. Disable the live window before requesting application
+        exit so no Start Editing/write action can race the queued Qt shutdown.
         """
         if success:
             text = (
@@ -256,8 +257,18 @@ class BackupRecoveryPage(QWidget):
                 f"Details: {error}"
             )
             QMessageBox.critical(self, "Recovery incomplete - restart required", text)
+
+        root = self.window()
+        try:
+            root.setEnabled(False)
+        except Exception:
+            pass
+
         app = QApplication.instance()
         if app is not None:
+            # exit() is processed by Qt's event loop. The window fence above closes the
+            # short interval in which the operator could otherwise click Start Editing
+            # while the post-restore write-handoff guard intentionally remains closed.
             app.exit(RECOVERY_RESTART_EXIT_CODE)
 
     def restore_selected(self):
