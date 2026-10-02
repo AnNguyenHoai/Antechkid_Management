@@ -53,7 +53,8 @@ def test_windows_connection_test_isolates_host_credentials_and_uses_app_auth(mon
     args = captured["args"]
     env = captured["kwargs"]["env"]
 
-    assert args == ["C:/portable-git/bin/git.exe", "ls-remote", REPOSITORY_URL, "HEAD"]
+    assert Path(args[0]) == Path("C:/portable-git/bin/git.exe")
+    assert args[1:] == ["ls-remote", REPOSITORY_URL, "HEAD"]
     assert TOKEN not in " ".join(args)
     assert USERNAME not in " ".join(args)
 
