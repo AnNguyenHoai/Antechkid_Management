@@ -2,8 +2,9 @@
 
 This compatibility layer keeps the existing provider implementation intact while
 making lock-acquisition failures observable. A failed acquisition is classified
-as either real contention (another valid remote lease exists) or an operational
-failure such as commit creation, push rejection, or ownership verification.
+as either real contention (another authoritative remote lease exists) or an
+operational failure such as commit creation, push rejection, or ownership
+verification.
 """
 
 from __future__ import annotations
@@ -21,6 +22,20 @@ def _clean_diagnostic(value: object, limit: int = 700) -> str:
     if len(text) > limit:
         return text[: limit - 3] + "..."
     return text
+
+
+def _remote_lock_blocks_reclaim(self, remote_lock: dict, contender_lock: dict) -> bool:
+    """Return whether an invalid remote lock is still protected from takeover.
+
+    Generic lease validity remains strict. Optional collaboration policies such
+    as the bounded clock-skew guard are consulted only for stale-lock reclaim.
+    When no policy is installed, historical behavior is preserved and an expired
+    lock is immediately reclaimable.
+    """
+    policy = getattr(self, "_is_remote_write_lock_reclaimable", None)
+    if not callable(policy):
+        return False
+    return not bool(policy(remote_lock, contender_lock))
 
 
 def install_lock_acquisition_diagnostics(provider_cls) -> None:
@@ -87,6 +102,19 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                     logger.info("Lock already held by %s, acquisition denied", owner)
                     return False
 
+                # An expired lease is strictly invalid, but a separate reclaim
+                # policy may still protect another runtime's WRITE lock for a
+                # bounded clock-skew grace interval.
+                if _remote_lock_blocks_reclaim(self, remote_lock, lock_data):
+                    owner = remote_lock.get("owner") or remote_lock.get("username") or "unknown"
+                    self._last_lock_contention = True
+                    self._last_lock_error = (
+                        f"Write lock held by {owner} is inside the clock-skew "
+                        "safety window."
+                    )
+                    logger.info("%s Acquisition denied.", self._last_lock_error)
+                    return False
+
             lock_data["lease_expires_at"] = (
                 datetime.now() + timedelta(seconds=self._lease_duration_seconds)
             ).isoformat()
@@ -109,10 +137,18 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                     current_lock = self._read_lock_from_oid(current_oid)
                     current_session = current_lock.get("session_id")
                     requested_session = lock_data.get("session_id")
+                    current_blocks_takeover = self._is_lock_valid(current_lock)
+                    if not current_blocks_takeover:
+                        current_blocks_takeover = _remote_lock_blocks_reclaim(
+                            self,
+                            current_lock,
+                            lock_data,
+                        )
+
                     if (
                         current_session
                         and current_session != requested_session
-                        and self._is_lock_valid(current_lock)
+                        and current_blocks_takeover
                     ):
                         owner = current_lock.get("owner") or current_lock.get("username") or "another user"
                         self._last_lock_contention = True
@@ -151,7 +187,11 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 )
                 return True
 
-            if self._is_lock_valid(remote_verify):
+            if self._is_lock_valid(remote_verify) or _remote_lock_blocks_reclaim(
+                self,
+                remote_verify,
+                lock_data,
+            ):
                 owner = remote_verify.get("owner") or remote_verify.get("username") or "another user"
                 self._last_lock_contention = True
                 self._last_lock_error = f"Write lock ownership changed to {owner} during verification."
