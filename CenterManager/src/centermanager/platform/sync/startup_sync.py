@@ -10,6 +10,9 @@ from pathlib import Path
 import os, json
 from centermanager.core.paths import get_paths
 from centermanager.platform.synchronization import GitSynchronizationProvider
+from centermanager.platform.synchronization.git_repository_hygiene import (
+    remove_windows_shell_metadata_from_git_refs,
+)
 from centermanager.database.startup_security import (
     inspect_authoritative_database_for_startup,
 )
@@ -43,10 +46,26 @@ class StartupSynchronization:
                 logger.error("Clone failed")
                 return False
         else:
+            # Cross-machine portable deployments are sometimes placed inside
+            # Windows/cloud-synced folders. Those folders can create
+            # desktop.ini under .git/refs, which Git interprets as a corrupt
+            # ref ("fatal: bad object refs/.../desktop.ini"). Remove only that
+            # known OS metadata before opening/fetching the repository.
+            if not remove_windows_shell_metadata_from_git_refs(self._repo_path):
+                logger.error("Git refs hygiene failed. Cannot proceed safely.")
+                return False
+
             logger.info("Repository exists, connecting...")
             if not self._provider.connect():
                 logger.error("Failed to connect to repository")
                 return False
+
+        # A freshly cloned repository should not contain shell metadata, but
+        # running the same narrow hygiene check here also covers a file created
+        # between clone/connect and the authoritative fetch.
+        if not remove_windows_shell_metadata_from_git_refs(self._repo_path):
+            logger.error("Git refs hygiene failed before fetch. Cannot proceed safely.")
+            return False
 
         # 2. Fetch remote (must succeed)
         if not self._fetch_remote():
