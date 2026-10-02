@@ -12,7 +12,7 @@ from typing import Optional
 
 from centermanager.core.crypto import decrypt_git_config, encrypt_git_config
 from centermanager.core.git_locator import locate_git
-from centermanager.core.git_url_safety import sanitize_repository_url
+from centermanager.core.git_url_safety import validate_repository_url
 from centermanager.core.paths import get_paths
 from centermanager.platform.synchronization._windows_subprocess import hidden_subprocess_kwargs
 from centermanager.platform.synchronization.git.git_credential_helper import GitCredentialHelper
@@ -37,24 +37,36 @@ class GitConfig:
     token: str
     branch: str = "main"
     email: str = ""
+    # Explicit encrypted exception for isolated/manual fixtures only. Normal
+    # production configuration never sets this and therefore remains HTTPS-only.
+    allow_local_file_remote: bool = False
 
     def to_dict(self) -> dict:
         return {
-            "repository_url": sanitize_repository_url(self.repository_url),
+            "repository_url": validate_repository_url(
+                self.repository_url,
+                allow_local_file_remote=self.allow_local_file_remote,
+            ),
             "username": self.username,
             "token": self.token,
             "branch": self.branch,
             "email": self.email,
+            "allow_local_file_remote": self.allow_local_file_remote,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "GitConfig":
+        allow_local_file_remote = bool(data.get("allow_local_file_remote", False))
         return cls(
-            repository_url=sanitize_repository_url(data["repository_url"]),
+            repository_url=validate_repository_url(
+                data["repository_url"],
+                allow_local_file_remote=allow_local_file_remote,
+            ),
             username=data["username"],
             token=data["token"],
             branch=data.get("branch", "main"),
             email=data.get("email", ""),
+            allow_local_file_remote=allow_local_file_remote,
         )
 
 
@@ -117,7 +129,7 @@ class GitConfigService:
                 logger.info("Migrated legacy Git credentials to Windows DPAPI")
             return self._config
         except ValueError:
-            logger.error("Git credential decryption failed")
+            logger.error("Git configuration failed decryption or repository URL policy validation")
             return None
         except Exception:
             logger.exception("Failed to load Git configuration")
@@ -128,7 +140,12 @@ class GitConfigService:
 
     def save_config(self, config: GitConfig) -> bool:
         try:
-            config.repository_url = sanitize_repository_url(config.repository_url)
+            # Validate before encryption/persistence. Embedded credentials and
+            # non-HTTPS network transports are rejected rather than sanitized.
+            config.repository_url = validate_repository_url(
+                config.repository_url,
+                allow_local_file_remote=config.allow_local_file_remote,
+            )
             plaintext = json.dumps(config.to_dict(), ensure_ascii=False)
             self.save_encrypted_bundle(encrypt_git_config(plaintext))
             return True
@@ -169,9 +186,17 @@ class GitConfigService:
             logger.warning("Git executable unavailable; connection test failed safely")
             return False
 
+        try:
+            safe_url = validate_repository_url(
+                config.repository_url,
+                allow_local_file_remote=config.allow_local_file_remote,
+            )
+        except ValueError:
+            logger.error("Repository URL violates transport policy")
+            return False
+
         helper = GitCredentialHelper(config.username, config.token)
         env = os.environ.copy()
-        safe_url = sanitize_repository_url(config.repository_url)
         if config.token:
             env.update(helper.setup_environment())
         else:

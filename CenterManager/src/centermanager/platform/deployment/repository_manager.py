@@ -2,16 +2,22 @@
 """Repository management for deployment."""
 
 import logging
-import shutil
-from pathlib import Path
-from typing import Optional, Dict, Any
 import os
-from centermanager.platform.synchronization.git.git_provider import GitProvider
-from centermanager.platform.synchronization.git.git_credentials import GitCredentials
-from centermanager.platform.synchronization.git.git_exceptions import GitException
-from centermanager.platform.deployment.deployment_config import DeploymentConfig
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
 from centermanager.core.git_locator import locate_git
+from centermanager.core.git_url_safety import validate_repository_url
 from centermanager.core.paths import get_paths
+from centermanager.platform.deployment.deployment_config import DeploymentConfig
+from centermanager.platform.synchronization._windows_subprocess import hidden_subprocess_kwargs
+from centermanager.platform.synchronization.git.git_credential_helper import GitCredentialHelper
+from centermanager.platform.synchronization.git.git_credentials import GitCredentials
+from centermanager.platform.synchronization.git.git_provider import GitProvider
+from centermanager.platform.synchronization.git_windows_auth import append_http_auth_config
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +29,6 @@ class RepositoryManager:
         self._config = DeploymentConfig()
         self._repo_path = self._config.get_local_path()
         self._git_executable = self._config.get_git_executable()
-        # If git executable not set, try to locate
         if not self._git_executable:
             git_path = locate_git()
             if git_path:
@@ -33,94 +38,82 @@ class RepositoryManager:
     def _get_git_provider(self) -> GitProvider:
         """Create GitProvider with current configuration."""
         token = self._config.get_token()
-        url = self._config.get_repository_url()
+        url = validate_repository_url(self._config.get_repository_url())
         branch = self._config.get_branch()
         creds = GitCredentials(
             repository_url=url,
             branch=branch,
             token=token,
-            username="",  # not needed for cloning with token
+            username="",
             email="",
         )
-        # Pass git executable to GitProvider
-        provider = GitProvider(self._repo_path, creds, git_executable=self._git_executable)
-        return provider
+        return GitProvider(self._repo_path, creds, git_executable=self._git_executable)
 
     def clone_repository(self, progress_callback: Optional[callable] = None) -> bool:
-        """
-        Clone repository from configured URL.
-        Returns True on success, False on failure.
-        progress_callback: function(step, message, percent)
-        """
+        """Clone the configured repository without putting credentials in URL/argv."""
+        helper: Optional[GitCredentialHelper] = None
         try:
-            url = self._config.get_repository_url()
-            if not url:
+            raw_url = self._config.get_repository_url()
+            if not raw_url:
                 logger.error("Repository URL is not configured.")
                 return False
+            url = validate_repository_url(raw_url)
 
             token = self._config.get_token()
             if not token:
-                logger.error("Git token is not configured.")
+                logger.error("Git service credential is not configured.")
                 return False
 
             branch = self._config.get_branch()
-
-            # Ensure parent directory exists
             self._repo_path.parent.mkdir(parents=True, exist_ok=True)
 
             if progress_callback:
                 progress_callback("clone", f"Cloning repository from {url}...", 10)
 
-            # Use GitProvider's clone capability.
-            # GitProvider currently does not have a standalone clone method; it expects repository to exist.
-            # We'll implement a simple clone using Git commands directly.
-            # We need to extend GitProvider or create a helper.
-            # For now, implement a simple clone with subprocess.
-
-            import subprocess
             if not self._git_executable:
                 logger.error("Git executable is unavailable; deployment clone cannot start.")
                 if progress_callback:
                     progress_callback("clone_failed", "Git executable is unavailable on this machine.", 100)
                 return False
-            git_cmd = self._git_executable
-            cmd = [git_cmd, "clone", url, str(self._repo_path)]
-            # Add token authentication
-            if token:
-                # Use token in URL for HTTPS
-                if "://" in url:
-                    protocol, rest = url.split("://", 1)
-                    if "@" in rest:
-                        rest = rest.split("@")[-1]
-                    auth_url = f"{protocol}://{token}@{rest}"
-                else:
-                    auth_url = url
-                cmd = [git_cmd, "clone", auth_url, str(self._repo_path)]
-            else:
-                cmd = [git_cmd, "clone", url, str(self._repo_path)]
 
+            # The remote URL is always credential-free. Authentication is
+            # process-local: askpass on non-Windows and GIT_CONFIG extraHeader on
+            # Windows GUI builds. The service credential never enters argv or
+            # persisted .git/config.
+            cmd = [self._git_executable, "clone"]
             if branch != "main":
                 cmd.extend(["--branch", branch])
+            cmd.extend([url, str(self._repo_path)])
 
             if progress_callback:
                 progress_callback("clone", "Running git clone...", 30)
 
+            helper = GitCredentialHelper("git", token)
             env = os.environ.copy()
-            if token:
-                env["GIT_ASKPASS"] = "echo"
-                env["GIT_USER"] = ""  # not used with token
-                env["GIT_PASSWORD"] = token
+            env.update(helper.setup_environment())
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = ""
+            if sys.platform == "win32":
+                env["GIT_CONFIG_COUNT"] = "2"
+                env["GIT_CONFIG_KEY_1"] = "core.askpass"
+                env["GIT_CONFIG_VALUE_1"] = ""
+                append_http_auth_config(env, url, helper.http_auth_header())
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                env=env,
-                check=False,
-            )
+            run_kwargs = {
+                "capture_output": True,
+                "text": True,
+                "env": env,
+                "check": False,
+            }
+            run_kwargs.update(hidden_subprocess_kwargs())
+            result = subprocess.run(cmd, **run_kwargs)
             if result.returncode != 0:
-                error_msg = result.stderr.strip()
-                logger.error(f"Clone failed: {error_msg}")
+                # Do not surface raw command arguments or environment. Git's
+                # HTTPS errors do not contain the process-local credential.
+                error_msg = (result.stderr or "").strip()
+                logger.error("Clone failed: %s", error_msg)
                 if progress_callback:
                     progress_callback("clone_failed", f"Clone failed: {error_msg}", 100)
                 return False
@@ -128,7 +121,6 @@ class RepositoryManager:
             if progress_callback:
                 progress_callback("clone", "Clone successful. Validating...", 60)
 
-            # Validate cloned repository
             if not self.is_valid():
                 if progress_callback:
                     progress_callback("clone_failed", "Repository is invalid after clone.", 100)
@@ -137,19 +129,25 @@ class RepositoryManager:
             if progress_callback:
                 progress_callback("clone", "Repository validation passed.", 80)
 
-            # Now, ensure runtime directories are initialized from repository
             self._sync_repository_to_runtime()
 
             if progress_callback:
                 progress_callback("clone", "Deployment completed.", 100)
-
             return True
 
-        except Exception as e:
+        except ValueError as exc:
+            logger.error("Repository URL rejected by transport policy: %s", exc)
+            if progress_callback:
+                progress_callback("clone_failed", "Repository URL must use credential-free HTTPS.", 100)
+            return False
+        except Exception:
             logger.exception("Clone failed")
             if progress_callback:
-                progress_callback("clone_failed", f"Clone error: {str(e)}", 100)
+                progress_callback("clone_failed", "Clone error. Check logs for non-secret diagnostics.", 100)
             return False
+        finally:
+            if helper is not None:
+                helper.cleanup()
 
     def _sync_repository_to_runtime(self) -> None:
         """Copy database and metadata from repository to runtime."""
@@ -168,7 +166,6 @@ class RepositoryManager:
                 shutil.copy2(f, runtime_meta / f.name)
             logger.info(f"Copied metadata from repository to runtime: {runtime_meta}")
 
-        # Also copy reports if any
         repo_reports = self._repo_path / "reports"
         runtime_reports = get_paths().reports_dir
         if repo_reports.exists():
@@ -182,7 +179,6 @@ class RepositoryManager:
         git_dir = self._repo_path / ".git"
         if not git_dir.exists():
             return False
-        # Check for at least database/center.db and metadata/*.json
         db_path = self._repo_path / "database" / "center.db"
         if not db_path.exists():
             logger.warning("Repository missing database/center.db")
@@ -191,7 +187,6 @@ class RepositoryManager:
         if not meta_dir.exists():
             logger.warning("Repository missing metadata directory")
             return False
-        # At least lock.json and version.json should exist
         required_meta = ["lock.json", "version.json", "deployment.json"]
         for fname in required_meta:
             if not (meta_dir / fname).exists():
@@ -210,10 +205,8 @@ class RepositoryManager:
 
     def is_deployed(self) -> bool:
         """Check if deployment is already set up."""
-        # Check if repository exists and is valid, and runtime has database/metadata
         if not self.is_valid():
             return False
-        # Check runtime database exists
         runtime_db = get_paths().database_dir / "center.db"
         if not runtime_db.exists():
             return False

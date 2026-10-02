@@ -85,7 +85,7 @@ def _load_canonical_package_manifest(package: Path) -> dict:
     """Load the release runtime manifest through the production validator.
 
     The authoritative UAT repository must publish the same runtime-manifest
-    schema/version contract as the packaged executable.  A synthetic/minimal
+    schema/version contract as the packaged executable. A synthetic/minimal
     manifest can pass Git setup but make BootstrapManager classify the runtime
     as CORRUPTED immediately after startup synchronization.
     """
@@ -104,7 +104,6 @@ def _write_initial_repository_manifest(repo: Path, canonical_manifest: dict) -> 
     manifest_path.write_text(
         json.dumps(canonical_manifest, indent=2) + "\n", encoding="utf-8"
     )
-    # Validate the exact artifact that Git will publish, not just the source.
     try:
         ManifestLoader(manifest_path).load()
     except Exception as exc:
@@ -130,7 +129,6 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     package, target, remote = package.resolve(), target.resolve(), remote.resolve()
     _assert_safe(package, target, remote)
 
-    # Validate and capture the release contract before creating any UAT files.
     canonical_manifest = _load_canonical_package_manifest(package)
 
     shutil.copytree(package, target)
@@ -170,8 +168,6 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     repo = target / "runtime" / "repository"
     manifest = _write_initial_repository_manifest(repo, canonical_manifest)
 
-    # Catch manifest/directory incompatibility before Git publication. This is
-    # the same repository-state boundary BootstrapManager checks after sync.
     _validate_runtime_contract(target)
 
     _git("init", "-b", "main", cwd=repo)
@@ -197,6 +193,9 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
         "token": "local-uat-no-network-credential",
         "branch": "main",
         "email": "sec06-uat@local.invalid",
+        # Production configuration is HTTPS-only. This encrypted opt-in is
+        # deliberately emitted only by the isolated SEC06 fixture generator.
+        "allow_local_file_remote": True,
     }
     config = {
         "application": {"name": "CenterManager", "version": "SEC06-UAT"},
@@ -206,7 +205,6 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
-    # Config recreation must not disturb the canonical runtime contract.
     _validate_runtime_contract(target)
 
     print(f"[OK] Isolated package : {target}")
@@ -221,7 +219,7 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     print("[OK] Runtime contract : READY under production RepositoryManager")
     print("[NEXT] Launch CenterManager.exe from the isolated package.")
     print("[UAT-09] Login with the documented default admin credential; password-change UI MUST appear before normal workspace access.")
-    print("[SAFETY] This fixture uses a local file:// Git remote and cannot publish to the production data repository.")
+    print("[SAFETY] This fixture uses an explicitly authorized local file:// Git remote and cannot publish to the production data repository.")
 
 
 def main(argv: list[str] | None = None) -> int:

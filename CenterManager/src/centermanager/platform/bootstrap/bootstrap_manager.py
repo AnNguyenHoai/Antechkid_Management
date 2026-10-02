@@ -174,6 +174,7 @@ class BootstrapManager:
             branch=git_config.branch,
             email=git_config.email or "",
             git_executable=str(git_executable),
+            allow_local_file_remote=git_config.allow_local_file_remote,
         )
 
         logger.info("[BOOTSTRAP] Synchronizing authoritative Git runtime")
@@ -219,7 +220,6 @@ class BootstrapManager:
             manifest=manifest,
             state=RuntimeStateMachine(),
             version=RuntimeVersion(current=manifest.runtime_version),
-            machine_id=platform.node(),
         )
 
     def _build_deployment_context(self, config: dict) -> DeploymentContext:
