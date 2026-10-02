@@ -2,8 +2,8 @@
 """GitConfigService - credential-safe Git configuration persistence.
 
 Git transport metadata is portable with the application package, while the
-access token is a local secret.  On Windows the token is protected with DPAPI
-for the current Windows user.  Copying a runtime to another machine therefore
+access token is a local secret. On Windows the token is protected with DPAPI
+for the current Windows user. Copying a runtime to another machine therefore
 keeps repository metadata but intentionally requires one local provisioning
 step for the token.
 
@@ -50,8 +50,6 @@ class GitConfig:
     token: str
     branch: str = "main"
     email: str = ""
-    # Explicit encrypted exception for isolated/manual fixtures only. Normal
-    # production configuration never sets this and therefore remains HTTPS-only.
     allow_local_file_remote: bool = False
 
     def to_dict(self) -> dict:
@@ -123,6 +121,18 @@ class GitConfigService:
     def _is_supported_bundle(bundle) -> bool:
         return isinstance(bundle, str) and bundle.startswith(_SUPPORTED_BUNDLE_PREFIXES)
 
+    @staticmethod
+    def _has_portable_metadata(section: dict) -> bool:
+        return all(
+            isinstance(section.get(field), str) and bool(section.get(field).strip())
+            for field in _PORTABLE_REQUIRED_FIELDS
+        )
+
+    @classmethod
+    def _is_split_config(cls, section: dict) -> bool:
+        secret = section.get(_LOCAL_SECRET_KEY)
+        return cls._has_portable_metadata(section) and isinstance(secret, str) and bool(secret.strip())
+
     def _read_root(self) -> dict:
         if not self._config_path.exists():
             return {}
@@ -137,35 +147,32 @@ class GitConfigService:
         except Exception:
             return {}
 
-    @staticmethod
-    def _is_split_config(section: dict) -> bool:
-        return all(section.get(field) is not None for field in _PORTABLE_REQUIRED_FIELDS) and isinstance(
-            section.get(_LOCAL_SECRET_KEY), str
-        )
-
     def has_config(self) -> bool:
-        """Return whether a persisted Git configuration record exists.
+        """Return whether any Git configuration record exists.
 
-        This deliberately does not claim the local credential is decryptable.
-        ``get_config()`` is the authority for whether it is usable on this
-        Windows user/machine.
+        Portable metadata without a token is still a valid deployment record;
+        ``get_config`` remains the authority for whether local credentials are
+        usable on the current Windows identity.
         """
         section = self._git_section()
-        if self._is_split_config(section):
-            return True
-        return self._is_supported_bundle(section.get("config"))
+        return self._has_portable_metadata(section) or self._is_supported_bundle(section.get("config"))
 
     def credential_status(self) -> str:
         """Return a non-secret status suitable for bootstrap diagnostics."""
         section = self._git_section()
         if not section:
             return "not_configured"
-        if self._is_split_config(section):
+
+        if self._has_portable_metadata(section):
+            secret = section.get(_LOCAL_SECRET_KEY)
+            if not isinstance(secret, str) or not secret.strip():
+                return "not_provisioned_on_this_machine"
             try:
-                self._unprotect_local_token(section[_LOCAL_SECRET_KEY])
+                self._unprotect_local_token(secret)
                 return "ready"
             except Exception:
                 return "not_provisioned_on_this_machine"
+
         legacy = section.get("config")
         if self._is_supported_bundle(legacy):
             try:
@@ -176,13 +183,9 @@ class GitConfigService:
         return "invalid"
 
     def get_portable_config(self) -> Optional[GitConfig]:
-        """Load copy-safe metadata without requiring the local token.
-
-        For the new split schema this remains available even when a copied
-        DPAPI secret cannot be decrypted on the current machine.
-        """
+        """Load copy-safe metadata without requiring the local token."""
         section = self._git_section()
-        if self._is_split_config(section):
+        if self._has_portable_metadata(section):
             try:
                 return GitConfig.from_portable_dict(section)
             except Exception:
@@ -198,7 +201,8 @@ class GitConfigService:
                 config.token = ""
                 return config
             except Exception:
-                # A foreign whole-config DPAPI bundle hides its metadata too.
+                # Foreign whole-config DPAPI hides metadata as well; old packages
+                # cannot recover it without re-entering repository information.
                 return None
         return None
 
@@ -216,8 +220,7 @@ class GitConfigService:
     def _protect_local_token(self, token: str) -> str:
         if os.name == "nt":
             return protect_secret(token)
-        # Non-Windows is development/test only. Preserve encrypted-at-rest
-        # behavior without pretending the value is portable production state.
+        # Linux/macOS are development/test platforms only.
         return encrypt_git_config({"token": token})
 
     def _unprotect_local_token(self, bundle: str) -> str:
@@ -246,13 +249,20 @@ class GitConfigService:
             logger.debug("No Git configuration found")
             return None
 
-        # Preferred cross-machine-safe schema: metadata is portable, token is
-        # locally protected and may intentionally fail after a package copy.
-        if self._is_split_config(section):
+        # Preferred schema: metadata remains readable after a cross-machine copy,
+        # while the token is locally protected and may intentionally be absent or
+        # undecryptable until the destination machine is provisioned.
+        if self._has_portable_metadata(section):
+            secret = section.get(_LOCAL_SECRET_KEY)
+            if not isinstance(secret, str) or not secret.strip():
+                logger.info(
+                    "Git metadata is available but credential is not provisioned for this Windows user/machine"
+                )
+                return None
             try:
-                token = self._unprotect_local_token(section[_LOCAL_SECRET_KEY])
+                token = self._unprotect_local_token(secret)
                 self._config = GitConfig.from_portable_dict(section, token=token)
-                self._encrypted_bundle = section[_LOCAL_SECRET_KEY]
+                self._encrypted_bundle = secret
                 return self._config
             except ValueError:
                 logger.info(
@@ -264,8 +274,7 @@ class GitConfigService:
                 return None
 
         # Legacy compatibility: the entire Git config used to be one encrypted
-        # bundle. If it is decryptable locally, migrate it to split storage so
-        # future package copies retain metadata without carrying a usable token.
+        # bundle. If decryptable locally, migrate it to split storage.
         encrypted = section.get("config")
         if not self._is_supported_bundle(encrypted):
             logger.debug("No supported Git configuration found")
@@ -297,7 +306,7 @@ class GitConfigService:
         return self._config if self._config is not None else self.load_config()
 
     def save_config(self, config: GitConfig) -> bool:
-        """Validate a plaintext in-memory config and wrap its token locally."""
+        """Validate plaintext input and wrap its token on the destination machine."""
         try:
             config.repository_url = validate_repository_url(
                 config.repository_url,
@@ -319,12 +328,7 @@ class GitConfigService:
             return False
 
     def save_encrypted_bundle(self, bundle: str) -> None:
-        """Legacy import path.
-
-        A DPAPI bundle from another Windows user/machine is intentionally not a
-        portable provisioning artifact.  Callers should use ``save_config`` on
-        the destination machine instead.
-        """
+        """Legacy import path; DPAPI is intentionally not portable."""
         bundle = bundle.strip()
         if not self._is_supported_bundle(bundle):
             raise GitConfigValidationError("Unsupported encrypted Git configuration format")
@@ -372,10 +376,6 @@ class GitConfigService:
             env["GIT_TERMINAL_PROMPT"] = "0"
 
         if sys.platform == "win32":
-            # Match the production synchronization provider: ignore any host
-            # credential helper / AskPass configuration, then inject the app
-            # credential through process-local Git configuration. This keeps a
-            # different GitHub account configured on the PC out of the test.
             env["GIT_TERMINAL_PROMPT"] = "0"
             env["GIT_CONFIG_COUNT"] = "2"
             env["GIT_CONFIG_KEY_0"] = "credential.helper"
