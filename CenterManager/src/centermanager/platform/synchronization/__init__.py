@@ -6,6 +6,7 @@ from .synchronization_provider import SynchronizationProvider
 from .git_synchronization_provider import GitSynchronizationProvider   # <-- ĐỔI TỪ git_provider
 from .git_output_safety import install_git_output_safety
 from .git_credential_safety import install_git_credential_safety
+from .git_windows_auth import install_windows_http_auth
 from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
 from .git_provider_safety import install_git_command_serialization
@@ -43,8 +44,12 @@ from .exceptions import (
 # Windows locale decoder failures while preserving all later security wrappers.
 install_git_output_safety(GitSynchronizationProvider)
 
-# Credentials are supplied through GIT_ASKPASS. Never allow token-bearing URLs
-# to reach subprocess argv, including the active startup-clone path.
+# Windows GUI builds must not invoke a .bat/cmd.exe askpass child. Inject the
+# HTTPS Authorization header through per-process GIT_CONFIG_* instead; other
+# platforms retain the existing secret-free askpass helper.
+install_windows_http_auth(GitSynchronizationProvider)
+
+# Credentials must never reach token-bearing URLs/argv or surfaced diagnostics.
 install_git_credential_safety(GitSynchronizationProvider)
 
 # Commit creation must work on clean Windows machines with no global Git
