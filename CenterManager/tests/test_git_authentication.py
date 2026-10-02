@@ -6,10 +6,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from centermanager.platform.synchronization.git.git_credential_helper import GitCredentialHelper
 from centermanager.platform.synchronization import GitSynchronizationProvider
 
 
+_non_windows_askpass = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows GUI authentication intentionally avoids GIT_ASKPASS helper processes",
+)
+
+
+@_non_windows_askpass
 def test_credential_helper_creates_askpass():
     """Verify credential helper creates a secret-free askpass script."""
     helper = GitCredentialHelper("test_user", "test_token")
@@ -18,10 +27,10 @@ def test_credential_helper_creates_askpass():
     askpass_path = Path(env["GIT_ASKPASS"])
     assert askpass_path.exists()
     assert "test_token" not in askpass_path.read_text(encoding="utf-8")
-    if sys.platform != "win32":
-        assert os.access(str(askpass_path), os.X_OK)
+    assert os.access(str(askpass_path), os.X_OK)
 
 
+@_non_windows_askpass
 def test_credential_helper_returns_token_from_child_environment():
     """Askpass returns the token from env without persisting it in the script."""
     helper = GitCredentialHelper("test_user", "test_token")
@@ -30,17 +39,19 @@ def test_credential_helper_returns_token_from_child_environment():
     process_env = os.environ.copy()
     process_env.update(helper_env)
 
-    if sys.platform == "win32":
-        command = [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(askpass_path), "Password"]
-    else:
-        command = [str(askpass_path), "Password"]
-
-    result = subprocess.run(command, capture_output=True, text=True, env=process_env, check=False)
+    result = subprocess.run(
+        [str(askpass_path), "Password"],
+        capture_output=True,
+        text=True,
+        env=process_env,
+        check=False,
+    )
     assert result.returncode == 0
     assert result.stdout.strip() == "test_token"
     assert "test_token" not in askpass_path.read_text(encoding="utf-8")
 
 
+@_non_windows_askpass
 def test_credential_helper_cleanup():
     """Verify cleanup removes askpass script."""
     helper = GitCredentialHelper("test_user", "test_token")

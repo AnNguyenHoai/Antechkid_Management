@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""GitCredentialHelper - Non-interactive Git authentication using GIT_ASKPASS."""
+"""GitCredentialHelper - non-interactive Git authentication helpers."""
 
+import base64
 import logging
 import os
 import sys
@@ -15,7 +16,14 @@ _TOKEN_ENV = "CENTERMANAGER_GIT_TOKEN"
 
 
 class GitCredentialHelper:
-    """Provide Git credentials without placing secrets in process argv or scripts."""
+    """Provide Git credentials without placing secrets in process argv or scripts.
+
+    Windows GUI builds deliberately avoid ``GIT_ASKPASS`` because invoking a
+    batch helper causes Git to create ``cmd.exe`` child processes which can
+    flash a console window.  The provider consumes :meth:`http_auth_header`
+    instead and injects it through Git's per-process configuration environment.
+    Non-Windows platforms retain the existing secret-free askpass helper.
+    """
 
     def __init__(self, username: str, token: str):
         self._username = username or "git"
@@ -24,6 +32,16 @@ class GitCredentialHelper:
 
     def setup_environment(self) -> dict:
         """Return environment variables for a non-interactive Git child process."""
+        if sys.platform == "win32":
+            # Preserve the established child-environment credential contract
+            # used by the active release gate, but do not expose GIT_ASKPASS.
+            # HTTPS auth itself is injected through process-local GIT_CONFIG_*.
+            return {
+                "GIT_TERMINAL_PROMPT": "0",
+                _USERNAME_ENV: self._username,
+                _TOKEN_ENV: self._token,
+            }
+
         if self._askpass_path is None:
             self._askpass_path = self._create_askpass_script()
         return {
@@ -33,34 +51,26 @@ class GitCredentialHelper:
             _TOKEN_ENV: self._token,
         }
 
+    def http_auth_header(self) -> Optional[str]:
+        """Return a Basic Authorization header for process-local Windows Git."""
+        if sys.platform != "win32" or not self._token:
+            return None
+        payload = f"{self._username}:{self._token}".encode("utf-8")
+        encoded = base64.b64encode(payload).decode("ascii")
+        return f"Authorization: Basic {encoded}"
+
     def _create_askpass_script(self) -> Path:
-        """Create a secret-free helper that reads credentials from child env vars."""
-        if sys.platform == "win32":
-            content = r'''@echo off
-set "prompt=%~1"
-echo %prompt% | %SystemRoot%\System32\findstr.exe /I "username" >nul
-if %errorlevel%==0 (
-  echo %CENTERMANAGER_GIT_USERNAME%
-) else (
-  echo %CENTERMANAGER_GIT_TOKEN%
-)
-'''
-            suffix = ".bat"
-        else:
-            content = '''#!/bin/sh
+        """Create the non-Windows secret-free helper used by Git."""
+        content = '''#!/bin/sh
 case "$1" in
   *Username*|*username*) printf '%s\\n' "$CENTERMANAGER_GIT_USERNAME" ;;
   *) printf '%s\\n' "$CENTERMANAGER_GIT_TOKEN" ;;
 esac
 '''
-            suffix = ".sh"
-
-        fd, path = tempfile.mkstemp(suffix=suffix, prefix="git-askpass-", text=True)
+        fd, path = tempfile.mkstemp(suffix=".sh", prefix="git-askpass-", text=True)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(content)
-
-        if sys.platform != "win32":
-            os.chmod(path, 0o700)
+        os.chmod(path, 0o700)
 
         logger.debug("Created secret-free askpass helper")
         return Path(path)
