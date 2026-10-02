@@ -12,6 +12,7 @@ from .synchronization_policy import SynchronizationPolicy
 from .version_resolver import VersionResolver
 from .synchronization_result import SynchronizationResult, SyncResult
 from .retry_policy import RetryPolicy
+from .git_repository_hygiene import remove_windows_shell_metadata_from_git_refs
 from .events import (
     SynchronizationStarted,
     SynchronizationFinished,
@@ -46,6 +47,20 @@ class SynchronizationManager:
         self._is_syncing = False
         self._last_result: Optional[SynchronizationResult] = None
         self._correlation_id: Optional[str] = None
+
+    def _prepare_local_repository(self) -> bool:
+        """Remove known OS metadata that Git can misinterpret as local refs.
+
+        Only Git-backed providers expose ``_repo_path``. Other synchronization
+        providers are left untouched. The hygiene helper itself is deliberately
+        restricted to ``desktop.ini`` files under ``.git/refs``.
+        """
+        if self._provider is None:
+            return True
+        repo_path = getattr(self._provider, "_repo_path", None)
+        if repo_path is None:
+            return True
+        return remove_windows_shell_metadata_from_git_refs(repo_path)
 
     def clone(self, progress_callback: Optional[Callable] = None) -> SynchronizationResult:
         if self._provider is None:
@@ -110,6 +125,15 @@ class SynchronizationManager:
         self._correlation_id = correlation_id
         start_time = time.time()
         logger.info(f"[{correlation_id}] Checking updates")
+        if not self._prepare_local_repository():
+            result = SynchronizationResult(
+                result=SyncResult.FAILED,
+                message="Local Git refs hygiene failed",
+                provider=self._provider.name(),
+                started_at=datetime.now(),
+            )
+            self._last_result = result
+            return result
         if not self._provider.health():
             result = SynchronizationResult(
                 result=SyncResult.OFFLINE,
@@ -190,6 +214,15 @@ class SynchronizationManager:
             policy=self._policy.policy.value,
         ))
         try:
+            if not self._prepare_local_repository():
+                result = SynchronizationResult(
+                    result=SyncResult.FAILED,
+                    message="Local Git refs hygiene failed",
+                    provider=self._provider.name(),
+                    started_at=datetime.now(),
+                )
+                self._last_result = result
+                return result
             if not self._provider.health():
                 result = SynchronizationResult(
                     result=SyncResult.OFFLINE,
@@ -337,6 +370,15 @@ class SynchronizationManager:
         start_time = time.time()
         logger.info(f"[{correlation_id}] Publishing local changes (no fetch/pull)")
         try:
+            if not self._prepare_local_repository():
+                result = SynchronizationResult(
+                    result=SyncResult.FAILED,
+                    message="Local Git refs hygiene failed",
+                    provider=self._provider.name(),
+                    started_at=datetime.now(),
+                )
+                self._last_result = result
+                return result
             if not self._provider.health():
                 result = SynchronizationResult(
                     result=SyncResult.OFFLINE,
