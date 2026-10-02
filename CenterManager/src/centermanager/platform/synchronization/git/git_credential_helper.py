@@ -33,9 +33,14 @@ class GitCredentialHelper:
     def setup_environment(self) -> dict:
         """Return environment variables for a non-interactive Git child process."""
         if sys.platform == "win32":
-            # Do not create a .bat helper. Git will receive HTTPS credentials
-            # through GIT_CONFIG_* in GitSynchronizationProvider._get_env().
-            return {"GIT_TERMINAL_PROMPT": "0"}
+            # Preserve the established child-environment credential contract
+            # used by the active release gate, but do not expose GIT_ASKPASS.
+            # HTTPS auth itself is injected through process-local GIT_CONFIG_*.
+            return {
+                "GIT_TERMINAL_PROMPT": "0",
+                _USERNAME_ENV: self._username,
+                _TOKEN_ENV: self._token,
+            }
 
         if self._askpass_path is None:
             self._askpass_path = self._create_askpass_script()
