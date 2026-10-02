@@ -40,6 +40,16 @@ def test_file_remote_requires_explicit_opt_in():
     assert validate_repository_url(url, allow_local_file_remote=True) == url
 
 
+def test_absolute_local_path_requires_explicit_opt_in(tmp_path):
+    local_path = str((tmp_path / "authoritative.git").resolve())
+    with pytest.raises(RepositoryUrlPolicyError):
+        validate_repository_url(local_path)
+    assert (
+        validate_repository_url(local_path, allow_local_file_remote=True)
+        == local_path
+    )
+
+
 def test_git_config_persists_local_remote_exception_only_when_explicit():
     url = Path("/tmp/authoritative.git").resolve().as_uri()
     config = GitConfig(
