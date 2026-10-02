@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Credential-safety boundary for the active Git synchronization provider.
-
-Git credentials belong in the non-interactive askpass environment, never in
-Git command arguments, logs, or surfaced exception text. This installer keeps
-the provider's existing behavior while enforcing that boundary around every
-subprocess Git operation.
-"""
+"""Credential and transport safety boundary for the active Git provider."""
 
 import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+
+from centermanager.core.git_url_safety import validate_repository_url
 
 
 _URL_USERINFO_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@")
@@ -66,19 +62,43 @@ class _GitCredentialRedactionFilter(logging.Filter):
 
 
 def install_git_credential_safety(provider_cls: Any) -> None:
-    """Keep credentials out of argv, logs, and surfaced Git errors.
+    """Keep credentials out of argv/logs and enforce the Git transport policy.
 
-    The provider already owns a ``GitCredentialHelper`` which supplies the
-    username/token through ``GIT_ASKPASS`` environment variables. Therefore
-    embedding the token into an HTTPS URL is both unnecessary and unsafe.
+    Normal application repositories are credential-free HTTPS URLs. Isolated
+    SEC06/manual fixtures may explicitly opt into a local ``file://`` remote by
+    passing ``allow_local_file_remote=True`` when the provider is constructed.
     """
     if getattr(provider_cls, "_git_credential_safety_installed", False):
         return
 
+    original_init = provider_cls.__init__
     original_run_git_command = provider_cls._run_git_command
     provider_logger = logging.getLogger(provider_cls.__module__)
     redaction_filter = _GitCredentialRedactionFilter()
     provider_logger.addFilter(redaction_filter)
+
+    def credential_safe_init(self, *args, **kwargs):
+        allow_local_file_remote = bool(kwargs.pop("allow_local_file_remote", False))
+
+        # repository_url is the second positional argument in the current
+        # provider signature. Prefer the keyword form used by production.
+        if "repository_url" in kwargs:
+            raw_url = kwargs.get("repository_url", "")
+            if raw_url:
+                kwargs["repository_url"] = validate_repository_url(
+                    raw_url,
+                    allow_local_file_remote=allow_local_file_remote,
+                )
+        elif len(args) >= 2 and args[1]:
+            args = list(args)
+            args[1] = validate_repository_url(
+                args[1],
+                allow_local_file_remote=allow_local_file_remote,
+            )
+            args = tuple(args)
+
+        original_init(self, *args, **kwargs)
+        self._allow_local_file_remote = allow_local_file_remote
 
     def repository_url_without_credentials(self) -> str:
         return _strip_url_credentials(getattr(self, "_repository_url", ""))
@@ -90,15 +110,14 @@ def install_git_credential_safety(provider_cls: Any) -> None:
         try:
             return original_run_git_command(self, safe_args, *run_args, **run_kwargs)
         except Exception as exc:
-            # The base provider includes Git stderr in several exception
-            # messages. Sanitize it before the exception reaches callers/UI.
             safe_message = _redact_text(str(exc), {token} if token else set())
             if safe_message != str(exc):
                 exc.args = (safe_message,) + tuple(exc.args[1:])
             raise
 
-    # clone() in the legacy implementation asks this helper for an auth URL.
-    # Keep the method for compatibility, but it now always returns a clean URL.
+    # The legacy clone implementation asks this method for an authenticated URL.
+    # Keep it for compatibility, but it can only return a credential-free URL.
+    provider_cls.__init__ = credential_safe_init
     provider_cls._build_authenticated_url = repository_url_without_credentials
     provider_cls._run_git_command = credential_safe_run_git_command
     provider_cls._git_credential_redaction_filter = redaction_filter
