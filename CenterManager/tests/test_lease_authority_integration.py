@@ -10,7 +10,13 @@ from datetime import datetime, timedelta
 
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.synchronization import GitSynchronizationProvider
+from centermanager.platform.synchronization.git_clock_skew_guard import (
+    DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS,
+)
 from centermanager.events.event_bus import EventBus
+
+
+STALE_BEYOND_CLOCK_SKEW_SECONDS = DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS + 30
 
 
 @pytest.fixture
@@ -200,23 +206,27 @@ class TestLeaseAuthorityIntegration:
     def test_expired_lease_fresh_heartbeat_manager(self):
         now = datetime.now()
 
-        # A acquires lock with expired lease but fresh heartbeat
+        # A owns an expired lock beyond the clock-skew reclaim window.
         lock_data = {
             "locked": True,
             "session_id": "sess_mgr_expired",
             "owner": "User A",
             "username": "User A",
             "user_id": "user_a",
-            "acquired_at": (now - timedelta(seconds=120)).isoformat(),
+            "acquired_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+            ).isoformat(),
             "last_heartbeat": now.isoformat(),
-            "lease_expires_at": (now - timedelta(seconds=1)).isoformat(),
+            "lease_expires_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+            ).isoformat(),
             "machine": "test_machine",
         }
         expected_oid = self.provider_a._remote_lock_oid()
         commit_sha = self.provider_a._create_lock_commit_plumbing(lock_data, expected_oid)
         self.provider_a._push_lock_branch(commit_sha, expected_oid)
 
-        # B requests write - should acquire because lock is stale
+        # B requests write - should acquire because stale reclaim grace elapsed.
         result = self.cm_b.request_write()
         assert result.is_granted or result.is_waiting
 
@@ -314,9 +324,11 @@ class TestLeaseAuthorityIntegration:
         commit_sha = self.provider_a._create_lock_commit_plumbing(lock_data_a, expected_oid)
         self.provider_a._push_lock_branch(commit_sha, expected_oid)
 
-        # Make A's lock stale so B can acquire
+        # Make A's lock stale beyond the skew window so B can acquire.
         stale_lock = lock_data_a.copy()
-        stale_lock["lease_expires_at"] = (now - timedelta(seconds=10)).isoformat()
+        stale_lock["lease_expires_at"] = (
+            now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+        ).isoformat()
 
         # Retry push stale lock (handle race)
         push_stale = False
@@ -344,7 +356,7 @@ class TestLeaseAuthorityIntegration:
         assert lease is not None
         assert datetime.fromisoformat(lease) < now
 
-        # B acquires lock (should succeed because A's lease expired)
+        # B acquires lock (should succeed because grace has elapsed)
         lock_data_b = {
             "locked": True,
             "session_id": "sess_race_B",
@@ -357,7 +369,7 @@ class TestLeaseAuthorityIntegration:
             "machine": "test_machine",
         }
         success_b = self.provider_b.acquire_lock(lock_data_b)
-        assert success_b is True, "B should acquire stale lock"
+        assert success_b is True, "B should acquire stale lock beyond skew grace"
 
         # Verify B owns the lock
         status_b = self.provider_b.remote_lock_status()
@@ -421,16 +433,20 @@ class TestLeaseAuthorityIntegration:
         """Prove that fresh heartbeat does NOT keep expired lease valid."""
         now = datetime.now()
 
-        # Create lock with expired lease but fresh heartbeat
+        # Create lock with expired lease beyond the skew reclaim window.
         lock_data = {
             "locked": True,
             "session_id": "sess_fresh_hb_expired",
             "owner": "User A",
             "username": "User A",
             "user_id": "user_a",
-            "acquired_at": (now - timedelta(seconds=120)).isoformat(),
+            "acquired_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+            ).isoformat(),
             "last_heartbeat": now.isoformat(),
-            "lease_expires_at": (now - timedelta(seconds=1)).isoformat(),
+            "lease_expires_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+            ).isoformat(),
             "machine": "test_machine",
         }
         expected_oid = self.provider_a._remote_lock_oid()
@@ -442,7 +458,7 @@ class TestLeaseAuthorityIntegration:
         is_stale = self.cm_a._is_lock_stale(lock_info)
         assert is_stale is True, "Lock should be stale (lease expired)"
 
-        # B should be able to acquire
+        # B should be able to acquire after reclaim grace has elapsed.
         result = self.cm_b.request_write()
         assert result.is_granted or result.is_waiting
 
