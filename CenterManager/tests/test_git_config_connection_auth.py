@@ -143,7 +143,7 @@ def test_non_windows_connection_test_retains_secret_free_askpass(monkeypatch, tm
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GIT_ASKPASS"]
     assert env["CENTERMANAGER_GIT_USERNAME"] == USERNAME
-    assert env["CENTERMANAGER_GIT_TOKEN"] == TOKEN
+    assert env["CENTERMANAGER_GIT_SERVICE_CREDENTIAL"] == TOKEN
     assert "http.extraHeader" not in {
         value for key, value in env.items() if key.startswith("GIT_CONFIG_KEY_")
     }
