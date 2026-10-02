@@ -37,8 +37,11 @@ def test_windows_new_secret_path_uses_dpapi_not_legacy_static_key():
 
 def test_legacy_bundle_is_one_way_migrated_on_windows():
     source = _read("src/centermanager/services/git_config_service.py")
-    assert 'os.name == "nt" and encrypted.startswith("ENC:v1:")' in source
-    assert "Migrated legacy Git credentials to Windows DPAPI" in source
+    assert '_SUPPORTED_BUNDLE_PREFIXES = ("ENC:v1:", "DPAPI:v2:")' in source
+    assert "decrypted = decrypt_git_config(encrypted)" in source
+    assert 'if os.name == "nt":' in source
+    assert "self._persist_split_config(self._config)" in source
+    assert "Migrated legacy Git credentials to portable metadata + local DPAPI token" in source
 
 
 def test_origin_reconciliation_never_persists_http_userinfo():
