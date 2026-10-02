@@ -7,6 +7,7 @@ from .git_synchronization_provider import GitSynchronizationProvider   # <-- Äá
 from .git_output_safety import install_git_output_safety
 from .git_credential_safety import install_git_credential_safety
 from .git_windows_auth import install_windows_http_auth
+from .git_clock_skew_guard import install_lock_clock_skew_guard
 from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
 from .git_provider_safety import install_git_command_serialization
@@ -51,6 +52,11 @@ install_windows_http_auth(GitSynchronizationProvider)
 
 # Credentials must never reach token-bearing URLs/argv or surfaced diagnostics.
 install_git_credential_safety(GitSynchronizationProvider)
+
+# A lease timestamp is produced by the lock owner's local wall clock. Keep a
+# recently expired lease authoritative for a bounded grace period so another PC
+# with an ahead-of-time clock cannot immediately steal a fresh WRITE lock.
+install_lock_clock_skew_guard(GitSynchronizationProvider)
 
 # Commit creation must work on clean Windows machines with no global Git
 # identity configured. Inject author/committer identity only for commit and
