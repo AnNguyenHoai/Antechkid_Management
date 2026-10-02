@@ -6,7 +6,7 @@ import platform
 from typing import Optional
 
 from centermanager.core.paths import get_paths
-from centermanager.core.config import get_config
+from centermanager.core.config import get_config, load_config
 from centermanager.platform.context import (
     PlatformContext,
     RuntimeContext,
@@ -29,15 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class BootstrapManager:
-    """
-    Orchestrates platform startup up to READY state.
-    Does NOT authenticate user or create session.
-
-    Git is the production database source of truth. Bootstrap therefore requires
-    valid Git configuration and a successful startup synchronization before the
-    runtime is declared READY. A missing runtime database is never replaced by
-    an empty production database during this sequence.
-    """
+    """Orchestrates platform startup up to READY state."""
 
     def __init__(self):
         self._lifecycle = PlatformLifecycle()
@@ -45,10 +37,6 @@ class BootstrapManager:
         self._workspace_registry = WorkspaceRegistry()
         self._repo_manager = RepositoryManager()
         self._context_manager = RuntimeContextManager()
-        # The provider that performed the authoritative startup synchronization
-        # remains owned by BootstrapManager for the lifetime of the application.
-        # Keeping the same instance preserves its connected repository and
-        # non-interactive credential helper for collaboration/write locking.
         self._sync_provider = None
 
     def run(self) -> bool:
@@ -57,7 +45,9 @@ class BootstrapManager:
             self._lifecycle.transition_to(PlatformLifecycleState.INITIALIZING)
             logger.info("[BOOTSTRAP] Starting platform")
 
-            # 1. Load configuration and create the filesystem runtime shell.
+            # Load the current configuration before bootstrap. Local Git
+            # provisioning may rewrite it below, so it is explicitly reloaded
+            # before contexts are built.
             config = get_config().raw
             paths = get_paths()
 
@@ -75,16 +65,15 @@ class BootstrapManager:
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # 2. The remote Git repository is authoritative. Ensure credentials
-            # exist, prompt on first run when they do not, then materialize the
-            # repository database into runtime before any database engine opens.
             if not self._ensure_authoritative_runtime_database(paths):
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # Synchronization can replace manifest/runtime files. Refresh the
-            # repository view before building contexts from the authoritative
-            # materialized runtime.
+            # GitConfigService may have provisioned/migrated the credential and
+            # rewritten config.json. Avoid building DeploymentContext from the
+            # stale Config singleton snapshot captured before the dialog.
+            config = load_config(paths.config_file)
+
             self._repo_manager.refresh()
             repo_state = self._repo_manager.detect()
             if repo_state in (RepositoryState.INVALID, RepositoryState.CORRUPTED):
@@ -95,7 +84,6 @@ class BootstrapManager:
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # 3. Build contexts after Git source-of-truth materialization.
             runtime_context = self._build_runtime_context(paths)
             deployment_context = self._build_deployment_context(config)
             configuration_context = ConfigurationContext.from_app_config(config)
@@ -132,13 +120,7 @@ class BootstrapManager:
             return False
 
     def _ensure_authoritative_runtime_database(self, paths) -> bool:
-        """Require Git config and install the remote database into runtime.
-
-        This method runs only after QApplication has been created by app.main(),
-        so the first-run Git configuration dialog can be shown safely.
-        """
-        # Local imports avoid widening the bootstrap module import graph and
-        # keep UI/Git dependencies out of module initialization.
+        """Require Git config and install the remote database into runtime."""
         from centermanager.core.git_locator import locate_git
         from centermanager.services.git_config_service import GitConfigService
         from centermanager.ui.git_config_dialog import GitConfigDialog
@@ -202,17 +184,12 @@ class BootstrapManager:
             )
             return False
 
-        # Retain the exact provider that connected/synchronized the authoritative
-        # repository. app.main() must reuse it instead of constructing a second
-        # provider and running StartupSynchronization a second time.
         self._sync_provider = provider
         logger.info("[BOOTSTRAP] Authoritative Git database materialized successfully")
         return True
 
     def _create_default_runtime(self, paths) -> None:
-        """Create the filesystem/runtime shell only; never create business DB data."""
         paths.ensure_directories()
-
         manifest = RuntimeManifest(
             runtime_version=1,
             database_version=1,
@@ -223,7 +200,6 @@ class BootstrapManager:
         logger.info("[BOOTSTRAP] Default runtime created")
 
     def _build_runtime_context(self, paths) -> RuntimeContext:
-        """Build RuntimeContext from disk."""
         try:
             manifest = self._repo_manager._manifest_loader.load()
         except Exception:
@@ -235,7 +211,6 @@ class BootstrapManager:
         )
 
     def _build_deployment_context(self, config: dict) -> DeploymentContext:
-        """Build DeploymentContext from config."""
         git_config = config.get("git", {})
         return DeploymentContext(
             profile=config.get("deployment", {}).get("profile", "standalone"),
@@ -246,23 +221,18 @@ class BootstrapManager:
         )
 
     def get_context(self) -> PlatformContext:
-        """Get platform context after bootstrap."""
         if self._context is None:
             raise RuntimeError("Bootstrap not run yet")
         return self._context
 
     def get_workspace_registry(self) -> WorkspaceRegistry:
-        """Get workspace registry."""
         return self._workspace_registry
 
     def get_lifecycle(self) -> PlatformLifecycle:
-        """Get platform lifecycle."""
         return self._lifecycle
 
     def get_repository_manager(self) -> RepositoryManager:
-        """Get repository manager."""
         return self._repo_manager
 
     def get_sync_provider(self):
-        """Return the authoritative Git provider retained from bootstrap."""
         return self._sync_provider
