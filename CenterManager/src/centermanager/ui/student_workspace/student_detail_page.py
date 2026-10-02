@@ -162,7 +162,8 @@ class StudentDetailPage(QWidget):
             feedback_controller=self._feedback,
         )
         self.enrollment_widget.enrollment_changed.connect(self._on_data_changed)
-        self.tab_widget.add_page(self.enrollment_widget, "Enrollment")
+        self.enrollment_tab = self._create_scroll_tab(self.enrollment_widget)
+        self.tab_widget.add_page(self.enrollment_tab, "Enrollment")
 
         self.financial_tab = StudentFinancialWidget(
             self._income_service,
@@ -175,7 +176,8 @@ class StudentDetailPage(QWidget):
         )
         self.financial_tab.open_finance_clicked.connect(self._on_open_finance)
         self.financial_tab.financial_updated.connect(self._on_data_changed)
-        self._finance_tab_index = self.tab_widget.add_page(self.financial_tab, "Finance")
+        self.finance_scroll_tab = self._create_scroll_tab(self.financial_tab)
+        self._finance_tab_index = self.tab_widget.add_page(self.finance_scroll_tab, "Finance")
 
         self.attendance_widget = StudentAttendanceWidget(
             self._attendance_service,
@@ -190,6 +192,16 @@ class StudentDetailPage(QWidget):
 
         self.content_state_stack.addWidget(self.tab_widget)
         main_layout.addWidget(self.content_state_stack, 1)
+
+    @staticmethod
+    def _create_scroll_tab(content: QWidget) -> QScrollArea:
+        """Keep content at its natural minimum height and scroll instead of compressing it."""
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        return scroll
 
     def _create_profile_tab(self) -> QWidget:
         tab = QWidget()
