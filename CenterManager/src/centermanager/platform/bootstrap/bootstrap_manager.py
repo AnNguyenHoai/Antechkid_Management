@@ -219,7 +219,7 @@ class BootstrapManager:
         return RuntimeContext(
             manifest=manifest,
             state=RuntimeStateMachine(),
-            version=RuntimeVersion(current=manifest.runtime_version,
+            version=RuntimeVersion(current=manifest.runtime_version),
         )
 
     def _build_deployment_context(self, config: dict) -> DeploymentContext:
