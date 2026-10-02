@@ -10,6 +10,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
+from centermanager.platform.synchronization.git_clock_skew_guard import (
+    DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS,
+)
+
+
+STALE_BEYOND_CLOCK_SKEW_SECONDS = DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS + 30
 
 
 @pytest.fixture
@@ -244,14 +250,18 @@ class TestLockLeaseRenewal:
         )
         provider_b.connect()
 
-        # Make A's lock stale so B can acquire
+        # Make A's lock stale beyond the skew window so B can acquire.
         stale_lock = lock_data_a.copy()
-        stale_lock["lease_expires_at"] = (datetime.now() - timedelta(seconds=10)).isoformat()
-        stale_lock["last_heartbeat"] = (datetime.now() - timedelta(seconds=70)).isoformat()
+        stale_lock["lease_expires_at"] = (
+            datetime.now() - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+        ).isoformat()
+        stale_lock["last_heartbeat"] = (
+            datetime.now() - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+        ).isoformat()
         stale_commit = self.provider._create_lock_commit_plumbing(stale_lock, expected_oid)
         self.provider._push_lock_branch(stale_commit, expected_oid)
 
-        # B acquires (should succeed because lock is stale)
+        # B acquires (should succeed because reclaim grace elapsed)
         lock_data_b = {
             "locked": True,
             "session_id": "sess_B",
@@ -416,23 +426,30 @@ class TestLockLeaseRenewal:
 
     # ---- Test I: Expired Lock Can Be Acquired ----
     def test_expired_lock_can_be_acquired(self):
-        # Create an expired lock
+        # Create an expired lock beyond the clock-skew reclaim window.
+        now = datetime.now()
         lock_data = {
             "locked": True,
             "session_id": "sess_expired2",
             "owner": "user_a",
             "username": "user_a",
             "user_id": "user_a",
-            "acquired_at": (datetime.now() - timedelta(seconds=70)).isoformat(),
-            "last_heartbeat": (datetime.now() - timedelta(seconds=70)).isoformat(),
+            "acquired_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+            ).isoformat(),
+            "last_heartbeat": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+            ).isoformat(),
             "machine": "test_machine",
-            "lease_expires_at": (datetime.now() - timedelta(seconds=10)).isoformat(),
+            "lease_expires_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+            ).isoformat(),
         }
         expected_oid = self.provider._remote_lock_oid()
         commit_sha = self.provider._create_lock_commit_plumbing(lock_data, expected_oid)
         self.provider._push_lock_branch(commit_sha, expected_oid)
 
-        # Another user should be able to acquire because lock is expired
+        # Another user should be able to acquire once reclaim grace has elapsed.
         provider_b = GitSynchronizationProvider(
             repo_path=self.repo_path,
             repository_url=str(self.remote_path),
@@ -452,7 +469,7 @@ class TestLockLeaseRenewal:
             "machine": "test_machine",
         }
         success = provider_b.acquire_lock(lock_data_b)
-        assert success is True, "Should be able to acquire expired lock"
+        assert success is True, "Should acquire expired lock beyond skew grace"
 
         status = provider_b.remote_lock_status()
         assert status.get("owner") == "user_b"
