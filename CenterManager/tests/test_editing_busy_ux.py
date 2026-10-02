@@ -37,17 +37,17 @@ def test_edit_operation_paints_busy_state_and_blocks_reentry(monkeypatch):
     monkeypatch.setattr(
         shell_module.QApplication,
         "setOverrideCursor",
-        lambda cursor: cursor_calls.append(("set", cursor)),
+        lambda *args: cursor_calls.append(("set", args[-1] if args else None)),
     )
     monkeypatch.setattr(
         shell_module.QApplication,
         "restoreOverrideCursor",
-        lambda: cursor_calls.append(("restore", None)),
+        lambda *args: cursor_calls.append(("restore", None)),
     )
     monkeypatch.setattr(
         shell_module.QApplication,
         "processEvents",
-        lambda: process_events_calls.append(True),
+        lambda *args: process_events_calls.append(True),
     )
 
     top_bar = SimpleNamespace(
@@ -96,9 +96,9 @@ def test_edit_operation_paints_busy_state_and_blocks_reentry(monkeypatch):
 
 
 def test_waiting_start_button_remains_disabled_after_busy_operation(monkeypatch):
-    monkeypatch.setattr(shell_module.QApplication, "setOverrideCursor", lambda cursor: None)
-    monkeypatch.setattr(shell_module.QApplication, "restoreOverrideCursor", lambda: None)
-    monkeypatch.setattr(shell_module.QApplication, "processEvents", lambda: None)
+    monkeypatch.setattr(shell_module.QApplication, "setOverrideCursor", lambda *args: None)
+    monkeypatch.setattr(shell_module.QApplication, "restoreOverrideCursor", lambda *args: None)
+    monkeypatch.setattr(shell_module.QApplication, "processEvents", lambda *args: None)
 
     start_button = _ButtonStub("Start editing")
     top_bar = SimpleNamespace(
