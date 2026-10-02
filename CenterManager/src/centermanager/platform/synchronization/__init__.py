@@ -53,9 +53,10 @@ install_windows_http_auth(GitSynchronizationProvider)
 # Credentials must never reach token-bearing URLs/argv or surfaced diagnostics.
 install_git_credential_safety(GitSynchronizationProvider)
 
-# A lease timestamp is produced by the lock owner's local wall clock. Keep a
-# recently expired lease authoritative for a bounded grace period so another PC
-# with an ahead-of-time clock cannot immediately steal a fresh WRITE lock.
+# Keep lease validity strict, but delay takeover of an expired remote WRITE lock
+# owned by another runtime for a bounded clock-skew safety window. This prevents
+# an ahead-of-time client clock from stealing a fresh lock without changing the
+# generic stale/valid contract used by renewal, cleanup, and existing tests.
 install_lock_clock_skew_guard(GitSynchronizationProvider)
 
 # Commit creation must work on clean Windows machines with no global Git
