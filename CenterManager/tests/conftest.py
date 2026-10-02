@@ -44,6 +44,58 @@ def qapplication_session():
     app.processEvents()
 
 
+def _is_local_test_repository_url(raw_url) -> bool:
+    """Identify local Git remotes used by isolated pytest integration fixtures."""
+    value = str(raw_url or "").strip()
+    if not value:
+        return False
+    if value.lower().startswith("file://"):
+        return True
+    if Path(value).is_absolute():
+        return True
+    # Keep Windows drive paths recognizable even when tests are collected on a
+    # non-Windows developer host.
+    return len(value) >= 3 and value[1] == ":" and value[2] in {"/", "\\"}
+
+
+@pytest.fixture(autouse=True)
+def explicit_local_git_remote_opt_in_for_legacy_integration_tests(monkeypatch, request):
+    """Opt legacy integration fixtures into local Git transport explicitly.
+
+    Production remains HTTPS-only. Existing integration tests intentionally use
+    temporary local bare repositories, so the pytest boundary supplies the
+    explicit ``allow_local_file_remote`` capability required by the hardened
+    provider. The transport-hardening test module is deliberately excluded so
+    it continues to verify that the production/default provider rejects local
+    remotes without opt-in.
+    """
+    if Path(str(request.node.fspath)).name == "test_git_transport_hardening.py":
+        yield
+        return
+
+    from centermanager.platform.synchronization import GitSynchronizationProvider
+
+    original_init = GitSynchronizationProvider.__init__
+
+    def init_with_test_local_remote_opt_in(self, *args, **kwargs):
+        raw_url = kwargs.get("repository_url")
+        if raw_url is None and len(args) >= 2:
+            raw_url = args[1]
+        if (
+            _is_local_test_repository_url(raw_url)
+            and "allow_local_file_remote" not in kwargs
+        ):
+            kwargs["allow_local_file_remote"] = True
+        return original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        GitSynchronizationProvider,
+        "__init__",
+        init_with_test_local_remote_opt_in,
+    )
+    yield
+
+
 @pytest.fixture
 def clean_paths():
     """Reset path, config, and clock state."""
