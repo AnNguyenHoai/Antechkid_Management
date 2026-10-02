@@ -9,6 +9,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from centermanager.platform.synchronization.git_synchronization_provider import GitSynchronizationProvider
+from centermanager.platform.synchronization.git_clock_skew_guard import (
+    DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS,
+)
+
+
+STALE_BEYOND_CLOCK_SKEW_SECONDS = DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS + 30
 
 
 @pytest.fixture
@@ -170,16 +176,20 @@ class TestLeaseAuthorityCleanup:
         """
         now = datetime.now()
 
-        # Create an expired lock
+        # Create an expired lock beyond the clock-skew reclaim window.
         lock_data = {
             "locked": True,
             "session_id": "sess_expired",
             "owner": "user_a",
             "username": "user_a",
             "user_id": "user_a",
-            "acquired_at": (now - timedelta(seconds=120)).isoformat(),
+            "acquired_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 60)
+            ).isoformat(),
             "last_heartbeat": now.isoformat(),  # Fresh heartbeat!
-            "lease_expires_at": (now - timedelta(seconds=10)).isoformat(),  # Expired!
+            "lease_expires_at": (
+                now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+            ).isoformat(),
             "machine": "test_machine",
         }
 
@@ -191,7 +201,7 @@ class TestLeaseAuthorityCleanup:
         remote_lock = self.provider._read_lock_from_oid(self.provider._remote_lock_oid())
         assert self.provider._is_lock_valid(remote_lock) is False
 
-        # Another user should be able to acquire
+        # Another user should be able to acquire once the reclaim grace has elapsed.
         provider_b = GitSynchronizationProvider(
             repo_path=self.repo_path,
             repository_url=str(self.remote_path),
@@ -211,7 +221,7 @@ class TestLeaseAuthorityCleanup:
             "machine": "test_machine",
         }
         success_b = provider_b.acquire_lock(lock_data_b)
-        assert success_b is True, "Expired lease should allow re-acquisition"
+        assert success_b is True, "Expired lease beyond skew grace should allow re-acquisition"
 
         status = provider_b.remote_lock_status()
         assert status["owner"] == "user_b"
@@ -364,9 +374,11 @@ class TestLeaseAuthorityCleanup:
         expected_oid = self.provider._remote_lock_oid()
         assert expected_oid is not None
 
-        # Make A's lock stale so B can acquire
+        # Make A's lock stale beyond the skew window so B can acquire.
         stale_lock = lock_data_a.copy()
-        stale_lock["lease_expires_at"] = (now - timedelta(seconds=10)).isoformat()
+        stale_lock["lease_expires_at"] = (
+            now - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS)
+        ).isoformat()
         stale_commit = self.provider._create_lock_commit_plumbing(stale_lock, expected_oid)
         self.provider._push_lock_branch(stale_commit, expected_oid)
 
