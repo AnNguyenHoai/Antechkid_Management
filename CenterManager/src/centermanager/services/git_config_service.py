@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -13,7 +14,9 @@ from centermanager.core.crypto import decrypt_git_config, encrypt_git_config
 from centermanager.core.git_locator import locate_git
 from centermanager.core.git_url_safety import sanitize_repository_url
 from centermanager.core.paths import get_paths
+from centermanager.platform.synchronization._windows_subprocess import hidden_subprocess_kwargs
 from centermanager.platform.synchronization.git.git_credential_helper import GitCredentialHelper
+from centermanager.platform.synchronization.git_windows_auth import append_http_auth_config
 
 logger = logging.getLogger(__name__)
 _SUPPORTED_BUNDLE_PREFIXES = ("ENC:v1:", "DPAPI:v2:")
@@ -168,15 +171,36 @@ class GitConfigService:
 
         helper = GitCredentialHelper(config.username, config.token)
         env = os.environ.copy()
+        safe_url = sanitize_repository_url(config.repository_url)
         if config.token:
             env.update(helper.setup_environment())
         else:
             env["GIT_TERMINAL_PROMPT"] = "0"
+
+        if sys.platform == "win32":
+            # Match the production synchronization provider: ignore any host
+            # credential helper / AskPass configuration, then inject the app
+            # credential through process-local Git configuration. This keeps a
+            # different GitHub account configured on the PC out of the test.
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            env["GIT_CONFIG_COUNT"] = "2"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = ""
+            env["GIT_CONFIG_KEY_1"] = "core.askpass"
+            env["GIT_CONFIG_VALUE_1"] = ""
+            append_http_auth_config(env, safe_url, helper.http_auth_header())
+
         try:
-            safe_url = sanitize_repository_url(config.repository_url)
+            run_kwargs = {
+                "capture_output": True,
+                "text": True,
+                "env": env,
+                "check": False,
+            }
+            run_kwargs.update(hidden_subprocess_kwargs())
             result = subprocess.run(
                 [str(git_executable), "ls-remote", safe_url, "HEAD"],
-                capture_output=True, text=True, env=env, check=False,
+                **run_kwargs,
             )
             if result.returncode == 0:
                 return True
