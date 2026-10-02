@@ -28,18 +28,36 @@ def sanitize_repository_url(url: str) -> str:
     return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
 
 
+def _looks_like_local_repository_path(value: str) -> bool:
+    """Return True for explicit absolute/UNC filesystem Git remotes.
+
+    Windows drive paths (``C:\\...``) are parsed by ``urlsplit`` as scheme
+    ``c``. Detect filesystem paths before URL parsing so isolated integration
+    fixtures can opt in without weakening the default HTTPS-only policy.
+    Relative paths are deliberately not accepted.
+    """
+    if value.startswith(("/", "\\\\")):
+        return True
+    return len(value) >= 3 and value[1] == ":" and value[2] in {"/", "\\"}
+
+
 def validate_repository_url(url: str, *, allow_local_file_remote: bool = False) -> str:
     """Validate and return a credential-free repository URL.
 
-    Production repository transport is HTTPS-only. A ``file://`` remote is
-    accepted only when the caller explicitly opts in; this exists solely for
-    isolated SEC06/manual test fixtures and is persisted inside the encrypted
-    Git configuration. HTTP, SSH/SCP-style URLs, and URLs containing user-info
-    are rejected fail-closed.
+    Production repository transport is HTTPS-only. A local ``file://`` URL or
+    absolute filesystem Git remote is accepted only when the caller explicitly
+    opts in; this exists solely for isolated SEC06/manual/integration fixtures.
+    HTTP, SSH/SCP-style URLs, and URLs containing user-info are rejected
+    fail-closed.
     """
     value = (url or "").strip()
     if not value:
         raise RepositoryUrlPolicyError("Repository URL is required")
+
+    if _looks_like_local_repository_path(value):
+        if not allow_local_file_remote:
+            raise RepositoryUrlPolicyError("Local file repository URLs are disabled")
+        return value
 
     try:
         parsed = urlsplit(value)
