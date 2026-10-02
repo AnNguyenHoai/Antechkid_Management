@@ -13,6 +13,12 @@ from unittest.mock import patch
 from centermanager.events.event_bus import EventBus
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.synchronization import GitSynchronizationProvider
+from centermanager.platform.synchronization.git_clock_skew_guard import (
+    DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS,
+)
+
+
+STALE_BEYOND_CLOCK_SKEW_SECONDS = DEFAULT_CLOCK_SKEW_TOLERANCE_SECONDS + 30
 
 
 # ---- Helpers ----
@@ -129,8 +135,9 @@ def test_stale_local_mirror_vs_new_remote_owner(seeded_center_manager_remote, tm
     provider_a.force_release("User A")
     provider_b.force_release("User B")
 
-    # ---- Step 1: Create local mirror X (stale) ----
-    past = datetime.now() - timedelta(seconds=60)
+    # ---- Step 1: Create local mirror X stale beyond the skew reclaim window ----
+    now_for_stale = datetime.now()
+    past = now_for_stale - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 10)
     lock_data_a = {
         "locked": True,
         "session_id": cm_a._session.session_id,
@@ -236,8 +243,9 @@ def test_expired_remote_lease_acquisition(seeded_center_manager_remote, tmp_path
     provider_a.force_release("User A")
     provider_b.force_release("User B")
 
-    # A creates an expired lock using plumbing
-    past = datetime.now() - timedelta(seconds=60)
+    # A creates an expired lock beyond the clock-skew reclaim window.
+    now_for_stale = datetime.now()
+    past = now_for_stale - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 10)
     lock_data_a = {
         "locked": True,
         "session_id": cm_a._session.session_id,
@@ -265,9 +273,9 @@ def test_expired_remote_lease_acquisition(seeded_center_manager_remote, tmp_path
     assert data is not None
     assert data.get("owner") == "User A"
 
-    # B requests write – should acquire (expired)
+    # B requests write – should acquire after skew reclaim grace has elapsed.
     result = cm_b.request_write()
-    assert result.is_granted, "B should acquire expired lock"
+    assert result.is_granted, "B should acquire expired lock beyond skew grace"
     assert cm_b.is_writing, "B should be writing"
 
     # Verify remote owner B
@@ -385,8 +393,9 @@ def test_release_cas_race(seeded_center_manager_remote, tmp_path):
     provider_a.force_release("User A")
     provider_b.force_release("User B")
 
-    # A acquires expired lock
-    past = datetime.now() - timedelta(seconds=60)
+    # A owns an expired lock beyond the clock-skew reclaim window.
+    now_for_stale = datetime.now()
+    past = now_for_stale - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 10)
     lock_data_a = {
         "locked": True,
         "session_id": cm_a._session.session_id,
@@ -440,8 +449,9 @@ def test_renewal_cas_race(seeded_center_manager_remote, tmp_path):
     provider_a.force_release("User A")
     provider_b.force_release("User B")
 
-    # A acquires expired lock
-    past = datetime.now() - timedelta(seconds=60)
+    # A owns an expired lock beyond the clock-skew reclaim window.
+    now_for_stale = datetime.now()
+    past = now_for_stale - timedelta(seconds=STALE_BEYOND_CLOCK_SKEW_SECONDS + 10)
     lock_data_a = {
         "locked": True,
         "session_id": cm_a._session.session_id,
