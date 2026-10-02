@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME, APPLICATION_PRODUCT_NAME
 from centermanager.ui.application_icon import build_application_icon
@@ -116,6 +116,7 @@ class ApplicationTopBar(QFrame):
         self.setObjectName("ApplicationTopBar")
         self.setMinimumHeight(COMPONENT_METRICS["app_top_bar_height"])
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._editing_operation_id: Optional[str] = None
 
         shell_layout = QVBoxLayout(self)
         shell_layout.setContentsMargins(0, 0, 0, 0)
@@ -183,8 +184,8 @@ class ApplicationTopBar(QFrame):
         self.cancel_edit_button.setAccessibleName("Cancel editing request")
         self.finish_edit_button.setVisible(False)
         self.cancel_edit_button.setVisible(False)
-        self.start_edit_button.clicked.connect(self.start_edit_requested.emit)
-        self.finish_edit_button.clicked.connect(self.finish_edit_requested.emit)
+        self.start_edit_button.clicked.connect(self._request_start_editing)
+        self.finish_edit_button.clicked.connect(self._request_finish_editing)
         self.cancel_edit_button.clicked.connect(self.cancel_edit_requested.emit)
         layout.addWidget(self.start_edit_button)
         layout.addWidget(self.finish_edit_button)
@@ -254,6 +255,60 @@ class ApplicationTopBar(QFrame):
             top_level.setWindowIcon(build_application_icon())
 
         install_desktop_polish(self.window())
+
+    def _request_start_editing(self) -> None:
+        self._run_edit_operation(
+            "start-editing",
+            "Starting editing…",
+            self.start_edit_requested,
+        )
+
+    def _request_finish_editing(self) -> None:
+        self._run_edit_operation(
+            "finish-editing",
+            "Finishing & syncing…",
+            self.finish_edit_requested,
+        )
+
+    def _run_edit_operation(self, operation_id: str, message: str, signal) -> bool:
+        """Paint busy feedback before synchronously emitting an edit request.
+
+        The write transaction remains owned by MainWindow and stays synchronous.
+        This method only prevents duplicate clicks and makes the existing
+        operation visible before Git/collaboration work blocks the GUI thread.
+        """
+        if self._editing_operation_id is not None:
+            return False
+
+        self._editing_operation_id = operation_id
+        self.begin_operation(operation_id, message)
+        self.set_transaction_text(message)
+        for button in (
+            self.start_edit_button,
+            self.finish_edit_button,
+            self.cancel_edit_button,
+        ):
+            button.setEnabled(False)
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        # One event flush is intentional: paint the busy state, but do not run
+        # an event loop while the write transaction itself is executing.
+        QApplication.processEvents()
+        try:
+            signal.emit()
+            return True
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.finish_operation(operation_id)
+            self._editing_operation_id = None
+
+            # MainWindow has projected the final transaction state while the
+            # signal was emitted. Re-enable only actions that are valid in that
+            # already-projected state; visibility remains MainWindow-owned.
+            waiting = self.start_edit_button.text().strip().lower().startswith("waiting")
+            self.start_edit_button.setEnabled(not waiting)
+            self.finish_edit_button.setEnabled(True)
+            self.cancel_edit_button.setEnabled(True)
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         self.mode_badge.setText(f"Mode: {mode}")
