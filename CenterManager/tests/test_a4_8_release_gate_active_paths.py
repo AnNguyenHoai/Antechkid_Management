@@ -56,7 +56,7 @@ def test_active_git_provider_strips_credentials_before_subprocess_argv(tmp_path,
     argv = " ".join(str(part) for part in captured["cmd"])
     assert secret not in argv
     assert clean_url in argv
-    assert captured["env"].get("CENTERMANAGER_GIT_TOKEN") == secret
+    assert captured["env"].get("CENTERMANAGER_GIT_SERVICE_CREDENTIAL") == secret
 
     if provider._credential_helper is not None:
         provider._credential_helper.cleanup()
