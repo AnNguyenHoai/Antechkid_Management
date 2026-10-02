@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Destination-bound provisioning for Git credentials.
-
-A destination installation owns an RSA private key protected by the local
-Windows secret store (DPAPI). Only the public key leaves the destination. An
-administrator encrypts Git configuration to that public key, producing a bundle
-that can be transported safely but can only be opened by that installation.
-"""
+"""Destination-bound provisioning for Git credentials."""
 
 import base64
 import json
@@ -49,17 +43,20 @@ def _paths(config_path: Path) -> ProvisioningPaths:
     return ProvisioningPaths(private_key_file=config_path.parent / _PRIVATE_KEY_FILE)
 
 
-def ensure_destination_request(config_path: Path) -> Dict[str, Any]:
-    """Return the destination public provisioning request, creating its key once."""
-    paths = _paths(config_path)
-    paths.private_key_file.parent.mkdir(parents=True, exist_ok=True)
+def _unprotect_private(record: Dict[str, Any]):
+    protected = record.get("protected_private_key")
+    if not isinstance(protected, str):
+        raise ProvisioningError("Destination provisioning identity is invalid")
+    if protected.startswith("DPAPI:v2:"):
+        private_pem = unprotect_secret(protected)
+    elif protected.startswith("TEST:v1:"):
+        private_pem = _b64d(protected[8:]).decode("utf-8")
+    else:
+        raise ProvisioningError("Unsupported destination private-key protection")
+    return serialization.load_pem_private_key(private_pem.encode("ascii"), password=None)
 
-    if paths.private_key_file.exists():
-        record = json.loads(paths.private_key_file.read_text(encoding="utf-8"))
-        public_pem = record.get("public_key")
-        if isinstance(public_pem, str) and public_pem:
-            return {"format": _REQUEST_FORMAT, "public_key": public_pem}
 
+def _new_identity(paths: ProvisioningPaths) -> Dict[str, Any]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -70,26 +67,49 @@ def ensure_destination_request(config_path: Path) -> Dict[str, Any]:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("ascii")
-
-    # The private key is never portable. On Windows it is bound to the current
-    # Windows identity through DPAPI. Non-Windows is test/development only.
-    if os.name == "nt":
-        protected_private = protect_secret(private_pem)
-    else:
-        protected_private = "TEST:v1:" + _b64e(private_pem.encode("utf-8"))
-
+    protected_private = (
+        protect_secret(private_pem)
+        if os.name == "nt"
+        else "TEST:v1:" + _b64e(private_pem.encode("utf-8"))
+    )
     record = {
         "format": _REQUEST_FORMAT,
         "public_key": public_pem,
         "protected_private_key": protected_private,
     }
     paths.private_key_file.write_text(json.dumps(record, indent=2), encoding="utf-8")
-    return {"format": _REQUEST_FORMAT, "public_key": public_pem}
+    return record
+
+
+def ensure_destination_request(config_path: Path) -> Dict[str, Any]:
+    """Return this Windows identity's public request, creating a key if needed.
+
+    A copied DPAPI-protected private key is intentionally unusable on another
+    Windows identity. In that case it is replaced with a fresh destination key
+    before a request is exported, preventing bundles from being encrypted back
+    to the source machine by mistake.
+    """
+    paths = _paths(config_path)
+    paths.private_key_file.parent.mkdir(parents=True, exist_ok=True)
+    record = None
+    if paths.private_key_file.exists():
+        try:
+            candidate = json.loads(paths.private_key_file.read_text(encoding="utf-8"))
+            _unprotect_private(candidate)
+            public_pem = candidate.get("public_key")
+            if isinstance(public_pem, str) and public_pem:
+                record = candidate
+        except Exception:
+            record = None
+    if record is None:
+        record = _new_identity(paths)
+    return {"format": _REQUEST_FORMAT, "public_key": record["public_key"]}
 
 
 def write_destination_request(config_path: Path, output_path: Path) -> None:
-    request = ensure_destination_request(config_path)
-    output_path.write_text(json.dumps(request, indent=2), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(ensure_destination_request(config_path), indent=2), encoding="utf-8"
+    )
 
 
 def create_bundle(request: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -99,7 +119,6 @@ def create_bundle(request: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str,
     public_pem = request.get("public_key")
     if not isinstance(public_pem, str) or not public_pem:
         raise ProvisioningError("Provisioning request has no public key")
-
     try:
         public_key = serialization.load_pem_public_key(public_pem.encode("ascii"))
     except Exception as exc:
@@ -126,28 +145,15 @@ def create_bundle(request: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str,
 
 
 def decrypt_bundle(config_path: Path, bundle: Dict[str, Any]) -> Dict[str, Any]:
-    """Open a bundle using only the destination's locally protected private key."""
+    """Open a bundle using only this destination's locally protected private key."""
     if bundle.get("format") != _BUNDLE_FORMAT:
         raise ProvisioningError("Unsupported provisioning bundle format")
-
     paths = _paths(config_path)
     if not paths.private_key_file.exists():
         raise ProvisioningError("This machine has no provisioning identity")
-    record = json.loads(paths.private_key_file.read_text(encoding="utf-8"))
-    protected_private = record.get("protected_private_key")
-    if not isinstance(protected_private, str):
-        raise ProvisioningError("Destination provisioning identity is invalid")
-
     try:
-        if protected_private.startswith("DPAPI:v2:"):
-            private_pem = unprotect_secret(protected_private)
-        elif protected_private.startswith("TEST:v1:"):
-            private_pem = _b64d(protected_private[8:]).decode("utf-8")
-        else:
-            raise ProvisioningError("Unsupported destination private-key protection")
-        private_key = serialization.load_pem_private_key(
-            private_pem.encode("ascii"), password=None
-        )
+        record = json.loads(paths.private_key_file.read_text(encoding="utf-8"))
+        private_key = _unprotect_private(record)
         aes_key = private_key.decrypt(
             _b64d(bundle["wrapped_key"]),
             padding.OAEP(
@@ -168,7 +174,6 @@ def decrypt_bundle(config_path: Path, bundle: Dict[str, Any]) -> Dict[str, Any]:
         raise ProvisioningError(
             "Provisioning bundle is invalid or belongs to another destination"
         ) from exc
-
     if not isinstance(payload, dict):
         raise ProvisioningError("Provisioning payload has invalid type")
     return payload
