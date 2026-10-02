@@ -12,15 +12,18 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _USERNAME_ENV = "CENTERMANAGER_GIT_USERNAME"
-_TOKEN_ENV = "CENTERMANAGER_GIT_TOKEN"
+_SERVICE_CREDENTIAL_ENV = "CENTERMANAGER_GIT_SERVICE_CREDENTIAL"
 
 
 class GitCredentialHelper:
     """Provide Git credentials without placing secrets in process argv or scripts.
 
+    The supplied secret is a dedicated CenterManager repository service
+    credential. It is never embedded in the repository URL or Git argv.
+
     Windows GUI builds deliberately avoid ``GIT_ASKPASS`` because invoking a
     batch helper causes Git to create ``cmd.exe`` child processes which can
-    flash a console window.  The provider consumes :meth:`http_auth_header`
+    flash a console window. The provider consumes :meth:`http_auth_header`
     instead and injects it through Git's per-process configuration environment.
     Non-Windows platforms retain the existing secret-free askpass helper.
     """
@@ -33,13 +36,10 @@ class GitCredentialHelper:
     def setup_environment(self) -> dict:
         """Return environment variables for a non-interactive Git child process."""
         if sys.platform == "win32":
-            # Preserve the established child-environment credential contract
-            # used by the active release gate, but do not expose GIT_ASKPASS.
-            # HTTPS auth itself is injected through process-local GIT_CONFIG_*.
             return {
                 "GIT_TERMINAL_PROMPT": "0",
                 _USERNAME_ENV: self._username,
-                _TOKEN_ENV: self._token,
+                _SERVICE_CREDENTIAL_ENV: self._token,
             }
 
         if self._askpass_path is None:
@@ -48,7 +48,7 @@ class GitCredentialHelper:
             "GIT_ASKPASS": str(self._askpass_path),
             "GIT_TERMINAL_PROMPT": "0",
             _USERNAME_ENV: self._username,
-            _TOKEN_ENV: self._token,
+            _SERVICE_CREDENTIAL_ENV: self._token,
         }
 
     def http_auth_header(self) -> Optional[str]:
@@ -64,7 +64,7 @@ class GitCredentialHelper:
         content = '''#!/bin/sh
 case "$1" in
   *Username*|*username*) printf '%s\\n' "$CENTERMANAGER_GIT_USERNAME" ;;
-  *) printf '%s\\n' "$CENTERMANAGER_GIT_TOKEN" ;;
+  *) printf '%s\\n' "$CENTERMANAGER_GIT_SERVICE_CREDENTIAL" ;;
 esac
 '''
         fd, path = tempfile.mkstemp(suffix=".sh", prefix="git-askpass-", text=True)
