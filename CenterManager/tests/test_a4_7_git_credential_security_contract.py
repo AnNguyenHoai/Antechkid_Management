@@ -23,7 +23,7 @@ def test_git_repository_never_embeds_token_in_remote_url():
 def test_git_config_connection_test_keeps_token_out_of_argv():
     source = _read(GIT_CONFIG_SERVICE)
     assert "auth_url" not in source
-    assert "safe_url = sanitize_repository_url(config.repository_url)" in source
+    assert "safe_url = validate_repository_url(" in source
     assert '"ls-remote", safe_url, "HEAD"' in source
     assert "GitCredentialHelper" in source
 
@@ -31,7 +31,7 @@ def test_git_config_connection_test_keeps_token_out_of_argv():
 def test_askpass_script_contains_no_secret_interpolation():
     source = _read(GIT_HELPER)
     assert "echo {self._token}" not in source
-    assert "CENTERMANAGER_GIT_TOKEN" in source
+    assert "CENTERMANAGER_GIT_SERVICE_CREDENTIAL" in source
     assert "CENTERMANAGER_GIT_USERNAME" in source
 
 
