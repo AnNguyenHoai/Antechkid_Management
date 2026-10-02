@@ -156,14 +156,26 @@ class BootstrapManager:
         git_config = git_config_service.get_config() if git_config_service.has_config() else None
 
         if git_config is None:
-            logger.info("[BOOTSTRAP] Git configuration missing or invalid; requesting first-run configuration")
+            credential_status = git_config_service.credential_status()
+            if credential_status in (
+                "not_provisioned_on_this_machine",
+                "legacy_not_provisioned_on_this_machine",
+            ):
+                logger.info(
+                    "[BOOTSTRAP] Git credential is not provisioned for this Windows user/machine; requesting local provisioning"
+                )
+            else:
+                logger.info(
+                    "[BOOTSTRAP] Git configuration is not ready (%s); requesting local provisioning",
+                    credential_status,
+                )
             dialog = GitConfigDialog(git_config_service)
             if dialog.exec() != dialog.DialogCode.Accepted:
                 logger.warning("[BOOTSTRAP] Git configuration cancelled; startup aborted")
                 return False
             git_config = git_config_service.get_config()
             if git_config is None:
-                logger.error("[BOOTSTRAP] Git configuration was not available after first-run dialog")
+                logger.error("[BOOTSTRAP] Git configuration was not available after local provisioning")
                 return False
 
         provider = GitSynchronizationProvider(
@@ -230,7 +242,7 @@ class BootstrapManager:
             repository_url=git_config.get("repository_url"),
             branch=git_config.get("branch", "main"),
             local_path=git_config.get("local_path"),
-            git_configured=bool(git_config.get("repository_url") and git_config.get("token")),
+            git_configured=bool(git_config.get("repository_url") and git_config.get("token_secret")),
         )
 
     def get_context(self) -> PlatformContext:
