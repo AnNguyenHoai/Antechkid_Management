@@ -146,15 +146,25 @@ def generate_windows_version_metadata() -> Path:
 
 def generate_windows_app_icon() -> Path:
     """Materialize the embedded AN TECHKIDS logo for PyInstaller."""
+    import ast
     import base64
 
     source = PROJECT_ROOT / "src" / "centermanager" / "branding" / "app_logo.py"
-    namespace: dict[str, object] = {}
-    exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), namespace)
-    png_bytes = base64.b64decode(namespace["APP_LOGO_PNG_BASE64"])
+    module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    encoded_logo = None
+    for node in module.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        if isinstance(target, ast.Name) and target.id == "APP_LOGO_PNG_BASE64":
+            encoded_logo = ast.literal_eval(node.value)
+            break
+    if not isinstance(encoded_logo, str):
+        raise RuntimeError("APP_LOGO_PNG_BASE64 was not found in branding/app_logo.py")
+
     BUILD_ROOT.mkdir(parents=True, exist_ok=True)
     png_path = BUILD_ROOT / "app_logo.generated.png"
-    png_path.write_bytes(png_bytes)
+    png_path.write_bytes(base64.b64decode(encoded_logo))
     return png_path
 
 
