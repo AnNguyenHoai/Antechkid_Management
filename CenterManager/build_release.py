@@ -146,25 +146,15 @@ def generate_windows_version_metadata() -> Path:
 
 
 def generate_windows_app_icon() -> Path:
-    """Materialize the embedded AN TECHKIDS PNG as an ICO for PyInstaller."""
-    from PIL import Image
-
+    """Materialize the embedded AN TECHKIDS logo for PyInstaller's Windows icon conversion."""
     source = PROJECT_ROOT / "src" / "centermanager" / "branding" / "app_logo.py"
     namespace: dict[str, object] = {}
     exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), namespace)
     png_bytes = base64.b64decode(namespace["APP_LOGO_PNG_BASE64"])
-
     BUILD_ROOT.mkdir(parents=True, exist_ok=True)
     png_path = BUILD_ROOT / "app_logo.generated.png"
-    ico_path = BUILD_ROOT / "app_logo.generated.ico"
     png_path.write_bytes(png_bytes)
-    with Image.open(png_path) as image:
-        image.convert("RGBA").save(
-            ico_path,
-            format="ICO",
-            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
-        )
-    return ico_path
+    return png_path
 
 
 def resolve_source_commit() -> str:
