@@ -29,14 +29,20 @@ class WriteTransactionState(Enum):
     OFFLINE_PENDING_PUBLISH = auto()
     WAITING = auto()
     GRANTING = auto()
+    # Finishing states
     FINISHING = auto()
     FINISHING_WAITING_FOR_COLLABORATION = auto()
     FINISHING_STALE = auto()
+    # MAIN conflict
     PUBLISH_CONFLICT = auto()
 
 
 class WriteTransactionManager:
-    """Manages complete write transaction: Start Editing → Finish Editing."""
+    """
+    Manages complete write transaction: Start Editing → Finish Editing.
+    Implements FINISHING authority fencing, generation fencing,
+    and MAIN optimistic concurrency.
+    """
 
     def __init__(self, collaboration_manager: CollaborationManager):
         self._collab_manager = collaboration_manager
@@ -54,12 +60,20 @@ class WriteTransactionManager:
         self._waiting_request_id: str = ""
         self._session = None
         self._last_start_error: str = ""
+
+        # FINISHING fields
         self._finishing_started_at: Optional[datetime] = None
         self._finishing_deadline: Optional[datetime] = None
         self._publish_intent: bool = False
         self._finishing_retry_count: int = 0
+
+        # Generation fencing
         self._expected_generation: int = 0
+
+        # MAIN optimistic concurrency
         self._base_main_commit: Optional[str] = None
+
+        # Internal editing flag
         self._is_editing = False
 
     @property
@@ -114,6 +128,11 @@ class WriteTransactionManager:
     }
 
     def _transition_to(self, target: WriteTransactionState, reason: str = "") -> bool:
+        """Single owner for collaboration-entry state transitions.
+
+        Existing publish/finishing substates are retained for compatibility,
+        while the contention path is explicitly fenced here.
+        """
         current = self._state
         if current == target:
             return True
@@ -126,6 +145,7 @@ class WriteTransactionManager:
         return True
 
     def _reset_to_idle(self) -> None:
+        """Reset transaction state to IDLE after completion."""
         self._state = WriteTransactionState.IDLE
         self._session = None
         self._save_callback = None
@@ -146,6 +166,7 @@ class WriteTransactionManager:
         self._is_editing = False
         logger.info("Transaction reset to IDLE")
 
+    # ---- Snapshot ----
     def _create_snapshot(self) -> None:
         try:
             paths = get_paths()
@@ -162,6 +183,7 @@ class WriteTransactionManager:
             logger.exception("Failed to create snapshot")
 
     def _delete_snapshot(self) -> None:
+        """Delete the transaction snapshot only after it is no longer needed."""
         snapshot_path = self._snapshot_path
         if snapshot_path is None:
             return
@@ -186,6 +208,7 @@ class WriteTransactionManager:
         return False
 
     def _release_grant_after_failed_consistency_check(self) -> None:
+        """Release a just-acquired WRITE lease when runtime verification fails."""
         try:
             if self._collab_manager.is_writing():
                 if not self._collab_manager.release_write():
@@ -194,6 +217,7 @@ class WriteTransactionManager:
             logger.exception("Failed to release WRITE lease after consistency rejection")
 
     def _verify_first_writer_consistency(self) -> bool:
+        """Run the mandatory runtime/repository/remote barrier while WRITE is held."""
         provider = getattr(self._collab_manager, "_sync_provider", None)
         if provider is None:
             return True
@@ -206,43 +230,64 @@ class WriteTransactionManager:
                 return True
         except Exception:
             logger.exception("First-writer consistency verification raised")
-        self._last_start_error = "Write lock was acquired, but authoritative data consistency verification failed."
+        self._last_start_error = (
+            "Write lock was acquired, but authoritative data consistency verification failed."
+        )
         logger.error(self._last_start_error)
         return False
 
     def _waiting_is_authoritative(self) -> bool:
+        """WAITING is valid only when another live remote lease actually exists."""
         provider = getattr(self._collab_manager, "_sync_provider", None)
         if provider is None:
             return True
         try:
             remote = provider.remote_lock_status()
-            return bool(remote.get("locked", False) and self._collab_manager._is_lease_valid(remote.get("lease_expires_at")))
+            return bool(
+                remote.get("locked", False)
+                and self._collab_manager._is_lease_valid(remote.get("lease_expires_at"))
+            )
         except Exception:
             logger.exception("Unable to verify remote writer after lock acquisition failure")
             return False
 
+    # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
         self._last_start_error = ""
         self.reset_finishing()
         logger.info("Start Editing requested; transaction_state=%s", self._state.name)
+
         if self._state == WriteTransactionState.WAITING:
             self._last_start_error = "Already waiting for the active writer to release the lock."
             logger.info(self._last_start_error)
             return False
+
         if self._state != WriteTransactionState.IDLE:
             self._last_start_error = f"Start Editing is unavailable while transaction state is {self._state.name}."
             logger.warning(self._last_start_error)
             return False
+
         if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
             self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
+
         result = self._collab_manager.request_write()
-        logger.info("Start Editing collaboration result=%s message=%s position=%s", result.result.value, result.message, result.position)
+        logger.info(
+            "Start Editing collaboration result=%s message=%s position=%s",
+            result.result.value,
+            result.message,
+            result.position,
+        )
         if result.is_granted:
+            # Immediate writers previously skipped the consistency barrier that
+            # queued writers execute during handoff. Run it now while this
+            # session owns the distributed lock; on failure, release the grant
+            # before returning to IDLE.
             if not self._verify_first_writer_consistency():
                 self._release_grant_after_failed_consistency_check()
                 self._transition_to(WriteTransactionState.IDLE, "consistency verification failed")
                 return False
+
             if not self._transition_to(WriteTransactionState.EDITING, "write granted"):
                 self._release_grant_after_failed_consistency_check()
                 self._last_start_error = "Write lock was acquired but the transaction could not enter EDITING."
@@ -251,8 +296,10 @@ class WriteTransactionManager:
             self._has_changes = False
             self._session = self._collab_manager.get_session()
             self._is_editing = True
+
             self._expected_generation = self._collab_manager.get_lock_generation()
             logger.info(f"Expected generation captured: {self._expected_generation}")
+
             self._base_main_commit = None
             if self._collab_manager._sync_provider:
                 try:
@@ -260,14 +307,18 @@ class WriteTransactionManager:
                     logger.info(f"Base MAIN commit captured: {self._base_main_commit[:8] if self._base_main_commit else None}")
                 except Exception as e:
                     logger.warning(f"Failed to capture base MAIN commit: {e}")
+
             self._create_snapshot()
             logger.info("Write transaction started: EDITING")
             return True
-        if result.is_waiting:
+        elif result.is_waiting:
             if not self._waiting_is_authoritative():
                 self._collab_manager.cancel_waiting_request()
                 self._transition_to(WriteTransactionState.IDLE, "false waiting rejected")
-                self._last_start_error = "Unable to acquire the remote write lock even though no active writer owns it. Check Git connectivity/credentials and try again."
+                self._last_start_error = (
+                    "Unable to acquire the remote write lock even though no active writer owns it. "
+                    "Check Git connectivity/credentials and try again."
+                )
                 logger.error(self._last_start_error)
                 return False
             self._transition_to(WriteTransactionState.WAITING, "queued")
@@ -276,36 +327,52 @@ class WriteTransactionManager:
             self._last_start_error = result.message or f"Waiting for write lock (position {result.position})."
             logger.info(f"Write transaction waiting (position {result.position})")
             return False
-        self._transition_to(WriteTransactionState.IDLE, "request rejected")
-        self._last_start_error = result.message or "Write lock request was rejected."
-        logger.warning(f"Failed to acquire write lock: {self._last_start_error}")
-        return False
+        else:
+            self._transition_to(WriteTransactionState.IDLE, "request rejected")
+            self._last_start_error = result.message or "Write lock request was rejected."
+            logger.warning(f"Failed to acquire write lock: {self._last_start_error}")
+            return False
 
-    def finish_editing(self, save_callback: Optional[Callable[[], bool]] = None, on_publish_success: Optional[Callable[[], None]] = None, on_publish_failure: Optional[Callable[[str], None]] = None) -> bool:
+    def finish_editing(self,
+                       save_callback: Optional[Callable[[], bool]] = None,
+                       on_publish_success: Optional[Callable[[], None]] = None,
+                       on_publish_failure: Optional[Callable[[str], None]] = None) -> bool:
         if self._state == WriteTransactionState.IDLE:
             logger.warning("Finish editing called in IDLE state")
             return False
+
         if self._state == WriteTransactionState.WAITING:
             logger.warning("Finish editing called while waiting for lock")
             return False
-        if self._state in (WriteTransactionState.FINISHING, WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION, WriteTransactionState.FINISHING_STALE, WriteTransactionState.PUBLISH_CONFLICT):
+
+        if self._state in (WriteTransactionState.FINISHING,
+                           WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
+                           WriteTransactionState.FINISHING_STALE,
+                           WriteTransactionState.PUBLISH_CONFLICT):
             logger.warning(f"Finish editing called while already in {self._state.name}")
             return False
+
         if self._state == WriteTransactionState.COMPLETED:
             logger.warning("Transaction already completed")
             self._reset_to_idle()
             return True
+
         result = self.enter_finishing()
         if not result.get("success"):
-            if self._state in (WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION, WriteTransactionState.FINISHING_STALE, WriteTransactionState.PUBLISH_CONFLICT):
+            if self._state in (WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
+                               WriteTransactionState.FINISHING_STALE,
+                               WriteTransactionState.PUBLISH_CONFLICT):
                 logger.warning(f"Cannot finish: {result.get('reason')}")
                 return False
-            logger.error(f"Unexpected failure entering finishing: {result.get('reason')}")
-            return False
+            else:
+                logger.error(f"Unexpected failure entering finishing: {result.get('reason')}")
+                return False
+
         save_fn = save_callback or self._save_callback
         if save_fn is not None:
             try:
-                if not save_fn():
+                save_success = save_fn()
+                if not save_success:
                     logger.error("Local save failed")
                     self._state = WriteTransactionState.FAILED
                     return False
@@ -313,17 +380,21 @@ class WriteTransactionManager:
                 logger.exception("Local save exception")
                 self._state = WriteTransactionState.FAILED
                 return False
+
         self._state = WriteTransactionState.LOCAL_SAVED
         self._on_publish_success = on_publish_success
         self._on_publish_failure = on_publish_failure
+
         if not self._create_pending_version():
             logger.error("Pending version creation failed")
             self._state = WriteTransactionState.FAILED
             return False
+
         if not self._publish_database_and_manifest():
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
             return False
+
         return self._publish()
 
     def cancel_editing(self, force: bool = False) -> bool:
@@ -333,17 +404,21 @@ class WriteTransactionManager:
                 logger.info("Transaction: IDLE (cancelled waiting)")
                 return True
             return False
+
         if not self.is_editing:
             logger.warning(f"Cancel editing in state {self._state}, ignoring")
             return False
+
         if self._has_changes and not force:
             logger.warning("Cancel called with pending changes, force=False")
             return False
+
         if force and self._has_changes:
             if not self._restore_snapshot():
                 logger.error("Snapshot restore failed, lock retained")
                 self._state = WriteTransactionState.FAILED
                 return False
+
         if self._collab_manager.is_writing():
             self._collab_manager.release_write()
         self._delete_snapshot()
@@ -351,13 +426,18 @@ class WriteTransactionManager:
         logger.info("Transaction: IDLE (cancelled)")
         return True
 
+    # ---- Publish helpers ----
     def _create_pending_version(self) -> bool:
         if self._version_manager is None:
             logger.warning("Version manager not set, skipping version increment")
             return True
         try:
             session = self._collab_manager.get_session()
-            self._pending_version = self._version_manager.create_pending_version({"session_id": self._collab_manager.get_session_id(), "owner": session.username if session else "system", "timestamp": datetime.now().isoformat()})
+            self._pending_version = self._version_manager.create_pending_version({
+                "session_id": self._collab_manager.get_session_id(),
+                "owner": session.username if session else "system",
+                "timestamp": datetime.now().isoformat(),
+            })
             logger.info(f"Pending version created: {self._pending_version}")
             return True
         except Exception as e:
@@ -371,31 +451,35 @@ class WriteTransactionManager:
             if not db_src.exists():
                 logger.warning("Database file not found, skipping copy")
                 return True
+
             repo_root = paths.runtime_root / "repository"
             if not repo_root.exists():
                 logger.warning("Repository not found, skipping copy")
                 return True
 
-            # center.db is a file-level publication artifact while production
-            # SQLite/SQLCipher runs in WAL mode. Flush every committed WAL frame
-            # under the DB maintenance fence before copying the main file.
+            # Production uses WAL mode, while Git publishes center.db as a
+            # single-file artifact. Fail closed unless committed WAL frames have
+            # first been checkpointed into the main database file.
             checkpoint_runtime_database_for_publish()
 
             db_dst = repo_root / "database"
             db_dst.mkdir(parents=True, exist_ok=True)
             dst_file = db_dst / "center.db"
+
             with open(db_src, 'rb') as fsrc:
                 with open(dst_file, 'wb') as fdst:
                     fdst.write(fsrc.read())
                     fdst.flush()
                     os.fsync(fdst.fileno())
+
             if dst_file.exists() and db_src.exists():
                 src_size = db_src.stat().st_size
                 dst_size = dst_file.stat().st_size
                 if src_size != dst_size:
                     logger.error(f"Size mismatch after copy: src={src_size}, dst={dst_size}")
                     return False
-            logger.info(f"Database copied to repository after WAL checkpoint: {dst_file}")
+            logger.info(f"Database copied to repository: {dst_file}")
+
             if self._version_manager and self._pending_version:
                 manifest_path = repo_root / "manifest.json"
                 if not manifest_path.exists():
@@ -411,6 +495,7 @@ class WriteTransactionManager:
                     f.flush()
                     os.fsync(f.fileno())
                 logger.info(f"Repository manifest updated from {old_version} to {self._pending_version}")
+
             return True
         except Exception as e:
             logger.exception(f"Failed to publish database: {e}")
@@ -420,7 +505,9 @@ class WriteTransactionManager:
         if self._state not in (WriteTransactionState.LOCAL_SAVED, WriteTransactionState.PUBLISHING):
             logger.warning(f"Publish called in invalid state {self._state}")
             return False
+
         self._state = WriteTransactionState.PUBLISHING
+
         try:
             success = self._do_publish()
             if success:
@@ -439,14 +526,15 @@ class WriteTransactionManager:
                 self._delete_snapshot()
                 self._reset_to_idle()
                 return True
-            self._state = WriteTransactionState.FAILED
-            if self._version_manager:
-                self._version_manager.clear_pending_version()
-            self._pending_version = None
-            logger.error("Transaction: FAILED (publish returned False)")
-            if self._on_publish_failure:
-                self._on_publish_failure("Publish operation failed (push failed)")
-            return False
+            else:
+                self._state = WriteTransactionState.FAILED
+                if self._version_manager:
+                    self._version_manager.clear_pending_version()
+                self._pending_version = None
+                logger.error("Transaction: FAILED (publish returned False)")
+                if self._on_publish_failure:
+                    self._on_publish_failure("Publish operation failed (push failed)")
+                return False
         except Exception as e:
             self._state = WriteTransactionState.FAILED
             if self._version_manager:
@@ -473,6 +561,7 @@ class WriteTransactionManager:
             self._state = WriteTransactionState.COMPLETED
             logger.info("Transaction: COMPLETED (lock released)")
 
+    # ---- Retry / Offline ----
     def retry_publish(self) -> bool:
         if self._state not in (WriteTransactionState.FAILED, WriteTransactionState.OFFLINE_PENDING_PUBLISH):
             logger.warning(f"Retry called in state {self._state}, ignoring")
@@ -496,6 +585,7 @@ class WriteTransactionManager:
         return self._waiting_position
 
     def cancel_waiting(self, reason: str = "Waiting request expired or was removed") -> None:
+        """Leave WAITING when the collaboration layer no longer owns our request."""
         if self._state != WriteTransactionState.WAITING:
             return
         logger.warning(f"Transaction: WAITING -> IDLE ({reason})")
@@ -506,67 +596,102 @@ class WriteTransactionManager:
         self._session = None
 
     def begin_grant(self) -> bool:
+        """Enter GRANTING while the collaboration layer completes a handoff."""
         if self._state != WriteTransactionState.WAITING:
             return False
         return self._transition_to(WriteTransactionState.GRANTING, "remote handoff")
 
     def on_write_granted(self) -> None:
+        """Apply an authoritative remote write grant exactly once."""
         if self._state == WriteTransactionState.EDITING:
             logger.debug("Duplicate write grant ignored: transaction already EDITING")
             return
-        if self._state not in (WriteTransactionState.WAITING, WriteTransactionState.GRANTING):
-            logger.debug("Write grant ignored in non-grantable state %s", self._state.name)
+
+        if self._state not in (
+            WriteTransactionState.WAITING,
+            WriteTransactionState.GRANTING,
+        ):
+            logger.debug(
+                "Write grant ignored in non-grantable state %s",
+                self._state.name,
+            )
             return
+
         if self._state == WriteTransactionState.WAITING:
-            if not self._transition_to(WriteTransactionState.GRANTING, "remote grant observed"):
+            if not self._transition_to(
+                WriteTransactionState.GRANTING,
+                "remote grant observed",
+            ):
                 return
-        if not self._transition_to(WriteTransactionState.EDITING, "remote grant confirmed"):
+
+        if not self._transition_to(
+            WriteTransactionState.EDITING,
+            "remote grant confirmed",
+        ):
             return
+
         self._is_editing = True
         self._session = self._collab_manager.get_session()
         self._expected_generation = self._collab_manager.get_lock_generation()
+
         self._base_main_commit = None
         if self._collab_manager._sync_provider:
             try:
-                self._base_main_commit = self._collab_manager._sync_provider.get_remote_main_commit()
+                self._base_main_commit = (
+                    self._collab_manager._sync_provider.get_remote_main_commit()
+                )
             except Exception:
                 pass
+
         self._waiting_position = 0
         self._waiting_request_id = ""
         self._create_snapshot()
-        logger.info("Transaction: WAITING/GRANTING -> EDITING (auto-grant), expected gen: %s", self._expected_generation)
+
+        logger.info(
+            "Transaction: WAITING/GRANTING -> EDITING (auto-grant), expected gen: %s",
+            self._expected_generation,
+        )
 
     def on_grant_failed(self) -> None:
+        """Return from GRANTING to WAITING when authoritative acquisition fails."""
         if self._state == WriteTransactionState.GRANTING:
             self._transition_to(WriteTransactionState.WAITING, "grant failed")
 
+    # ---- Finishing methods ----
     def enter_finishing(self) -> Dict[str, Any]:
         if self._state not in (WriteTransactionState.EDITING, WriteTransactionState.LOCAL_SAVED):
             return {"success": False, "reason": f"Invalid state for finishing: {self._state.name}"}
+
         session = self._collab_manager.get_session()
         if not session:
             return {"success": False, "reason": "No active session"}
+
         if not self._collab_manager.is_collaboration_available():
             self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
             reason = "Collaboration unavailable"
             logger.warning(f"Entered FINISHING_WAITING_FOR_COLLABORATION due to: {reason}")
             return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
+
         auth = self._collab_manager.validate_write_authority(session)
+
         if not auth.get("valid", False):
             reason = auth.get("reason", "Unknown authority failure")
             if "unavailable" in reason.lower():
                 self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
                 logger.warning(f"Entered FINISHING_WAITING_FOR_COLLABORATION due to: {reason}")
                 return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
-            self._state = WriteTransactionState.FINISHING_STALE
-            logger.warning(f"Entered FINISHING_STALE due to: {reason}")
-            return {"success": False, "reason": reason, "state": "STALE"}
+            else:
+                self._state = WriteTransactionState.FINISHING_STALE
+                logger.warning(f"Entered FINISHING_STALE due to: {reason}")
+                return {"success": False, "reason": reason, "state": "STALE"}
+
         current_gen = self._collab_manager.get_lock_generation()
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
             self._state = WriteTransactionState.FINISHING_STALE
             logger.warning(f"Entered FINISHING_STALE due to: {reason}")
             return {"success": False, "reason": reason, "state": "STALE"}
+
         if self._collab_manager._sync_provider:
             try:
                 current_main = self._collab_manager._sync_provider.get_remote_main_commit()
@@ -575,109 +700,190 @@ class WriteTransactionManager:
                     reason = "MAIN verification failed: cannot get remote commit"
                     logger.warning(f"Entered PUBLISH_CONFLICT due to: {reason}")
                     return {"success": False, "reason": reason, "state": "CONFLICT"}
+
                 if self._base_main_commit is not None and current_main != self._base_main_commit:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
                     reason = f"MAIN conflict: base={self._base_main_commit[:8]}, current={current_main[:8]}"
                     logger.warning(f"Entered PUBLISH_CONFLICT due to: {reason}")
                     return {"success": False, "reason": reason, "state": "CONFLICT"}
+
                 if self._base_main_commit is None:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
                     reason = "MAIN base unknown: cannot verify concurrency"
                     logger.warning(f"Entered PUBLISH_CONFLICT due to: {reason}")
                     return {"success": False, "reason": reason, "state": "CONFLICT"}
+
             except Exception as e:
                 self._state = WriteTransactionState.PUBLISH_CONFLICT
                 reason = f"MAIN verification unavailable: {e}"
                 logger.warning(f"Entered PUBLISH_CONFLICT due to: {reason}")
                 return {"success": False, "reason": reason, "state": "CONFLICT"}
+
         now = datetime.now()
         deadline = now + timedelta(seconds=120)
         self._finishing_started_at = now
         self._finishing_deadline = deadline
         self._publish_intent = True
         self._finishing_retry_count = 0
+
         self._collab_manager._lock.set_finishing_data(now, deadline, True)
         self._state = WriteTransactionState.FINISHING
+
         logger.info(f"Entered FINISHING: started={now}, deadline={deadline}")
-        return {"success": True, "reason": "OK", "state": "FINISHING", "deadline": deadline}
+        return {
+            "success": True,
+            "reason": "OK",
+            "state": "FINISHING",
+            "deadline": deadline,
+        }
 
     def refresh_finishing_authority(self) -> Dict[str, Any]:
-        if self._state not in (WriteTransactionState.FINISHING, WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION):
+        if self._state not in (
+            WriteTransactionState.FINISHING,
+            WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
+        ):
             return {"success": False, "reason": f"Not in finishing state: {self._state.name}"}
-        if self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION and self._finishing_deadline and datetime.now() >= self._finishing_deadline:
+
+        if (
+            self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
+            and self._finishing_deadline
+            and datetime.now() >= self._finishing_deadline
+        ):
             self._state = WriteTransactionState.FINISHING_STALE
             logger.warning("Finishing deadline expired while waiting -> FINISHING_STALE")
             return {"success": False, "reason": "Deadline expired", "state": "STALE"}
+
         if not self._collab_manager.is_collaboration_available():
             if self._state != WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
                 self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
                 logger.warning("Collaboration unavailable -> FINISHING_WAITING_FOR_COLLABORATION")
-            return {"success": False, "reason": "Collaboration unavailable", "state": "WAITING_FOR_COLLABORATION"}
+            return {
+                "success": False,
+                "reason": "Collaboration unavailable",
+                "state": "WAITING_FOR_COLLABORATION",
+            }
+
         if self._state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
             self._state = WriteTransactionState.FINISHING
             logger.info("Collaboration restored -> FINISHING")
+
         if self._finishing_deadline and datetime.now() >= self._finishing_deadline:
             self._state = WriteTransactionState.FINISHING_STALE
             logger.warning("Finishing deadline expired -> FINISHING_STALE")
             return {"success": False, "reason": "Deadline expired", "state": "STALE"}
+
         session = self._collab_manager.get_session()
         if not session:
             self._state = WriteTransactionState.FINISHING_STALE
             return {"success": False, "reason": "No session", "state": "STALE"}
+
         auth = self._collab_manager.validate_write_authority(session)
+
         if auth.get("valid", False):
             current_gen = self._collab_manager.get_lock_generation()
             if current_gen != self._expected_generation:
                 self._state = WriteTransactionState.FINISHING_STALE
-                return {"success": False, "reason": f"Generation mismatch: expected {self._expected_generation}, current {current_gen}", "state": "STALE"}
+                reason = (
+                    f"Generation mismatch: expected {self._expected_generation}, "
+                    f"current {current_gen}"
+                )
+                return {"success": False, "reason": reason, "state": "STALE"}
+
             if self._base_main_commit and self._collab_manager._sync_provider:
                 try:
                     current_main = self._collab_manager._sync_provider.get_remote_main_commit()
                 except Exception as e:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
-                    return {"success": False, "reason": f"MAIN verification unavailable: {e}", "state": "CONFLICT"}
+                    reason = f"MAIN verification unavailable: {e}"
+                    return {"success": False, "reason": reason, "state": "CONFLICT"}
                 if current_main is None:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
-                    return {"success": False, "reason": "MAIN verification failed: cannot get remote commit", "state": "CONFLICT"}
+                    reason = "MAIN verification failed: cannot get remote commit"
+                    return {"success": False, "reason": reason, "state": "CONFLICT"}
                 if current_main != self._base_main_commit:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
-                    return {"success": False, "reason": f"MAIN conflict: base={self._base_main_commit[:8]}, current={current_main[:8]}", "state": "CONFLICT"}
+                    reason = (
+                        f"MAIN conflict: base={self._base_main_commit[:8]}, "
+                        f"current={current_main[:8]}"
+                    )
+                    return {"success": False, "reason": reason, "state": "CONFLICT"}
+
             return {"success": True, "reason": "Authority valid", "state": self._state.name}
+
         reason = auth.get("reason", "Unknown")
         if "unavailable" in reason.lower():
             self._state = WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION
-            return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
+            return {
+                "success": False,
+                "reason": reason,
+                "state": "WAITING_FOR_COLLABORATION",
+            }
+
         provider = getattr(self._collab_manager, "_sync_provider", None)
-        if "lease expired or missing" in reason.lower() and provider is not None and self._base_main_commit:
+        if (
+            "lease expired or missing" in reason.lower()
+            and provider is not None
+            and self._base_main_commit
+        ):
             try:
                 remote = provider.remote_lock_status()
-                if isinstance(remote, dict) and remote.get("locked") and remote.get("session_id") == session.session_id and remote.get("lock_generation") == self._expected_generation:
+                if (
+                    isinstance(remote, dict)
+                    and remote.get("locked")
+                    and remote.get("session_id") == session.session_id
+                    and remote.get("lock_generation") == self._expected_generation
+                ):
                     try:
                         current_main = provider.get_remote_main_commit()
                     except Exception as exc:
                         self._state = WriteTransactionState.PUBLISH_CONFLICT
-                        return {"success": False, "reason": f"MAIN verification unavailable: {exc}", "state": "CONFLICT"}
+                        return {
+                            "success": False,
+                            "reason": f"MAIN verification unavailable: {exc}",
+                            "state": "CONFLICT",
+                        }
                     if current_main is None or current_main != self._base_main_commit:
                         self._state = WriteTransactionState.PUBLISH_CONFLICT
-                        return {"success": False, "reason": "MAIN verification failed", "state": "CONFLICT"}
+                        return {
+                            "success": False,
+                            "reason": "MAIN verification failed",
+                            "state": "CONFLICT",
+                        }
             except Exception:
                 pass
+
         self._state = WriteTransactionState.FINISHING_STALE
         logger.warning(f"Authority invalid -> FINISHING_STALE: {reason}")
         return {"success": False, "reason": reason, "state": "STALE"}
 
     def is_finishing_deadline_expired(self) -> bool:
-        return self._finishing_deadline is not None and datetime.now() >= self._finishing_deadline
+        if self._finishing_deadline is None:
+            return False
+        return datetime.now() >= self._finishing_deadline
 
     def reset_finishing(self) -> None:
+        """Reset local finishing state and collaboration finishing metadata."""
         self._is_finishing = False
+
         if self._collab_manager is None:
             return
-        clear_remote = getattr(self._collab_manager, "clear_finishing_data", None)
+
+        clear_remote = getattr(
+            self._collab_manager,
+            "clear_finishing_data",
+            None,
+        )
+
         if callable(clear_remote):
             clear_remote()
             return
+
         remote_lock = getattr(self._collab_manager, "_lock", None)
-        clear_lock_data = getattr(remote_lock, "clear_finishing_data", None)
+        clear_lock_data = getattr(
+            remote_lock,
+            "clear_finishing_data",
+            None,
+        )
+
         if callable(clear_lock_data):
             clear_lock_data()
