@@ -156,9 +156,15 @@ def generate_windows_app_icon() -> Path:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-        if isinstance(target, ast.Name) and target.id == "APP_LOGO_PNG_BASE64":
-            encoded_logo = ast.literal_eval(node.value)
-            break
+        if not (isinstance(target, ast.Name) and target.id == "APP_LOGO_PNG_BASE64"):
+            continue
+        value = node.value
+        if isinstance(value, (ast.Tuple, ast.List)):
+            parts = [ast.literal_eval(item) for item in value.elts]
+            encoded_logo = "".join(parts)
+        else:
+            encoded_logo = ast.literal_eval(value)
+        break
     if not isinstance(encoded_logo, str):
         raise RuntimeError("APP_LOGO_PNG_BASE64 was not found in branding/app_logo.py")
 
