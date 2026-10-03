@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Build the CenterManager Windows production release candidate."""
 
+import base64
 import hashlib
 import json
 import os
@@ -144,6 +145,28 @@ def generate_windows_version_metadata() -> Path:
     return metadata_path
 
 
+def generate_windows_app_icon() -> Path:
+    """Materialize the embedded AN TECHKIDS PNG as an ICO for PyInstaller."""
+    from PIL import Image
+
+    source = PROJECT_ROOT / "src" / "centermanager" / "branding" / "app_logo.py"
+    namespace: dict[str, object] = {}
+    exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), namespace)
+    png_bytes = base64.b64decode(namespace["APP_LOGO_PNG_BASE64"])
+
+    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
+    png_path = BUILD_ROOT / "app_logo.generated.png"
+    ico_path = BUILD_ROOT / "app_logo.generated.ico"
+    png_path.write_bytes(png_bytes)
+    with Image.open(png_path) as image:
+        image.convert("RGBA").save(
+            ico_path,
+            format="ICO",
+            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        )
+    return ico_path
+
+
 def resolve_source_commit() -> str:
     github_sha = os.environ.get("GITHUB_SHA", "").strip()
     if re.fullmatch(r"[0-9a-fA-F]{40}", github_sha):
@@ -225,8 +248,10 @@ def _pyinstaller_hidden_imports() -> list[str]:
 
 def build_executable() -> Path:
     version_metadata = generate_windows_version_metadata()
+    app_icon = generate_windows_app_icon()
     args = ["run.py", "--name", APP_NAME, "--onefile", "--windowed", "--paths", str(PROJECT_ROOT / "src"),
-            "--version-file", str(version_metadata), "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
+            "--version-file", str(version_metadata), "--icon", str(app_icon),
+            "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
             "--add-data", f"{PROJECT_ROOT / 'migrations'}{os.pathsep}migrations"]
     for module in _pyinstaller_hidden_imports():
         args.extend(["--hidden-import", module])
