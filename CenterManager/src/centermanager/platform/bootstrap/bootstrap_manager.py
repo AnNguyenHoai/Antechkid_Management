@@ -45,9 +45,6 @@ class BootstrapManager:
             self._lifecycle.transition_to(PlatformLifecycleState.INITIALIZING)
             logger.info("[BOOTSTRAP] Starting platform")
 
-            # Load the current configuration before bootstrap. Local Git
-            # provisioning may rewrite it below, so it is explicitly reloaded
-            # before contexts are built.
             config = get_config().raw
             paths = get_paths()
 
@@ -69,9 +66,8 @@ class BootstrapManager:
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            # GitConfigService may have provisioned/migrated the credential and
-            # rewritten config.json. Avoid building DeploymentContext from the
-            # stale Config singleton snapshot captured before the dialog.
+            # Provisioning may rewrite config.json. Do not construct contexts
+            # from the Config singleton snapshot captured before the dialog.
             config = load_config(paths.config_file)
 
             self._repo_manager.refresh()
@@ -120,7 +116,7 @@ class BootstrapManager:
             return False
 
     def _ensure_authoritative_runtime_database(self, paths) -> bool:
-        """Require Git config and install the remote database into runtime."""
+        """Provision local secrets, then install the remote authoritative DB."""
         from centermanager.core.git_locator import locate_git
         from centermanager.services.git_config_service import GitConfigService
         from centermanager.ui.git_config_dialog import GitConfigDialog
@@ -128,6 +124,11 @@ class BootstrapManager:
         from centermanager.platform.sync import StartupSynchronization
         from centermanager.database.engine import inspect_runtime_database
         from centermanager.database.lifecycle import DatabaseLifecycleState
+        from centermanager.database.encryption import (
+            DatabaseKeyStore,
+            DatabaseKeyUnavailable,
+            database_encryption_required,
+        )
 
         git_executable = locate_git()
         if not git_executable:
@@ -137,28 +138,60 @@ class BootstrapManager:
         git_config_service = GitConfigService()
         git_config = git_config_service.get_config() if git_config_service.has_config() else None
 
-        if git_config is None:
-            credential_status = git_config_service.credential_status()
-            if credential_status in (
-                "not_provisioned_on_this_machine",
-                "legacy_not_provisioned_on_this_machine",
-            ):
+        key_store = DatabaseKeyStore()
+        database_key_needs_provisioning = False
+        if database_encryption_required():
+            if not key_store.bundle_path.is_file():
+                database_key_needs_provisioning = True
                 logger.info(
-                    "[BOOTSTRAP] Git credential is not provisioned for this Windows user/machine; requesting local provisioning"
+                    "[BOOTSTRAP] Workspace database key is not provisioned for this Windows user/machine"
                 )
             else:
-                logger.info(
-                    "[BOOTSTRAP] Git configuration is not ready (%s); requesting local provisioning",
-                    credential_status,
-                )
-            dialog = GitConfigDialog(git_config_service)
+                try:
+                    key_store.load()
+                except DatabaseKeyUnavailable:
+                    database_key_needs_provisioning = True
+                    logger.info(
+                        "[BOOTSTRAP] Workspace database key bundle is unavailable for this Windows user/machine; requesting destination provisioning"
+                    )
+
+        if git_config is None or database_key_needs_provisioning:
+            credential_status = git_config_service.credential_status()
+            if git_config is None:
+                if credential_status in (
+                    "not_provisioned_on_this_machine",
+                    "legacy_not_provisioned_on_this_machine",
+                ):
+                    logger.info(
+                        "[BOOTSTRAP] Git credential is not provisioned for this Windows user/machine"
+                    )
+                else:
+                    logger.info(
+                        "[BOOTSTRAP] Git configuration is not ready (%s)", credential_status
+                    )
+
+            logger.info("[BOOTSTRAP] Requesting destination-bound workstation provisioning")
+            dialog = GitConfigDialog(
+                git_config_service,
+                require_database_key=database_key_needs_provisioning,
+            )
             if dialog.exec() != dialog.DialogCode.Accepted:
-                logger.warning("[BOOTSTRAP] Git configuration cancelled; startup aborted")
+                logger.warning("[BOOTSTRAP] Workstation provisioning cancelled; startup aborted")
                 return False
+
             git_config = git_config_service.get_config()
             if git_config is None:
-                logger.error("[BOOTSTRAP] Git configuration was not available after local provisioning")
+                logger.error("[BOOTSTRAP] Git configuration was not available after provisioning")
                 return False
+
+            if database_encryption_required():
+                try:
+                    key_store.load()
+                except DatabaseKeyUnavailable:
+                    logger.error(
+                        "[BOOTSTRAP] Workspace database key is still unavailable after provisioning"
+                    )
+                    return False
 
         provider = GitSynchronizationProvider(
             repo_path=paths.runtime_root / "repository",

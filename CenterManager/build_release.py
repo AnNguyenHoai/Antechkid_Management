@@ -43,11 +43,14 @@ PORTABLE_GIT_VERSION = "2.54.0"
 PORTABLE_GIT_URL = "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/MinGit-2.54.0-64-bit.zip"
 PORTABLE_GIT_SHA256 = "04f937e1f0918b17b9be6f2294cb2bb66e96e1d9832d1c298e2de088a1d0e668"
 
+# A release is a clean template. Machine/user-bound secret material must never
+# be copied from the build workstation into a destination package.
 RUNTIME_EXCLUDES = shutil.ignore_patterns(
     "*.db", "*.db-journal", "*.db-wal", "*.db-shm", "*.sqlite", "*.sqlite3",
     "logs", "Logs", "cache", "Cache", "temp", "Temp", "backup", "Backup",
     "repository", ".git", "__pycache__", "attachments", "Attachments", "Attachment",
     "*.log", "*.tmp", "*.bak", "*.pyc", ".DS_Store", "Thumbs.db",
+    "*.dpapi", "git_provisioning_private.json", "config.json",
 )
 
 
@@ -172,12 +175,14 @@ def write_release_readme(source_commit: str) -> None:
     (PACKAGE_ROOT / "README_RELEASE.md").write_text(
         f"# CenterManager {VERSION}\n\nWindows {release_channel()} build.\n\nSource commit: `{source_commit}`\n\n"
         "## Start\n\nRun CenterManager.exe. Mutable application data is stored in the runtime folder beside the executable.\n\n"
-        "## Git synchronization\n\n"
+        "## Secure workstation provisioning\n\n"
         f"This package bundles Git for Windows MinGit {PORTABLE_GIT_VERSION}; no system Git installation is required.\n\n"
-        "For a new destination machine, CenterManager exports a provisioning request. On an administrator-controlled Windows PC, run `AdminTools/GitProvisioningAdmin.exe`, select that request, enter the Git repository information and PAT, and create the encrypted destination-bound bundle. Send only that bundle back to the destination and import it in CenterManager. The destination operator never needs the plaintext PAT.\n\n"
+        "A clean destination exports a provisioning request. Run `AdminTools/GitProvisioningAdmin.exe` only from an already-authorized CenterManager installation that can open the production database. The admin tool combines the Git credential with that installation's existing shared workspace database key, encrypts both for the destination request, and never creates a replacement database key. Import the returned bundle on the destination; both secrets are then re-wrapped with destination-local Windows DPAPI.\n\n"
         "## Important\n\n- Do not delete or rename the runtime or git folders.\n"
+        "- Release packages intentionally contain no config.json, DPAPI bundle, or provisioning private identity from the build machine.\n"
         "- Keep AdminTools/GitProvisioningAdmin.exe under administrator control; it is not needed for normal destination operation.\n"
         "- When Git synchronization is configured, the Git repository database is authoritative and startup refuses to use a stale local database if synchronization fails.\n"
+        "- Never generate a new database key for an existing authoritative encrypted database.\n"
         "- Use the application's backup flow for test data.\n- Alembic migration assets are shipped with the release and are required for startup.\n"
         "- Verify the distributed ZIP against its `.sha256` file before installation.\n- If startup fails, inspect error.log beside the executable and runtime/Logs/.\n",
         encoding="utf-8",
@@ -189,11 +194,14 @@ def write_uat_checklist() -> None:
         f"# CenterManager {VERSION} Production Candidate UAT Checklist\n\n"
         "- [ ] Verify RELEASE_MANIFEST.json version and source commit match the approved release.\n"
         "- [ ] Verify the release ZIP against the distributed SHA-256 checksum.\n"
+        "- [ ] Confirm the release contains no runtime/Config/config.json, *.dpapi, or git_provisioning_private.json from the build machine.\n"
         "- [ ] Verify AdminTools/GitProvisioningAdmin.exe is present and launches without Python installed.\n"
-        "- [ ] On a clean destination, export CenterManager_Git_Provisioning_Request.json.\n"
-        "- [ ] On an administrator-controlled PC, create a destination-bound bundle with GitProvisioningAdmin.exe.\n"
-        "- [ ] Import the bundle on the destination and confirm restart does not request provisioning again.\n"
+        "- [ ] On a clean destination, export CenterManager_Workstation_Provisioning_Request.json.\n"
+        "- [ ] On an already-authorized administrator PC, create a destination-bound workstation bundle.\n"
+        "- [ ] Import the bundle and confirm both Git synchronization and encrypted database startup succeed.\n"
+        "- [ ] Restart the destination and confirm provisioning is not requested again.\n"
         "- [ ] Confirm a bundle created for one destination is rejected by another destination.\n"
+        "- [ ] Confirm a copied foreign-DPAPI database_key.dpapi triggers provisioning and is replaced only after authenticated bundle import.\n"
         "- [ ] Launch CenterManager.exe from a clean Windows user directory.\n- [ ] Login succeeds with the test account.\n"
         "- [ ] Student workspace and navigation work.\n- [ ] Class and Teacher workspaces open.\n"
         "- [ ] Session / Attendance / Assessment flows open.\n- [ ] Finance workspace opens.\n- [ ] Student Timeline opens.\n"
@@ -234,7 +242,8 @@ def build_admin_provisioning_executable() -> Path:
     args = [
         "git_provisioning_admin.py", "--name", ADMIN_TOOL_NAME, "--onefile", "--windowed",
         "--paths", str(PROJECT_ROOT / "src"), "--hidden-import", "centermanager.services.git_provisioning",
-        "--hidden-import", "centermanager.core.secret_store", "--hidden-import", "cryptography", "--hidden-import", "PySide6",
+        "--hidden-import", "centermanager.database.encryption", "--hidden-import", "centermanager.core.secret_store",
+        "--hidden-import", "cryptography", "--hidden-import", "PySide6",
     ]
     PyInstaller.__main__.run(args)
     executable = DIST_ROOT / f"{ADMIN_TOOL_NAME}.exe"
