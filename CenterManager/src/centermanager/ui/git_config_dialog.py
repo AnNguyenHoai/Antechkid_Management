@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Git configuration provisioning without exposing the Git token to operators."""
+"""Destination-bound workstation provisioning without exposing secrets."""
 
 import json
 import logging
@@ -22,6 +22,8 @@ from centermanager.services.git_config_service import GitConfig, GitConfigServic
 from centermanager.services.git_provisioning import (
     ProvisioningError,
     decrypt_bundle,
+    parse_provisioning_payload,
+    provision_workspace_database_key,
     write_destination_request,
 )
 
@@ -29,13 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class GitConfigDialog(QDialog):
-    """Provision one destination from an administrator-created encrypted bundle.
-
-    The destination exports only a public-key request. The administrator uses
-    that request to encrypt the Git configuration. The Git token exists as
-    plaintext only transiently inside this process after bundle decryption and
-    is immediately re-wrapped with the destination Windows user's DPAPI store.
-    """
+    """Provision destination Git access and, when required, the shared DB key."""
 
     config_saved = Signal()
 
@@ -43,11 +39,14 @@ class GitConfigDialog(QDialog):
         self,
         git_config_service: GitConfigService,
         parent: Optional[QWidget] = None,
+        *,
+        require_database_key: bool = False,
     ) -> None:
         super().__init__(parent)
         self._git_config_service = git_config_service
-        self.setWindowTitle("Git Provisioning")
-        self.setMinimumSize(640, 360)
+        self._require_database_key = bool(require_database_key)
+        self.setWindowTitle("Workstation Provisioning")
+        self.setMinimumSize(660, 380)
         self.setModal(True)
         self._setup_ui()
 
@@ -55,17 +54,23 @@ class GitConfigDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
-        header = QLabel("🔐 Secure Git Provisioning")
+        header = QLabel("🔐 Secure Workstation Provisioning")
         header.setStyleSheet("font-size: 20px; font-weight: bold;")
         layout.addWidget(header)
 
+        secret_description = (
+            "Git credential and the shared encrypted-database workspace key"
+            if self._require_database_key
+            else "Git credential"
+        )
         desc = QLabel(
-            "This Windows user/machine does not yet have a usable Git credential.\n\n"
-            "1. Export a provisioning request and send that request to the administrator. "
-            "It contains only a public key and no secret.\n"
-            "2. Import the encrypted provisioning bundle returned by the administrator.\n\n"
-            "The Git token is never displayed or entered on this computer. After import, "
-            "it is protected locally with Windows DPAPI."
+            f"This Windows user/machine does not yet have usable {secret_description}.\n\n"
+            "1. Export a provisioning request and send only that public request to the administrator.\n"
+            "2. Ask the administrator to create a destination-bound workstation bundle from an "
+            "already-authorized CenterManager installation.\n"
+            "3. Import the encrypted bundle returned by the administrator.\n\n"
+            "Secrets are never displayed or entered on this computer. After import they are "
+            "protected locally with Windows DPAPI."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #555; font-size: 13px;")
@@ -83,7 +88,7 @@ class GitConfigDialog(QDialog):
             layout.addWidget(metadata)
 
         self.status_label = QLabel(
-            "Credential status: not provisioned for this Windows identity."
+            "Provisioning status: secrets are not ready for this Windows identity."
         )
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #a15c00; font-size: 13px;")
@@ -106,15 +111,13 @@ class GitConfigDialog(QDialog):
 
     @property
     def _config_path(self) -> Path:
-        # Keep the provisioning identity next to the local config used by the
-        # service, without exposing a new public persistence contract.
         return self._git_config_service._config_path
 
     def _export_request(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Git Provisioning Request",
-            "CenterManager_Git_Provisioning_Request.json",
+            "Export Workstation Provisioning Request",
+            "CenterManager_Workstation_Provisioning_Request.json",
             "JSON files (*.json)",
         )
         if not path:
@@ -126,13 +129,13 @@ class GitConfigDialog(QDialog):
             )
             self.status_label.setStyleSheet("color: #2e7d32; font-size: 13px;")
         except Exception:
-            logger.exception("Failed to export Git provisioning request")
+            logger.exception("Failed to export workstation provisioning request")
             QMessageBox.critical(self, "Export Error", "Could not create the provisioning request.")
 
     def _import_bundle(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import Git Provisioning Bundle",
+            "Import Workstation Provisioning Bundle",
             "",
             "JSON files (*.json)",
         )
@@ -141,33 +144,45 @@ class GitConfigDialog(QDialog):
 
         config = None
         payload = None
+        workspace_key = None
+        git_payload = None
         try:
             bundle = json.loads(Path(path).read_text(encoding="utf-8"))
             payload = decrypt_bundle(self._config_path, bundle)
-            config = GitConfig.from_dict(payload)
+            git_payload, workspace_key = parse_provisioning_payload(payload)
 
-            # save_config validates the remote before persisting. On success it
-            # stores only portable metadata plus a DPAPI-wrapped local token.
+            if self._require_database_key and workspace_key is None:
+                raise ProvisioningError(
+                    "This legacy Git-only bundle does not contain the shared workspace database key. "
+                    "Ask the administrator to create a new workstation provisioning bundle."
+                )
+
+            # Re-wrap the authenticated shared key for this destination first.
+            # The helper refuses to replace a different valid local workspace key,
+            # but can repair a copied foreign-DPAPI bundle.
+            if workspace_key is not None:
+                provision_workspace_database_key(workspace_key)
+
+            config = GitConfig.from_dict(git_payload)
+            # save_config validates the remote before persisting and stores the
+            # token only as destination-local DPAPI secret material.
             if not self._git_config_service.save_config(config):
                 raise ProvisioningError(
                     "The encrypted credential was opened, but Git validation failed."
                 )
 
-            self.status_label.setText("✅ Git credential provisioned successfully.")
+            self.status_label.setText("✅ Workstation secrets provisioned successfully.")
             self.status_label.setStyleSheet("color: #2e7d32; font-size: 13px;")
             self.config_saved.emit()
             self.accept()
         except (ProvisioningError, ValueError, KeyError, json.JSONDecodeError) as exc:
-            logger.warning("Git provisioning bundle rejected: %s", exc)
-            QMessageBox.warning(
-                self,
-                "Provisioning Failed",
-                "The bundle is invalid, belongs to another destination, or the Git credential failed validation.",
-            )
+            logger.warning("Workstation provisioning bundle rejected: %s", exc)
+            QMessageBox.warning(self, "Provisioning Failed", str(exc))
         except Exception:
-            logger.exception("Failed to import Git provisioning bundle")
-            QMessageBox.critical(self, "Provisioning Error", "Could not provision Git access.")
+            logger.exception("Failed to import workstation provisioning bundle")
+            QMessageBox.critical(self, "Provisioning Error", "Could not provision this workstation.")
         finally:
-            # Best-effort removal of references to plaintext credential objects.
             config = None
             payload = None
+            workspace_key = None
+            git_payload = None
