@@ -27,10 +27,20 @@ def test_admin_tool_uses_password_field_destination_crypto_and_existing_db_key()
     assert "create_bundle(request, payload)" in source
     assert '"token": token' in source
     assert "build_workstation_payload(git_payload, workspace_key)" in source
-    assert "DatabaseKeyStore(bundle_path=bundle_path).load()" in source
+    assert "DatabaseKeyStore(bundle_path=_workspace_key_path(root)).load()" in source
     assert ".create()" not in source
     assert "self.token_edit.clear()" in source
     assert "--token" not in source
+
+
+def test_admin_tool_selects_authorized_installation_instead_of_copying_dpapi():
+    source = _read("git_provisioning_admin.py")
+    assert 'form.addRow("Authorized installation:", authority_row)' in source
+    assert "QFileDialog.getExistingDirectory" in source
+    assert "_load_existing_workspace_key(authority_root)" in source
+    assert '"runtime" / "Config" / "database_key.dpapi"' in source
+    assert "database_key.dpapi file is not" in source
+    assert "copied into the clean destination release" in source
 
 
 def test_release_documents_no_python_admin_flow():
