@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Build the CenterManager Windows production release candidate."""
 
-import base64
 import hashlib
 import json
 import os
@@ -146,7 +145,9 @@ def generate_windows_version_metadata() -> Path:
 
 
 def generate_windows_app_icon() -> Path:
-    """Materialize the embedded AN TECHKIDS logo for PyInstaller's Windows icon conversion."""
+    """Materialize the embedded AN TECHKIDS logo for PyInstaller."""
+    import base64
+
     source = PROJECT_ROOT / "src" / "centermanager" / "branding" / "app_logo.py"
     namespace: dict[str, object] = {}
     exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), namespace)
