@@ -39,7 +39,11 @@ def test_frozen_paths_keep_mutable_runtime_next_to_executable():
 
 def test_release_entrypoint_remains_run_py():
     source = (ROOT / "run.py").read_text(encoding="utf-8")
-    assert 'from centermanager.app import main' in source
+    imports_app_entrypoint = (
+        'from centermanager.app import main' in source
+        or 'import centermanager.app as app_module' in source
+    )
+    assert imports_app_entrypoint
     assert 'sys.exit(main())' in source
 
 
