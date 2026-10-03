@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from centermanager.core.paths import get_paths
+from centermanager.database.wal_safety import checkpoint_runtime_database_for_publish
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
 
 logger = logging.getLogger(__name__)
@@ -455,6 +456,11 @@ class WriteTransactionManager:
             if not repo_root.exists():
                 logger.warning("Repository not found, skipping copy")
                 return True
+
+            # Production uses WAL mode, while Git publishes center.db as a
+            # single-file artifact. Fail closed unless committed WAL frames have
+            # first been checkpointed into the main database file.
+            checkpoint_runtime_database_for_publish()
 
             db_dst = repo_root / "database"
             db_dst.mkdir(parents=True, exist_ok=True)
