@@ -34,6 +34,7 @@ from centermanager.database.encryption import (
     load_sqlcipher_driver,
 )
 from centermanager.database.engine import runtime_dbapi_connection
+from centermanager.database.wal_safety import checkpoint_runtime_database_for_publish
 
 
 class DatabaseArtifactSecurityError(DatabaseEncryptionError):
@@ -246,6 +247,10 @@ def materialize_runtime_database_to_repository() -> Path:
 
     if not encrypted and not runtime_db.exists():
         return repo_db
+
+    # This function is also a publication entry point outside WriteTransaction.
+    # Never allow a center.db-only Git artifact to omit committed WAL frames.
+    checkpoint_runtime_database_for_publish()
 
     key = DatabaseKeyStore().load() if encrypted else None
     validate_database_artifact(
