@@ -107,7 +107,7 @@ def test_same_valid_local_workspace_key_is_noop(tmp_path):
 
 def test_admin_tool_loads_existing_key_and_never_creates_one():
     source = (ROOT / "git_provisioning_admin.py").read_text(encoding="utf-8")
-    assert "DatabaseKeyStore(bundle_path=bundle_path).load()" in source
+    assert "DatabaseKeyStore(bundle_path=_workspace_key_path(root)).load()" in source
     assert ".create()" not in source
     assert "build_workstation_payload" in source
 
