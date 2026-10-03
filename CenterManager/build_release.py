@@ -144,36 +144,6 @@ def generate_windows_version_metadata() -> Path:
     return metadata_path
 
 
-def generate_windows_app_icon() -> Path:
-    """Materialize the embedded AN TECHKIDS logo for PyInstaller."""
-    import ast
-    import base64
-
-    source = PROJECT_ROOT / "src" / "centermanager" / "branding" / "app_logo.py"
-    module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
-    encoded_logo = None
-    for node in module.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-        if not (isinstance(target, ast.Name) and target.id == "APP_LOGO_PNG_BASE64"):
-            continue
-        value = node.value
-        if isinstance(value, (ast.Tuple, ast.List)):
-            parts = [ast.literal_eval(item) for item in value.elts]
-            encoded_logo = "".join(parts)
-        else:
-            encoded_logo = ast.literal_eval(value)
-        break
-    if not isinstance(encoded_logo, str):
-        raise RuntimeError("APP_LOGO_PNG_BASE64 was not found in branding/app_logo.py")
-
-    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
-    png_path = BUILD_ROOT / "app_logo.generated.png"
-    png_path.write_bytes(base64.b64decode(encoded_logo))
-    return png_path
-
-
 def resolve_source_commit() -> str:
     github_sha = os.environ.get("GITHUB_SHA", "").strip()
     if re.fullmatch(r"[0-9a-fA-F]{40}", github_sha):
@@ -255,10 +225,8 @@ def _pyinstaller_hidden_imports() -> list[str]:
 
 def build_executable() -> Path:
     version_metadata = generate_windows_version_metadata()
-    app_icon = generate_windows_app_icon()
     args = ["run.py", "--name", APP_NAME, "--onefile", "--windowed", "--paths", str(PROJECT_ROOT / "src"),
-            "--version-file", str(version_metadata), "--icon", str(app_icon),
-            "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
+            "--version-file", str(version_metadata), "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
             "--add-data", f"{PROJECT_ROOT / 'migrations'}{os.pathsep}migrations"]
     for module in _pyinstaller_hidden_imports():
         args.extend(["--hidden-import", module])
