@@ -1,0 +1,1 @@
+AN TECHKIDS application icon is embedded in run.py so PyInstaller one-file builds require no external branding asset.
