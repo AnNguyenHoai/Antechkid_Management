@@ -172,7 +172,9 @@ class ApplicationTopBar(QFrame):
         """Project routine busy state inline; FeedbackHost is not used here."""
         if self._editing_operation_id is not None: return False
         self._editing_operation_id = operation_id
-        self.set_transaction_text(message); self._animate_state_change()
+        self.set_transaction_text(message)
+        animate = getattr(self, "_animate_state_change", None)
+        if callable(animate): animate()
         for button in (self.start_edit_button, self.finish_edit_button, self.cancel_edit_button): button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor); QApplication.processEvents()
         try:
@@ -181,7 +183,7 @@ class ApplicationTopBar(QFrame):
             QApplication.restoreOverrideCursor(); self._editing_operation_id = None
             waiting = self.start_edit_button.text().strip().lower().startswith("waiting")
             self.start_edit_button.setEnabled(not waiting); self.finish_edit_button.setEnabled(True); self.cancel_edit_button.setEnabled(True)
-            self._animate_state_change()
+            if callable(animate): animate()
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         changed = self.mode_badge.text() != f"Mode: {mode}"; self.mode_badge.setText(f"Mode: {mode}"); self.mode_badge.set_tone(tone)
@@ -194,6 +196,8 @@ class ApplicationTopBar(QFrame):
     def set_transaction_text(self, text: str) -> None: self.transaction_label.setText(text)
     def set_runtime_version(self, version: str) -> None: self.version_label.setText(f"Runtime: v{version}" if not version.startswith("v") else f"Runtime: {version}")
     def set_sync_status(self, status: str) -> None: self.sync_label.setText(f"Sync: {status}")
+
+    # ---- UI-PROD-07 feedback API ----
     def show_feedback(self, request: FeedbackRequest) -> FeedbackRequest: return self.feedback_controller.publish(request)
     def notify_info(self, message: str, **kwargs) -> FeedbackRequest: return self.feedback_controller.info(message, **kwargs)
     def notify_success(self, message: str, **kwargs) -> FeedbackRequest: return self.feedback_controller.success(message, **kwargs)
