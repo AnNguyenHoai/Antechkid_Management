@@ -148,6 +148,7 @@ LEGACY_CAPABILITY_ALIASES = {
 }
 
 ADMIN_ONLY_CAPABILITIES = frozenset({
+    Capability.USER_DELETE.value,
     Capability.WORK_REGISTRATION_PERIOD_ADMIN_OVERRIDE.value,
     Capability.WORK_REGISTRATION_DELETE.value,
     Capability.EMPLOYEE_DELETE.value,
