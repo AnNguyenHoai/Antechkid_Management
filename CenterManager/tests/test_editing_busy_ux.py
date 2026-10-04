@@ -50,6 +50,8 @@ def test_edit_operation_paints_busy_state_and_blocks_reentry(monkeypatch):
         lambda *args: process_events_calls.append(True),
     )
 
+    # Legacy feedback-operation hooks remain present for real notifications, but
+    # routine Start/Finish Editing busy state is now owned by the fixed header.
     top_bar = SimpleNamespace(
         _editing_operation_id=None,
         start_edit_button=_ButtonStub("Start editing"),
@@ -83,8 +85,9 @@ def test_edit_operation_paints_busy_state_and_blocks_reentry(monkeypatch):
     assert result is True
     assert signal.emits == 1
     assert reentry_results == [False]
-    assert started == [("start-editing", "Starting editing…")]
-    assert finished == ["start-editing"]
+    # PR-C deliberately removed routine edit operations from FeedbackHost.
+    assert started == []
+    assert finished == []
     assert transaction_text == ["Starting editing…"]
     assert len(process_events_calls) == 1
     assert cursor_calls[0][0] == "set"
