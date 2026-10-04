@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from centermanager.core.paths import get_paths
-from centermanager.database.wal_safety import checkpoint_runtime_database_for_publish
+from centermanager.database.wal_safety import copy_runtime_database_for_publish
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
 
 logger = logging.getLogger(__name__)
@@ -457,28 +457,14 @@ class WriteTransactionManager:
                 logger.warning("Repository not found, skipping copy")
                 return True
 
-            # Production uses WAL mode, while Git publishes center.db as a
-            # single-file artifact. Fail closed unless committed WAL frames have
-            # first been checkpointed into the main database file.
-            checkpoint_runtime_database_for_publish()
-
             db_dst = repo_root / "database"
             db_dst.mkdir(parents=True, exist_ok=True)
             dst_file = db_dst / "center.db"
 
-            with open(db_src, 'rb') as fsrc:
-                with open(dst_file, 'wb') as fdst:
-                    fdst.write(fsrc.read())
-                    fdst.flush()
-                    os.fsync(fdst.fileno())
-
-            if dst_file.exists() and db_src.exists():
-                src_size = db_src.stat().st_size
-                dst_size = dst_file.stat().st_size
-                if src_size != dst_size:
-                    logger.error(f"Size mismatch after copy: src={src_size}, dst={dst_size}")
-                    return False
-            logger.info(f"Database copied to repository: {dst_file}")
+            # Capture checkpoint + source bytes under one maintenance fence, then
+            # atomically install the immutable snapshot into the Git working tree.
+            copy_runtime_database_for_publish(dst_file)
+            logger.info(f"Database copied to repository from WAL-safe snapshot: {dst_file}")
 
             if self._version_manager and self._pending_version:
                 manifest_path = repo_root / "manifest.json"

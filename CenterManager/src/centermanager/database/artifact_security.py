@@ -34,7 +34,7 @@ from centermanager.database.encryption import (
     load_sqlcipher_driver,
 )
 from centermanager.database.engine import runtime_dbapi_connection
-from centermanager.database.wal_safety import checkpoint_runtime_database_for_publish
+from centermanager.database.wal_safety import runtime_database_publication_snapshot
 
 
 class DatabaseArtifactSecurityError(DatabaseEncryptionError):
@@ -185,10 +185,6 @@ def _publish_encrypted_repository_pair(
         except DatabaseArtifactIdentityError:
             if not filecmp.cmp(repo_db, source_tmp, shallow=False):
                 raise
-            # The signed manifest itself is still authenticated by
-            # next_identity_document(); only its byte hash is stale because the
-            # legacy transaction path copied these exact validated runtime bytes
-            # before entering the atomic publication boundary.
 
     identity_document = next_identity_document(source_tmp, key, repo_db)
     identity_tmp = manifest.with_name(f".{manifest.name}.publish-{uuid.uuid4().hex}.tmp")
@@ -235,10 +231,10 @@ def _publish_encrypted_repository_pair(
 def materialize_runtime_database_to_repository() -> Path:
     """Atomically publish the current runtime DB into the Git working tree.
 
-    Validation occurs before and after the copy. In encrypted production mode
-    the repository DB is also published together with a signed stable identity,
-    exact SHA-256 and monotonic generation. A failure installing either half
-    restores the previous authoritative DB/identity pair.
+    Validation and publication operate on an immutable WAL-complete snapshot.
+    In encrypted production mode the repository DB is also published together
+    with a signed stable identity, exact SHA-256 and monotonic generation. A
+    failure installing either half restores the previous authoritative pair.
     """
     paths = get_paths()
     runtime_db = paths.database_dir / "center.db"
@@ -248,21 +244,34 @@ def materialize_runtime_database_to_repository() -> Path:
     if not encrypted and not runtime_db.exists():
         return repo_db
 
-    # This function is also a publication entry point outside WriteTransaction.
-    # Never allow a center.db-only Git artifact to omit committed WAL frames.
-    checkpoint_runtime_database_for_publish()
-
     key = DatabaseKeyStore().load() if encrypted else None
+
+    # Preserve the security boundary before WAL checkpointing. In particular,
+    # plaintext production artifacts must be classified as a security-policy
+    # violation rather than leaking a lower-level SQLCipher "not a database"
+    # error from the checkpoint connection. This preflight is not the publication
+    # authority: the immutable snapshot is validated again below after capture.
     validate_database_artifact(
         runtime_db,
         encryption_required=encrypted,
         key=key,
         runtime_guarded=True,
     )
+
     repo_db.parent.mkdir(parents=True, exist_ok=True)
     tmp = repo_db.with_name(f".{repo_db.name}.publish-{uuid.uuid4().hex}.tmp")
     try:
-        shutil.copy2(runtime_db, tmp)
+        # Checkpoint and snapshot capture occur inside one maintenance-fenced
+        # boundary. The yielded file remains stable after live runtime activity
+        # resumes, so validation/copy cannot race a new WAL checkpoint.
+        with runtime_database_publication_snapshot() as runtime_snapshot:
+            validate_database_artifact(
+                runtime_snapshot,
+                encryption_required=encrypted,
+                key=key,
+            )
+            shutil.copy2(runtime_snapshot, tmp)
+
         with tmp.open("r+b") as handle:
             handle.flush()
             os.fsync(handle.fileno())

@@ -6,6 +6,7 @@ import sqlite3
 import pytest
 
 import centermanager.database.artifact_security as artifact_security
+import centermanager.database.wal_safety as wal_safety
 from centermanager.database.artifact_security import (
     DatabaseArtifactSecurityError,
     materialize_runtime_database_to_repository,
@@ -47,6 +48,12 @@ def _configure(monkeypatch, paths):
     monkeypatch.setattr(artifact_security, "get_paths", lambda: paths)
     monkeypatch.setattr(artifact_security, "database_encryption_required", lambda: True)
     monkeypatch.setattr(artifact_security, "DatabaseKeyStore", _KeyStore)
+    # Publication snapshotting owns its own module-level path/encryption imports.
+    # Keep the security tests on the same isolated runtime instead of allowing the
+    # snapshot helper to fall through to the real CI/runtime Database directory.
+    monkeypatch.setattr(wal_safety, "get_paths", lambda: paths)
+    monkeypatch.setattr(wal_safety, "database_encryption_required", lambda: True)
+    monkeypatch.setattr(wal_safety, "DatabaseKeyStore", _KeyStore)
 
 
 def test_materialize_runtime_db_keeps_authoritative_git_artifact_encrypted(tmp_path, monkeypatch):
