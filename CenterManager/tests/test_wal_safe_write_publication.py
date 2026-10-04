@@ -74,18 +74,27 @@ def test_publication_snapshot_survives_write_after_runtime_refresh(tmp_path, mon
 
         with wal_safety.runtime_database_publication_snapshot() as snapshot:
             assert snapshot.exists()
-            with sqlite3.connect(snapshot) as published:
+            # sqlite3.Connection's context manager commits/rolls back but does not
+            # close the handle. Close explicitly so Windows can unlink the snapshot
+            # when runtime_database_publication_snapshot() exits.
+            published = sqlite3.connect(snapshot)
+            try:
                 values = [
                     row[0]
                     for row in published.execute("SELECT value FROM items ORDER BY id")
                 ]
+            finally:
+                published.close()
             assert values == ["A_ONLY"]
 
-            with sqlite3.connect(db_path) as live:
+            live = sqlite3.connect(db_path)
+            try:
                 live_values = [
                     row[0]
                     for row in live.execute("SELECT value FROM items ORDER BY id")
                 ]
+            finally:
+                live.close()
             assert live_values == ["A_ONLY", "AFTER_REFRESH"]
 
         assert not snapshot.exists()
