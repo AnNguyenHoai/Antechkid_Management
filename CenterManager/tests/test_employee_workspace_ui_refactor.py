@@ -21,13 +21,17 @@ def test_profile_has_explicit_in_window_back_navigation():
 
 
 def test_schedule_tables_have_usable_minimum_height():
-    assert 'self.rules.setMinimumHeight(190)' in SCHEDULE
-    assert 'self.exceptions.setMinimumHeight(150)' in SCHEDULE
-    assert 'QHeaderView.ResizeMode.Stretch' in SCHEDULE
+    # PR A moved these tables into focused tabs and centralized sizing in
+    # configure_employee_table(). Keep the regression contract aligned with
+    # the actual layout mechanism instead of requiring the retired direct
+    # setMinimumHeight() calls.
+    assert 'configure_employee_table(self.rules, RULE_COLUMNS, row_height=38, minimum_height=320)' in SCHEDULE
+    assert 'minimum_height=320' in SCHEDULE
+    assert 'EmployeeTableColumn("stretch", None, LEFT)' in SCHEDULE
 
 
 def test_working_time_table_has_usable_height_and_self_mode_controls():
-    assert 'self.table.setMinimumHeight(260)' in WORKING
+    assert 'minimum_height=280' in WORKING
     assert 'if self.management:' in WORKING
     assert 'self.add' in WORKING
     assert 'self.edit' in WORKING

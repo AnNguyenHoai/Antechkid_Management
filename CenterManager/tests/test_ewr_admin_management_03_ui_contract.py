@@ -25,12 +25,14 @@ def test_registration_review_exposes_admin_closed_period_reopen_action():
     assert 'Registration workflow states will not be changed.' in source
 
 
-def test_registration_detail_exposes_edit_delete_only_for_open_draft():
+def test_registration_detail_exposes_edit_delete_only_for_open_draft_or_admin_override():
     source = read("employee_work_registration_detail_page.py")
     assert 'self.edit_btn = QPushButton("Edit Selected")' in source
     assert 'self.delete_btn = QPushButton("Delete Selected")' in source
-    assert 'r.status == EmployeeWorkRegistration.STATUS_DRAFT' in source
-    assert 'self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED' in source
+    assert 'period_open = self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED' in source
+    assert 'registration.status == EmployeeWorkRegistration.STATUS_DRAFT' in source
+    assert 'or can_override' in source
+    assert 'and (period_open or can_override)' in source
 
 
 def test_admin_can_override_registration_status_and_closed_period_in_detail_service():
