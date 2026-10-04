@@ -5,18 +5,34 @@ from datetime import timedelta
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
 from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
+from centermanager.ui.employee_workspace.table_layout import (
+    CENTER,
+    LEFT,
+    RIGHT,
+    EmployeeTableColumn,
+    configure_employee_table,
+    set_employee_row,
+)
+
+
+DETAIL_COLUMNS = [
+    EmployeeTableColumn("fixed", 118, CENTER),
+    EmployeeTableColumn("fixed", 82, CENTER),
+    EmployeeTableColumn("fixed", 82, CENTER),
+    EmployeeTableColumn("fixed", 78, RIGHT),
+    EmployeeTableColumn("fixed", 118, CENTER),
+    EmployeeTableColumn("stretch", None, LEFT),
+]
 
 
 class EmployeeWorkRegistrationDetailPage(QWidget):
@@ -53,13 +69,12 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Date", "From", "To", "Hours", "Work Type", "Notes"]
         )
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        for column in range(5):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        configure_employee_table(
+            self.table,
+            DETAIL_COLUMNS,
+            row_height=36,
+            minimum_height=300,
+        )
         root.addWidget(self.table, 1)
 
         actions = QHBoxLayout()
@@ -90,17 +105,19 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
     def refresh(self) -> None:
         can_override = getattr(self._rs, "can_admin_override", None)
         self._admin_override = bool(can_override()) if can_override is not None else False
-        r = self.registration
-        employee = getattr(r, "employee", None)
+        registration = self.registration
+        employee = getattr(registration, "employee", None)
         name = getattr(employee, "full_name", None) or "-"
         code = getattr(employee, "employee_code", None) or "-"
-        period = getattr(r, "period", None)
+        period = getattr(registration, "period", None)
         if period and getattr(period, "week_start", None):
             week_start = period.week_start
             week_end = getattr(period, "week_end", week_start + timedelta(days=6))
             period_text = f"{week_start:%d/%m/%Y} - {week_end:%d/%m/%Y}"
             self._period_status = getattr(
-                period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN
+                period,
+                "status",
+                EmployeeWorkRegistrationPeriod.STATUS_OPEN,
             )
         else:
             period_text = "-"
@@ -109,7 +126,7 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         self.summary.setText(
             f"Employee: {name} ({code})\n"
             f"Registration week: {period_text}\n"
-            f"Availability blocks: {len(r.blocks)}"
+            f"Availability blocks: {len(registration.blocks)}"
         )
         effective = (
             "ADMIN OVERRIDE"
@@ -118,12 +135,12 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
             else self._period_status
         )
         self.status.setText(
-            f"Status: {r.status} • Period: {self._period_status} • Access: {effective}"
+            f"Status: {registration.status} • Period: {self._period_status} • Access: {effective}"
         )
 
         self.table.setRowCount(0)
         total_minutes = 0
-        for block in sorted(r.blocks, key=lambda b: (b.work_date, b.start_time)):
+        for block in sorted(registration.blocks, key=lambda b: (b.work_date, b.start_time)):
             minutes = (
                 block.end_time.hour * 60
                 + block.end_time.minute
@@ -133,41 +150,48 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
             total_minutes += minutes
             row = self.table.rowCount()
             self.table.insertRow(row)
-            values = [
-                block.work_date.strftime("%d/%m/%Y"),
-                block.start_time.strftime("%H:%M"),
-                block.end_time.strftime("%H:%M"),
-                f"{minutes / 60:.2f}",
-                block.work_type,
-                block.notes or "",
-            ]
-            for column, value in enumerate(values):
-                self.table.setItem(row, column, QTableWidgetItem(value))
+            set_employee_row(
+                self.table,
+                row,
+                [
+                    block.work_date.strftime("%d/%m/%Y"),
+                    block.start_time.strftime("%H:%M"),
+                    block.end_time.strftime("%H:%M"),
+                    f"{minutes / 60:.2f}",
+                    block.work_type,
+                    block.notes or "",
+                ],
+                DETAIL_COLUMNS,
+                row_user_data=block.id,
+            )
 
         self.table.setToolTip(f"Total availability: {total_minutes / 60:.2f} hours")
         self._update_actions()
 
     def _update_actions(self) -> None:
-        r = self.registration
+        registration = self.registration
         period_open = self._period_status != EmployeeWorkRegistrationPeriod.STATUS_CLOSED
         can_override = self._admin_override
         self.accept_btn.setEnabled(
             self._write_enabled
             and period_open
-            and r.status == EmployeeWorkRegistration.STATUS_SUBMITTED
+            and registration.status == EmployeeWorkRegistration.STATUS_SUBMITTED
         )
         self.reopen_btn.setEnabled(
             self._write_enabled
-            and r.status == EmployeeWorkRegistration.STATUS_ACCEPTED
+            and registration.status == EmployeeWorkRegistration.STATUS_ACCEPTED
             and (period_open or can_override)
         )
-        blocks = sorted(r.blocks, key=lambda b: (b.work_date, b.start_time))
+        blocks = sorted(registration.blocks, key=lambda b: (b.work_date, b.start_time))
         has_selection = 0 <= self.table.currentRow() < len(blocks)
         can_edit = (
             self._write_enabled
             and has_selection
             and (period_open or can_override)
-            and (r.status == EmployeeWorkRegistration.STATUS_DRAFT or can_override)
+            and (
+                registration.status == EmployeeWorkRegistration.STATUS_DRAFT
+                or can_override
+            )
         )
         self.edit_btn.setEnabled(can_edit)
         self.delete_btn.setEnabled(can_edit)
@@ -182,7 +206,8 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
     def _reload(self):
         week_start = self._week_start()
         self.registration = self._rs.list_for_employee(
-            self.registration.employee_id, week_start
+            self.registration.employee_id,
+            week_start,
         )
         self.refresh()
 
@@ -269,7 +294,8 @@ class EmployeeWorkRegistrationDetailPage(QWidget):
         try:
             self._rs.delete(block.id)
             refreshed = self._rs.list_for_employee(
-                self.registration.employee_id, self._week_start()
+                self.registration.employee_id,
+                self._week_start(),
             )
             if refreshed is not None:
                 self.registration = refreshed
