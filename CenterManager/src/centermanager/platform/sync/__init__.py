@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Runtime Auto Sync - Platform automatic synchronization."""
 
-from .runtime_sync_service import RuntimeSyncService
+from .write_handoff_runtime_sync_service import RuntimeSyncService
 from .status import SyncStatus
 from .auto_pull_policy import AutoPullPolicy
 from .reload_decision_service import ReloadDecisionService, ReloadDecision, ReloadState
