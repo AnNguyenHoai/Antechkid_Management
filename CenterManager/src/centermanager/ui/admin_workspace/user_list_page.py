@@ -117,6 +117,8 @@ class UserListPage(QWidget):
     def _on_search(self, text: str) -> None: self._apply_filters()
 
     def _on_row_double_clicked(self, row: int) -> None:
+        if not self._write_enabled:
+            return
         if row < len(self._filtered): self._show_user_detail(self._filtered[row].id)
 
     def _on_context_menu(self, pos, row: int) -> None:
