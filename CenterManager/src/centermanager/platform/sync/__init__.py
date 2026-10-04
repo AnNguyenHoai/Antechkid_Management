@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Runtime Auto Sync - Platform automatic synchronization."""
 
-from .write_handoff_runtime_sync_service import RuntimeSyncService
+# Public RuntimeSyncService is the fail-closed authoritative implementation.
+# It extends the WAL-safe/UI-safe handoff layer and additionally requires an
+# exact fresh origin/MAIN commit before WRITE can be granted.
+from .authoritative_runtime_sync_service import RuntimeSyncService
 from .status import SyncStatus
 from .auto_pull_policy import AutoPullPolicy
 from .reload_decision_service import ReloadDecisionService, ReloadDecision, ReloadState
@@ -15,7 +18,7 @@ from .events import (
     ReloadRequired,
     SyncStatusChanged,
 )
-from .startup_sync import StartupSynchronization   # <-- THÊM
+from .startup_sync import StartupSynchronization
 
 __all__ = [
     "RuntimeSyncService",
@@ -32,5 +35,5 @@ __all__ = [
     "SynchronizationFailed",
     "ReloadRequired",
     "SyncStatusChanged",
-    "StartupSynchronization",   # <-- THÊM
+    "StartupSynchronization",
 ]
