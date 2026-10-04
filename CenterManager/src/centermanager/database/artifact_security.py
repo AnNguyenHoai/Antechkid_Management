@@ -185,10 +185,6 @@ def _publish_encrypted_repository_pair(
         except DatabaseArtifactIdentityError:
             if not filecmp.cmp(repo_db, source_tmp, shallow=False):
                 raise
-            # The signed manifest itself is still authenticated by
-            # next_identity_document(); only its byte hash is stale because the
-            # legacy transaction path copied these exact validated runtime bytes
-            # before entering the atomic publication boundary.
 
     identity_document = next_identity_document(source_tmp, key, repo_db)
     identity_tmp = manifest.with_name(f".{manifest.name}.publish-{uuid.uuid4().hex}.tmp")
@@ -249,6 +245,19 @@ def materialize_runtime_database_to_repository() -> Path:
         return repo_db
 
     key = DatabaseKeyStore().load() if encrypted else None
+
+    # Preserve the security boundary before WAL checkpointing. In particular,
+    # plaintext production artifacts must be classified as a security-policy
+    # violation rather than leaking a lower-level SQLCipher "not a database"
+    # error from the checkpoint connection. This preflight is not the publication
+    # authority: the immutable snapshot is validated again below after capture.
+    validate_database_artifact(
+        runtime_db,
+        encryption_required=encrypted,
+        key=key,
+        runtime_guarded=True,
+    )
+
     repo_db.parent.mkdir(parents=True, exist_ok=True)
     tmp = repo_db.with_name(f".{repo_db.name}.publish-{uuid.uuid4().hex}.tmp")
     try:
