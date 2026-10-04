@@ -8,12 +8,10 @@ from PySide6.QtWidgets import (
     QComboBox,
     QInputDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,8 +25,27 @@ from centermanager.services.employee_admin_management_service import (
     EmployeeAdminManagementService,
     EmployeeAdminManagementValidationError,
 )
+from centermanager.ui.employee_workspace.table_layout import (
+    CENTER,
+    LEFT,
+    RIGHT,
+    EmployeeTableColumn,
+    configure_employee_table,
+    set_employee_row,
+)
 
 logger = logging.getLogger(__name__)
+
+
+REVIEW_COLUMNS = [
+    EmployeeTableColumn("stretch", None, LEFT),
+    EmployeeTableColumn("fixed", 105, CENTER),
+    EmployeeTableColumn("fixed", 80, RIGHT),
+    EmployeeTableColumn("fixed", 104, RIGHT),
+    EmployeeTableColumn("fixed", 108, CENTER),
+    EmployeeTableColumn("fixed", 148, CENTER),
+    EmployeeTableColumn("fixed", 148, CENTER),
+]
 
 
 class EmployeeWorkRegistrationReviewPage(QWidget):
@@ -73,28 +90,16 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         bar = QHBoxLayout()
         self.period_label = QLabel()
         self.period_label.setStyleSheet("font-size:15px;font-weight:600;")
-        bar.addWidget(self.period_label)
-        bar.addStretch()
+        bar.addWidget(self.period_label, 1)
         bar.addWidget(QLabel("Status:"))
         self.status_filter = QComboBox()
         self.status_filter.addItems(["ALL", "DRAFT", "SUBMITTED", "ACCEPTED"])
         self.status_filter.currentTextChanged.connect(self._apply_filter)
         bar.addWidget(self.status_filter)
-        self.accept_btn = QPushButton("Accept")
-        self.reopen_btn = QPushButton("Reopen")
         self.detail_btn = QPushButton("Open Detail")
-        self.close_btn = QPushButton("Close Registration Week")
-        self.reopen_period_btn = QPushButton("Re-open Closed Week")
         self.refresh_btn = QPushButton("Refresh")
-        for button in (
-            self.accept_btn,
-            self.reopen_btn,
-            self.detail_btn,
-            self.close_btn,
-            self.reopen_period_btn,
-            self.refresh_btn,
-        ):
-            bar.addWidget(button)
+        bar.addWidget(self.detail_btn)
+        bar.addWidget(self.refresh_btn)
         root.addLayout(bar)
 
         self.counters = QLabel("Total: 0 • Draft: 0 • Submitted: 0 • Accepted: 0")
@@ -105,15 +110,25 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Employee", "Code", "Blocks", "Total Hours", "Status", "Submitted", "Accepted"]
         )
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 7):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        configure_employee_table(
+            self.table,
+            REVIEW_COLUMNS,
+            row_height=38,
+            minimum_height=320,
+        )
         root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        self.accept_btn = QPushButton("Accept")
+        self.reopen_btn = QPushButton("Reopen")
+        self.close_btn = QPushButton("Close Registration Week")
+        self.reopen_period_btn = QPushButton("Re-open Closed Week")
+        actions.addWidget(self.accept_btn)
+        actions.addWidget(self.reopen_btn)
+        actions.addStretch()
+        actions.addWidget(self.close_btn)
+        actions.addWidget(self.reopen_period_btn)
+        root.addLayout(actions)
 
         self.detail_btn.clicked.connect(self.open_detail)
         self.accept_btn.clicked.connect(self.accept_selected)
@@ -156,7 +171,9 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             self._week_start = self._rs.next_week()
             period = self._rs.get_period(self._week_start)
             self._period_status = getattr(
-                period, "status", EmployeeWorkRegistrationPeriod.STATUS_OPEN
+                period,
+                "status",
+                EmployeeWorkRegistrationPeriod.STATUS_OPEN,
             )
             week_end = self._week_start + timedelta(days=6)
             period_label = (
@@ -212,24 +229,28 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
             for registration in self._filtered_rows:
                 row = self.table.rowCount()
                 self.table.insertRow(row)
-                values = [
-                    registration.employee.full_name or "-",
-                    registration.employee.employee_code or "-",
-                    str(len(registration.blocks)),
-                    f"{self._hours(registration):.2f}",
-                    registration.status,
-                    registration.submitted_at.strftime("%d/%m/%Y %H:%M")
-                    if registration.submitted_at
-                    else "-",
-                    registration.accepted_at.strftime("%d/%m/%Y %H:%M")
-                    if registration.accepted_at
-                    else "-",
-                ]
-                for column, value in enumerate(values):
-                    self.table.setItem(row, column, QTableWidgetItem(value))
-                self.table.item(row, 0).setData(
-                    Qt.ItemDataRole.UserRole,
-                    self._registration_identity(registration),
+                set_employee_row(
+                    self.table,
+                    row,
+                    [
+                        registration.employee.full_name or "-",
+                        registration.employee.employee_code or "-",
+                        str(len(registration.blocks)),
+                        f"{self._hours(registration):.2f}",
+                        registration.status,
+                        (
+                            registration.submitted_at.strftime("%d/%m/%Y %H:%M")
+                            if registration.submitted_at
+                            else "-"
+                        ),
+                        (
+                            registration.accepted_at.strftime("%d/%m/%Y %H:%M")
+                            if registration.accepted_at
+                            else "-"
+                        ),
+                    ],
+                    REVIEW_COLUMNS,
+                    row_user_data=self._registration_identity(registration),
                 )
 
             self.table.clearSelection()
@@ -371,7 +392,10 @@ class EmployeeWorkRegistrationReviewPage(QWidget):
         try:
             self._admin_service.reopen_period(self._week_start, reason=reason)
             self.refresh()
-        except (EmployeeAdminManagementAccessDeniedError, EmployeeAdminManagementValidationError) as exc:
+        except (
+            EmployeeAdminManagementAccessDeniedError,
+            EmployeeAdminManagementValidationError,
+        ) as exc:
             QMessageBox.warning(self, "Re-open Registration Week", str(exc))
         except Exception as exc:
             logger.exception("[WORK_REGISTRATION_ERROR] weekly period reopen failed")
