@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """Application shell primitives for CenterManager.
 
-PR-C keeps routine collaboration/editing state inside the fixed application
-header. The feedback host remains reserved for exceptional/success feedback and
-no longer grows a second row merely because Start/Finish Editing is running.
+PR-E keeps routine collaboration/editing progress inside the fixed application
+header. Start/Finish Editing receive a lightweight animated activity indicator
+and truthful transition copy; the feedback host remains reserved for exceptional
+or durable success/warning/error feedback.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt, Signal
 from PySide6.QtWidgets import QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME, APPLICATION_PRODUCT_NAME
@@ -64,12 +65,19 @@ class ApplicationTopBar(QFrame):
     finish_edit_requested = Signal()
     cancel_edit_requested = Signal()
 
+    _ACTIVITY_FRAMES = ("◐", "◓", "◑", "◒")
+
     def __init__(self, *, user_name: str, role_name: str = "", runtime_version: str = "", sync_status: str = "disabled", feedback_controller: Optional[FeedbackController] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("ApplicationTopBar")
         self.setMinimumHeight(COMPONENT_METRICS["app_top_bar_height"])
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._editing_operation_id: Optional[str] = None
+        self._activity_frame_index = 0
+        self._activity_message = ""
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(140)
+        self._activity_timer.timeout.connect(self._advance_activity_frame)
         shell_layout = QVBoxLayout(self)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
@@ -110,6 +118,12 @@ class ApplicationTopBar(QFrame):
         self.editor_badge = Badge("No active editor", tone="neutral")
         self.mode_badge.setAccessibleName("Application editing mode")
         self.editor_badge.setAccessibleName("Active editor status")
+        self.activity_label = QLabel("", self.state_zone)
+        self.activity_label.setObjectName("EditingActivityIndicator")
+        self.activity_label.setFixedWidth(18)
+        self.activity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.activity_label.setVisible(False)
+        self.activity_label.setAccessibleName("Editing operation in progress")
         self.transaction_label = ElidedLabel("Ready")
         self.transaction_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: {TYPOGRAPHY['caption']}px; font-weight: {FONT_WEIGHTS['medium']};")
         self.start_edit_button = Button("Start editing", variant="primary", size="sm")
@@ -122,7 +136,7 @@ class ApplicationTopBar(QFrame):
         self.start_edit_button.clicked.connect(self._request_start_editing)
         self.finish_edit_button.clicked.connect(self._request_finish_editing)
         self.cancel_edit_button.clicked.connect(self.cancel_edit_requested.emit)
-        state_layout.addWidget(self.mode_badge); state_layout.addWidget(self.editor_badge); state_layout.addWidget(self.transaction_label, 1)
+        state_layout.addWidget(self.mode_badge); state_layout.addWidget(self.editor_badge); state_layout.addWidget(self.activity_label); state_layout.addWidget(self.transaction_label, 1)
         state_layout.addWidget(self.start_edit_button); state_layout.addWidget(self.finish_edit_button); state_layout.addWidget(self.cancel_edit_button)
         layout.addWidget(self.state_zone, 2)
         self._state_opacity = QGraphicsOpacityEffect(self.state_zone)
@@ -150,6 +164,7 @@ class ApplicationTopBar(QFrame):
             QFrame#ApplicationTopBarHeader {{ background-color: {COLORS['surface_page']}; border: none; border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']}; }}
             QFrame#ApplicationTopBarHeader QLabel {{ border: none; background: transparent; font-family: {FONT_FAMILY}; }}
             QFrame#ApplicationTopBarStateZone {{ background-color: {COLORS['surface_hover']}; border: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_subtle']}; border-radius: {SPACING['sm']}px; }}
+            QLabel#EditingActivityIndicator {{ color: {COLORS['action_primary']}; font-size: {TYPOGRAPHY['body']}px; font-weight: {FONT_WEIGHTS['bold']}; }}
         """)
         self.mode_label = self.mode_badge; self.waiting_indicator = self.editor_badge; self.tx_state_label = self.transaction_label
         self.start_edit_btn = self.start_edit_button; self.finish_edit_btn = self.finish_edit_button; self.cancel_btn = self.cancel_edit_button
@@ -162,17 +177,40 @@ class ApplicationTopBar(QFrame):
     def _animate_state_change(self) -> None:
         self._state_animation.stop(); self._state_animation.setStartValue(0.58); self._state_animation.setEndValue(1.0); self._state_animation.start()
 
+    def _start_activity(self, message: str) -> None:
+        """Show indeterminate activity without claiming backend progress percentage."""
+        self._activity_message = message
+        self._activity_frame_index = 0
+        self.activity_label.setText(self._ACTIVITY_FRAMES[0])
+        self.activity_label.setVisible(True)
+        self.set_transaction_text(message)
+        self._activity_timer.start()
+
+    def _advance_activity_frame(self) -> None:
+        if not self._activity_timer.isActive():
+            return
+        self._activity_frame_index = (self._activity_frame_index + 1) % len(self._ACTIVITY_FRAMES)
+        self.activity_label.setText(self._ACTIVITY_FRAMES[self._activity_frame_index])
+
+    def _stop_activity(self) -> None:
+        self._activity_timer.stop()
+        self.activity_label.clear()
+        self.activity_label.setVisible(False)
+        self._activity_message = ""
+
     def _request_start_editing(self) -> None:
-        self._run_edit_operation("start-editing", "Starting editing…", self.start_edit_requested)
+        self._run_edit_operation("start-editing", "Preparing edit access…", self.start_edit_requested)
 
     def _request_finish_editing(self) -> None:
-        self._run_edit_operation("finish-editing", "Finishing & syncing…", self.finish_edit_requested)
+        self._run_edit_operation("finish-editing", "Saving and syncing changes…", self.finish_edit_requested)
 
     def _run_edit_operation(self, operation_id: str, message: str, signal) -> bool:
         """Project routine busy state inline; FeedbackHost is not used here."""
         if self._editing_operation_id is not None: return False
         self._editing_operation_id = operation_id
-        self.set_transaction_text(message)
+        start_activity = getattr(self, "_start_activity", None)
+        if callable(start_activity): start_activity(message)
+        else: self.set_transaction_text(message)
         animate = getattr(self, "_animate_state_change", None)
         if callable(animate): animate()
         for button in (self.start_edit_button, self.finish_edit_button, self.cancel_edit_button): button.setEnabled(False)
@@ -181,6 +219,8 @@ class ApplicationTopBar(QFrame):
             signal.emit(); return True
         finally:
             QApplication.restoreOverrideCursor(); self._editing_operation_id = None
+            stop_activity = getattr(self, "_stop_activity", None)
+            if callable(stop_activity): stop_activity()
             waiting = self.start_edit_button.text().strip().lower().startswith("waiting")
             self.start_edit_button.setEnabled(not waiting); self.finish_edit_button.setEnabled(True); self.cancel_edit_button.setEnabled(True)
             if callable(animate): animate()
