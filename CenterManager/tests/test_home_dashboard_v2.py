@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Regression coverage for UI-PROD-04 Home Dashboard V2."""
+"""Regression coverage carried forward for the Home Dashboard presentation."""
 from __future__ import annotations
 
 import re
@@ -69,11 +69,15 @@ def test_home_dashboard_renders_compact_operational_snapshot(app):
     assert isinstance(home.scroll_area, QScrollArea)
     assert home.scroll_area.widgetResizable()
     assert len(home._cards) == 3
-    assert home.available_tile.value_label.text() == "3"
-    assert home.healthy_tile.value_label.text() == "2"
-    assert home.attention_tile.value_label.text() == "1"
+
+    # V3 replaced the V2 KPI tiles with the Today / Attention / Quick Access
+    # hierarchy. Preserve the semantic regression here rather than coupling the
+    # test to presentation widgets that no longer exist.
+    assert "3 available workspace(s)" in home.today_panel.detail.text()
+    assert "1 reporting attention" in home.today_panel.detail.text()
     assert not home.attention_panel.isHidden()
-    assert "Finance Workspace: 3 items to review" in home.attention_details.text()
+    assert "Finance Workspace: 3 items to review" in home.attention_panel.detail_label.text()
+    assert "3 workspace(s) available" in home.quick_panel.detail_label.text()
 
 
 def test_home_respects_service_filtered_workspace_list(app):
