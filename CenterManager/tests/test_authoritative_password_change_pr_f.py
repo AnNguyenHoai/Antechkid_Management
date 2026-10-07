@@ -40,3 +40,17 @@ def test_password_flow_does_not_implement_direct_git_publication():
     assert "git push" not in source
     assert "publish_only(" not in source
     assert "runtime_sync_service" not in source
+
+
+def test_password_flow_rejects_stale_pre_handoff_credentials():
+    source = read("ui/authoritative_password_change.py")
+
+    assert "credentials changed on another computer" in source
+    assert "sign in with the current password" in source
+
+
+def test_workspace_unlock_waits_until_transaction_returns_to_idle():
+    source = read("ui/authoritative_password_change.py")
+
+    assert "QTimer.singleShot(0, self._verify_and_complete_after_publish)" in source
+    assert "self._transaction.state != WriteTransactionState.IDLE" in source
