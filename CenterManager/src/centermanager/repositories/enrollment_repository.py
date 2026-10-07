@@ -21,6 +21,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         query = self._session.query(Enrollment).filter(
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
+            Enrollment.reconciled_into_enrollment_id.is_(None),
         )
         if active_only:
             query = query.filter(Enrollment.status == "ACTIVE")
@@ -32,6 +33,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             .filter(
                 Enrollment.student_id == student_id,
                 Enrollment.class_id == class_id,
+                Enrollment.reconciled_into_enrollment_id.is_(None),
                 or_(Enrollment.start_date.is_(None), Enrollment.start_date <= on_date),
                 or_(Enrollment.end_date.is_(None), Enrollment.end_date >= on_date),
             )
@@ -46,6 +48,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
+            Enrollment.reconciled_into_enrollment_id.is_(None),
         ).first()
 
     def get_active_by_class(self, class_id: int) -> List[Enrollment]:
@@ -54,6 +57,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         ).filter(
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
+            Enrollment.reconciled_into_enrollment_id.is_(None),
         ).order_by(Enrollment.id).all()
 
     def get_by_student_and_class(self, student_id: int, class_id: int) -> List[Enrollment]:
@@ -62,7 +66,18 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         ).filter(
             Enrollment.student_id == student_id,
             Enrollment.class_id == class_id,
+            Enrollment.reconciled_into_enrollment_id.is_(None),
         ).order_by(desc(Enrollment.created_at)).all()
+
+    def get_by_student_and_class_including_reconciled(
+        self, student_id: int, class_id: int
+    ) -> List[Enrollment]:
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.freezes)
+        ).filter(
+            Enrollment.student_id == student_id,
+            Enrollment.class_id == class_id,
+        ).order_by(desc(Enrollment.created_at), desc(Enrollment.id)).all()
 
     def get_by_student(self, student_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).options(
@@ -90,7 +105,10 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
                 joinedload(Enrollment.freezes),
             )
             .join(Enrollment.student)
-            .filter(Enrollment.class_id.isnot(None))
+            .filter(
+                Enrollment.class_id.isnot(None),
+                Enrollment.reconciled_into_enrollment_id.is_(None),
+            )
         )
         if class_id is not None:
             query = query.filter(Enrollment.class_id == class_id)
@@ -124,13 +142,27 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
     def get_by_class(self, class_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).options(
             joinedload(Enrollment.freezes)
-        ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
+        ).filter(
+            Enrollment.class_id == class_id,
+            Enrollment.reconciled_into_enrollment_id.is_(None),
+        ).order_by(Enrollment.id).all()
 
     def get_by_class_with_student(self, class_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).options(
             joinedload(Enrollment.student),
             joinedload(Enrollment.freezes),
-        ).filter(Enrollment.class_id == class_id).order_by(Enrollment.id).all()
+        ).filter(
+            Enrollment.class_id == class_id,
+            Enrollment.reconciled_into_enrollment_id.is_(None),
+        ).order_by(Enrollment.id).all()
+
+    def get_by_class_with_student_including_reconciled(self, class_id: int) -> List[Enrollment]:
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.student),
+            joinedload(Enrollment.freezes),
+        ).filter(
+            Enrollment.class_id == class_id,
+        ).order_by(Enrollment.id).all()
 
     def add(self, enrollment: Enrollment) -> Enrollment:
         self._session.add(enrollment)

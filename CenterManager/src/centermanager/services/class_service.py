@@ -519,6 +519,142 @@ class ClassService:
             repository_provider=self._repository_provider,
         ).preview_enrollment_pricing(class_id, **pricing_kwargs)
 
+    def find_legacy_enrollment_duplicates(self, class_id: int):
+        """Return conservative legacy duplicate candidates for this class."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        return EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).find_candidates(class_id)
+
+    def reconcile_legacy_enrollment_duplicate(
+        self,
+        class_id: int,
+        duplicate_enrollment_id: int,
+        canonical_enrollment_id: int,
+        *,
+        reason: str,
+    ):
+        """Reconcile a reviewed accidental duplicate into its active contract."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        with self._session_factory() as session:
+            duplicate = self._repository_provider.enrollments(session).get_by_id(
+                duplicate_enrollment_id
+            )
+            canonical = self._repository_provider.enrollments(session).get_by_id(
+                canonical_enrollment_id
+            )
+            if (
+                duplicate is None
+                or canonical is None
+                or duplicate.class_id != class_id
+                or canonical.class_id != class_id
+            ):
+                raise ClassNotFoundError(
+                    "Enrollment reconciliation does not belong to this class."
+                )
+
+        return EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).reconcile(
+            duplicate_enrollment_id,
+            canonical_enrollment_id,
+            reason=reason,
+        )
+
+    def mark_legacy_enrollment_legitimate(
+        self,
+        class_id: int,
+        enrollment_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        """Record operator confirmation that a suspected duplicate is legitimate."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        with self._session_factory() as session:
+            enrollment = self._repository_provider.enrollments(session).get_by_id(
+                enrollment_id
+            )
+            if enrollment is None or enrollment.class_id != class_id:
+                raise ClassNotFoundError(
+                    "Enrollment reconciliation does not belong to this class."
+                )
+
+        EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).mark_legitimate(enrollment_id, reason=reason)
+
+    def get_latest_restorable_enrollment(
+        self,
+        class_id: int,
+        student_id: int,
+    ) -> Optional[Enrollment]:
+        """Return the latest withdrawn Enrollment that can be restored."""
+        from centermanager.services.enrollment_service import EnrollmentService
+
+        return EnrollmentService(
+            self._session_factory,
+            event_bus=self._event_bus,
+            repository_provider=self._repository_provider,
+        ).get_latest_restorable(student_id, class_id)
+
+    def restore_student(
+        self,
+        class_id: int,
+        student_id: int,
+        enrollment_id: int,
+        *,
+        reason: str,
+    ) -> Enrollment:
+        """Restore a mistakenly withdrawn Enrollment without creating a new contract."""
+        from centermanager.services.enrollment_service import EnrollmentService
+
+        with self._session_factory() as session:
+            candidate = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
+            if (
+                candidate is None
+                or candidate.student_id != student_id
+                or candidate.class_id != class_id
+            ):
+                raise ClassNotFoundError("Enrollment does not belong to this student/class.")
+
+        enrollment = EnrollmentService(
+            self._session_factory,
+            event_bus=self._event_bus,
+            repository_provider=self._repository_provider,
+        ).restore(enrollment_id, reason=reason)
+
+        if self._timeline_service:
+            with self._session_factory() as session:
+                student = self._repository_provider.students(session).get_by_id(student_id)
+            self._timeline_service.log_event(
+                class_id=class_id,
+                event_type=ClassTimelineEventType.STUDENT_ENROLLED,
+                title="Enrollment Restored",
+                description=f"{student.full_name if student else 'Student'} restored to class.",
+                metadata={
+                    "student_id": student_id,
+                    "enrollment_id": enrollment_id,
+                    "reason": reason,
+                    "action": "RESTORED",
+                },
+            )
+        return enrollment
+
     def enroll_student(
         self,
         class_id: int,
@@ -552,8 +688,14 @@ class ClassService:
             )
         return enrollment
 
-    def remove_student(self, class_id: int, student_id: int) -> None:
-        """Compatibility facade: remove now preserves history as WITHDRAWN."""
+    def remove_student(
+        self,
+        class_id: int,
+        student_id: int,
+        *,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Withdraw a student while preserving the Enrollment financial contract."""
         from centermanager.services.enrollment_service import EnrollmentService, EnrollmentNotFoundError
         service = EnrollmentService(
             self._session_factory,
@@ -566,7 +708,10 @@ class ClassService:
                 raise ClassNotFoundError("Active enrollment not found.")
             enrollment_id = enrollment.id
         try:
-            service.withdraw(enrollment_id)
+            if reason is None:
+                service.withdraw(enrollment_id)
+            else:
+                service.withdraw(enrollment_id, reason=reason)
         except EnrollmentNotFoundError as exc:
             raise ClassNotFoundError("Enrollment not found.") from exc
 
@@ -574,9 +719,14 @@ class ClassService:
             self._timeline_service.log_event(
                 class_id=class_id,
                 event_type=ClassTimelineEventType.STUDENT_REMOVED,
-                title="Student Removed",
+                title="Student Withdrawn",
                 description="Student withdrawn from class.",
-                metadata={"student_id": student_id},
+                metadata={
+                    "student_id": student_id,
+                    "enrollment_id": enrollment_id,
+                    "reason": reason or "Withdrawn from class",
+                    "action": "WITHDRAWN",
+                },
             )
 
     def get_enrolled_students(self, class_id: int) -> List[Student]:

@@ -186,6 +186,12 @@ class IncomeService:
                 raise IncomeValidationError(
                     "Selected Enrollment does not belong to the selected Student and Class."
                 )
+            if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
+                raise IncomeValidationError(
+                    "Selected Enrollment has been reconciled into "
+                    f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
+                    "use the canonical Enrollment."
+                )
             return enrollment
 
         candidates = repo.get_by_student_and_class(student_id, class_id)

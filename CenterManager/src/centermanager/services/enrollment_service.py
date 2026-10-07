@@ -36,6 +36,7 @@ class EnrollmentAlreadyActiveError(EnrollmentError): pass
 class InvalidEnrollmentTransitionError(EnrollmentError): pass
 class EnrollmentCapacityError(EnrollmentError): pass
 class EnrollmentValidationError(EnrollmentError): pass
+class EnrollmentRangeOverlapError(EnrollmentValidationError): pass
 
 
 _MONEY_QUANTUM = Decimal("0.0001")
@@ -276,6 +277,71 @@ class EnrollmentService:
         result["unit_fee"] = _money(override_fee / Decimal(result["planned_sessions"]))
         return result
 
+    @staticmethod
+    def _session_effective_date(session_obj):
+        return getattr(session_obj, "actual_date", None) or getattr(session_obj, "scheduled_date", None)
+
+    @classmethod
+    def _effective_historical_range(cls, enrollment: Enrollment, sessions) -> Optional[tuple[int, int]]:
+        """Return the session range actually occupied by a historical contract."""
+        start = getattr(enrollment, "enrolled_from_session", None)
+        end = getattr(enrollment, "enrolled_until_session", None)
+        if start is None or end is None:
+            return None
+        start = int(start)
+        end = int(end)
+        if getattr(enrollment, "status", None) == EnrollmentStatus.ACTIVE.value:
+            return start, end
+        ended_on = getattr(enrollment, "end_date", None)
+        if ended_on is None:
+            return start, end
+        occupied = []
+        for item in sessions:
+            number = getattr(item, "session_number", None)
+            effective_date = cls._session_effective_date(item)
+            if number is None or effective_date is None:
+                continue
+            number = int(number)
+            if start <= number <= end and effective_date <= ended_on:
+                occupied.append(number)
+        if not occupied:
+            return None
+        return start, max(occupied)
+
+    @classmethod
+    def _ensure_no_overlapping_contract(
+        cls,
+        enrollments,
+        sessions,
+        *,
+        new_start: int,
+        new_end: int,
+        exclude_enrollment_id: Optional[int] = None,
+    ) -> None:
+        for existing in enrollments:
+            if exclude_enrollment_id is not None and existing.id == exclude_enrollment_id:
+                continue
+            effective = cls._effective_historical_range(existing, sessions)
+            if effective is None:
+                continue
+            old_start, old_end = effective
+            if cls._ranges_overlap(new_start, new_end, old_start, old_end):
+                raise EnrollmentRangeOverlapError(
+                    f"Enrollment session range {new_start}-{new_end} overlaps "
+                    f"Enrollment #{existing.id} range {old_start}-{old_end}. "
+                    "Restore the existing enrollment or choose a non-overlapping session range."
+                )
+
+    def get_latest_restorable(self, student_id: int, class_id: int) -> Optional[Enrollment]:
+        """Return the latest withdrawn contract that may be restored by the UI."""
+        with self._session_factory() as session:
+            rows = self._repository_provider.enrollments(session).get_by_student_and_class(
+                student_id, class_id
+            )
+            return next(
+                (item for item in rows if item.status == EnrollmentStatus.WITHDRAWN.value),
+                None,
+            )
     def enroll(
         self,
         student_id: int,
@@ -323,6 +389,16 @@ class EnrollmentService:
                 discount_source=discount_source,
                 discount_reason=discount_reason,
             )
+            history_getter = getattr(repo, "get_by_student_and_class", None)
+            session_factory = getattr(self._repository_provider, "sessions", None)
+            if callable(history_getter) and callable(session_factory):
+                sessions = session_factory(session).get_by_class(class_id)
+                self._ensure_no_overlapping_contract(
+                    history_getter(student_id, class_id),
+                    sessions,
+                    new_start=int(tuition_snapshot["enrolled_from_session"]),
+                    new_end=int(tuition_snapshot["enrolled_until_session"]),
+                )
             suggested_fee = tuition_snapshot["agreed_course_fee"]
             resolved_actor = actor if actor is not None else get_current_user()
             reason = (override_reason or "").strip()
@@ -567,13 +643,111 @@ class EnrollmentService:
             self._publish_change(enrollment, "TUITION_RESUMED", enrollment.status)
             return freeze
 
-    def withdraw(self, enrollment_id: int, end_date: Optional[date] = None) -> Enrollment:
-        return self._transition(enrollment_id, EnrollmentStatus.WITHDRAWN, end_date)
+    def withdraw(
+        self,
+        enrollment_id: int,
+        end_date: Optional[date] = None,
+        *,
+        reason: Optional[str] = None,
+        actor=None,
+    ) -> Enrollment:
+        return self._transition(
+            enrollment_id,
+            EnrollmentStatus.WITHDRAWN,
+            end_date,
+            reason=reason,
+            actor=actor,
+        )
 
-    def complete(self, enrollment_id: int, end_date: Optional[date] = None) -> Enrollment:
-        return self._transition(enrollment_id, EnrollmentStatus.COMPLETED, end_date)
+    def complete(
+        self,
+        enrollment_id: int,
+        end_date: Optional[date] = None,
+        *,
+        reason: Optional[str] = None,
+        actor=None,
+    ) -> Enrollment:
+        return self._transition(
+            enrollment_id,
+            EnrollmentStatus.COMPLETED,
+            end_date,
+            reason=reason,
+            actor=actor,
+        )
 
-    def _transition(self, enrollment_id: int, target: EnrollmentStatus, end_date: Optional[date]) -> Enrollment:
+    def restore(
+        self,
+        enrollment_id: int,
+        *,
+        reason: str,
+        actor=None,
+    ) -> Enrollment:
+        restore_reason = self._require_reason(reason, "Restore")
+        resolved_actor = actor if actor is not None else get_current_user()
+        with self._session_factory() as session:
+            repo = self._repository_provider.enrollments(session)
+            enrollment = repo.get_by_id(enrollment_id)
+            if enrollment is None:
+                raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
+            if enrollment.status != EnrollmentStatus.WITHDRAWN.value:
+                raise InvalidEnrollmentTransitionError("Only a WITHDRAWN enrollment can be restored.")
+            if repo.exists(enrollment.student_id, enrollment.class_id, active_only=True):
+                raise EnrollmentAlreadyActiveError("Student already has an active enrollment in this class.")
+            if enrollment.enrolled_from_session is None or enrollment.enrolled_until_session is None:
+                raise EnrollmentValidationError("Enrollment tuition session range is unresolved.")
+            sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
+            self._ensure_no_overlapping_contract(
+                repo.get_by_student_and_class(enrollment.student_id, enrollment.class_id),
+                sessions,
+                new_start=int(enrollment.enrolled_from_session),
+                new_end=int(enrollment.enrolled_until_session),
+                exclude_enrollment_id=enrollment.id,
+            )
+            previous_status = enrollment.status
+            previous_end_date = enrollment.end_date
+            enrollment.status = EnrollmentStatus.ACTIVE.value
+            enrollment.end_date = None
+            audit_factory = getattr(self._repository_provider, "audit_logs", None)
+            if callable(audit_factory):
+                self._audit_service.record_in_session(
+                    session,
+                    action="ENROLLMENT_RESTORED",
+                    module="enrollment",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=(
+                        getattr(enrollment, "class_name", None)
+                        or f"Class #{enrollment.class_id}"
+                    ),
+                    actor=resolved_actor,
+                    details={
+                        "student_id": enrollment.student_id,
+                        "class_id": enrollment.class_id,
+                        "previous_status": previous_status,
+                        "current_status": enrollment.status,
+                        "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
+                        "reason": restore_reason,
+                    },
+                    summary=f"Restore Enrollment#{enrollment.id}",
+                )
+            session.commit()
+            repo.refresh(enrollment)
+            self._publish_change(enrollment, "RESTORED", previous_status)
+            return enrollment
+
+    def _transition(
+        self,
+        enrollment_id: int,
+        target: EnrollmentStatus,
+        end_date: Optional[date],
+        *,
+        reason: Optional[str] = None,
+        actor=None,
+    ) -> Enrollment:
+        resolved_actor = actor if actor is not None else get_current_user()
+        transition_reason = (reason or "").strip() or (
+            "Withdrawn from class" if target == EnrollmentStatus.WITHDRAWN else "Enrollment completed"
+        )
         with self._session_factory() as session:
             repo = self._repository_provider.enrollments(session)
             enrollment = repo.get_by_id(enrollment_id)
@@ -594,8 +768,39 @@ class EnrollmentService:
                     "Resume the open tuition freeze before completing or withdrawing this enrollment."
                 )
             previous_status = enrollment.status
+            previous_end_date = enrollment.end_date
             enrollment.status = target.value
             enrollment.end_date = end_date or get_clock().today()
+            action = (
+                "ENROLLMENT_WITHDRAWN"
+                if target == EnrollmentStatus.WITHDRAWN
+                else "ENROLLMENT_COMPLETED"
+            )
+            audit_factory = getattr(self._repository_provider, "audit_logs", None)
+            if callable(audit_factory):
+                self._audit_service.record_in_session(
+                    session,
+                    action=action,
+                    module="enrollment",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=(
+                        getattr(enrollment, "class_name", None)
+                        or getattr(class_obj, "name", None)
+                        or f"Class #{enrollment.class_id}"
+                    ),
+                    actor=resolved_actor,
+                    details={
+                        "student_id": enrollment.student_id,
+                        "class_id": enrollment.class_id,
+                        "previous_status": previous_status,
+                        "current_status": enrollment.status,
+                        "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
+                        "end_date": enrollment.end_date.isoformat(),
+                        "reason": transition_reason,
+                    },
+                    summary=f"{action}: Enrollment#{enrollment.id}",
+                )
             session.commit()
             repo.refresh(enrollment)
             self._publish_change(
@@ -604,7 +809,6 @@ class EnrollmentService:
                 previous_status,
             )
             return enrollment
-
     def get_student_history(self, student_id: int) -> List[Enrollment]:
         with self._session_factory() as session:
             return self._repository_provider.enrollments(session).get_by_student(student_id)

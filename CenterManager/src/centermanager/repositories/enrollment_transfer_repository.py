@@ -60,6 +60,17 @@ class EnrollmentTransferRepository(BaseRepository[EnrollmentTransfer]):
         target_class = class_query.filter(Class.id == target_class_id).first()
         return source, target_class
 
+    def has_for_enrollment(self, enrollment_id: int) -> bool:
+        return (
+            self._session.query(EnrollmentTransfer.id)
+            .filter(
+                (EnrollmentTransfer.source_enrollment_id == enrollment_id)
+                | (EnrollmentTransfer.target_enrollment_id == enrollment_id)
+            )
+            .first()
+            is not None
+        )
+
     def get_for_target(self, target_enrollment_id: int) -> Optional[EnrollmentTransfer]:
         return self._session.query(EnrollmentTransfer).filter(
             EnrollmentTransfer.target_enrollment_id == target_enrollment_id

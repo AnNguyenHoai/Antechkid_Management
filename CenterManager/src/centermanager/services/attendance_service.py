@@ -102,7 +102,20 @@ class AttendanceService:
         ):
             try:
                 number = int(session_number)
-                return int(enrolled_from) <= number <= int(enrolled_until)
+                if not int(enrolled_from) <= number <= int(enrolled_until):
+                    return False
+                enrollment_end = getattr(enrollment, "end_date", None)
+                session_date = (
+                    getattr(session_obj, "actual_date", None)
+                    or getattr(session_obj, "scheduled_date", None)
+                )
+                if (
+                    enrollment_end is not None
+                    and session_date is not None
+                    and session_date > enrollment_end
+                ):
+                    return False
+                return True
             except (TypeError, ValueError):
                 return False
 

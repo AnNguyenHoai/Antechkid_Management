@@ -4,11 +4,11 @@ Enrollment model - student's class/course enrollment.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING, List
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from centermanager.database.base import Base
@@ -66,6 +66,22 @@ class Enrollment(Base, TimestampMixin):
     billing_policy_version: Mapped[str] = mapped_column(
         String(40), nullable=False, default="attendance_v2"
     )
+
+    # Legacy duplicate-contract reconciliation lineage. Reconciled rows remain
+    # physically present for audit/history but are excluded from operational
+    # Enrollment projections.
+    reconciled_into_enrollment_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("enrollments.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    reconciled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reconciled_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reconcile_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Explicit operator review for a suspected overlap that is confirmed to be
+    # a legitimate separate contract. This prevents repeated repair prompts.
+    reconciliation_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reconciliation_reviewed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reconciliation_review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="enrollments")
     class_: Mapped[Optional[Class]] = relationship("Class", back_populates="enrollments")

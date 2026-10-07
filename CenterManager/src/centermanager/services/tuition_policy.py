@@ -36,6 +36,7 @@ class BillableSessionPolicy:
     REASON_NOT_COMPLETED = "session_not_completed"
     REASON_UNRESOLVED_RANGE = "enrollment_range_unresolved"
     REASON_OUTSIDE_RANGE = "outside_enrollment_range"
+    REASON_AFTER_ENROLLMENT_END = "session_after_enrollment_end"
     REASON_CLASS_MISMATCH = "class_mismatch"
     REASON_INVALID_SESSION_NUMBER = "invalid_session_number"
     REASON_ENROLLMENT_FROZEN = "enrollment_frozen_for_session"
@@ -73,6 +74,14 @@ class BillableSessionPolicy:
             return BillableSessionDecision(False, cls.REASON_CLASS_MISMATCH, policy_version=version)
         if not int(enrolled_from) <= int(session_number) <= int(enrolled_until):
             return BillableSessionDecision(False, cls.REASON_OUTSIDE_RANGE, policy_version=version)
+        enrollment_end = getattr(enrollment, "end_date", None)
+        session_date = getattr(session, "actual_date", None) or getattr(session, "scheduled_date", None)
+        if enrollment_end is not None and session_date is not None and session_date > enrollment_end:
+            return BillableSessionDecision(
+                False,
+                cls.REASON_AFTER_ENROLLMENT_END,
+                policy_version=version,
+            )
         for freeze in (getattr(enrollment, "freezes", None) or []):
             start = getattr(freeze, "start_session", None)
             end = getattr(freeze, "end_session", None)
