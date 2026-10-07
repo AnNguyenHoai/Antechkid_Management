@@ -187,7 +187,7 @@ class ExpenseService:
                               payment_date=payment_date, finance_period_id=period_id,
                               paid_by=paid_by, status=status, note=note)
             repo.add(expense)
-            session.flush()
+            repo.flush()
             self._record_audit(
                 session,
                 expense,
