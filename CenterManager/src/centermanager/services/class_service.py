@@ -507,7 +507,22 @@ class ClassService:
 
     # ===== Enrollment =====
 
-    def enroll_student(self, class_id: int, student_id: int) -> Enrollment:
+    def preview_enrollment_pricing(self, class_id: int, **pricing_kwargs) -> dict:
+        """Expose the canonical Enrollment pricing/range preview to Class UI."""
+        from centermanager.services.enrollment_service import EnrollmentService
+
+        return EnrollmentService(
+            self._session_factory,
+            event_bus=self._event_bus,
+            repository_provider=self._repository_provider,
+        ).preview_enrollment_pricing(class_id, **pricing_kwargs)
+
+    def enroll_student(
+        self,
+        class_id: int,
+        student_id: int,
+        **enrollment_kwargs,
+    ) -> Enrollment:
         """Compatibility facade. EnrollmentService owns the canonical lifecycle."""
         from centermanager.services.enrollment_service import (
             EnrollmentService, EnrollmentAlreadyActiveError, EnrollmentCapacityError
@@ -517,7 +532,7 @@ class ClassService:
                 self._session_factory,
                 event_bus=self._event_bus,
                 repository_provider=self._repository_provider,
-            ).enroll(student_id, class_id)
+            ).enroll(student_id, class_id, **enrollment_kwargs)
         except EnrollmentAlreadyActiveError as exc:
             raise StudentAlreadyEnrolledError(str(exc)) from exc
         except EnrollmentCapacityError as exc:
