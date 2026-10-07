@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
+from centermanager.services.timeline_actor import resolve_timeline_actor
 
 
 class ExpenseTimelineService:
@@ -40,7 +41,7 @@ class ExpenseTimelineService:
                 title=title,
                 description=description,
                 metadata_json=metadata_json,
-                created_by=created_by or "system",
+                created_by=resolve_timeline_actor(created_by),
             )
             repo = self._repository_provider.expense_timeline(session)
             repo.add(event)
