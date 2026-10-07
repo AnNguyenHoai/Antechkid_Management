@@ -29,6 +29,9 @@ from centermanager.database.artifact_security import (
     validate_database_artifact,
 )
 from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required
+from centermanager.database.migration import (
+    upgrade_installed_runtime_database_under_maintenance_to_head,
+)
 
 from .runtime_sync_service import RuntimeSyncService as _BaseRuntimeSyncService
 
@@ -260,6 +263,18 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
                     "Authoritative runtime DB hash mismatch after atomic install: "
                     f"expected={expected_hash}, actual={installed_hash}"
                 )
+
+            # The repository database is authoritative for data, but it may have
+            # been published by an older executable/schema revision.  Startup
+            # migration is not sufficient because every WRITE handoff and
+            # background pull replaces the live runtime file again.  Upgrade
+            # the freshly installed artifact while the maintenance fence is
+            # still held and while the previous runtime is still available for
+            # rollback.  Only then rebuild normal runtime sessions.
+            upgrade_installed_runtime_database_under_maintenance_to_head()
+            logger.info(
+                "WRITE/pull runtime schema barrier passed after authoritative install"
+            )
 
             self._refresh_db_sessions()
             sessions_refreshed = True

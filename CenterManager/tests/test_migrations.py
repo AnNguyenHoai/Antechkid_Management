@@ -184,6 +184,18 @@ def test_post_upgrade_validation_checks_revision_and_physical_schema():
     assert '"class_fee_history": {"changed_by"}' in source
 
 
+def test_installed_runtime_migration_requires_maintenance_fence(monkeypatch):
+    from centermanager.database import migration
+
+    monkeypatch.setattr(migration, "runtime_db_maintenance_active", lambda: False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires the database maintenance fence",
+    ):
+        migration.upgrade_installed_runtime_database_under_maintenance_to_head()
+
+
 def test_employee_timestamp_defaults_and_persistence_after_migration(migration_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
     from sqlalchemy import inspect
