@@ -316,6 +316,10 @@ class EnrollmentReconciliationService:
             duplicate.reconciliation_reviewed_by = None
             duplicate.reconciliation_review_reason = None
 
+            event_student_id = int(canonical.student_id)
+            event_enrollment_id = int(canonical.id)
+            event_class_id = int(canonical.class_id)
+            event_status = canonical.status
             self._audit_service.record_in_session(
                 session,
                 action="ENROLLMENT_RECONCILED",
@@ -346,17 +350,17 @@ class EnrollmentReconciliationService:
                 FinanceDataChanged(
                     entity="enrollment_reconciliation",
                     action="RECONCILED",
-                    entity_id=canonical_enrollment_id,
+                    entity_id=event_enrollment_id,
                 )
             )
             self._event_bus.publish(
                 StudentEnrollmentChanged(
-                    student_id=canonical.student_id,
-                    enrollment_id=canonical.id,
-                    class_id=canonical.class_id,
+                    student_id=event_student_id,
+                    enrollment_id=event_enrollment_id,
+                    class_id=event_class_id,
                     action="RECONCILED",
-                    previous_status=canonical.status,
-                    current_status=canonical.status,
+                    previous_status=event_status,
+                    current_status=event_status,
                 )
             )
         return moved_income_ids
