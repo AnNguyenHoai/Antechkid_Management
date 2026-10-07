@@ -54,3 +54,11 @@ def test_workspace_unlock_waits_until_transaction_returns_to_idle():
 
     assert "QTimer.singleShot(0, self._verify_and_complete_after_publish)" in source
     assert "self._transaction.state != WriteTransactionState.IDLE" in source
+
+
+def test_password_flow_rejects_authorization_changes_during_handoff():
+    source = read("ui/authoritative_password_change.py")
+
+    assert 'getattr(fresh_user, "is_active", False)' in source
+    assert 'getattr(fresh_user, "role_id", None) != self._role_id' in source
+    assert "permissions can be rebuilt safely" in source
