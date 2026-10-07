@@ -276,7 +276,7 @@ class TuitionAdjustmentService:
                         f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
                         "use the canonical Enrollment."
                     )
-                    if origin_adjustment_id is not None:
+                if origin_adjustment_id is not None:
                     origin_adjustment = adjustments.get_by_id(origin_adjustment_id)
                     if origin_adjustment is None or origin_adjustment.enrollment_id != enrollment_id:
                         raise TuitionAdjustmentValidationError("Origin adjustment must belong to the same Enrollment.")
