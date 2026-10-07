@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from centermanager.services.class_service import ClassService
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
+from centermanager.ui.student_workspace.enrollment_pricing_dialog import EnrollmentPricingDialog
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +137,24 @@ class ClassEnrollmentDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Please select at least one student.")
             return
 
+        pricing = EnrollmentPricingDialog(
+            self._class_service,
+            self._class_id,
+            parent=self,
+        )
+        if pricing.exec() != QDialog.DialogCode.Accepted:
+            return
+        enrollment_kwargs = pricing.enrollment_kwargs()
+
         for item in items:
             student_id = item.data(Qt.ItemDataRole.UserRole)
             try:
                 logger.info(f"Enrolling student {student_id} into class {self._class_id}")
-                self._class_service.enroll_student(self._class_id, student_id)
+                self._class_service.enroll_student(
+                    self._class_id,
+                    student_id,
+                    **enrollment_kwargs,
+                )
                 self._enrolled_ids.append(student_id)
                 self.enrollment_changed.emit(self._class_id)
                 logger.info(f"Successfully enrolled student {student_id}")
