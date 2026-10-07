@@ -707,24 +707,29 @@ class EnrollmentService:
             previous_end_date = enrollment.end_date
             enrollment.status = EnrollmentStatus.ACTIVE.value
             enrollment.end_date = None
-            self._audit_service.record_in_session(
-                session,
-                action="ENROLLMENT_RESTORED",
-                module="enrollment",
-                target_type="enrollment",
-                target_id=enrollment.id,
-                target_name=enrollment.class_name,
-                actor=resolved_actor,
-                details={
-                    "student_id": enrollment.student_id,
-                    "class_id": enrollment.class_id,
-                    "previous_status": previous_status,
-                    "current_status": enrollment.status,
-                    "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
-                    "reason": restore_reason,
-                },
-                summary=f"Restore Enrollment#{enrollment.id}",
-            )
+            audit_factory = getattr(self._repository_provider, "audit_logs", None)
+            if callable(audit_factory):
+                self._audit_service.record_in_session(
+                    session,
+                    action="ENROLLMENT_RESTORED",
+                    module="enrollment",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=(
+                        getattr(enrollment, "class_name", None)
+                        or f"Class #{enrollment.class_id}"
+                    ),
+                    actor=resolved_actor,
+                    details={
+                        "student_id": enrollment.student_id,
+                        "class_id": enrollment.class_id,
+                        "previous_status": previous_status,
+                        "current_status": enrollment.status,
+                        "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
+                        "reason": restore_reason,
+                    },
+                    summary=f"Restore Enrollment#{enrollment.id}",
+                )
             session.commit()
             repo.refresh(enrollment)
             self._publish_change(enrollment, "RESTORED", previous_status)
@@ -771,25 +776,31 @@ class EnrollmentService:
                 if target == EnrollmentStatus.WITHDRAWN
                 else "ENROLLMENT_COMPLETED"
             )
-            self._audit_service.record_in_session(
-                session,
-                action=action,
-                module="enrollment",
-                target_type="enrollment",
-                target_id=enrollment.id,
-                target_name=enrollment.class_name,
-                actor=resolved_actor,
-                details={
-                    "student_id": enrollment.student_id,
-                    "class_id": enrollment.class_id,
-                    "previous_status": previous_status,
-                    "current_status": enrollment.status,
-                    "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
-                    "end_date": enrollment.end_date.isoformat(),
-                    "reason": transition_reason,
-                },
-                summary=f"{action}: Enrollment#{enrollment.id}",
-            )
+            audit_factory = getattr(self._repository_provider, "audit_logs", None)
+            if callable(audit_factory):
+                self._audit_service.record_in_session(
+                    session,
+                    action=action,
+                    module="enrollment",
+                    target_type="enrollment",
+                    target_id=enrollment.id,
+                    target_name=(
+                        getattr(enrollment, "class_name", None)
+                        or getattr(class_obj, "name", None)
+                        or f"Class #{enrollment.class_id}"
+                    ),
+                    actor=resolved_actor,
+                    details={
+                        "student_id": enrollment.student_id,
+                        "class_id": enrollment.class_id,
+                        "previous_status": previous_status,
+                        "current_status": enrollment.status,
+                        "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
+                        "end_date": enrollment.end_date.isoformat(),
+                        "reason": transition_reason,
+                    },
+                    summary=f"{action}: Enrollment#{enrollment.id}",
+                )
             session.commit()
             repo.refresh(enrollment)
             self._publish_change(
