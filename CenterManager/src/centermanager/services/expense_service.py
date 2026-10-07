@@ -13,6 +13,7 @@ from centermanager.repositories.provider import RepositoryProvider, create_defau
 from centermanager.services.expense_timeline_service import ExpenseTimelineService
 from centermanager.services.finance_ledger_guard import FinanceLedgerGuard, FinancePeriodClosedError
 from centermanager.services.permission_service import PermissionService
+from centermanager.services.audit_service import AuditService
 from centermanager.core.permission_guard import require_permission
 from centermanager.core.current_user import get_current_user
 from centermanager.events.event_bus import EventBus
@@ -40,12 +41,17 @@ class ExpenseService:
     def __init__(self, session_factory: Any, timeline_service: ExpenseTimelineService,
                  permission_service: PermissionService,
                  repository_provider: Optional[RepositoryProvider] = None,
-                 event_bus: Optional[EventBus] = None):
+                 event_bus: Optional[EventBus] = None,
+                 audit_service: Optional[AuditService] = None):
         self._session_factory = session_factory
         self._timeline_service = timeline_service
         self._permission_service = permission_service
         self._repository_provider = repository_provider or create_default_repository_provider()
         self._event_bus = event_bus
+        self._audit_service = audit_service or AuditService(
+            session_factory,
+            repository_provider=self._repository_provider,
+        )
 
     def set_event_bus(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
@@ -62,6 +68,44 @@ class ExpenseService:
             self._timeline_service.log_event(**kwargs)
         except Exception:
             logger.exception("Expense committed but timeline projection failed")
+
+    @staticmethod
+    def _audit_snapshot(expense: Expense) -> dict:
+        return {
+            "category": expense.category,
+            "description": expense.description,
+            "amount": expense.amount,
+            "payment_method": expense.payment_method,
+            "payment_date": expense.payment_date.isoformat() if expense.payment_date else None,
+            "finance_period_id": expense.finance_period_id,
+            "paid_by": expense.paid_by,
+            "status": expense.status,
+            "note": expense.note,
+            "deleted_at": expense.deleted_at.isoformat() if expense.deleted_at else None,
+        }
+
+    def _record_audit(
+        self,
+        session,
+        expense: Expense,
+        action: str,
+        *,
+        old_values: Optional[dict] = None,
+        new_values: Optional[dict] = None,
+    ) -> None:
+        self._audit_service.record_in_session(
+            session,
+            action=action,
+            module="finance",
+            target_type="expense",
+            target_id=expense.id,
+            target_name=f"Expense #{expense.id}",
+            details={"old_values": old_values, "new_values": new_values},
+            actor=get_current_user(),
+            entity_type="Expense",
+            entity_id=expense.id,
+            summary=f"{action}: Expense#{expense.id}",
+        )
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
         if text is None:
@@ -143,6 +187,13 @@ class ExpenseService:
                               payment_date=payment_date, finance_period_id=period_id,
                               paid_by=paid_by, status=status, note=note)
             repo.add(expense)
+            session.flush()
+            self._record_audit(
+                session,
+                expense,
+                "CREATE",
+                new_values=self._audit_snapshot(expense),
+            )
             session.commit()
             repo.refresh(expense)
             expense_id = expense.id
@@ -220,6 +271,7 @@ class ExpenseService:
             if not expense or expense.deleted_at is not None:
                 raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
 
+            before = self._audit_snapshot(expense)
             original_date = expense.payment_date
             original_status = expense.status
             if original_status == "Completed":
@@ -248,6 +300,13 @@ class ExpenseService:
             if expense.finance_period_id != new_period_id:
                 changes.append(f"finance_period_id: {expense.finance_period_id} -> {new_period_id}")
                 expense.finance_period_id = new_period_id
+            self._record_audit(
+                session,
+                expense,
+                "UPDATE",
+                old_values=before,
+                new_values=self._audit_snapshot(expense),
+            )
             session.commit()
             repo.refresh(expense)
             self._log_timeline_best_effort(expense_id=expense.id, event_type="ExpenseUpdated", title="Expense Updated",
@@ -265,7 +324,15 @@ class ExpenseService:
             if expense.status == "Completed":
                 self._ensure_date_mutable(session, expense.payment_date)
             category, amount = expense.category, expense.amount
+            before = self._audit_snapshot(expense)
             repo.soft_delete(expense)
+            self._record_audit(
+                session,
+                expense,
+                "DELETE",
+                old_values=before,
+                new_values=self._audit_snapshot(expense),
+            )
             session.commit()
             self._log_timeline_best_effort(expense_id=expense_id, event_type="ExpenseDeleted", title="Expense Deleted",
                                            description=f"Expense {category} amount {amount:,.0f} VND deleted")
