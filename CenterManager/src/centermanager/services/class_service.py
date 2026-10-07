@@ -629,7 +629,10 @@ class ClassService:
                 raise ClassNotFoundError("Active enrollment not found.")
             enrollment_id = enrollment.id
         try:
-            service.withdraw(enrollment_id, reason=reason)
+            if reason is None:
+                service.withdraw(enrollment_id)
+            else:
+                service.withdraw(enrollment_id, reason=reason)
         except EnrollmentNotFoundError as exc:
             raise ClassNotFoundError("Enrollment not found.") from exc
 
