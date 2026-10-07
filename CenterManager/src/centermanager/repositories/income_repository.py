@@ -187,6 +187,33 @@ class IncomeRepository(BaseRepository[Income]):
             status=Income.STATUS_ACTIVE,
         )
 
+    def list_tuition_for_enrollment_including_history(
+        self, enrollment_id: int
+    ) -> List[Income]:
+        """Load every Tuition Income attribution, including voided/deleted history."""
+        return (
+            self._session.query(Income)
+            .filter(
+                Income.income_type == "Tuition",
+                Income.enrollment_id == enrollment_id,
+            )
+            .order_by(Income.id)
+            .all()
+        )
+
+    def reattribute_tuition_enrollment(
+        self,
+        source_enrollment_id: int,
+        target_enrollment_id: int,
+    ) -> List[int]:
+        """Move Tuition Income attribution without changing cash/accounting facts."""
+        rows = self.list_tuition_for_enrollment_including_history(source_enrollment_id)
+        moved = []
+        for income in rows:
+            income.enrollment_id = target_enrollment_id
+            moved.append(int(income.id))
+        return moved
+
     def list_unattributed_tuition(self, *, student_id=None, class_id=None) -> List[Income]:
         query = self._session.query(Income).options(*self._load_options()).filter(
             Income.deleted_at.is_(None), Income.income_type == "Tuition", Income.enrollment_id.is_(None)

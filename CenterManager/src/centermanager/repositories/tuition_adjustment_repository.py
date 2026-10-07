@@ -28,6 +28,14 @@ class TuitionAdjustmentRepository(BaseRepository[TuitionAdjustment]):
         self._session.refresh(adjustment)
         return adjustment
 
+    def has_for_enrollment(self, enrollment_id: int) -> bool:
+        return (
+            self._session.query(TuitionAdjustment.id)
+            .filter(TuitionAdjustment.enrollment_id == enrollment_id)
+            .first()
+            is not None
+        )
+
     def get_by_id(self, adjustment_id: int) -> Optional[TuitionAdjustment]:
         return self._session.query(TuitionAdjustment).filter(
             TuitionAdjustment.id == adjustment_id

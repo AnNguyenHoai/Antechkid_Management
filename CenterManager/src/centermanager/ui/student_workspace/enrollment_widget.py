@@ -225,6 +225,10 @@ class EnrollmentWidget(QWidget):
             metadata.append(f"Teacher: {enrollment.teacher_name}")
         if enrollment.level:
             metadata.append(f"Level: {enrollment.level}")
+        if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
+            metadata.append(
+                f"Reconciled into Enrollment #{enrollment.reconciled_into_enrollment_id}"
+            )
         if metadata:
             metadata_label = QLabel(" • ".join(metadata), card)
             metadata_label.setWordWrap(True)

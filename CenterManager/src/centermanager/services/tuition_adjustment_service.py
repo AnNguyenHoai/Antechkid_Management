@@ -148,6 +148,12 @@ class TuitionAdjustmentService:
             enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
             if enrollment is None:
                 raise TuitionAdjustmentValidationError("Enrollment not found.")
+            if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
+                raise TuitionAdjustmentValidationError(
+                    "Enrollment has been reconciled into "
+                    f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
+                    "use the canonical Enrollment."
+                )
             incomes = self._repository_provider.incomes(session)
             adjustments = self._repository_provider.tuition_adjustments(session)
             settled = _money(incomes.sum_active_tuition_for_enrollment(enrollment_id, as_of_date=cutoff))
@@ -181,6 +187,12 @@ class TuitionAdjustmentService:
                     return existing
                 if enrollment is None:
                     raise TuitionAdjustmentValidationError("Enrollment not found.")
+                if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
+                    raise TuitionAdjustmentValidationError(
+                        "Enrollment has been reconciled into "
+                        f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
+                        "use the canonical Enrollment."
+                    )
                 incomes = self._repository_provider.incomes(session)
                 if origin_income_id is not None:
                     if (origin is None or origin.deleted_at is not None or origin.income_type != "Tuition"
@@ -258,6 +270,12 @@ class TuitionAdjustmentService:
                     return existing
                 if enrollment is None:
                     raise TuitionAdjustmentValidationError("Enrollment not found.")
+                if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
+                    raise TuitionAdjustmentValidationError(
+                        "Enrollment has been reconciled into "
+                        f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
+                        "use the canonical Enrollment."
+                    )
                 if origin_adjustment_id is not None:
                     origin_adjustment = adjustments.get_by_id(origin_adjustment_id)
                     if origin_adjustment is None or origin_adjustment.enrollment_id != enrollment_id:

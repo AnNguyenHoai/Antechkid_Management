@@ -78,7 +78,11 @@ class ClassEnrollmentDialog(QDialog):
         self.remove_btn = QPushButton("← Withdraw")
         self.remove_btn.clicked.connect(self._remove_selected)
 
+        self.reconcile_btn = QPushButton("Repair legacy duplicates")
+        self.reconcile_btn.clicked.connect(self._repair_legacy_duplicates)
+
         btn_layout2 = QHBoxLayout()
+        btn_layout2.addWidget(self.reconcile_btn)
         btn_layout2.addStretch()
         btn_layout2.addWidget(self.remove_btn)
 
@@ -100,6 +104,7 @@ class ClassEnrollmentDialog(QDialog):
         enabled = self._collaboration_manager.ensure_write()
         self.enroll_btn.setEnabled(enabled)
         self.remove_btn.setEnabled(enabled)
+        self.reconcile_btn.setEnabled(enabled)
 
     def _load_data(self) -> None:
         self._all_students = self._class_service.list_active_students()
@@ -225,6 +230,145 @@ class ClassEnrollmentDialog(QDialog):
                 )
 
         self._update_lists()
+    def _repair_legacy_duplicates(self) -> None:
+        if not self._ensure_enrollment_write("repair legacy enrollment duplicates"):
+            return
+        try:
+            candidates = self._class_service.find_legacy_enrollment_duplicates(
+                self._class_id
+            )
+        except Exception as exc:
+            logger.exception("Failed to scan legacy Enrollment duplicates: %s", exc)
+            QMessageBox.warning(
+                self,
+                "Legacy Enrollment Repair",
+                f"Could not scan legacy duplicates: {str(exc)}",
+            )
+            return
+
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "Legacy Enrollment Repair",
+                "No unresolved legacy duplicate Enrollment contracts were found for this class.",
+            )
+            return
+
+        changed = False
+        for candidate in candidates:
+            blocker_text = (
+                "\nBlockers: " + ", ".join(candidate.blockers)
+                if candidate.blockers
+                else ""
+            )
+            box = QMessageBox(self)
+            box.setWindowTitle("Review legacy Enrollment")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f"{candidate.student_name}\n"
+                f"{candidate.class_name}\n\n"
+                f"Active canonical Enrollment #{candidate.canonical_enrollment_id} "
+                f"(S{candidate.canonical_range[0]}–S{candidate.canonical_range[1]})\n"
+                f"Historical withdrawn Enrollment #{candidate.duplicate_enrollment_id} "
+                f"(effective S{candidate.duplicate_effective_range[0]}–"
+                f"S{candidate.duplicate_effective_range[1]})\n"
+                f"Tuition Income rows to re-attribute: {candidate.tuition_income_count}\n"
+                f"Active tuition amount: {candidate.tuition_income_total:,.0f}"
+                f"{blocker_text}\n\n"
+                "Choose Reconcile only if the historical row came from an accidental "
+                "remove/add. Choose Keep separate if it is a genuine historical contract."
+            )
+            reconcile_btn = box.addButton(
+                "Reconcile into active",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            keep_btn = box.addButton(
+                "Keep separate",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is reconcile_btn:
+                if candidate.blockers:
+                    QMessageBox.warning(
+                        self,
+                        "Automatic repair blocked",
+                        "This Enrollment has immutable tuition history and cannot be "
+                        "reconciled automatically:\n"
+                        + "\n".join(candidate.blockers),
+                    )
+                    continue
+                reason, accepted = QInputDialog.getText(
+                    self,
+                    "Reconciliation reason",
+                    "Why is this an accidental duplicate?",
+                )
+                if not accepted:
+                    continue
+                reason = reason.strip()
+                if not reason:
+                    QMessageBox.warning(
+                        self,
+                        "Reconciliation reason",
+                        "A reconciliation reason is required.",
+                    )
+                    continue
+                try:
+                    moved = self._class_service.reconcile_legacy_enrollment_duplicate(
+                        self._class_id,
+                        candidate.duplicate_enrollment_id,
+                        candidate.canonical_enrollment_id,
+                        reason=reason,
+                    )
+                    changed = True
+                    QMessageBox.information(
+                        self,
+                        "Enrollment reconciled",
+                        f"Enrollment #{candidate.duplicate_enrollment_id} was reconciled "
+                        f"into #{candidate.canonical_enrollment_id}.\n"
+                        f"Re-attributed Tuition Income rows: {len(moved)}.",
+                    )
+                except Exception as exc:
+                    logger.exception("Legacy Enrollment reconciliation failed: %s", exc)
+                    QMessageBox.warning(
+                        self,
+                        "Reconciliation failed",
+                        str(exc),
+                    )
+            elif clicked is keep_btn:
+                reason, accepted = QInputDialog.getText(
+                    self,
+                    "Keep separate",
+                    "Why are these separate legitimate Enrollment contracts?",
+                )
+                if not accepted:
+                    continue
+                reason = reason.strip()
+                if not reason:
+                    QMessageBox.warning(
+                        self,
+                        "Review reason",
+                        "A review reason is required.",
+                    )
+                    continue
+                try:
+                    self._class_service.mark_legacy_enrollment_legitimate(
+                        self._class_id,
+                        candidate.duplicate_enrollment_id,
+                        reason=reason,
+                    )
+                    changed = True
+                except Exception as exc:
+                    logger.exception("Legacy Enrollment review failed: %s", exc)
+                    QMessageBox.warning(self, "Review failed", str(exc))
+            else:
+                break
+
+        if changed:
+            self.enrollment_changed.emit(self._class_id)
+            self._load_data()
+
     def _remove_selected(self) -> None:
         # Keep the legacy authorization action key stable; the user-facing action is Withdraw.
         if not self._ensure_enrollment_write("remove students"):
