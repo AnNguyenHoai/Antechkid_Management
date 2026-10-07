@@ -70,6 +70,48 @@ def test_enrollment_reconciliation_columns_exist_at_migration_head(migration_db_
     }.issubset(columns)
 
 
+def test_existing_database_upgrades_from_1e10a039_without_enrollment_table_rebuild(
+    migration_db_path,
+):
+    """Production path: PR J lineage upgrade must be additive and SQLite-safe."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+    from centermanager.database.engine import create_engine_for_path
+
+    project_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(project_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_root / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{migration_db_path}")
+
+    command.upgrade(cfg, "1e10a039")
+    command.upgrade(cfg, "head")
+
+    engine = create_engine_for_path(migration_db_path)
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("enrollments")
+    }
+    assert "reconciled_into_enrollment_id" in columns
+    assert "reconciliation_reviewed_at" in columns
+
+
+def test_reconciliation_migration_upgrade_avoids_batch_rebuild_and_self_fk():
+    migration_source = (
+        Path(__file__).resolve().parent.parent
+        / "migrations"
+        / "versions"
+        / "1e10a040_enrollment_reconciliation_lineage.py"
+    ).read_text(encoding="utf-8")
+    upgrade_source = migration_source.split("def downgrade()", 1)[0]
+
+    assert 'op.add_column(' in upgrade_source
+    assert 'op.create_index(' in upgrade_source
+    assert 'batch_alter_table("enrollments")' not in upgrade_source
+    assert "create_foreign_key" not in upgrade_source
+    assert "fk_enrollments_reconciled_into" not in upgrade_source
+
+
 def test_employee_timestamp_defaults_and_persistence_after_migration(migration_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
     from sqlalchemy import inspect
