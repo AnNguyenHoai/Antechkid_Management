@@ -26,6 +26,50 @@ _BASELINE_TABLES = {
     "timeline_events", "student_products", "progress", "attachments",
 }
 
+_POST_PRJ_REQUIRED_COLUMNS = {
+    "enrollments": {
+        "reconciled_into_enrollment_id",
+        "reconciled_at",
+        "reconciled_by",
+        "reconcile_reason",
+        "reconciliation_reviewed_at",
+        "reconciliation_reviewed_by",
+        "reconciliation_review_reason",
+    },
+    "class_fee_history": {"changed_by"},
+}
+
+
+def _validate_post_upgrade_schema(connection, config: Config) -> None:
+    """Prove revision metadata and the critical post-PR-J physical schema agree."""
+    migration_context = MigrationContext.configure(connection)
+    current = migration_context.get_current_revision()
+    head = ScriptDirectory.from_config(config).get_current_head()
+    if current != head:
+        raise RuntimeError(
+            f"Database migration revision mismatch after upgrade: current={current!r}, head={head!r}"
+        )
+
+    db_inspector = inspect(connection)
+    missing = []
+    for table_name, required_columns in _POST_PRJ_REQUIRED_COLUMNS.items():
+        actual = {
+            column["name"]
+            for column in db_inspector.get_columns(table_name)
+        }
+        for column_name in sorted(required_columns - actual):
+            missing.append(f"{table_name}.{column_name}")
+    if missing:
+        raise RuntimeError(
+            "Database revision is at Alembic head but required physical schema is missing: "
+            + ", ".join(missing)
+        )
+
+    logger.info(
+        "Database schema verified at Alembic head: revision=%s",
+        current,
+    )
+
 
 def _bundled_root() -> Path | None:
     """Return PyInstaller's extracted resource root when running frozen."""
@@ -126,6 +170,7 @@ def _upgrade_database_with_engine(database_path: Path, engine) -> None:
 
         logger.info("Upgrading database schema to Alembic head: %s", database_path)
         command.upgrade(config, "head")
+        _validate_post_upgrade_schema(connection, config)
         logger.info("Database schema migration completed successfully: %s", database_path)
 
 
