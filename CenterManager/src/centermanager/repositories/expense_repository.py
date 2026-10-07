@@ -33,6 +33,10 @@ class ExpenseRepository(BaseRepository[Expense]):
         self._session.add(expense)
         return expense
 
+    def flush(self) -> None:
+        """Materialize pending Expense identity inside the caller transaction."""
+        self._session.flush()
+
     def get_by_id(self, expense_id: int) -> Optional[Expense]:
         return self._session.query(Expense).filter(
             Expense.id == expense_id,
