@@ -49,7 +49,6 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
             Enrollment.reconciled_into_enrollment_id.is_(None),
-            Enrollment.reconciled_into_enrollment_id.is_(None),
         ).first()
 
     def get_active_by_class(self, class_id: int) -> List[Enrollment]:
@@ -58,6 +57,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         ).filter(
             Enrollment.class_id == class_id,
             Enrollment.status == "ACTIVE",
+            Enrollment.reconciled_into_enrollment_id.is_(None),
         ).order_by(Enrollment.id).all()
 
     def get_by_student_and_class(self, student_id: int, class_id: int) -> List[Enrollment]:
