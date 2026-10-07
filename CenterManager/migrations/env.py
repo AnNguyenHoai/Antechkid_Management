@@ -21,8 +21,16 @@ from centermanager.models import *  # noqa
 config = context.config
 
 # Logging
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Production migration receives an already-keyed runtime connection from the
+# application.  In that path, re-running fileConfig() would replace the root
+# handlers installed by centermanager.core.logging and hide every post-migration
+# application exception from the rotating log file.  Keep Alembic CLI behavior
+# unchanged for standalone/dev migrations.
+if (
+    config.config_file_name is not None
+    and config.attributes.get("connection") is None
+):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
