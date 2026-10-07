@@ -70,8 +70,12 @@ class Enrollment(Base, TimestampMixin):
     # Legacy duplicate-contract reconciliation lineage. Reconciled rows remain
     # physically present for audit/history but are excluded from operational
     # Enrollment projections.
+    # Application-validated lineage pointer. Deliberately not a DB-level
+    # self-referencing FK: on SQLite/SQLCipher, introducing that FK requires a
+    # full enrollments table rebuild during migration. EnrollmentReconciliationService
+    # validates the canonical Enrollment before persisting this value.
     reconciled_into_enrollment_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("enrollments.id", ondelete="RESTRICT"), nullable=True, index=True
+        Integer, nullable=True, index=True
     )
     reconciled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     reconciled_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
