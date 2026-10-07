@@ -6,6 +6,7 @@ from typing import Optional, List, Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from centermanager.core.clock import get_clock
+from centermanager.services.timeline_actor import resolve_timeline_actor
 from centermanager.models.class_ import Class
 from centermanager.models.student import Student
 from centermanager.models.class_timeline_event import ClassTimelineEventType
@@ -145,6 +146,7 @@ class ClassService:
                 effective_from=effective_from,
                 fee=fee,
                 source=source,
+                changed_by=resolve_timeline_actor(),
             )
 
     def _require_active_class(self, class_obj: Optional[Class], class_id: int) -> Class:

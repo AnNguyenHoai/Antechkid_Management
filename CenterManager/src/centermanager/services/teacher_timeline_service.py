@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from centermanager.models.teacher_timeline_event import TeacherTimelineEvent, TeacherTimelineEventType
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
+from centermanager.services.timeline_actor import resolve_timeline_actor
 
 
 class TeacherTimelineService:
@@ -49,7 +50,7 @@ class TeacherTimelineService:
                 title=title,
                 description=description,
                 metadata_json=metadata_json,
-                created_by=created_by or "system",
+                created_by=resolve_timeline_actor(created_by),
             )
             repo = self._repository_provider.teacher_timeline(session)
             repo.add(event)

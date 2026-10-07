@@ -36,3 +36,4 @@ class ClassFeeHistory(Base, TimestampMixin):
         default="CLASS_FEE_CHANGE",
         server_default="CLASS_FEE_CHANGE",
     )
+    changed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

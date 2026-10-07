@@ -59,6 +59,14 @@ class TimelineCard(QFrame):
 
         layout.addLayout(header)
 
+        actor_name = getattr(self._event, "created_by", None) or "system"
+        actor_label = QLabel(f"By {actor_name}")
+        actor_label.setStyleSheet(f"""
+            font-size: {TYPOGRAPHY['caption']}px;
+            color: {COLORS['muted']};
+        """)
+        layout.addWidget(actor_label)
+
         if self._event.description:
             desc_label = QLabel(self._event.description)
             desc_label.setWordWrap(True)

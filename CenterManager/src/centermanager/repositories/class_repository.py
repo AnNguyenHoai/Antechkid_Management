@@ -49,12 +49,14 @@ class ClassRepository(BaseRepository[Class]):
         effective_from: date,
         fee: Optional[int],
         source: str,
+        changed_by: Optional[str] = None,
     ) -> ClassFeeHistory:
         version = ClassFeeHistory(
             class_id=class_id,
             effective_from=effective_from,
             fee=fee,
             source=source,
+            changed_by=changed_by,
         )
         self._session.add(version)
         return version
