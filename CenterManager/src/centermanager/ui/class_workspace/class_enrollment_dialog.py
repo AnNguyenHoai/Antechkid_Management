@@ -370,7 +370,8 @@ class ClassEnrollmentDialog(QDialog):
             self._load_data()
 
     def _remove_selected(self) -> None:
-        if not self._ensure_enrollment_write("withdraw students"):
+        # Keep the legacy authorization action key stable; the user-facing action is Withdraw.
+        if not self._ensure_enrollment_write("remove students"):
             return
         items = self.enrolled_list.selectedItems()
         if not items:
