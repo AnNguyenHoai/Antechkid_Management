@@ -138,9 +138,15 @@ class AuthoritativePasswordChangeCoordinator:
             return
 
         if not fresh_user.force_password_change:
-            # Another authoritative writer may have completed it while we waited.
+            # The credential used at login is now stale relative to the
+            # authoritative account state. Never grant workspace access on the
+            # strength of the old password; release WRITE and require re-login.
             self._transaction.cancel_editing(force=True)
-            self._complete(fresh_user)
+            self._abort_and_close(
+                "Your account credentials changed on another computer while "
+                "this machine was waiting. Please restart CenterManager and "
+                "sign in with the current password."
+            )
             return
 
         self._dialog_open = True
@@ -170,6 +176,18 @@ class AuthoritativePasswordChangeCoordinator:
             )
 
     def _on_publish_success(self) -> None:
+        # WriteTransactionManager invokes this callback before it releases the
+        # WRITE lease and resets itself to IDLE. Defer UI unlock to the next Qt
+        # turn so normal edit controls cannot observe a half-finished state.
+        QTimer.singleShot(0, self._verify_and_complete_after_publish)
+
+    def _verify_and_complete_after_publish(self) -> None:
+        if not self._active:
+            return
+        if self._transaction.state != WriteTransactionState.IDLE:
+            QTimer.singleShot(0, self._verify_and_complete_after_publish)
+            return
+
         fresh_user = self._permission_service.get_user(self._user_id)
         if fresh_user is None or fresh_user.force_password_change:
             self._fail_closed(
