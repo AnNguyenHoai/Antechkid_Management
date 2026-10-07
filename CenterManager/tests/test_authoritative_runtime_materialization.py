@@ -54,6 +54,11 @@ def _service(monkeypatch, paths, writer=None):
         "validate_authoritative_repository_database",
         lambda: paths.runtime_root / "repository" / "database" / "center.db",
     )
+    monkeypatch.setattr(
+        hardened_sync,
+        "upgrade_installed_runtime_database_under_maintenance_to_head",
+        lambda: order.append("migrate"),
+    )
 
     import centermanager.database.session as session_module
 
@@ -107,7 +112,7 @@ def test_waiting_writer_discards_stale_local_wal_and_uses_git_authority(tmp_path
 
     assert service._apply_runtime_update() is True
     assert order[0] == "quiesce"
-    assert "refresh" in order
+    assert order.index("migrate") < order.index("refresh")
     assert fence["active"] is False
     assert _read_values(runtime_db) == ["BASE", "A_ONLY"]
     assert not runtime_db.with_name("center.db-wal").exists()
@@ -138,6 +143,35 @@ def test_live_runtime_is_not_replaced_before_quiesce(tmp_path, monkeypatch):
     assert service._apply_runtime_update() is True
     assert order.index("quiesce") < order.index("runtime-mutation") < order.index("refresh")
     assert _read_values(runtime_db) == ["LATEST"]
+
+
+def test_schema_migration_failure_rolls_back_authoritative_install(
+    tmp_path, monkeypatch
+):
+    paths = _paths(tmp_path)
+    repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+    _make_plain_db(repo_db, ["NEW_AUTHORITY"])
+
+    runtime_db = paths.database_dir / "center.db"
+    _make_plain_db(runtime_db, ["PREVIOUS_RUNTIME"])
+
+    service, fence, order = _service(monkeypatch, paths)
+
+    def fail_migration():
+        order.append("migrate")
+        raise RuntimeError("schema upgrade failed")
+
+    monkeypatch.setattr(
+        hardened_sync,
+        "upgrade_installed_runtime_database_under_maintenance_to_head",
+        fail_migration,
+    )
+
+    assert service._apply_runtime_update() is False
+    assert "migrate" in order
+    assert "refresh" in order  # rollback refresh only
+    assert fence["active"] is False
+    assert _read_values(runtime_db) == ["PREVIOUS_RUNTIME"]
 
 
 def test_refresh_failure_rolls_back_and_rejects_handoff(tmp_path, monkeypatch):
