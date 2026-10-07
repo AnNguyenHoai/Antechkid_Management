@@ -193,7 +193,7 @@ class TuitionAdjustmentService:
                         f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
                         "use the canonical Enrollment."
                     )
-                    incomes = self._repository_provider.incomes(session)
+                incomes = self._repository_provider.incomes(session)
                 if origin_income_id is not None:
                     if (origin is None or origin.deleted_at is not None or origin.income_type != "Tuition"
                             or origin.status != Income.STATUS_ACTIVE or float(origin.amount) <= 0):
