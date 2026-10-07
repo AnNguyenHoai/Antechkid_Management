@@ -544,14 +544,20 @@ class ClassService:
         """Restore a mistakenly withdrawn Enrollment without creating a new contract."""
         from centermanager.services.enrollment_service import EnrollmentService
 
+        with self._session_factory() as session:
+            candidate = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
+            if (
+                candidate is None
+                or candidate.student_id != student_id
+                or candidate.class_id != class_id
+            ):
+                raise ClassNotFoundError("Enrollment does not belong to this student/class.")
+
         enrollment = EnrollmentService(
             self._session_factory,
             event_bus=self._event_bus,
             repository_provider=self._repository_provider,
         ).restore(enrollment_id, reason=reason)
-
-        if enrollment.student_id != student_id or enrollment.class_id != class_id:
-            raise ClassNotFoundError("Enrollment does not belong to this student/class.")
 
         if self._timeline_service:
             with self._session_factory() as session:
