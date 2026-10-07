@@ -48,6 +48,28 @@ def test_migration_upgrade(migration_db_path):
     assert "alembic_version" in actual_tables
 
 
+def test_enrollment_reconciliation_columns_exist_at_migration_head(migration_db_path):
+    """PR I/J runtime code must never run against a head missing reconciliation lineage."""
+    from sqlalchemy import inspect
+    from centermanager.database.engine import create_engine_for_path
+
+    _upgrade_to_head(migration_db_path)
+    engine = create_engine_for_path(migration_db_path)
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("enrollments")
+    }
+    assert {
+        "reconciled_into_enrollment_id",
+        "reconciled_at",
+        "reconciled_by",
+        "reconcile_reason",
+        "reconciliation_reviewed_at",
+        "reconciliation_reviewed_by",
+        "reconciliation_review_reason",
+    }.issubset(columns)
+
+
 def test_employee_timestamp_defaults_and_persistence_after_migration(migration_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
     from sqlalchemy import inspect
