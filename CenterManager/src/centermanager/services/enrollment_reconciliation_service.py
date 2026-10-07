@@ -11,6 +11,7 @@ from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.events.finance_events import FinanceDataChanged
 from centermanager.events.student_events import StudentEnrollmentChanged
+from centermanager.repositories.provider import RepositoryProvider
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.enrollment_service import EnrollmentService, EnrollmentStatus
@@ -45,7 +46,7 @@ class EnrollmentReconciliationService:
     def __init__(
         self,
         session_factory,
-        repository_provider,
+        repository_provider: RepositoryProvider,
         *,
         audit_service: Optional[AuditService] = None,
         event_bus=None,
