@@ -36,24 +36,39 @@ def _bundled_root() -> Path | None:
 
 
 def _migration_root(project_root: Path) -> Path:
-    """Resolve Alembic migrations from the external release or PyInstaller bundle."""
+    """Resolve the authoritative Alembic migration tree.
+
+    Frozen production builds must prefer the migrations embedded in the exact
+    executable build.  Release folders also contain an external copy for
+    transparency/support, but that copy can become stale when an executable is
+    replaced during an incremental rollout.  Allowing a stale external tree to
+    override the bundled tree creates a code/schema split-brain.
+
+    Source/dev execution keeps using the checkout's external migrations.
+    """
     external = project_root / "migrations"
-    if external.exists():
-        return external
     bundled = _bundled_root()
-    if bundled is not None and (bundled / "migrations").exists():
-        return bundled / "migrations"
+    if bundled is not None:
+        bundled_migrations = bundled / "migrations"
+        if bundled_migrations.exists():
+            return bundled_migrations
+        raise RuntimeError(
+            "Frozen CenterManager build is missing bundled Alembic migrations."
+        )
     return external
 
 
 def _alembic_ini_path(project_root: Path) -> Path:
-    """Resolve alembic.ini from the external release or PyInstaller bundle."""
+    """Resolve the Alembic config paired with the authoritative migration tree."""
     external = project_root / "alembic.ini"
-    if external.exists():
-        return external
     bundled = _bundled_root()
-    if bundled is not None and (bundled / "alembic.ini").exists():
-        return bundled / "alembic.ini"
+    if bundled is not None:
+        bundled_ini = bundled / "alembic.ini"
+        if bundled_ini.exists():
+            return bundled_ini
+        raise RuntimeError(
+            "Frozen CenterManager build is missing bundled alembic.ini."
+        )
     return external
 
 
@@ -61,11 +76,19 @@ def get_alembic_config(database_path: Path | None = None) -> Config:
     from centermanager.core.paths import get_paths
 
     project_root = get_paths().project_root
-    config = Config(str(_alembic_ini_path(project_root)))
+    ini_path = _alembic_ini_path(project_root)
+    migration_root = _migration_root(project_root)
+    logger.info(
+        "Alembic assets resolved: ini=%s migrations=%s frozen=%s",
+        ini_path,
+        migration_root,
+        bool(_bundled_root()),
+    )
+    config = Config(str(ini_path))
     if database_path is None:
         database_path = get_database_path()
     config.set_main_option("sqlalchemy.url", f"sqlite:///{Path(database_path).resolve()}")
-    config.set_main_option("script_location", str(_migration_root(project_root)))
+    config.set_main_option("script_location", str(migration_root))
     return config
 
 
