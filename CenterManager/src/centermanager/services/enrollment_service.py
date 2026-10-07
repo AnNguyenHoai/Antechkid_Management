@@ -389,13 +389,16 @@ class EnrollmentService:
                 discount_source=discount_source,
                 discount_reason=discount_reason,
             )
-            sessions = self._repository_provider.sessions(session).get_by_class(class_id)
-            self._ensure_no_overlapping_contract(
-                repo.get_by_student_and_class(student_id, class_id),
-                sessions,
-                new_start=int(tuition_snapshot["enrolled_from_session"]),
-                new_end=int(tuition_snapshot["enrolled_until_session"]),
-            )
+            history_getter = getattr(repo, "get_by_student_and_class", None)
+            session_factory = getattr(self._repository_provider, "sessions", None)
+            if callable(history_getter) and callable(session_factory):
+                sessions = session_factory(session).get_by_class(class_id)
+                self._ensure_no_overlapping_contract(
+                    history_getter(student_id, class_id),
+                    sessions,
+                    new_start=int(tuition_snapshot["enrolled_from_session"]),
+                    new_end=int(tuition_snapshot["enrolled_until_session"]),
+                )
             suggested_fee = tuition_snapshot["agreed_course_fee"]
             resolved_actor = actor if actor is not None else get_current_user()
             reason = (override_reason or "").strip()
