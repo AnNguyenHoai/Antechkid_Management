@@ -160,7 +160,13 @@ def main() -> int:
 
         permission_service = PermissionService(session_factory)
 
-        login_dialog = LoginDialog(permission_service)
+        # Credential verification happens before collaboration identity exists,
+        # but a forced password mutation must not be committed outside the
+        # authoritative WRITE/publication protocol.
+        login_dialog = LoginDialog(
+            permission_service,
+            defer_forced_password_change=True,
+        )
         if login_dialog.exec() != LoginDialog.DialogCode.Accepted:
             logger.info("[STARTUP] Login cancelled. Exiting.")
             return 0
@@ -424,6 +430,26 @@ def main() -> int:
 
         window.show()
         logger.info("[STARTUP] MainWindow shown")
+
+        # Forced password changes are authoritative shared-data mutations.
+        # Run them only after collaboration, handoff sync, poller and the
+        # WriteTransactionManager are all live. The coordinator keeps the
+        # workspace restricted until publication succeeds.
+        password_change_coordinator = None
+        if current_user.force_password_change:
+            from centermanager.ui.authoritative_password_change import (
+                AuthoritativePasswordChangeCoordinator,
+            )
+
+            password_change_coordinator = AuthoritativePasswordChangeCoordinator(
+                window=window,
+                current_user=current_user,
+                permission_service=permission_service,
+                transaction_manager=transaction_manager,
+                collaboration_manager=collaboration_manager,
+            )
+            window._authoritative_password_change_coordinator = password_change_coordinator
+            QTimer.singleShot(0, password_change_coordinator.start)
 
         exit_code = qapp.exec()
         logger.info(f"[STARTUP] QApplication.exec finished with code {exit_code}")

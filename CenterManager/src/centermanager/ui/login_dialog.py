@@ -20,9 +20,10 @@ class LoginDialog(QDialog):
     # an ORM User. Keep the UI contract persistence-agnostic.
     login_successful = Signal(object)
 
-    def __init__(self, permission_service) -> None:
+    def __init__(self, permission_service, defer_forced_password_change: bool = False) -> None:
         super().__init__()
         self._permission_service = permission_service
+        self._defer_forced_password_change = defer_forced_password_change
         self._user: Optional[Any] = None
 
         self.setWindowTitle("CenterManager - Login")
@@ -98,7 +99,7 @@ class LoginDialog(QDialog):
             user = self._permission_service.authenticate_user(username, password)
             self.error_label.setVisible(False)
             self._user = user
-            if user.force_password_change:
+            if user.force_password_change and not self._defer_forced_password_change:
                 from centermanager.ui.change_password_dialog import ChangePasswordDialog
                 self.hide()
                 change_dialog = ChangePasswordDialog(user, self._permission_service)
@@ -116,11 +117,16 @@ class LoginDialog(QDialog):
                     self.password_edit.setFocus()
                     return
             else:
+                # Production startup defers a required password mutation until
+                # the collaboration/WRITE authority is initialized. Credential
+                # verification still happens here; only the authoritative
+                # mutation/publication is deferred.
                 set_current_user(user)
                 logger.info(
-                    "User logged in: %s (role: %s)",
+                    "User logged in: %s (role: %s, password_change_deferred=%s)",
                     username,
                     user.role.name if getattr(user, "role", None) else "none",
+                    bool(user.force_password_change and self._defer_forced_password_change),
                 )
                 self.login_successful.emit(user)
                 self.accept()
