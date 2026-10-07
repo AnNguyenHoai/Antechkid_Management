@@ -79,9 +79,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # This is a repair-only revision.  Downgrade intentionally preserves the
-    # repaired nullable columns because deleting them would discard lineage or
-    # actor-attribution history from a database that may have required repair.
-    raise RuntimeError(
-        "Schema repair revision 1e10a041 is intentionally irreversible."
-    )
+    # The repository already treats the historical weekly migration chain as
+    # globally irreversible.  Keep this repair revision schema-neutral on the
+    # way down so that the canonical irreversible guard remains authoritative.
+    pass
