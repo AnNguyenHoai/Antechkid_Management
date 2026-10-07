@@ -31,6 +31,7 @@ This inventory is the committed architecture classification for application serv
 | `employee_work_registration_service.py` | PASS | repository-owned | — |
 | `employee_working_time_service.py` | PASS | repository-owned | — |
 | `enrollment_service.py` | PASS | repository-owned | — |
+| `enrollment_reconciliation_service.py` | PASS | repository-owned reconciliation orchestration | — |
 | `enrollment_transfer_service.py` | PASS | repository-owned | — |
 | `expense_service.py` | PASS | repository-owned | — |
 | `expense_timeline_service.py` | PASS | repository-owned | — |
@@ -68,6 +69,10 @@ This inventory is the committed architecture classification for application serv
 | `tuition_adjustment_service.py` | PASS | repository-owned adjustment/Income orchestration | — |
 | `tuition_detail_service.py` | PASS | repository-owned read model | — |
 | `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
+
+## PR J Legacy Enrollment Reconciliation
+
+`enrollment_reconciliation_service.py` — **EnrollmentReconciliationService** is provider-backed and classified as `PASS`. It coordinates conservative duplicate detection, Tuition Income re-attribution, reconciliation lineage, immutable-ledger blocker checks, audit recording, and event publication through `RepositoryProvider`. Repositories own database query/persistence operations; reconciliation policy and transaction completion remain service-owned.
 
 ## TUITION-13 Enrollment Transfer
 
