@@ -19,9 +19,12 @@ def test_handoff_runtime_materialization_orders_quiesce_before_install_and_refre
     preserve_live = source.index("os.replace(runtime_db, previous_db)")
     install_authority = source.index("os.replace(staged_db, runtime_db)")
     hash_verify = source.index("installed_hash = _sha256(runtime_db)")
+    migrate = source.index(
+        "upgrade_installed_runtime_database_under_maintenance_to_head()"
+    )
     refresh = source.index("self._refresh_db_sessions()")
 
-    assert quiesce < preserve_live < install_authority < hash_verify < refresh
+    assert quiesce < preserve_live < install_authority < hash_verify < migrate < refresh
     assert 'runtime_db.with_name(runtime_db.name + "-wal")' in source
     assert 'runtime_db.with_name(runtime_db.name + "-shm")' in source
     assert "validate_authoritative_repository_database()" in source
