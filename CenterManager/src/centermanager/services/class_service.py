@@ -519,6 +519,85 @@ class ClassService:
             repository_provider=self._repository_provider,
         ).preview_enrollment_pricing(class_id, **pricing_kwargs)
 
+    def find_legacy_enrollment_duplicates(self, class_id: int):
+        """Return conservative legacy duplicate candidates for this class."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        return EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).find_candidates(class_id)
+
+    def reconcile_legacy_enrollment_duplicate(
+        self,
+        class_id: int,
+        duplicate_enrollment_id: int,
+        canonical_enrollment_id: int,
+        *,
+        reason: str,
+    ):
+        """Reconcile a reviewed accidental duplicate into its active contract."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        with self._session_factory() as session:
+            duplicate = self._repository_provider.enrollments(session).get_by_id(
+                duplicate_enrollment_id
+            )
+            canonical = self._repository_provider.enrollments(session).get_by_id(
+                canonical_enrollment_id
+            )
+            if (
+                duplicate is None
+                or canonical is None
+                or duplicate.class_id != class_id
+                or canonical.class_id != class_id
+            ):
+                raise ClassNotFoundError(
+                    "Enrollment reconciliation does not belong to this class."
+                )
+
+        return EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).reconcile(
+            duplicate_enrollment_id,
+            canonical_enrollment_id,
+            reason=reason,
+        )
+
+    def mark_legacy_enrollment_legitimate(
+        self,
+        class_id: int,
+        enrollment_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        """Record operator confirmation that a suspected duplicate is legitimate."""
+        from centermanager.services.enrollment_reconciliation_service import (
+            EnrollmentReconciliationService,
+        )
+
+        with self._session_factory() as session:
+            enrollment = self._repository_provider.enrollments(session).get_by_id(
+                enrollment_id
+            )
+            if enrollment is None or enrollment.class_id != class_id:
+                raise ClassNotFoundError(
+                    "Enrollment reconciliation does not belong to this class."
+                )
+
+        EnrollmentReconciliationService(
+            self._session_factory,
+            self._repository_provider,
+            event_bus=self._event_bus,
+        ).mark_legitimate(enrollment_id, reason=reason)
+
     def get_latest_restorable_enrollment(
         self,
         class_id: int,
