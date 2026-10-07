@@ -112,6 +112,78 @@ def test_reconciliation_migration_upgrade_avoids_batch_rebuild_and_self_fk():
     assert "fk_enrollments_reconciled_into" not in upgrade_source
 
 
+def test_repair_revision_recovers_stamped_1e10a040_with_missing_physical_columns(
+    migration_db_path,
+):
+    """A database stamped to 1e10a040 but missing PR H/J columns must self-repair."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+    from centermanager.database.engine import create_engine_for_path
+
+    project_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(project_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_root / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{migration_db_path}")
+
+    # Build a legitimate pre-PR-H/J schema, then simulate the production failure
+    # mode where revision metadata advanced without all physical columns landing.
+    command.upgrade(cfg, "1e10a038")
+    command.stamp(cfg, "1e10a040")
+    command.upgrade(cfg, "head")
+
+    engine = create_engine_for_path(migration_db_path)
+    db_inspector = inspect(engine)
+    enrollment_columns = {
+        column["name"]
+        for column in db_inspector.get_columns("enrollments")
+    }
+    class_fee_columns = {
+        column["name"]
+        for column in db_inspector.get_columns("class_fee_history")
+    }
+    enrollment_indexes = {
+        index["name"]
+        for index in db_inspector.get_indexes("enrollments")
+        if index.get("name")
+    }
+
+    assert {
+        "reconciled_into_enrollment_id",
+        "reconciled_at",
+        "reconciled_by",
+        "reconcile_reason",
+        "reconciliation_reviewed_at",
+        "reconciliation_reviewed_by",
+        "reconciliation_review_reason",
+    }.issubset(enrollment_columns)
+    assert "changed_by" in class_fee_columns
+    assert "ix_enrollments_reconciled_into_enrollment_id" in enrollment_indexes
+
+
+def test_production_alembic_env_preserves_application_logging_handlers():
+    env_source = (
+        Path(__file__).resolve().parent.parent / "migrations" / "env.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'config.attributes.get("connection") is None' in env_source
+    assert "disable_existing_loggers=False" in env_source
+
+
+def test_post_upgrade_validation_checks_revision_and_physical_schema():
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "centermanager"
+        / "database"
+        / "migration.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_validate_post_upgrade_schema(connection, config)" in source
+    assert "Database revision is at Alembic head but required physical schema is missing" in source
+    assert '"class_fee_history": {"changed_by"}' in source
+
+
 def test_employee_timestamp_defaults_and_persistence_after_migration(migration_db_path):
     """Employee inserts must succeed because timestamp defaults exist in DB."""
     from sqlalchemy import inspect
