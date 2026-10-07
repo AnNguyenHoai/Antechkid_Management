@@ -17,6 +17,7 @@ from centermanager.database.engine import (
     create_engine_for_path,
     create_production_engine,
     get_database_path,
+    runtime_db_maintenance_active,
 )
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,43 @@ def upgrade_database_to_head() -> None:
         _upgrade_database_with_engine(database_path, engine)
     finally:
         engine.dispose()
+
+
+def upgrade_installed_runtime_database_under_maintenance_to_head() -> None:
+    """Migrate a freshly installed authoritative runtime DB while the fence is held.
+
+    WRITE handoff/background pull can atomically replace the live runtime file
+    with an authoritative repository DB whose physical schema is older than the
+    current executable.  Normal production engines are intentionally blocked
+    during maintenance, so this narrow entry point opens the just-installed file
+    directly only while the maintenance fence is active.
+
+    The caller must keep the previous runtime artifact for rollback until this
+    function returns successfully.  No normal runtime session is rebuilt here.
+    """
+    if not runtime_db_maintenance_active():
+        raise RuntimeError(
+            "Installed runtime migration requires the database maintenance fence."
+        )
+
+    database_path = get_database_path()
+    encrypted = database_encryption_required()
+    key = DatabaseKeyStore().load() if encrypted else None
+    engine = create_engine_for_path(
+        database_path,
+        allow_create=False,
+        encrypted=encrypted,
+        encryption_key=key,
+        runtime_guarded=False,
+    )
+    try:
+        _upgrade_database_with_engine(database_path, engine)
+    finally:
+        engine.dispose()
+
+    logger.info(
+        "Installed authoritative runtime database migrated and verified at Alembic head."
+    )
 
 
 def get_current_revision(database_path: Path | None = None) -> str | None:
