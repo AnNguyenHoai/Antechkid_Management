@@ -73,28 +73,57 @@ class AttendanceService:
 
     @staticmethod
     def _enrollment_covers_session_date(enrollment: Any, scheduled_date: Any) -> bool:
-        """Return whether an enrollment owned the student/class relationship on a Session date."""
+        """Legacy date-range eligibility fallback for unresolved Enrollment rows."""
         if scheduled_date is None:
-            return False
+            return getattr(enrollment, "status", None) == "ACTIVE"
         if enrollment.start_date is not None and enrollment.start_date > scheduled_date:
             return False
         if enrollment.end_date is not None and enrollment.end_date < scheduled_date:
             return False
         return True
 
+    @classmethod
+    def _enrollment_covers_session(cls, enrollment: Any, session_obj: Any) -> bool:
+        """Resolve historical roster using the canonical Enrollment session range.
+
+        Tuition-aware Enrollment rows own an effective session range. Attendance
+        must use that same range so a genuine mid-course join cannot be marked
+        for earlier sessions, while an explicit historical correction can
+        include them. Legacy unresolved rows retain date-based behavior.
+        """
+        session_number = getattr(session_obj, "session_number", None)
+        enrolled_from = getattr(enrollment, "enrolled_from_session", None)
+        enrolled_until = getattr(enrollment, "enrolled_until_session", None)
+
+        if (
+            session_number is not None
+            and enrolled_from is not None
+            and enrolled_until is not None
+        ):
+            try:
+                number = int(session_number)
+                return int(enrolled_from) <= number <= int(enrolled_until)
+            except (TypeError, ValueError):
+                return False
+
+        return cls._enrollment_covers_session_date(
+            enrollment,
+            getattr(session_obj, "scheduled_date", None),
+        )
+
     def _is_student_eligible_for_session(
         self,
         enrollment_repo: Any,
         student_id: int,
-        class_id: int,
-        scheduled_date: Any,
+        session_obj: Any,
     ) -> bool:
-        """Use historical Enrollment dates when available, with legacy provider compatibility."""
+        """Use canonical Enrollment session range, with legacy compatibility."""
+        class_id = getattr(session_obj, "class_id", None)
         history_getter = getattr(enrollment_repo, "get_by_student_and_class", None)
-        if scheduled_date is not None and callable(history_getter):
+        if class_id is not None and callable(history_getter):
             enrollments = history_getter(student_id, class_id)
             return any(
-                self._enrollment_covers_session_date(enrollment, scheduled_date)
+                self._enrollment_covers_session(enrollment, session_obj)
                 for enrollment in enrollments
             )
 
@@ -131,8 +160,7 @@ class AttendanceService:
             return self._is_student_eligible_for_session(
                 enroll_repo,
                 student_id,
-                session_obj.class_id,
-                getattr(session_obj, "scheduled_date", None),
+                session_obj,
             )
 
     @require_permission("attendance.create")
@@ -265,11 +293,10 @@ class AttendanceService:
                     if not self._is_student_eligible_for_session(
                         enrollment_repo,
                         student_id,
-                        session_obj.class_id,
-                        getattr(session_obj, "scheduled_date", None),
+                        session_obj,
                     ):
                         raise ValueError(
-                            f"Student {student_id} is not enrolled in this class for this session date."
+                            f"Student {student_id} is not enrolled in this class for this session."
                         )
 
                 existing_by_student = {
@@ -386,24 +413,16 @@ class AttendanceService:
             enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(
                 session_obj.class_id
             )
-            scheduled_date = getattr(session_obj, "scheduled_date", None)
-            if scheduled_date is None:
-                return [
-                    enrollment.student
-                    for enrollment in enrollments
-                    if enrollment.student is not None
-                    and getattr(enrollment, "status", None) == "ACTIVE"
-                ]
             return [
                 enrollment.student
                 for enrollment in enrollments
                 if enrollment.student is not None
-                and self._enrollment_covers_session_date(enrollment, scheduled_date)
+                and self._enrollment_covers_session(enrollment, session_obj)
             ]
 
     @require_permission("attendance.view")
     def get_roster_for_session(self, session_id: int) -> List[Student]:
-        """Return students whose Enrollment covered the Session scheduled date."""
+        """Return students whose canonical Enrollment range covers the Session."""
         return self._get_roster_for_session(session_id)
 
     @require_permission("attendance.view")
