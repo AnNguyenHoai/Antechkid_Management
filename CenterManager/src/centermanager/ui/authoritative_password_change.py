@@ -37,6 +37,7 @@ class AuthoritativePasswordChangeCoordinator:
     ) -> None:
         self._window = window
         self._user_id = current_user.id
+        self._role_id = getattr(current_user, "role_id", None)
         self._permission_service = permission_service
         self._transaction = transaction_manager
         self._collaboration_manager = collaboration_manager
@@ -135,6 +136,18 @@ class AuthoritativePasswordChangeCoordinator:
         fresh_user = self._permission_service.get_user(self._user_id)
         if fresh_user is None:
             self._fail_closed("The authenticated account is no longer available.")
+            return
+
+        if (
+            not getattr(fresh_user, "is_active", False)
+            or getattr(fresh_user, "role_id", None) != self._role_id
+        ):
+            self._transaction.cancel_editing(force=True)
+            self._abort_and_close(
+                "Your account authorization changed on another computer while "
+                "this machine was waiting. Please restart CenterManager and "
+                "sign in again so permissions can be rebuilt safely."
+            )
             return
 
         if not fresh_user.force_password_change:
