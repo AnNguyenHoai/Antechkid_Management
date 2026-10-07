@@ -72,7 +72,9 @@ def test_class_fee_history_records_forward_going_editor_without_backfill_guessin
     assert "changed_by" in model
     assert "changed_by=changed_by" in repo
     assert "changed_by=resolve_timeline_actor()" in service
-    assert 'op.add_column("class_fee_history"' in migration
+    assert "op.add_column(" in migration
+    assert '"class_fee_history"' in migration
+    assert '"changed_by"' in migration
     assert "UPDATE class_fee_history" not in migration
 
 
