@@ -519,6 +519,57 @@ class ClassService:
             repository_provider=self._repository_provider,
         ).preview_enrollment_pricing(class_id, **pricing_kwargs)
 
+    def get_latest_restorable_enrollment(
+        self,
+        class_id: int,
+        student_id: int,
+    ) -> Optional[Enrollment]:
+        """Return the latest withdrawn Enrollment that can be restored."""
+        from centermanager.services.enrollment_service import EnrollmentService
+
+        return EnrollmentService(
+            self._session_factory,
+            event_bus=self._event_bus,
+            repository_provider=self._repository_provider,
+        ).get_latest_restorable(student_id, class_id)
+
+    def restore_student(
+        self,
+        class_id: int,
+        student_id: int,
+        enrollment_id: int,
+        *,
+        reason: str,
+    ) -> Enrollment:
+        """Restore a mistakenly withdrawn Enrollment without creating a new contract."""
+        from centermanager.services.enrollment_service import EnrollmentService
+
+        enrollment = EnrollmentService(
+            self._session_factory,
+            event_bus=self._event_bus,
+            repository_provider=self._repository_provider,
+        ).restore(enrollment_id, reason=reason)
+
+        if enrollment.student_id != student_id or enrollment.class_id != class_id:
+            raise ClassNotFoundError("Enrollment does not belong to this student/class.")
+
+        if self._timeline_service:
+            with self._session_factory() as session:
+                student = self._repository_provider.students(session).get_by_id(student_id)
+            self._timeline_service.log_event(
+                class_id=class_id,
+                event_type=ClassTimelineEventType.STUDENT_ENROLLED,
+                title="Enrollment Restored",
+                description=f"{student.full_name if student else 'Student'} restored to class.",
+                metadata={
+                    "student_id": student_id,
+                    "enrollment_id": enrollment_id,
+                    "reason": reason,
+                    "action": "RESTORED",
+                },
+            )
+        return enrollment
+
     def enroll_student(
         self,
         class_id: int,
@@ -552,8 +603,14 @@ class ClassService:
             )
         return enrollment
 
-    def remove_student(self, class_id: int, student_id: int) -> None:
-        """Compatibility facade: remove now preserves history as WITHDRAWN."""
+    def remove_student(
+        self,
+        class_id: int,
+        student_id: int,
+        *,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Withdraw a student while preserving the Enrollment financial contract."""
         from centermanager.services.enrollment_service import EnrollmentService, EnrollmentNotFoundError
         service = EnrollmentService(
             self._session_factory,
@@ -566,7 +623,7 @@ class ClassService:
                 raise ClassNotFoundError("Active enrollment not found.")
             enrollment_id = enrollment.id
         try:
-            service.withdraw(enrollment_id)
+            service.withdraw(enrollment_id, reason=reason)
         except EnrollmentNotFoundError as exc:
             raise ClassNotFoundError("Enrollment not found.") from exc
 
@@ -574,9 +631,14 @@ class ClassService:
             self._timeline_service.log_event(
                 class_id=class_id,
                 event_type=ClassTimelineEventType.STUDENT_REMOVED,
-                title="Student Removed",
+                title="Student Withdrawn",
                 description="Student withdrawn from class.",
-                metadata={"student_id": student_id},
+                metadata={
+                    "student_id": student_id,
+                    "enrollment_id": enrollment_id,
+                    "reason": reason or "Withdrawn from class",
+                    "action": "WITHDRAWN",
+                },
             )
 
     def get_enrolled_students(self, class_id: int) -> List[Student]:
