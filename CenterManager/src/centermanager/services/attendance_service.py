@@ -115,20 +115,38 @@ class AttendanceService:
         self,
         enrollment_repo: Any,
         student_id: int,
-        session_obj: Any,
+        session_or_class_id: Any,
+        scheduled_date: Any = None,
     ) -> bool:
-        """Use canonical Enrollment session range, with legacy compatibility."""
-        class_id = getattr(session_obj, "class_id", None)
+        """Use canonical Enrollment range without breaking the legacy helper seam.
+
+        Production callers pass a Session object so tuition-aware Enrollment
+        session ranges are authoritative. Older tests/injected providers call
+        this helper with class_id and scheduled_date; preserve that contract and
+        keep its historical date-range behavior.
+        """
+        if hasattr(session_or_class_id, "class_id"):
+            session_obj = session_or_class_id
+            class_id = getattr(session_obj, "class_id", None)
+        else:
+            session_obj = None
+            class_id = session_or_class_id
+
         history_getter = getattr(enrollment_repo, "get_by_student_and_class", None)
         if class_id is not None and callable(history_getter):
             enrollments = history_getter(student_id, class_id)
+            if session_obj is not None:
+                return any(
+                    self._enrollment_covers_session(enrollment, session_obj)
+                    for enrollment in enrollments
+                )
             return any(
-                self._enrollment_covers_session(enrollment, session_obj)
+                self._enrollment_covers_session_date(enrollment, scheduled_date)
                 for enrollment in enrollments
             )
 
         # Compatibility for lightweight injected providers that expose the older
-        # ``exists`` seam only. Production repositories take the historical path.
+        # exists seam only. Production repositories take the historical path.
         exists = getattr(enrollment_repo, "exists", None)
         return bool(callable(exists) and exists(student_id, class_id))
 
