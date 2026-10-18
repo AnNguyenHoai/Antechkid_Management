@@ -22,10 +22,11 @@ def configure_windows_app_identity() -> bool:
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            WINDOWS_APP_USER_MODEL_ID
-        )
-        return True
+        setter = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+        setter.argtypes = [ctypes.c_wchar_p]
+        setter.restype = ctypes.c_long
+        hresult = setter(WINDOWS_APP_USER_MODEL_ID)
+        return hresult >= 0
     except Exception:
         return False
 
