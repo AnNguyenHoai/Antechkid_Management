@@ -693,14 +693,25 @@ class EnrollmentService:
             enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
             if enrollment is None:
                 raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
-            sessions = self._repository_provider.sessions(session).get_by_class(
-                enrollment.class_id
-            )
-            boundary = self._resolve_withdrawn_from_session(
-                enrollment,
-                sessions,
-                explicit_session=effective_from_session,
-            )
+            sessions_factory = getattr(self._repository_provider, "sessions", None)
+            if callable(sessions_factory):
+                sessions = sessions_factory(session).get_by_class(enrollment.class_id)
+                boundary = self._resolve_withdrawn_from_session(
+                    enrollment,
+                    sessions,
+                    explicit_session=effective_from_session,
+                )
+            else:
+                # Compatibility for injected/minimal repository providers that
+                # predate session-aware Enrollment lifecycle support. Preserve
+                # the legacy date boundary rather than failing the transition.
+                # Production/default providers expose sessions and therefore
+                # always resolve the exact withdrawal Session boundary.
+                boundary = (
+                    int(effective_from_session)
+                    if effective_from_session is not None
+                    else None
+                )
         return self._transition(
             enrollment_id,
             EnrollmentStatus.WITHDRAWN,
