@@ -14,6 +14,9 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QMenu, QStackedWidget, QVBoxLayout, QWidget
 
 from centermanager.models.student import Student
+from centermanager.core.capabilities import Capability
+from centermanager.core.current_user import get_current_user
+from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.assessment_service import AssessmentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.student_export_service import StudentExportService
@@ -111,6 +114,13 @@ class StudentListPage(WorkspaceBase):
         )
         self.search_bar.search_changed.connect(self._on_search)
         self.search_bar.filters_changed.connect(self._on_filter_changed)
+        # Product default: the operational Student list opens on ACTIVE records.
+        # "All" remains available through the filter placeholder/clear action.
+        status_control = self.search_bar.filter_controls.get("status")
+        if status_control is not None:
+            status_control.blockSignals(True)
+            self.search_bar.set_filter_value("status", "Active")
+            status_control.blockSignals(False)
         self.filter_bar = self.search_bar
         toolbar.add_widget(self.search_bar, align="start")
 
@@ -169,9 +179,20 @@ class StudentListPage(WorkspaceBase):
 
     def _update_button_states(self) -> None:
         can_write = bool(self._write_enabled or self.can_write())
+        can_export = AuthorizationService.allows(
+            get_current_user(),
+            Capability.STUDENT_EXPORT,
+        )
         self.add_btn.setEnabled(can_write)
         self.import_btn.setEnabled(can_write)
         self.bulk_delete_btn.setEnabled(can_write)
+        self.export_btn.setEnabled(can_export)
+        self.bulk_export_btn.setEnabled(can_export)
+        self.export_btn.setToolTip(
+            "Export student records"
+            if can_export
+            else "You do not have permission to export student records."
+        )
 
     def initialize(self) -> None:
         pass
@@ -183,8 +204,13 @@ class StudentListPage(WorkspaceBase):
         self._update_bulk_bar()
         try:
             self._students = self._student_service.list_students()
-            self._filtered_base = self._students[:]
-            self._apply_filters_and_sort()
+            filters = self.search_bar.filters()
+            self._filters_active = any(value for value in filters.values())
+            if self._filters_active:
+                self._apply_filter_state(filters)
+            else:
+                self._filtered_base = self._students[:]
+                self._apply_filters_and_sort()
         except Exception as exc:
             logger.exception("Failed to refresh student list")
             self.data_table.set_error(
@@ -272,10 +298,9 @@ class StudentListPage(WorkspaceBase):
     def _on_search(self, _text: str) -> None:
         self._apply_filters_and_sort()
 
-    def _on_filter_changed(self, filters: Dict[str, str]) -> None:
+    def _apply_filter_state(self, filters: Dict[str, str]) -> None:
         from centermanager.dto.student_filter_dto import StudentFilter
 
-        self._filters_active = any(value for value in filters.values())
         status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
         enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
         assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
@@ -284,13 +309,17 @@ class StudentListPage(WorkspaceBase):
             enrollment_status=enrollment_map.get(filters.get("enrollment", "")),
             assessment_status=assessment_map.get(filters.get("assessment", "")),
         )
+        self._filtered_base = (
+            self._filter_service.filter_students(filter_dto)
+            if self._filters_active
+            else self._students[:]
+        )
+        self._apply_filters_and_sort()
+
+    def _on_filter_changed(self, filters: Dict[str, str]) -> None:
+        self._filters_active = any(value for value in filters.values())
         try:
-            self._filtered_base = (
-                self._filter_service.filter_students(filter_dto)
-                if self._filters_active
-                else self._students[:]
-            )
-            self._apply_filters_and_sort()
+            self._apply_filter_state(filters)
         except Exception as exc:
             logger.exception("Student filter failed")
             self._feedback.system_error(
