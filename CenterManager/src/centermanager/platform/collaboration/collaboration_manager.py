@@ -642,7 +642,9 @@ class CollaborationManager:
         if not self._initialized: raise CollaborationNotInitializedError("Collaboration not initialized. Call initialize() first.")
     def get_queue_length(self) -> int: return self._queue.count()
     def has_writer(self) -> bool: return self._is_writing or self._lock.is_locked()
-    def ensure_write(self) -> bool: self._ensure_initialized(); return self._is_writing
+    def ensure_write(self) -> bool:
+        self._ensure_initialized()
+        return self._is_writing and not self._lease_renewal_suspended
 
     def get_lock_status(self) -> Dict[str, Any]:
         if self._sync_provider is not None:
@@ -700,7 +702,9 @@ class CollaborationManager:
     def is_lock_held_by_current_session(self) -> bool:
         if not self._lock.is_locked(): return False
         owner=self._lock.get_owner(); return owner == self._session.session_id if self._session else False
-    def current_mode(self) -> str: self._ensure_initialized(); return "WRITE" if self._is_writing else "READ"
+    def current_mode(self) -> str:
+        self._ensure_initialized()
+        return "WRITE" if self._is_writing and not self._lease_renewal_suspended else "READ"
     def get_version(self) -> int: self._ensure_initialized(); return self._lock_timeout
     def get_deployment_profile(self) -> str: self._ensure_initialized(); return "Standalone"
 
