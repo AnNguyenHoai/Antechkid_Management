@@ -104,6 +104,9 @@ class AttendanceService:
                 number = int(session_number)
                 if not int(enrolled_from) <= number <= int(enrolled_until):
                     return False
+                withdrawn_from = getattr(enrollment, "withdrawn_from_session", None)
+                if withdrawn_from is not None and number >= int(withdrawn_from):
+                    return False
                 enrollment_end = getattr(enrollment, "end_date", None)
                 session_date = (
                     getattr(session_obj, "actual_date", None)
