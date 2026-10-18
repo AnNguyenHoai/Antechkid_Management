@@ -6,8 +6,6 @@ used by both the runtime Qt icon and the Windows executable ICO generator.
 """
 from __future__ import annotations
 
-from typing import Iterable
-
 
 APPLICATION_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
