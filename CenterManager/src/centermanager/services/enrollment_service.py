@@ -290,6 +290,10 @@ class EnrollmentService:
             return None
         start = int(start)
         end = int(end)
+        withdrawn_from = getattr(enrollment, "withdrawn_from_session", None)
+        if withdrawn_from is not None:
+            effective_end = min(end, int(withdrawn_from) - 1)
+            return (start, effective_end) if effective_end >= start else None
         if getattr(enrollment, "status", None) == EnrollmentStatus.ACTIVE.value:
             return start, end
         ended_on = getattr(enrollment, "end_date", None)
@@ -643,20 +647,67 @@ class EnrollmentService:
             self._publish_change(enrollment, "TUITION_RESUMED", enrollment.status)
             return freeze
 
+    @staticmethod
+    def _resolve_withdrawn_from_session(
+        enrollment: Enrollment,
+        sessions,
+        explicit_session: Optional[int] = None,
+    ) -> Optional[int]:
+        start = getattr(enrollment, "enrolled_from_session", None)
+        end = getattr(enrollment, "enrolled_until_session", None)
+        if start is None or end is None:
+            return None
+        start = int(start)
+        end = int(end)
+        completed = [
+            int(item.session_number)
+            for item in sessions
+            if (
+                getattr(item, "status", None) == SessionStatus.COMPLETED.value
+                and getattr(item, "session_number", None) is not None
+                and start <= int(item.session_number) <= end
+            )
+        ]
+        earliest_safe_boundary = max(start, (max(completed) + 1) if completed else start)
+        latest_boundary = end + 1
+        if explicit_session is None:
+            return min(earliest_safe_boundary, latest_boundary)
+        boundary = int(explicit_session)
+        if boundary < earliest_safe_boundary or boundary > latest_boundary:
+            raise EnrollmentValidationError(
+                "Withdrawal effective session must be after all completed sessions "
+                f"and between {earliest_safe_boundary} and {latest_boundary}."
+            )
+        return boundary
+
     def withdraw(
         self,
         enrollment_id: int,
         end_date: Optional[date] = None,
         *,
+        effective_from_session: Optional[int] = None,
         reason: Optional[str] = None,
         actor=None,
     ) -> Enrollment:
+        with self._session_factory() as session:
+            enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
+            if enrollment is None:
+                raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
+            sessions = self._repository_provider.sessions(session).get_by_class(
+                enrollment.class_id
+            )
+            boundary = self._resolve_withdrawn_from_session(
+                enrollment,
+                sessions,
+                explicit_session=effective_from_session,
+            )
         return self._transition(
             enrollment_id,
             EnrollmentStatus.WITHDRAWN,
             end_date,
             reason=reason,
             actor=actor,
+            withdrawn_from_session=boundary,
         )
 
     def complete(
@@ -707,6 +758,7 @@ class EnrollmentService:
             previous_end_date = enrollment.end_date
             enrollment.status = EnrollmentStatus.ACTIVE.value
             enrollment.end_date = None
+            enrollment.withdrawn_from_session = None
             audit_factory = getattr(self._repository_provider, "audit_logs", None)
             if callable(audit_factory):
                 self._audit_service.record_in_session(
@@ -743,6 +795,7 @@ class EnrollmentService:
         *,
         reason: Optional[str] = None,
         actor=None,
+        withdrawn_from_session: Optional[int] = None,
     ) -> Enrollment:
         resolved_actor = actor if actor is not None else get_current_user()
         transition_reason = (reason or "").strip() or (
@@ -771,6 +824,8 @@ class EnrollmentService:
             previous_end_date = enrollment.end_date
             enrollment.status = target.value
             enrollment.end_date = end_date or get_clock().today()
+            if target == EnrollmentStatus.WITHDRAWN:
+                enrollment.withdrawn_from_session = withdrawn_from_session
             action = (
                 "ENROLLMENT_WITHDRAWN"
                 if target == EnrollmentStatus.WITHDRAWN
@@ -797,6 +852,7 @@ class EnrollmentService:
                         "current_status": enrollment.status,
                         "previous_end_date": previous_end_date.isoformat() if previous_end_date else None,
                         "end_date": enrollment.end_date.isoformat(),
+                        "withdrawn_from_session": enrollment.withdrawn_from_session,
                         "reason": transition_reason,
                     },
                     summary=f"{action}: Enrollment#{enrollment.id}",
