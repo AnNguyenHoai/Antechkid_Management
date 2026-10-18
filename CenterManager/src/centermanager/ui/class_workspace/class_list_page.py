@@ -91,31 +91,37 @@ class ClassListPage(QWidget):
         self.add_btn.clicked.connect(self.show_add_dialog)
         top_row.addWidget(self.add_btn)
 
-        toolbar_layout.addLayout(top_row)
-        layout.addWidget(toolbar)
-
-        # Bulk actions bar
-        self.bulk_bar = QWidget()
+        # Selection controls stay inside the existing toolbar row. Showing or
+        # hiding them must never insert/remove a vertical strip above the table.
+        self.bulk_bar = QWidget(toolbar)
+        self.bulk_bar.setFixedHeight(34)
         self.bulk_bar.setStyleSheet(f"""
             background: {COLORS['primary_hover']};
-            padding: {SPACING['xs']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
+            padding: 0 {SPACING['sm']}px;
+            border-radius: 4px;
         """)
         self.bulk_bar.setVisible(False)
         bulk_layout = QHBoxLayout(self.bulk_bar)
         bulk_layout.setContentsMargins(0, 0, 0, 0)
+        bulk_layout.setSpacing(SPACING['xs'])
         self.bulk_count_label = QLabel("0 selected")
-        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
+        self.bulk_count_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-weight: 500;"
+        )
         bulk_layout.addWidget(self.bulk_count_label)
-        bulk_layout.addStretch()
         self.bulk_archive_btn = QPushButton("Archive Selected")
+        self.bulk_archive_btn.setFixedHeight(28)
         self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
         self.bulk_archive_btn.clicked.connect(self._bulk_archive)
         bulk_layout.addWidget(self.bulk_archive_btn)
         self.bulk_clear_btn = QPushButton("Clear")
+        self.bulk_clear_btn.setFixedHeight(28)
         self.bulk_clear_btn.clicked.connect(self._clear_selection)
         bulk_layout.addWidget(self.bulk_clear_btn)
-        layout.addWidget(self.bulk_bar)
+        top_row.addWidget(self.bulk_bar)
+
+        toolbar_layout.addLayout(top_row)
+        layout.addWidget(toolbar)
 
         # Data Table
         columns = [
