@@ -6,6 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -99,7 +100,25 @@ class IncomeFormDialog(QDialog):
 
         self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
         self.amount_spin.setRange(0.01, 999999999.99)
-        form.addRow("Số tiền *", self.amount_spin)
+        form.addRow("Số tiền thực nhận *", self.amount_spin)
+
+        self.credit_enabled = QCheckBox(
+            "Có giảm giá / hỗ trợ học phí không phát sinh dòng tiền",
+            self,
+        )
+        self.credit_enabled.toggled.connect(self._update_credit_state)
+        form.addRow("Điều chỉnh học phí", self.credit_enabled)
+
+        self.credit_amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
+        self.credit_amount_spin.setRange(0.01, 999999999.99)
+        form.addRow("Giảm giá / credit", self.credit_amount_spin)
+
+        self.credit_reason_edit = QLineEdit()
+        self.credit_reason_edit.setPlaceholderText(
+            "Bắt buộc, ví dụ: ưu đãi anh em / học bổng / hỗ trợ"
+        )
+        form.addRow("Lý do giảm giá", self.credit_reason_edit)
+        self._update_credit_state(False)
 
         self.method_combo = QComboBox()
         self.method_combo.addItem("Cash", "CASH")
@@ -158,6 +177,24 @@ class IncomeFormDialog(QDialog):
         if label is not None:
             label.setVisible(visible)
 
+    def _set_credit_fields_visible(self, visible: bool) -> None:
+        widgets = (
+            self.credit_enabled,
+            self.credit_amount_spin,
+            self.credit_reason_edit,
+        )
+        for widget in widgets:
+            widget.setVisible(visible)
+            label = self._form.labelForField(widget)
+            if label is not None:
+                label.setVisible(visible)
+
+    def _update_credit_state(self, enabled: bool) -> None:
+        self.credit_amount_spin.setEnabled(enabled)
+        self.credit_reason_edit.setEnabled(enabled)
+        if not enabled:
+            self.credit_reason_edit.clear()
+
     def _on_source_changed(self, index: int) -> None:
         is_student = index == 0
         self.student_combo.setVisible(is_student)
@@ -173,6 +210,12 @@ class IncomeFormDialog(QDialog):
                 self.type_combo.setCurrentText("Other")
                 self.type_combo.setEnabled(False)
         self._reload_enrollments()
+        is_tuition_create = (
+            not self._is_edit
+            and is_student
+            and self.type_combo.currentText() == "Tuition"
+        )
+        self._set_credit_fields_visible(is_tuition_create)
 
     def _on_income_type_changed(self, income_type: str) -> None:
         if not self._is_edit:
@@ -182,6 +225,11 @@ class IncomeFormDialog(QDialog):
             elif self.source_combo.currentIndex() != 0:
                 self.source_combo.setCurrentIndex(0)
         self._reload_enrollments()
+        self._set_credit_fields_visible(
+            not self._is_edit
+            and self.source_combo.currentIndex() == 0
+            and income_type == "Tuition"
+        )
 
     def _load_students(self) -> None:
         try:
@@ -256,6 +304,7 @@ class IncomeFormDialog(QDialog):
         self.enrollment_combo.setEnabled(False)
         self.type_combo.setEnabled(False)
         self.other_source_edit.setEnabled(False)
+        self._set_credit_fields_visible(False)
 
     def _load_income(self) -> None:
         try:
@@ -377,18 +426,47 @@ class IncomeFormDialog(QDialog):
                 student_id, class_id, enrollment_id, income_type, create_note = (
                     self._create_identity_payload()
                 )
-                self._income_service.create_income(
-                    student_id=student_id,
-                    class_id=class_id,
-                    enrollment_id=enrollment_id,
-                    amount=amount,
-                    income_type=income_type,
-                    payment_method=payment_method,
-                    payment_date=payment_date,
-                    payment_period=payment_period or None,
-                    received_by=received_by or None,
-                    note=create_note,
-                )
+                if (
+                    income_type == "Tuition"
+                    and self.credit_enabled.isVisible()
+                    and self.credit_enabled.isChecked()
+                ):
+                    credit_amount = self.credit_amount_spin.value()
+                    credit_reason = self.credit_reason_edit.text().strip()
+                    if credit_amount <= 0:
+                        raise IncomeValidationError(
+                            "Vui lòng nhập số tiền giảm giá / tuition credit."
+                        )
+                    if not credit_reason:
+                        raise IncomeValidationError(
+                            "Vui lòng nhập lý do giảm giá / tuition credit."
+                        )
+                    self._income_service.create_tuition_payment_with_credit(
+                        student_id=int(student_id),
+                        class_id=int(class_id),
+                        enrollment_id=int(enrollment_id),
+                        amount=amount,
+                        payment_method=payment_method,
+                        payment_date=payment_date,
+                        credit_amount=credit_amount,
+                        credit_reason=credit_reason,
+                        payment_period=payment_period or None,
+                        received_by=received_by or None,
+                        note=create_note,
+                    )
+                else:
+                    self._income_service.create_income(
+                        student_id=student_id,
+                        class_id=class_id,
+                        enrollment_id=enrollment_id,
+                        amount=amount,
+                        income_type=income_type,
+                        payment_method=payment_method,
+                        payment_date=payment_date,
+                        payment_period=payment_period or None,
+                        received_by=received_by or None,
+                        note=create_note,
+                    )
             self.accept()
         except IncomeValidationError as exc:
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
