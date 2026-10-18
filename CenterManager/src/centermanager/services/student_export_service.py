@@ -12,6 +12,7 @@ from openpyxl.styles import Font, Alignment
 from sqlalchemy.orm import sessionmaker
 
 from centermanager.core.paths import get_paths
+from centermanager.core.permission_guard import require_permission
 from centermanager.models.student import Student
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
 from centermanager.services.student_service import StudentService
@@ -27,6 +28,7 @@ class StudentExportService:
             self._session_factory = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
 
+    @require_permission("student.export")
     def export_all_active(self, file_path: Optional[Path] = None) -> Path:
         """Export all active students to Excel."""
         with self._session_factory() as session:
@@ -34,6 +36,7 @@ class StudentExportService:
             students = repo.list_active()
         return self.export_excel(students, file_path)
 
+    @require_permission("student.export")
     def export_excel(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
         """Export students to Excel."""
         if file_path is None:
@@ -43,6 +46,7 @@ class StudentExportService:
             file_path = export_dir / f"students_{timestamp}.xlsx"
         return self._write_excel(students, file_path)
 
+    @require_permission("student.export")
     def export_csv(self, students: List[Student], file_path: Optional[Path] = None) -> Path:
         """Export students to CSV."""
         if file_path is None:

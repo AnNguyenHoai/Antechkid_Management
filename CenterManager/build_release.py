@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import urllib.request
@@ -125,6 +126,93 @@ def _numeric_windows_version(version: str) -> tuple[int, int, int, int]:
     return int(match.group(1)), int(match.group(2)), int(match.group(3)), 0
 
 
+def generate_windows_icon() -> Path:
+    """Generate a deterministic branded ICO without external image dependencies."""
+    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
+    icon_path = BUILD_ROOT / "centermanager.generated.ico"
+    width = height = 32
+
+    pixels = [[(21, 101, 192, 255) for _ in range(width)] for _ in range(height)]
+    for y in range(height - 8, height):
+        for x in range(width):
+            pixels[y][x] = (245, 124, 0, 255)
+
+    glyphs = {
+        "A": [
+            "01110",
+            "10001",
+            "10001",
+            "11111",
+            "10001",
+            "10001",
+            "10001",
+        ],
+        "K": [
+            "10001",
+            "10010",
+            "10100",
+            "11000",
+            "10100",
+            "10010",
+            "10001",
+        ],
+    }
+    scale = 2
+    glyph_w = 5 * scale
+    gap = 2
+    total_w = glyph_w * 2 + gap
+    start_x = (width - total_w) // 2
+    start_y = 6
+    for index, letter in enumerate(("A", "K")):
+        ox = start_x + index * (glyph_w + gap)
+        for gy, row in enumerate(glyphs[letter]):
+            for gx, bit in enumerate(row):
+                if bit != "1":
+                    continue
+                for dy in range(scale):
+                    for dx in range(scale):
+                        x = ox + gx * scale + dx
+                        y = start_y + gy * scale + dy
+                        if 0 <= x < width and 0 <= y < height - 8:
+                            pixels[y][x] = (255, 255, 255, 255)
+
+    # ICO with one 32-bit DIB image. DIB pixels are BGRA and bottom-up.
+    xor = bytearray()
+    for row in reversed(pixels):
+        for r, g, b, a in row:
+            xor.extend((b, g, r, a))
+    and_mask = bytes((((width + 31) // 32) * 4) * height)
+    dib = struct.pack(
+        "<IIIHHIIIIII",
+        40,
+        width,
+        height * 2,
+        1,
+        32,
+        0,
+        len(xor),
+        0,
+        0,
+        0,
+        0,
+    ) + bytes(xor) + and_mask
+    image_offset = 6 + 16
+    header = struct.pack("<HHH", 0, 1, 1)
+    entry = struct.pack(
+        "<BBBBHHII",
+        width,
+        height,
+        0,
+        0,
+        1,
+        32,
+        len(dib),
+        image_offset,
+    )
+    icon_path.write_bytes(header + entry + dib)
+    return icon_path
+
+
 def generate_windows_version_metadata() -> Path:
     major, minor, patch, build = _numeric_windows_version(VERSION)
     BUILD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -225,8 +313,10 @@ def _pyinstaller_hidden_imports() -> list[str]:
 
 def build_executable() -> Path:
     version_metadata = generate_windows_version_metadata()
+    windows_icon = generate_windows_icon()
     args = ["run.py", "--name", APP_NAME, "--onefile", "--windowed", "--paths", str(PROJECT_ROOT / "src"),
-            "--version-file", str(version_metadata), "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
+            "--version-file", str(version_metadata), "--icon", str(windows_icon),
+            "--add-data", f"{PROJECT_ROOT / 'alembic.ini'}{os.pathsep}.",
             "--add-data", f"{PROJECT_ROOT / 'migrations'}{os.pathsep}migrations"]
     for module in _pyinstaller_hidden_imports():
         args.extend(["--hidden-import", module])
