@@ -50,6 +50,10 @@ class Enrollment(Base, TimestampMixin):
     unit_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4), nullable=True)
     enrolled_from_session: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     enrolled_until_session: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # First Session number that is no longer part of this Enrollment after a
+    # withdrawal. This preserves the original tuition snapshot/range for audit
+    # while giving Attendance/Billing an exact session boundary.
+    withdrawn_from_session: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Canonical effective amount consumed by accrual.  Rule metadata below is
     # immutable provenance for the Enrollment contract; historical rows may
     # legitimately have only discount_amount populated.
