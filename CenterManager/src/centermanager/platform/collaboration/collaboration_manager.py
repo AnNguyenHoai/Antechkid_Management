@@ -106,6 +106,7 @@ class CollaborationManager:
         self._initialized = False
         self._is_writing = False
         self._lock_acquired = False
+        self._lease_renewal_suspended = False
         self._state_mutex = threading.RLock()
         self._write_handoff_guard: Optional[Callable[[], bool]] = None
 
@@ -383,6 +384,7 @@ class CollaborationManager:
                 if acquired:
                     self._is_writing = True
                     self._lock_acquired = True
+                    self._lease_renewal_suspended = False
                     self._sync_local_lock()
                     self._publish_write_granted(request_id, 0)
                     logger.info(f"Write granted to {self._session.username} (expired lease replaced)")
@@ -393,6 +395,7 @@ class CollaborationManager:
             if acquired:
                 self._is_writing = True
                 self._lock_acquired = True
+                self._lease_renewal_suspended = False
                 self._sync_local_lock()
                 self._publish_write_granted(request_id, 0)
                 logger.info(f"Write granted to {self._session.username}")
@@ -434,6 +437,7 @@ class CollaborationManager:
                 result = self._sync_provider.release_lock(self._session.username)
                 self._is_writing = False
                 self._lock_acquired = False
+                self._lease_renewal_suspended = False
                 self._lock._force_release()
                 self._event_bus.publish(WriteReleased(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username))
                 self._event_bus.publish(ModeChanged(mode="READ"))
@@ -445,6 +449,7 @@ class CollaborationManager:
             self._lock.release(self._session)
             self._is_writing = False
             self._lock_acquired = False
+            self._lease_renewal_suspended = False
             self._event_bus.publish(WriteReleased(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username))
             self._event_bus.publish(ModeChanged(mode="READ"))
             logger.info(f"Write released by {self._session.username}")
@@ -535,10 +540,55 @@ class CollaborationManager:
             return result
         self._lock.release(self._session); self._lock_acquired = False; self._is_writing = False; return True
 
+    def suspend_write_lease_renewal(self) -> None:
+        """Stop automatic remote lease renewal without discarding local work.
+
+        Used when an editing session becomes idle or its authority can no longer
+        be trusted.  The transaction layer simultaneously disables write UI.
+        Existing remote ownership is left untouched so the user has one lease
+        window to recover; after expiry another writer may acquire normally.
+        """
+        with self._state_mutex:
+            self._lease_renewal_suspended = True
+            logger.warning("Automatic WRITE lease renewal suspended")
+
+    def resume_write_lease_renewal(self) -> None:
+        with self._state_mutex:
+            self._lease_renewal_suspended = False
+            logger.info("Automatic WRITE lease renewal resumed")
+
+    def clear_local_write_projection_for_recovery(self) -> None:
+        """Clear stale process-local WRITE state without releasing remote state.
+
+        Recovery calls this only after proving the current session no longer
+        owns a valid remote lease.  It prevents request_write() from returning
+        the misleading 'Already in WRITE mode' result that caused the
+        Renew Editing <-> Start Editing loop.
+        """
+        with self._state_mutex:
+            if self._sync_provider is not None and self._session is not None:
+                remote = self._get_remote_lock_status()
+                if (
+                    remote.get("locked", False)
+                    and remote.get("session_id") == self._session.session_id
+                    and self._is_lease_valid(remote.get("lease_expires_at"))
+                ):
+                    raise RuntimeError(
+                        "Cannot clear local WRITE projection while this session still owns a valid remote lease."
+                    )
+            self._lock._force_release()
+            self._lock_acquired = False
+            self._is_writing = False
+            self._lease_renewal_suspended = False
+            logger.info("Cleared stale local WRITE projection for recovery")
+
     def renew_remote_lease(self, force: bool = False) -> bool:
         self._ensure_initialized()
         with self._state_mutex:
             if self._sync_provider is None or not self._is_writing or self._session is None:
+                return True
+            if self._lease_renewal_suspended and not force:
+                logger.debug("Skipping automatic WRITE lease renewal while suspended")
                 return True
             try:
                 remote = self._sync_provider.remote_lock_status()
@@ -553,6 +603,7 @@ class CollaborationManager:
                         pass
                 renewed = self._sync_provider.renew_lock(self._session.username, self._session.session_id)
                 if renewed:
+                    self._lease_renewal_suspended = False
                     self._sync_local_lock()
                     return True
                 return False
