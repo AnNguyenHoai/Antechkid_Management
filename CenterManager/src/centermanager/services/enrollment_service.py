@@ -689,29 +689,40 @@ class EnrollmentService:
         reason: Optional[str] = None,
         actor=None,
     ) -> Enrollment:
+        sessions_factory = getattr(self._repository_provider, "sessions", None)
+
+        # Preserve the historical repository contract for injected/minimal
+        # providers. They do not expose a Sessions repository, so there is
+        # nothing useful to pre-read here; _transition() remains the single
+        # Enrollment lookup exactly as before this feature.
+        if not callable(sessions_factory):
+            boundary = (
+                int(effective_from_session)
+                if effective_from_session is not None
+                else None
+            )
+            return self._transition(
+                enrollment_id,
+                EnrollmentStatus.WITHDRAWN,
+                end_date,
+                reason=reason,
+                actor=actor,
+                withdrawn_from_session=boundary,
+            )
+
+        # Production/default providers are session-aware. Resolve the exact
+        # first excluded Session before applying the lifecycle transition.
         with self._session_factory() as session:
             enrollment = self._repository_provider.enrollments(session).get_by_id(enrollment_id)
             if enrollment is None:
                 raise EnrollmentNotFoundError(f"Enrollment {enrollment_id} not found.")
-            sessions_factory = getattr(self._repository_provider, "sessions", None)
-            if callable(sessions_factory):
-                sessions = sessions_factory(session).get_by_class(enrollment.class_id)
-                boundary = self._resolve_withdrawn_from_session(
-                    enrollment,
-                    sessions,
-                    explicit_session=effective_from_session,
-                )
-            else:
-                # Compatibility for injected/minimal repository providers that
-                # predate session-aware Enrollment lifecycle support. Preserve
-                # the legacy date boundary rather than failing the transition.
-                # Production/default providers expose sessions and therefore
-                # always resolve the exact withdrawal Session boundary.
-                boundary = (
-                    int(effective_from_session)
-                    if effective_from_session is not None
-                    else None
-                )
+            sessions = sessions_factory(session).get_by_class(enrollment.class_id)
+            boundary = self._resolve_withdrawn_from_session(
+                enrollment,
+                sessions,
+                explicit_session=effective_from_session,
+            )
+
         return self._transition(
             enrollment_id,
             EnrollmentStatus.WITHDRAWN,
