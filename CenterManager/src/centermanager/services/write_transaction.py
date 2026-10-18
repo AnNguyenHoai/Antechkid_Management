@@ -21,6 +21,7 @@ class WriteTransactionState(Enum):
     IDLE = auto()
     ACQUIRING = auto()
     EDITING = auto()
+    EDITING_STALE = auto()
     LOCAL_SAVED = auto()
     PUBLISHING = auto()
     PUBLISHED = auto()
@@ -60,6 +61,7 @@ class WriteTransactionManager:
         self._waiting_request_id: str = ""
         self._session = None
         self._last_start_error: str = ""
+        self._stale_editing_reason: str = ""
 
         # FINISHING fields
         self._finishing_started_at: Optional[datetime] = None
@@ -102,6 +104,10 @@ class WriteTransactionManager:
     @property
     def last_start_error(self) -> str:
         return self._last_start_error
+
+    @property
+    def stale_editing_reason(self) -> str:
+        return self._stale_editing_reason
 
     def set_sync_service(self, sync_service) -> None:
         self._sync_service = sync_service
@@ -164,6 +170,8 @@ class WriteTransactionManager:
         self._expected_generation = 0
         self._base_main_commit = None
         self._is_editing = False
+        self._stale_editing_reason = ""
+        self._collab_manager.resume_write_lease_renewal()
         logger.info("Transaction reset to IDLE")
 
     # ---- Snapshot ----
@@ -250,6 +258,150 @@ class WriteTransactionManager:
         except Exception:
             logger.exception("Unable to verify remote writer after lock acquisition failure")
             return False
+
+    def pause_editing_for_lost_authority(self, reason: str) -> bool:
+        """Fail closed when an active editing lease can no longer be trusted."""
+        if self._state not in (
+            WriteTransactionState.EDITING,
+            WriteTransactionState.LOCAL_SAVED,
+        ):
+            return False
+        self._stale_editing_reason = (reason or "WRITE authority is stale.").strip()
+        self._state = WriteTransactionState.EDITING_STALE
+        self._is_editing = False
+        self._collab_manager.suspend_write_lease_renewal()
+        logger.warning(
+            "Editing paused due to stale WRITE authority: %s",
+            self._stale_editing_reason,
+        )
+        return True
+
+    def pause_editing_for_idle_timeout(self) -> bool:
+        """Pause a forgotten editing session without silently discarding work."""
+        if self._state not in (
+            WriteTransactionState.EDITING,
+            WriteTransactionState.LOCAL_SAVED,
+        ):
+            return False
+        self._stale_editing_reason = (
+            "Editing was paused after prolonged inactivity. Recover editing before making more changes."
+        )
+        self._state = WriteTransactionState.EDITING_STALE
+        self._is_editing = False
+        self._collab_manager.suspend_write_lease_renewal()
+
+        # No unpublished work: release immediately so another workstation is
+        # not blocked by an abandoned editor. Dirty sessions retain the remote
+        # lease until its normal expiry window, then recovery is concurrency-fenced.
+        if not self._has_changes and self._collab_manager.is_writing():
+            try:
+                self._collab_manager.release_write()
+            except Exception:
+                logger.exception("Idle clean session could not release WRITE immediately")
+        logger.warning(
+            "Editing paused for inactivity; dirty=%s",
+            self._has_changes,
+        )
+        return True
+
+    def recover_stale_editing(self) -> bool:
+        """Recover an EDITING_STALE / FINISHING_STALE transaction safely.
+
+        Local work is preserved. Recovery is allowed only while remote MAIN is
+        unchanged from the transaction base. A lost/expired lease may be
+        reacquired without pulling the repository DB, because doing a normal
+        first-writer handoff here would overwrite unpublished local work.
+        """
+        if self._state not in (
+            WriteTransactionState.EDITING_STALE,
+            WriteTransactionState.FINISHING_STALE,
+        ):
+            self._last_start_error = (
+                f"Editing recovery is unavailable while transaction state is {self._state.name}."
+            )
+            return False
+
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        session = self._collab_manager.get_session()
+        if session is None:
+            self._last_start_error = "Editing recovery failed: no active collaboration session."
+            return False
+
+        if provider is not None:
+            try:
+                current_main = provider.get_remote_main_commit()
+            except Exception as exc:
+                self._last_start_error = f"Editing recovery could not verify MAIN: {exc}"
+                logger.warning(self._last_start_error)
+                return False
+
+            if (
+                self._base_main_commit is None
+                or current_main is None
+                or current_main != self._base_main_commit
+            ):
+                self._state = WriteTransactionState.PUBLISH_CONFLICT
+                self._is_editing = False
+                self._last_start_error = (
+                    "Editing recovery stopped because authoritative MAIN changed "
+                    "while this editor was stale."
+                )
+                logger.warning(self._last_start_error)
+                return False
+
+            try:
+                remote = provider.remote_lock_status()
+            except Exception as exc:
+                self._last_start_error = f"Editing recovery could not read remote lock: {exc}"
+                return False
+
+            valid = bool(
+                remote.get("locked", False)
+                and self._collab_manager._is_lease_valid(remote.get("lease_expires_at"))
+            )
+            if valid and remote.get("session_id") != session.session_id:
+                self._last_start_error = (
+                    f"Editing recovery blocked: {remote.get('owner') or 'another editor'} "
+                    "currently owns WRITE."
+                )
+                return False
+
+            if valid and remote.get("session_id") == session.session_id:
+                if not self._collab_manager.renew_remote_lease(force=True):
+                    self._last_start_error = "Editing recovery could not renew the existing WRITE lease."
+                    return False
+            else:
+                try:
+                    self._collab_manager.clear_local_write_projection_for_recovery()
+                except Exception as exc:
+                    self._last_start_error = f"Editing recovery could not clear stale local state: {exc}"
+                    return False
+
+                result = self._collab_manager.request_write("recover stale editing")
+                if not result.is_granted:
+                    if result.is_waiting:
+                        self._collab_manager.cancel_waiting_request()
+                    self._last_start_error = (
+                        result.message
+                        or "Editing recovery could not reacquire WRITE."
+                    )
+                    return False
+
+        self._collab_manager.resume_write_lease_renewal()
+        self._expected_generation = self._collab_manager.get_lock_generation()
+        self._finishing_started_at = None
+        self._finishing_deadline = None
+        self._publish_intent = False
+        self._finishing_retry_count = 0
+        self._state = WriteTransactionState.EDITING
+        self._is_editing = True
+        self._stale_editing_reason = ""
+        self._last_start_error = ""
+        logger.info(
+            "Stale editing transaction recovered; expected_generation=%s",
+            self._expected_generation,
+        )
+        return True
 
     # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
