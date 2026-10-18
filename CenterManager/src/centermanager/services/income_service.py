@@ -8,6 +8,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
+from uuid import uuid4
 
 from sqlalchemy.orm import sessionmaker
 
@@ -21,6 +22,7 @@ from centermanager.models.enrollment import Enrollment
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.income import Income
 from centermanager.models.timeline_event import TimelineEventType
+from centermanager.models.tuition_adjustment import TuitionAdjustment
 from centermanager.repositories.provider import (
     RepositoryProvider,
     create_default_repository_provider,
@@ -444,6 +446,175 @@ class IncomeService:
                 )
             self._publish_finance_change("created", income.id)
             return income
+
+    @require_permission("finance.income.create")
+    def create_tuition_payment_with_credit(
+        self,
+        *,
+        student_id: int,
+        class_id: int,
+        enrollment_id: int,
+        amount: float,
+        payment_method: str,
+        payment_date: date,
+        credit_amount,
+        credit_reason: str,
+        payment_period: Optional[str] = None,
+        received_by: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> tuple[Income, TuitionAdjustment]:
+        """Atomically post actual cash/bank received plus one non-cash tuition credit.
+
+        The Income amount is always the real money received. The credit adjustment
+        settles the remaining tuition obligation without creating a fake wallet
+        movement, so accounting cash and tuition settlement stay reconcilable.
+        """
+        amount = self._validate_amount(amount)
+        payment_method = self._validate_payment_method(payment_method)
+        if payment_date is None:
+            raise IncomeValidationError("Payment date is required.")
+        self._validate_realized_posting_date(payment_date)
+        try:
+            resolved_credit = Decimal(str(credit_amount or 0)).quantize(Decimal("0.01"))
+        except Exception as exc:
+            raise IncomeValidationError("Tuition credit amount must be a valid number.") from exc
+        if resolved_credit <= 0:
+            raise IncomeValidationError("Tuition credit amount must be greater than 0.")
+        resolved_reason = (credit_reason or "").strip()
+        if not resolved_reason:
+            raise IncomeValidationError("A reason is required for a non-cash tuition credit.")
+
+        payment_period = self._normalize_text(payment_period)
+        _, actor_name = self._actor()
+        actor = get_current_user()
+        received_by = self._normalize_text(received_by) or actor_name
+        note = self._normalize_text(note)
+
+        self._student_service.get_student(student_id)
+        class_record = self._class_service.get_class(class_id)
+        class_name = class_record.name
+
+        with self._session_factory() as session:
+            enrollment = self._resolve_tuition_enrollment(
+                session,
+                student_id=int(student_id),
+                class_id=int(class_id),
+                enrollment_id=int(enrollment_id),
+            )
+            finance_period, finance_period_start = self._resolve_finance_period(
+                session,
+                payment_date,
+            )
+            self._ensure_period_start_mutable(session, finance_period_start)
+
+            income_repo = self._repository_provider.incomes(session)
+            adjustment_repo = self._repository_provider.tuition_adjustments(session)
+
+            income = Income(
+                student_id=student_id,
+                class_id=class_id,
+                enrollment_id=enrollment.id,
+                amount=amount,
+                income_type="Tuition",
+                payment_method=payment_method,
+                payment_date=payment_date,
+                payment_period=payment_period,
+                finance_period_id=finance_period.id,
+                finance_period_start=finance_period_start,
+                received_by=received_by,
+                note=note,
+                status=Income.STATUS_ACTIVE,
+            )
+            income_repo.add(income)
+            income_repo.flush()
+
+            adjustment = TuitionAdjustment(
+                enrollment_id=enrollment.id,
+                origin_income_id=None,
+                origin_adjustment_id=None,
+                linked_income_id=None,
+                kind=TuitionAdjustment.KIND_CREDIT,
+                amount=resolved_credit,
+                adjustment_date=payment_date,
+                wallet=None,
+                reason=resolved_reason,
+                idempotency_key=f"tuition-payment-credit:{uuid4()}",
+                created_by=getattr(actor, "username", None),
+            )
+            adjustment_repo.add(adjustment)
+            adjustment_repo.flush()
+
+            self._record_audit(
+                session,
+                income,
+                "CREATE",
+                new_values=self._audit_snapshot(income),
+            )
+            self._audit_service.record_in_session(
+                session,
+                action="TUITION_CREDIT_ADJUSTMENT",
+                module="tuition",
+                target_type="tuition_adjustment",
+                target_id=adjustment.id,
+                target_name=f"Tuition Credit Adjustment #{adjustment.id}",
+                actor=actor,
+                details={
+                    "enrollment_id": enrollment.id,
+                    "linked_income_id": income.id,
+                    "amount": str(resolved_credit),
+                    "adjustment_date": payment_date.isoformat(),
+                    "accounting_period_start": finance_period_start.isoformat(),
+                    "wallet_movement": False,
+                    "reason": resolved_reason,
+                    "source": "PAYMENT_TIME_DISCOUNT",
+                },
+                entity_type="TuitionAdjustment",
+                entity_id=adjustment.id,
+                summary=f"Payment-time tuition credit for Enrollment#{enrollment.id}",
+            )
+
+            # Snapshot event/audit identities before commit expires ORM state.
+            event_income_id = int(income.id)
+            event_adjustment_id = int(adjustment.id)
+            event_enrollment_id = int(enrollment.id)
+            event_finance_period_id = int(finance_period.id)
+            event_finance_period_start = finance_period_start
+
+            session.commit()
+            income_repo.refresh(income)
+            adjustment_repo.refresh(adjustment)
+
+        self._best_effort_timeline_event(
+            student_id=student_id,
+            event_type=TimelineEventType.INCOME_CREATED,
+            title="Tuition Payment Recorded",
+            description=(
+                f"Actual received: {amount:,.0f} VND; non-cash tuition credit: "
+                f"{resolved_credit:,.0f} VND; Method: {payment_method}; "
+                f"Class: {class_name}"
+            ),
+            metadata={
+                "income_id": event_income_id,
+                "class_id": class_id,
+                "enrollment_id": event_enrollment_id,
+                "amount": amount,
+                "non_cash_credit": str(resolved_credit),
+                "payment_method": payment_method,
+                "finance_period_id": event_finance_period_id,
+                "finance_period_start": event_finance_period_start.isoformat(),
+            },
+        )
+        self._publish_finance_change("created", event_income_id)
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                FinanceDataChanged(
+                    entity="tuition_adjustment",
+                    action="credit_adjustment",
+                    entity_id=event_adjustment_id,
+                )
+            )
+        return income, adjustment
+
 
     @require_permission("finance.view")
     def get_income(self, income_id: int) -> Income:
