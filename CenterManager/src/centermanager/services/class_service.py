@@ -709,9 +709,9 @@ class ClassService:
             enrollment_id = enrollment.id
         try:
             if reason is None:
-                service.withdraw(enrollment_id)
+                withdrawn = service.withdraw(enrollment_id)
             else:
-                service.withdraw(enrollment_id, reason=reason)
+                withdrawn = service.withdraw(enrollment_id, reason=reason)
         except EnrollmentNotFoundError as exc:
             raise ClassNotFoundError("Enrollment not found.") from exc
 
@@ -725,6 +725,9 @@ class ClassService:
                     "student_id": student_id,
                     "enrollment_id": enrollment_id,
                     "reason": reason or "Withdrawn from class",
+                    "withdrawn_from_session": getattr(
+                        withdrawn, "withdrawn_from_session", None
+                    ),
                     "action": "WITHDRAWN",
                 },
             )
