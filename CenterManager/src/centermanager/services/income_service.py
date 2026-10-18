@@ -573,6 +573,13 @@ class IncomeService:
                 summary=f"Payment-time tuition credit for Enrollment#{enrollment.id}",
             )
 
+            # Snapshot event/audit identities before commit expires ORM state.
+            event_income_id = int(income.id)
+            event_adjustment_id = int(adjustment.id)
+            event_enrollment_id = int(enrollment.id)
+            event_finance_period_id = int(finance_period.id)
+            event_finance_period_start = finance_period_start
+
             session.commit()
             income_repo.refresh(income)
             adjustment_repo.refresh(adjustment)
@@ -587,23 +594,23 @@ class IncomeService:
                 f"Class: {class_name}"
             ),
             metadata={
-                "income_id": income.id,
+                "income_id": event_income_id,
                 "class_id": class_id,
-                "enrollment_id": enrollment_id,
+                "enrollment_id": event_enrollment_id,
                 "amount": amount,
                 "non_cash_credit": str(resolved_credit),
                 "payment_method": payment_method,
-                "finance_period_id": finance_period.id,
-                "finance_period_start": finance_period_start.isoformat(),
+                "finance_period_id": event_finance_period_id,
+                "finance_period_start": event_finance_period_start.isoformat(),
             },
         )
-        self._publish_finance_change("created", income.id)
+        self._publish_finance_change("created", event_income_id)
         if self._event_bus is not None:
             self._event_bus.publish(
                 FinanceDataChanged(
                     entity="tuition_adjustment",
                     action="credit_adjustment",
-                    entity_id=adjustment.id,
+                    entity_id=event_adjustment_id,
                 )
             )
         return income, adjustment
