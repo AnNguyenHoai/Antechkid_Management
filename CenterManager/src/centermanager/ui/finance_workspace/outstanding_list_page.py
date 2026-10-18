@@ -259,6 +259,7 @@ class OutstandingListPage(QWidget):
             on_date=self._target_date,
             sort_by=self._sort_by,
             ascending=self._sort_ascending,
+            hide_settled_inactive=True,
         )
         max_page = max(1, (total + self._page_size - 1) // self._page_size)
         if self._current_page > max_page:
@@ -271,6 +272,7 @@ class OutstandingListPage(QWidget):
                 on_date=self._target_date,
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
+                hide_settled_inactive=True,
             )
 
         self._items = items
@@ -405,6 +407,7 @@ class OutstandingListPage(QWidget):
                 on_date=self._target_date,
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
+                hide_settled_inactive=True,
             )
             Path(filename).write_text(csv_text, encoding="utf-8-sig")
             self._notify("Xuất công nợ CSV thành công.")
