@@ -30,6 +30,7 @@ from centermanager.platform.business import BusinessModule
 from centermanager.platform.collaboration import CollaborationPoller, PollerMode
 
 from centermanager.ui.main_window import MainWindow
+from centermanager.ui.application_icon import build_application_icon
 from centermanager.services.student_service import StudentService
 from centermanager.services.parent_service import ParentService
 from centermanager.services.timeline_service import TimelineService
@@ -110,6 +111,7 @@ def main() -> int:
         qapp = QApplication(sys.argv)
         qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
         qapp.setOrganizationName("CenterManager")
+        qapp.setWindowIcon(build_application_icon())
 
         instance_lock = QLockFile(str(paths.runtime_root / ".centermanager.instance.lock"))
         instance_lock.setStaleLockTime(30_000)
