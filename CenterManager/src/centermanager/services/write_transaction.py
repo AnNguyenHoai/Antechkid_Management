@@ -171,7 +171,9 @@ class WriteTransactionManager:
         self._base_main_commit = None
         self._is_editing = False
         self._stale_editing_reason = ""
-        self._collab_manager.resume_write_lease_renewal()
+        resume_lease = getattr(self._collab_manager, "resume_write_lease_renewal", None)
+        if callable(resume_lease):
+            resume_lease()
         logger.info("Transaction reset to IDLE")
 
     # ---- Snapshot ----
