@@ -110,7 +110,7 @@ class IncomeFormDialog(QDialog):
         form.addRow("Điều chỉnh học phí", self.credit_enabled)
 
         self.credit_amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
-        self.credit_amount_spin.setRange(0.01, 999999999.99)
+        self.credit_amount_spin.setRange(0.0, 999999999.99)
         form.addRow("Giảm giá / credit", self.credit_amount_spin)
 
         self.credit_reason_edit = QLineEdit()
@@ -193,6 +193,7 @@ class IncomeFormDialog(QDialog):
         self.credit_amount_spin.setEnabled(enabled)
         self.credit_reason_edit.setEnabled(enabled)
         if not enabled:
+            self.credit_amount_spin.setValue(0.0)
             self.credit_reason_edit.clear()
 
     def _on_source_changed(self, index: int) -> None:
