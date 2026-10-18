@@ -12,6 +12,7 @@ from centermanager.core.paths import get_paths
 from centermanager.core.config import get_config, init_config
 from centermanager.core.logging import setup_logging
 from centermanager.core.current_user import set_current_user
+from centermanager.core.application_identity import configure_windows_app_identity
 from centermanager.database.engine import create_production_engine, initialize_runtime_database
 from centermanager.database.seed import seed_roles_and_permissions
 from centermanager.events.event_bus import EventBus
@@ -108,6 +109,9 @@ def main() -> int:
         )
         logger.info("[STARTUP] Config and logging initialized")
 
+        # Windows taskbar/shortcut grouping must have a stable identity before
+        # QApplication creates any native window handles.
+        configure_windows_app_identity()
         qapp = QApplication(sys.argv)
         qapp.setApplicationName(config.get("application", {}).get("name", "CenterManager"))
         qapp.setOrganizationName("CenterManager")

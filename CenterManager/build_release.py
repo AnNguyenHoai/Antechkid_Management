@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import struct
+import sys
 import subprocess
 import tempfile
 import urllib.request
@@ -18,6 +19,15 @@ from pathlib import Path
 import PyInstaller.__main__
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from centermanager.core.application_icon_asset import (
+    APPLICATION_ICON_SIZES,
+    render_application_icon_rgba,
+)
+
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 APP_NAME = "CenterManager"
 ADMIN_TOOL_NAME = "GitProvisioningAdmin"
@@ -126,90 +136,72 @@ def _numeric_windows_version(version: str) -> tuple[int, int, int, int]:
     return int(match.group(1)), int(match.group(2)), int(match.group(3)), 0
 
 
+def _ico_dib_frame(size: int) -> bytes:
+    """Return one uncompressed 32-bit DIB icon frame."""
+    rgba = render_application_icon_rgba(size)
+    row_bytes = size * 4
+    xor = bytearray()
+    for y in range(size - 1, -1, -1):
+        row_start = y * row_bytes
+        row = rgba[row_start:row_start + row_bytes]
+        for x in range(0, len(row), 4):
+            r, g, b, a = row[x:x + 4]
+            xor.extend((b, g, r, a))
+
+    # Fully opaque AND mask. Rows are DWORD-aligned per ICO/DIB requirements.
+    mask_stride = ((size + 31) // 32) * 4
+    and_mask = bytes(mask_stride * size)
+    return (
+        struct.pack(
+            "<IIIHHIIIIII",
+            40,
+            size,
+            size * 2,
+            1,
+            32,
+            0,
+            len(xor),
+            0,
+            0,
+            0,
+            0,
+        )
+        + bytes(xor)
+        + and_mask
+    )
+
+
 def generate_windows_icon() -> Path:
-    """Generate a deterministic branded ICO without external image dependencies."""
+    """Generate a canonical multi-resolution Windows ICO for shell/taskbar use."""
     BUILD_ROOT.mkdir(parents=True, exist_ok=True)
     icon_path = BUILD_ROOT / "centermanager.generated.ico"
-    width = height = 32
 
-    pixels = [[(21, 101, 192, 255) for _ in range(width)] for _ in range(height)]
-    for y in range(height - 8, height):
-        for x in range(width):
-            pixels[y][x] = (245, 124, 0, 255)
+    frames = [(size, _ico_dib_frame(size)) for size in APPLICATION_ICON_SIZES]
+    directory_size = 6 + 16 * len(frames)
+    offset = directory_size
+    entries = []
+    payload = bytearray()
 
-    glyphs = {
-        "A": [
-            "01110",
-            "10001",
-            "10001",
-            "11111",
-            "10001",
-            "10001",
-            "10001",
-        ],
-        "K": [
-            "10001",
-            "10010",
-            "10100",
-            "11000",
-            "10100",
-            "10010",
-            "10001",
-        ],
-    }
-    scale = 2
-    glyph_w = 5 * scale
-    gap = 2
-    total_w = glyph_w * 2 + gap
-    start_x = (width - total_w) // 2
-    start_y = 6
-    for index, letter in enumerate(("A", "K")):
-        ox = start_x + index * (glyph_w + gap)
-        for gy, row in enumerate(glyphs[letter]):
-            for gx, bit in enumerate(row):
-                if bit != "1":
-                    continue
-                for dy in range(scale):
-                    for dx in range(scale):
-                        x = ox + gx * scale + dx
-                        y = start_y + gy * scale + dy
-                        if 0 <= x < width and 0 <= y < height - 8:
-                            pixels[y][x] = (255, 255, 255, 255)
+    for size, frame in frames:
+        dimension = 0 if size >= 256 else size
+        entries.append(
+            struct.pack(
+                "<BBBBHHII",
+                dimension,
+                dimension,
+                0,
+                0,
+                1,
+                32,
+                len(frame),
+                offset,
+            )
+        )
+        payload.extend(frame)
+        offset += len(frame)
 
-    # ICO with one 32-bit DIB image. DIB pixels are BGRA and bottom-up.
-    xor = bytearray()
-    for row in reversed(pixels):
-        for r, g, b, a in row:
-            xor.extend((b, g, r, a))
-    and_mask = bytes((((width + 31) // 32) * 4) * height)
-    dib = struct.pack(
-        "<IIIHHIIIIII",
-        40,
-        width,
-        height * 2,
-        1,
-        32,
-        0,
-        len(xor),
-        0,
-        0,
-        0,
-        0,
-    ) + bytes(xor) + and_mask
-    image_offset = 6 + 16
-    header = struct.pack("<HHH", 0, 1, 1)
-    entry = struct.pack(
-        "<BBBBHHII",
-        width,
-        height,
-        0,
-        0,
-        1,
-        32,
-        len(dib),
-        image_offset,
-    )
-    icon_path.write_bytes(header + entry + dib)
+    header = struct.pack("<HHH", 0, 1, len(frames))
+    icon_path.write_bytes(header + b"".join(entries) + bytes(payload))
     return icon_path
 
 
@@ -290,7 +282,9 @@ def write_uat_checklist() -> None:
         "- [ ] Restart the destination and confirm provisioning is not requested again.\n"
         "- [ ] Confirm a bundle created for one destination is rejected by another destination.\n"
         "- [ ] Confirm a copied foreign-DPAPI database_key.dpapi triggers provisioning and is replaced only after authenticated bundle import.\n"
-        "- [ ] Launch CenterManager.exe from a clean Windows user directory.\n- [ ] Login succeeds with the test account.\n"
+        "- [ ] Launch CenterManager.exe from a clean Windows user directory.\n"
+        "- [ ] Confirm CenterManager.exe, the taskbar button, and the application window all show the same AnTechKids icon.\n"
+        "- [ ] Login succeeds with the test account.\n"
         "- [ ] Student workspace and navigation work.\n- [ ] Class and Teacher workspaces open.\n"
         "- [ ] Session / Attendance / Assessment flows open.\n- [ ] Finance workspace opens.\n- [ ] Student Timeline opens.\n"
         "- [ ] Export/report actions produce expected files.\n- [ ] Backup/restore can be exercised with test data.\n"
