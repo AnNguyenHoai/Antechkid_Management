@@ -225,6 +225,9 @@ class EnrollmentWidget(QWidget):
             metadata.append(f"Teacher: {enrollment.teacher_name}")
         if enrollment.level:
             metadata.append(f"Level: {enrollment.level}")
+        withdrawn_from = getattr(enrollment, "withdrawn_from_session", None)
+        if withdrawn_from is not None:
+            metadata.append(f"Withdrawn effective from Session #{withdrawn_from}")
         if getattr(enrollment, "reconciled_into_enrollment_id", None) is not None:
             metadata.append(
                 f"Reconciled into Enrollment #{enrollment.reconciled_into_enrollment_id}"
