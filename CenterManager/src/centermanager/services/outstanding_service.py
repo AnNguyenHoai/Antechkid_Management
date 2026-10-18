@@ -281,6 +281,7 @@ class OutstandingService:
         as_of_date: date,
         sort_by: str,
         ascending: bool,
+        hide_settled_inactive: bool = False,
     ) -> List[OutstandingDTO]:
         enrollment_repo = self._repository_provider.enrollments(session)
         enrollments, _ = enrollment_repo.list_for_outstanding(
@@ -310,6 +311,16 @@ class OutstandingService:
             if dto is None:
                 continue
             if status_filter and status_filter not in (dto.status, dto.balance_state):
+                continue
+            if (
+                hide_settled_inactive
+                and status_filter is None
+                and getattr(enrollment, "status", None) in {"WITHDRAWN", "COMPLETED"}
+                and dto.balance_state == BALANCE_STATE_PAID
+            ):
+                # Operational default hides fully settled historical contracts,
+                # but debt/prepaid/unconfigured rows remain visible. Selecting
+                # an explicit status filter (for example Paid) reveals history.
                 continue
             results.append(dto)
 
@@ -364,6 +375,7 @@ class OutstandingService:
         sort_by: str = "outstanding",
         ascending: bool = False,
         as_of_date: Optional[date] = None,
+        hide_settled_inactive: bool = False,
     ) -> Tuple[List[OutstandingDTO], int, Dict[str, int]]:
         target_date = on_date or get_clock().today()
         cutoff = as_of_date or target_date
@@ -388,6 +400,7 @@ class OutstandingService:
                 as_of_date=cutoff,
                 sort_by=sort_by,
                 ascending=ascending,
+                hide_settled_inactive=hide_settled_inactive,
             )
             total = len(rows)
             stats = self._stats_for_rows(rows)
@@ -426,6 +439,7 @@ class OutstandingService:
             sort_by=sort_by,
             ascending=ascending,
             as_of_date=as_of_date,
+            hide_settled_inactive=hide_settled_inactive,
         )
         return rows, total
 
@@ -570,6 +584,7 @@ class OutstandingService:
         sort_by: str = "outstanding",
         ascending: bool = False,
         as_of_date: Optional[date] = None,
+        hide_settled_inactive: bool = False,
     ) -> str:
         rows, _, _ = self.get_outstanding_page(
             class_id=class_id,
