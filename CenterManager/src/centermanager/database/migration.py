@@ -36,6 +36,7 @@ _POST_PRJ_REQUIRED_COLUMNS = {
         "reconciliation_reviewed_at",
         "reconciliation_reviewed_by",
         "reconciliation_review_reason",
+        "withdrawn_from_session",
     },
     "class_fee_history": {"changed_by"},
 }
