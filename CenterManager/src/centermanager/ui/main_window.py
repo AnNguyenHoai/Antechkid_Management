@@ -4,8 +4,9 @@
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QThread
+from PySide6.QtCore import Qt, QTimer, QThread, QEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QStackedWidget,
     QWidget,
@@ -64,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     """Main application window with platform integration."""
+
+    EDITING_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
     def __init__(
         self,
@@ -163,6 +166,13 @@ class MainWindow(QMainWindow):
         self._poller = poller
 
         self._transaction = transaction_manager
+        self._editing_idle_timer = QTimer(self)
+        self._editing_idle_timer.setSingleShot(True)
+        self._editing_idle_timer.setInterval(self.EDITING_IDLE_TIMEOUT_MS)
+        self._editing_idle_timer.timeout.connect(self._on_editing_idle_timeout)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self._closing_requested = False
         self._skip_auto_request_until_next_poll = False
         self._permission_helper = UIPermissionHelper(permission_service._session_factory)
@@ -353,6 +363,7 @@ class MainWindow(QMainWindow):
             logger.debug("Poller not available, skipping connection")
             return
         self._poller.snapshot_changed.connect(self._on_poller_snapshot_changed)
+        self._poller.lease_renewal_failed.connect(self._on_lease_renewal_failed)
         logger.info("Connected CollaborationPoller to MainWindow")
 
     def _on_poller_snapshot_changed(self, snapshot: CollaborationSnapshot) -> None:
@@ -360,6 +371,49 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._update_waiting_status)
         else:
             self._update_waiting_status()
+
+    def _on_lease_renewal_failed(self, payload) -> None:
+        if not self._transaction.is_editing:
+            return
+        detail = ""
+        if isinstance(payload, dict):
+            detail = str(payload.get("error") or "").strip()
+        reason = "Active editing lease renewal failed"
+        if detail:
+            reason = f"{reason}: {detail}"
+        if self._transaction.pause_editing_for_lost_authority(reason):
+            self.statusBar().showMessage(
+                "Editing paused because WRITE authority could not be renewed. Recover editing before continuing.",
+                8000,
+            )
+            self._update_write_buttons()
+
+    def _on_editing_idle_timeout(self) -> None:
+        if not self._transaction.is_editing:
+            return
+        if self._transaction.pause_editing_for_idle_timeout():
+            self.statusBar().showMessage(
+                "Editing paused after 30 minutes of inactivity. Recover editing to continue.",
+                10000,
+            )
+            self._update_write_buttons()
+
+    def _arm_editing_idle_timer(self) -> None:
+        if self._transaction.is_editing:
+            self._editing_idle_timer.start(self.EDITING_IDLE_TIMEOUT_MS)
+        else:
+            self._editing_idle_timer.stop()
+
+    def eventFilter(self, watched, event):
+        if event.type() in (
+            QEvent.Type.KeyPress,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonDblClick,
+            QEvent.Type.Wheel,
+            QEvent.Type.TouchBegin,
+        ):
+            self._arm_editing_idle_timer()
+        return super().eventFilter(watched, event)
 
     def _update_poller_status(self) -> None:
         if self._poller is None:
@@ -411,6 +465,7 @@ class MainWindow(QMainWindow):
             WriteTransactionState.FINISHING,
             WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
             WriteTransactionState.FINISHING_STALE,
+            WriteTransactionState.EDITING_STALE,
         ):
             self.start_edit_btn.setVisible(False)
             self.finish_edit_btn.setVisible(False)
@@ -420,11 +475,17 @@ class MainWindow(QMainWindow):
             elif state == WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION:
                 self.app_top_bar.set_transaction_text("Waiting for collaboration...")
             else:
-                self.app_top_bar.set_transaction_text("Stale session - renew editing")
+                reason = self._transaction.stale_editing_reason
+                self.app_top_bar.set_transaction_text(
+                    "Editing paused - recovery required"
+                    + (f" ({reason})" if reason else "")
+                )
                 self.start_edit_btn.setVisible(True)
                 self.start_edit_btn.setEnabled(True)
-                self.start_edit_btn.setText("Renew editing")
+                self.start_edit_btn.setText("Recover editing")
             self.app_top_bar.set_mode("FINISHING", "warning")
+            self._update_write_actions(False)
+            self._editing_idle_timer.stop()
             return
 
         if state == WriteTransactionState.IDLE:
@@ -484,6 +545,7 @@ class MainWindow(QMainWindow):
 
         self._update_waiting_status()
         self._update_write_actions(is_editing)
+        self._arm_editing_idle_timer()
         self._update_poller_status()
 
     def _update_lock_owner_display(self) -> None:
@@ -554,14 +616,21 @@ class MainWindow(QMainWindow):
     # ===== Transaction Actions =====
 
     def _on_start_editing(self) -> None:
-        if self._transaction.state == WriteTransactionState.FINISHING_STALE:
-            logger.info("Renewing stale editing session")
-            self._transaction._state = WriteTransactionState.IDLE
-            self._transaction._finishing_deadline = None
-            self._transaction._finishing_started_at = None
-            self._transaction._publish_intent = False
-            self._transaction._base_main_commit = None
+        if self._transaction.state in (
+            WriteTransactionState.EDITING_STALE,
+            WriteTransactionState.FINISHING_STALE,
+        ):
+            logger.info("Recovering stale editing session")
+            if self._transaction.recover_stale_editing():
+                self.statusBar().showMessage(
+                    "Editing authority recovered. You can continue your work.",
+                    5000,
+                )
+            else:
+                reason = self._transaction.last_start_error or "Editing recovery failed."
+                self.statusBar().showMessage(reason, 8000)
             self._update_write_buttons()
+            return
 
         if not (
             self._transaction.can_edit
