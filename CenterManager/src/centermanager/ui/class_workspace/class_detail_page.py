@@ -9,7 +9,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMessageBox, QTabWidget
+    QScrollArea, QFrame, QSizePolicy, QMessageBox, QTabWidget, QInputDialog
 )
 
 from centermanager.models.class_ import Class
@@ -364,10 +364,16 @@ class ClassDetailPage(QWidget):
             label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']};")
             layout.addWidget(label)
             layout.addStretch()
-            remove_btn = QPushButton("Remove")
-            remove_btn.setStyleSheet("color: #d32f2f; background: transparent; border: none;")
-            remove_btn.clicked.connect(lambda checked, sid=student.id: self._on_remove_student(sid))
-            layout.addWidget(remove_btn)
+            withdraw_btn = QPushButton("Withdraw")
+            withdraw_btn.setStyleSheet("color: #d32f2f; background: transparent; border: none;")
+            withdraw_btn.setToolTip(
+                "Withdraw from this class while preserving attendance, tuition, "
+                "payment, and Enrollment history."
+            )
+            withdraw_btn.clicked.connect(
+                lambda checked, sid=student.id: self._on_withdraw_student(sid)
+            )
+            layout.addWidget(withdraw_btn)
             self.student_layout.addWidget(w)
 
         add_btn = QPushButton("+ Enroll Another Student")
@@ -448,24 +454,54 @@ class ClassDetailPage(QWidget):
             self.load_class(self._current_class_id)
             self.class_updated.emit()
 
-    def _on_remove_student(self, student_id: int) -> None:
+    def _on_withdraw_student(self, student_id: int) -> None:
         if self._current_class_id is None:
             return
         if not self._collaboration_manager.ensure_write():
-            self._notification_service.notify("You must be in WRITE mode to remove a student.", "warning")
+            self._notification_service.notify(
+                "You must be in WRITE mode to withdraw a student.",
+                "warning",
+            )
             return
+
         reply = QMessageBox.question(
-            self, "Confirm Remove",
-            "Remove this student from the class?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self,
+            "Withdraw from class",
+            "This records a real withdrawal and keeps attendance, tuition, "
+            "payment, and Enrollment history.\n\n"
+            "Withdraw this student from the class?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                self._class_service.remove_student(self._current_class_id, student_id)
-                self.load_class(self._current_class_id)
-                self.class_updated.emit()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        reason, accepted = QInputDialog.getText(
+            self,
+            "Withdrawal reason",
+            "Reason for withdrawal:",
+        )
+        if not accepted:
+            return
+        reason = reason.strip()
+        if not reason:
+            QMessageBox.warning(
+                self,
+                "Withdrawal reason",
+                "A withdrawal reason is required.",
+            )
+            return
+
+        try:
+            self._class_service.withdraw_student(
+                self._current_class_id,
+                student_id,
+                reason=reason,
+            )
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "Withdrawal Error", str(e))
 
     def _on_add_session(self) -> None:
         if self._current_class_id is None:

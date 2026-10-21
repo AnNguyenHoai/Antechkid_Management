@@ -407,7 +407,7 @@ class ClassEnrollmentDialog(QDialog):
             student_id = item.data(Qt.ItemDataRole.UserRole)
             try:
                 logger.info("Withdrawing student %s from class %s", student_id, self._class_id)
-                self._class_service.remove_student(
+                self._class_service.withdraw_student(
                     self._class_id,
                     student_id,
                     reason=reason,
