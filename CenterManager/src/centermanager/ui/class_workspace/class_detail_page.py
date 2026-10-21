@@ -488,6 +488,16 @@ class ClassDetailPage(QWidget):
                     "Active enrollment not found for this student.",
                 )
                 return
+            if any(
+                getattr(freeze, "is_open", False)
+                for freeze in (getattr(enrollment, "freezes", None) or [])
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Transfer unavailable",
+                    "Resume the open tuition freeze before transferring.",
+                )
+                return
 
             dialog = EnrollmentTransferDialog(
                 self._transfer_service,
