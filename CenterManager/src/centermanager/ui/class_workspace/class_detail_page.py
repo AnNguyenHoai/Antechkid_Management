@@ -9,7 +9,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMessageBox, QTabWidget, QInputDialog
+    QScrollArea, QFrame, QSizePolicy, QMessageBox, QTabWidget, QInputDialog, QDialog
 )
 
 from centermanager.models.class_ import Class
@@ -23,6 +23,7 @@ from centermanager.services.session_note_service import SessionNoteService
 from centermanager.services.student_highlight_service import StudentHighlightService
 from centermanager.services.student_service import StudentService
 from centermanager.services.attendance_service import AttendanceService
+from centermanager.services.enrollment_transfer_service import EnrollmentTransferService
 from centermanager.ui.design_system import (
     Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
 )
@@ -33,6 +34,7 @@ from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnroll
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
+from centermanager.ui.enrollment_transfer_dialog import EnrollmentTransferDialog
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 
@@ -59,6 +61,7 @@ class ClassDetailPage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._class_service = class_service
+        self._transfer_service = EnrollmentTransferService.from_class_service(class_service)
         self._assignment_service = assignment_service
         self._timeline_service = timeline_service
         self._session_service = session_service
@@ -364,6 +367,15 @@ class ClassDetailPage(QWidget):
             label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']};")
             layout.addWidget(label)
             layout.addStretch()
+            transfer_btn = QPushButton("Transfer")
+            transfer_btn.setStyleSheet(
+                f"color: {COLORS['primary']}; background: transparent; border: none;"
+            )
+            transfer_btn.setToolTip("Transfer this student to another active class.")
+            transfer_btn.clicked.connect(
+                lambda checked, sid=student.id: self._on_transfer_student(sid)
+            )
+            layout.addWidget(transfer_btn)
             withdraw_btn = QPushButton("Withdraw")
             withdraw_btn.setStyleSheet("color: #d32f2f; background: transparent; border: none;")
             withdraw_btn.setToolTip(
@@ -453,6 +465,48 @@ class ClassDetailPage(QWidget):
         if dialog.exec() == ClassEnrollmentDialog.DialogCode.Accepted:
             self.load_class(self._current_class_id)
             self.class_updated.emit()
+
+    def _on_transfer_student(self, student_id: int) -> None:
+        if self._current_class_id is None:
+            return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(
+                "You must be in WRITE mode to transfer a student.",
+                "warning",
+            )
+            return
+
+        try:
+            enrollment = self._class_service.get_active_enrollment(
+                self._current_class_id,
+                student_id,
+            )
+            if enrollment is None:
+                QMessageBox.warning(
+                    self,
+                    "Transfer unavailable",
+                    "Active enrollment not found for this student.",
+                )
+                return
+
+            dialog = EnrollmentTransferDialog(
+                self._transfer_service,
+                self._class_service,
+                enrollment,
+                parent=self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            self.load_class(self._current_class_id)
+            self.class_updated.emit()
+            self._notification_service.notify(
+                "Student transferred to target class.",
+                "success",
+            )
+        except Exception as exc:
+            logger.exception("Failed to transfer student %s: %s", student_id, exc)
+            QMessageBox.critical(self, "Transfer failed", str(exc))
 
     def _on_withdraw_student(self, student_id: int) -> None:
         if self._current_class_id is None:
