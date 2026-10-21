@@ -688,7 +688,7 @@ class ClassService:
             )
         return enrollment
 
-    def remove_student(
+    def withdraw_student(
         self,
         class_id: int,
         student_id: int,
@@ -731,6 +731,16 @@ class ClassService:
                     "action": "WITHDRAWN",
                 },
             )
+
+    def remove_student(
+        self,
+        class_id: int,
+        student_id: int,
+        *,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Compatibility alias for legacy callers; use withdraw_student()."""
+        return self.withdraw_student(class_id, student_id, reason=reason)
 
     def get_enrolled_students(self, class_id: int) -> List[Student]:
         with self._session_factory() as session:
