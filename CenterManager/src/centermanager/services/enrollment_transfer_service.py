@@ -14,6 +14,7 @@ from centermanager.models.session import SessionStatus
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
+from centermanager.services.enrollment_service import EnrollmentService
 from centermanager.services.tuition_accrual_service import TuitionAccrualService, TuitionAccrualUnresolvedError
 
 
@@ -273,6 +274,16 @@ class EnrollmentTransferService:
                         f"Target class capacity ({target_class.capacity}) reached."
                     )
 
+                source_sessions = self._repository_provider.sessions(session).get_by_class(
+                    source.class_id
+                )
+                source_withdrawn_from_session = (
+                    EnrollmentService._resolve_withdrawn_from_session(
+                        source,
+                        source_sessions,
+                    )
+                )
+
                 target_sessions = self._repository_provider.sessions(session).get_by_class(target_class_id)
                 target_start = self._target_start_session(target_class, target_sessions)
                 target_contract = self._target_contract(target_class, target_start)
@@ -299,6 +310,7 @@ class EnrollmentTransferService:
 
                 source.status = "WITHDRAWN"
                 source.end_date = today
+                source.withdrawn_from_session = source_withdrawn_from_session
                 transfer = EnrollmentTransfer(
                     source_enrollment_id=int(source.id),
                     target_enrollment_id=int(target.id),
@@ -327,6 +339,7 @@ class EnrollmentTransferService:
                         "source_class_id": source.class_id,
                         "target_class_id": target_class_id,
                         "source_balance_before": str(source_balance),
+                        "source_withdrawn_from_session": source_withdrawn_from_session,
                         "transferred_credit": str(credit),
                         "target_unit_fee": str(target.unit_fee),
                         "idempotency_key": resolved_key,
