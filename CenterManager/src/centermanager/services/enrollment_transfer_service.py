@@ -56,6 +56,14 @@ class EnrollmentTransferService:
             audit_service=enrollment_service._audit_service,
         )
 
+    @classmethod
+    def from_class_service(cls, class_service):
+        """Compose transfer behavior for Class UI without exposing repositories there."""
+        return cls(
+            class_service._session_factory,
+            repository_provider=class_service._repository_provider,
+        )
+
     @staticmethod
     def _require_reason(reason: str) -> str:
         resolved = (reason or "").strip()

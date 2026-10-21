@@ -28,6 +28,7 @@ from centermanager.ui.design_system.form_detail import EditStateBanner
 from centermanager.ui.design_system.foundation import Badge, Button, ButtonVariant, Card, Select
 from centermanager.ui.design_system.tokens import COLORS, FONT_WEIGHTS, SPACING, TYPOGRAPHY
 from centermanager.ui.student_workspace.enrollment_pricing_dialog import EnrollmentPricingDialog
+from centermanager.ui.enrollment_transfer_dialog import EnrollmentTransferDialog
 
 
 class EnrollmentWidget(QWidget):
@@ -84,7 +85,7 @@ class EnrollmentWidget(QWidget):
         layout.addWidget(self.overview_section)
         action_card = Card(
             "Enroll in a class",
-            "Choose an active class that the student is not currently enrolled in. The same selection is used as the transfer target.",
+            "Choose an active class that the student is not currently enrolled in.",
             parent=self,
         )
         action_wrap = QWidget(action_card)
@@ -93,8 +94,8 @@ class EnrollmentWidget(QWidget):
         action.setSpacing(SPACING["sm"])
         self.class_combo = Select([], parent=action_wrap)
         self.class_combo.setMinimumWidth(220)
-        self.class_combo.setAccessibleName("Class to enroll or transfer into")
-        self.class_combo.setToolTip("Select an active class for enrollment or transfer")
+        self.class_combo.setAccessibleName("Class to enroll into")
+        self.class_combo.setToolTip("Select an active class to enroll into")
         self.enroll_btn = Button("Enroll in class", variant=ButtonVariant.PRIMARY, parent=action_wrap)
         self.enroll_btn.clicked.connect(self._enroll_selected)
         action.addWidget(self.class_combo, 1)
@@ -309,44 +310,22 @@ class EnrollmentWidget(QWidget):
     def _transfer(self, enrollment) -> None:
         if not self._require_write():
             return
-        target_class_id = self.class_combo.currentData()
-        if target_class_id is None:
-            self._feedback.info("Select the target class above before transferring.", key="student-enrollment")
-            return
-        try:
-            preview = self._transfer_service.preview(enrollment.id, int(target_class_id))
-        except EnrollmentTransferError as exc:
-            self._feedback.warning(str(exc), title="Transfer unavailable", key="student-enrollment")
-            return
-        available = float(preview["available_prepaid_credit"])
-        credit, ok = QInputDialog.getDouble(
-            self,
-            "Transfer class",
-            f"Prepaid credit to transfer (available {available:,.0f}):",
-            available,
-            0.0,
-            available,
-            0,
+
+        dialog = EnrollmentTransferDialog(
+            self._transfer_service,
+            self._class_service,
+            enrollment,
+            parent=self,
         )
-        if not ok:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        reason, ok = QInputDialog.getMultiLineText(self, "Transfer class", "Transfer reason:")
-        if not ok:
-            return
-        try:
-            self._transfer_service.transfer(
-                enrollment.id,
-                int(target_class_id),
-                transferred_credit=credit,
-                reason=reason,
-            )
-            self.refresh()
-            self.enrollment_changed.emit()
-            self._feedback.success("Student transferred to target class", key="student-enrollment")
-        except EnrollmentTransferError as exc:
-            self._feedback.warning(str(exc), title="Transfer unavailable", key="student-enrollment")
-        except Exception as exc:
-            self._feedback.system_error(exc, message="The enrollment could not be transferred.", key="student-enrollment")
+
+        self.refresh()
+        self.enrollment_changed.emit()
+        self._feedback.success(
+            "Student transferred to target class",
+            key="student-enrollment",
+        )
 
     def _refund(self, enrollment) -> None:
         if not self._require_write():

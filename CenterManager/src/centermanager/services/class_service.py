@@ -507,6 +507,19 @@ class ClassService:
         with self._session_factory() as session:
             return self._repository_provider.students(session).list_active()
 
+    def get_active_enrollment(self, class_id: int, student_id: int) -> Optional[Enrollment]:
+        """Return the student's active Enrollment for a class, if any."""
+        with self._session_factory() as session:
+            return self._repository_provider.enrollments(session).get_active(
+                student_id,
+                class_id,
+            )
+
+    def get_student_enrollments(self, student_id: int) -> List[Enrollment]:
+        """Return Enrollment history for Class UI lifecycle dialogs."""
+        with self._session_factory() as session:
+            return self._repository_provider.enrollments(session).get_by_student(student_id)
+
     # ===== Enrollment =====
 
     def preview_enrollment_pricing(self, class_id: int, **pricing_kwargs) -> dict:
