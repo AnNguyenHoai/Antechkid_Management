@@ -97,14 +97,22 @@ def test_outstanding_settlement_projects_credit_without_cash_income_rows():
 
 def test_ui_requires_explicit_target_credit_and_reason():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "src/centermanager/ui/student_workspace/enrollment_widget.py").read_text(encoding="utf-8")
+    widget = (
+        root / "src/centermanager/ui/student_workspace/enrollment_widget.py"
+    ).read_text(encoding="utf-8")
+    dialog = (
+        root / "src/centermanager/ui/enrollment_transfer_dialog.py"
+    ).read_text(encoding="utf-8")
 
-    assert 'Button("Transfer class"' in source
-    assert "EnrollmentTransferService.from_enrollment_service" in source
-    assert "available_prepaid_credit" in source
-    assert "transferred_credit=credit" in source
-    assert 'getMultiLineText(self, "Transfer class", "Transfer reason:")' in source
-    assert "self._write_enabled and open_freeze is None" in source
+    assert 'Button("Transfer class"' in widget
+    assert "EnrollmentTransferService.from_enrollment_service" in widget
+    assert "EnrollmentTransferDialog(" in widget
+    assert "self._write_enabled and open_freeze is None" in widget
+
+    assert "available_prepaid_credit" in dialog
+    assert "transferred_credit=self.credit_input.value()" in dialog
+    assert "A transfer reason is required." in dialog
+    assert "Select target class" in dialog
 
 def test_transfer_uses_same_exact_withdrawal_session_boundary_as_manual_withdraw():
     root = Path(__file__).resolve().parents[1]
