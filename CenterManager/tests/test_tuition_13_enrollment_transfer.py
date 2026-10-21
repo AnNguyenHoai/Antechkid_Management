@@ -105,3 +105,59 @@ def test_ui_requires_explicit_target_credit_and_reason():
     assert "transferred_credit=credit" in source
     assert 'getMultiLineText(self, "Transfer class", "Transfer reason:")' in source
     assert "self._write_enabled and open_freeze is None" in source
+
+def test_transfer_uses_same_exact_withdrawal_session_boundary_as_manual_withdraw():
+    root = Path(__file__).resolve().parents[1]
+    source = (
+        root / "src/centermanager/services/enrollment_transfer_service.py"
+    ).read_text(encoding="utf-8")
+
+    resolver_at = source.index("EnrollmentService._resolve_withdrawn_from_session(")
+    withdraw_at = source.index('source.status = "WITHDRAWN"')
+    boundary_at = source.index(
+        "source.withdrawn_from_session = source_withdrawn_from_session"
+    )
+    commit_at = source.index("session.commit()")
+
+    assert resolver_at < withdraw_at < boundary_at < commit_at
+    assert '"source_withdrawn_from_session": source_withdrawn_from_session' in source
+
+
+def test_transfer_source_boundary_resolves_after_latest_completed_source_session():
+    from datetime import date
+
+    from centermanager.models.session import SessionStatus
+    from centermanager.services.enrollment_service import EnrollmentService
+
+    source_enrollment = SimpleNamespace(
+        enrolled_from_session=1,
+        enrolled_until_session=12,
+    )
+    source_sessions = [
+        SimpleNamespace(session_number=8, status=SessionStatus.COMPLETED.value),
+        SimpleNamespace(session_number=9, status=SessionStatus.COMPLETED.value),
+        SimpleNamespace(session_number=10, status=SessionStatus.SCHEDULED.value),
+        SimpleNamespace(session_number=11, status=SessionStatus.SCHEDULED.value),
+    ]
+
+    boundary = EnrollmentService._resolve_withdrawn_from_session(
+        source_enrollment,
+        source_sessions,
+    )
+
+    assert boundary == 10
+
+
+def test_transfer_remains_single_commit_atomic_with_boundary_persistence():
+    root = Path(__file__).resolve().parents[1]
+    source = (
+        root / "src/centermanager/services/enrollment_transfer_service.py"
+    ).read_text(encoding="utf-8")
+    transfer_body = source.split("def transfer(", 1)[1]
+
+    assert transfer_body.count("session.commit()") == 1
+    assert "source.withdrawn_from_session = source_withdrawn_from_session" in transfer_body
+    assert transfer_body.index(
+        "source.withdrawn_from_session = source_withdrawn_from_session"
+    ) < transfer_body.index("session.commit()")
+
