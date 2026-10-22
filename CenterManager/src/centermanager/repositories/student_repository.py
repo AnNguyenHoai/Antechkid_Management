@@ -1,7 +1,8 @@
 """Student repository with domain-specific queries."""
 import re
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, asc, desc, or_
 from centermanager.models.student import Student
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.assessment import Assessment
@@ -40,11 +41,104 @@ class StudentRepository(BaseRepository[Student]):
                 if max_num is None or num > max_num: max_num = num
         return max_num
     def search_students(self, query: str) -> List[Student]:
-        from sqlalchemy import or_
-        q = self._session.query(Student).filter(Student.deleted_at.is_(None))
+        q = (
+            self._session.query(Student)
+            .options(selectinload(Student.parents))
+            .filter(Student.deleted_at.is_(None))
+        )
         if query:
-            q = q.outerjoin(Student.parents).filter(or_(Student.student_code.ilike(f"%{query}%"), Student.full_name.ilike(f"%{query}%"), Parent.phone.ilike(f"%{query}%"), Parent.name.ilike(f"%{query}%"))).distinct()
-        return q.all()
+            like = f"%{query.strip()}%"
+            q = q.filter(
+                or_(
+                    Student.student_code.ilike(like),
+                    Student.full_name.ilike(like),
+                    Student.preferred_name.ilike(like),
+                    Student.parents.any(
+                        or_(Parent.phone.ilike(like), Parent.name.ilike(like))
+                    ),
+                )
+            )
+        return q.order_by(Student.student_code.asc()).all()
+
+    def search_page(
+        self,
+        *,
+        search_text: str = "",
+        status: Optional[str] = None,
+        enrollment_status: Optional[str] = None,
+        assessment_status: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 20,
+        sort_by: str = "student_code",
+        ascending: bool = True,
+    ) -> Tuple[List[Student], int]:
+        """Server-side Student search/filter page without per-row relationship queries."""
+        q = (
+            self._session.query(Student)
+            .options(selectinload(Student.parents))
+            .filter(Student.deleted_at.is_(None))
+        )
+
+        if status == "ACTIVE":
+            q = q.filter(Student.status == "ACTIVE")
+        elif status == "ARCHIVED":
+            q = q.filter(Student.status == "ARCHIVED")
+
+        if enrollment_status == "enrolled":
+            q = q.filter(
+                Student.enrollments.any(
+                    and_(
+                        Enrollment.status == "ACTIVE",
+                        Enrollment.reconciled_into_enrollment_id.is_(None),
+                    )
+                )
+            )
+        elif enrollment_status == "not_enrolled":
+            q = q.filter(
+                ~Student.enrollments.any(
+                    and_(
+                        Enrollment.status == "ACTIVE",
+                        Enrollment.reconciled_into_enrollment_id.is_(None),
+                    )
+                )
+            )
+
+        if assessment_status == "has_assessment":
+            q = q.filter(Student.assessments.any())
+        elif assessment_status == "no_assessment":
+            q = q.filter(~Student.assessments.any())
+
+        term = (search_text or "").strip()
+        if term:
+            like = f"%{term}%"
+            q = q.filter(
+                or_(
+                    Student.student_code.ilike(like),
+                    Student.full_name.ilike(like),
+                    Student.preferred_name.ilike(like),
+                    Student.parents.any(
+                        or_(Parent.phone.ilike(like), Parent.name.ilike(like))
+                    ),
+                )
+            )
+
+        total = q.count()
+        sort_columns = {
+            "student_code": Student.student_code,
+            "full_name": Student.full_name,
+            "status": Student.status,
+            "current_level": Student.current_level,
+            "created_at": Student.created_at,
+        }
+        column = sort_columns.get(sort_by, Student.student_code)
+        order = asc(column) if ascending else desc(column)
+        rows = (
+            q.order_by(order, Student.id.asc())
+            .offset(max(0, int(offset)))
+            .limit(max(1, int(limit)))
+            .all()
+        )
+        return rows, total
     def get_with_relations(self, student_id: int) -> Optional[Student]:
         return (self._session.query(Student).options(selectinload(Student.enrollments).selectinload(Enrollment.class_).selectinload(Class.teachers), selectinload(Student.parents), selectinload(Student.notes_structured), selectinload(Student.assessments)).filter(Student.id == student_id, Student.deleted_at.is_(None)).first())
 
