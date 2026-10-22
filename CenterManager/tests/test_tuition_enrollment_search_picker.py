@@ -82,7 +82,7 @@ def test_picker_is_search_first_debounced_and_historical_is_opt_in():
     assert "QTimer" in source
     assert "setInterval(250)" in source
     assert "Tìm theo tên, mã HS, SĐT phụ huynh" in source
-    assert 'QCheckBox("Include historical enrollments"' in source
+    assert "Bao gồm Enrollment lịch sử (WITHDRAWN/COMPLETED)" in source
     assert "include_historical=self.include_historical.isChecked()" in source
     assert "limit=20" in source
     assert "Còn phải đóng" in source
