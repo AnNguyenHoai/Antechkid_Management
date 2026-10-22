@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from typing import Optional
 
-from PySide6.QtCore import Signal, QDate
+from PySide6.QtCore import QDate, QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox,
     QMenu, QComboBox, QDateEdit, QFileDialog,
@@ -61,7 +61,7 @@ class ExpenseListPage(QWidget):
 
         top_row = QHBoxLayout()
         self.search_bar = SearchBar("Tìm kiếm theo nội dung, người chi, ghi chú...")
-        self.search_bar.text_changed.connect(self._filters_changed)
+        self.search_bar.text_changed.connect(self._schedule_search)
         top_row.addWidget(self.search_bar)
         self.refresh_btn = SecondaryButton("🔄 Làm mới")
         self.refresh_btn.clicked.connect(self.refresh)
@@ -123,6 +123,10 @@ class ExpenseListPage(QWidget):
         self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
         self.loading = LoadingWidget(); self.loading.setVisible(False); layout.addWidget(self.loading)
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(300)
+        self._search_debounce.timeout.connect(self._apply_debounced_search)
         self._apply_action_state()
 
     def _notify(self, message: str, level: str = "warning") -> None:
@@ -195,7 +199,15 @@ class ExpenseListPage(QWidget):
             "search_text": self.search_bar.text().strip() or None,
         }
 
+    def _schedule_search(self, _text: str) -> None:
+        self._search_debounce.start()
+
+    def _apply_debounced_search(self) -> None:
+        self._current_page = 1
+        self._load_page()
+
     def _filters_changed(self, *_args) -> None:
+        self._search_debounce.stop()
         self._current_page = 1
         self._load_page()
 
@@ -322,6 +334,7 @@ class ExpenseListPage(QWidget):
             self._service.delete_expense(expense_id); self.refresh()
 
     def _clear_filters(self) -> None:
+        self._search_debounce.stop()
         self.search_bar.clear()
         self.category_combo.setCurrentIndex(0); self.method_combo.setCurrentIndex(0); self.status_combo.setCurrentIndex(0)
         if self._period_start is not None and self._period_end is not None:
