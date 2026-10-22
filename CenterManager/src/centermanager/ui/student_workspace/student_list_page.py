@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QMenu, QStackedWidget, QVBoxLayout, QWidget
 
@@ -80,8 +80,12 @@ class StudentListPage(WorkspaceBase):
         self._students: List[Student] = []
         self._filtered: List[Student] = []
         self._filtered_base: List[Student] = []
-        self._sort_key: Optional[str] = None
+        self._sort_key: Optional[str] = "student_code"
         self._sort_asc = True
+        self._current_page = 1
+        self._page_size = 20
+        self._total_rows = 0
+        self._advanced_filter_active = False
         self._selected_ids: List[int] = []
         self._filters_active = False
         self._write_enabled = False
@@ -112,7 +116,7 @@ class StudentListPage(WorkspaceBase):
             ],
             parent=toolbar,
         )
-        self.search_bar.search_changed.connect(self._on_search)
+        self.search_bar.search_changed.connect(self._on_search_text_changed)
         self.search_bar.filters_changed.connect(self._on_filter_changed)
         # Product default: the operational Student list opens on ACTIVE records.
         # "All" remains available through the filter placeholder/clear action.
@@ -160,6 +164,7 @@ class StudentListPage(WorkspaceBase):
             empty_message="Student records will appear here after they are created or imported.",
         )
         self.data_table.sort_requested.connect(self._on_sort)
+        self.data_table.page_requested.connect(self._on_page_requested)
         self.data_table.selection_changed.connect(self._on_selection_changed)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
         self.data_table.context_menu_requested.connect(self._on_context_menu)
@@ -175,6 +180,12 @@ class StudentListPage(WorkspaceBase):
         layout.addWidget(self.list_state_stack, 1)
 
         self.loading = self.data_table.loading_state
+
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(300)
+        self._search_debounce.timeout.connect(self._apply_debounced_search)
+
         self._update_button_states()
 
     def _update_button_states(self) -> None:
@@ -197,20 +208,58 @@ class StudentListPage(WorkspaceBase):
     def initialize(self) -> None:
         pass
 
+    def _toolbar_filter_values(self):
+        from centermanager.dto.student_filter_dto import StudentFilter
+
+        filters = self.search_bar.filters()
+        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
+        enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
+        assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
+        return StudentFilter(
+            status=status_map.get(filters.get("status", "")),
+            enrollment_status=enrollment_map.get(filters.get("enrollment", "")),
+            assessment_status=assessment_map.get(filters.get("assessment", "")),
+        )
+
     def refresh(self) -> None:
+        self._advanced_filter_active = False
+        self._current_page = 1
+        self._load_server_page()
+
+    def _load_server_page(self) -> None:
         self.list_state_stack.setCurrentWidget(self.data_table)
         self.data_table.set_loading(True)
         self._selected_ids = []
         self._update_bulk_bar()
         try:
-            self._students = self._student_service.list_students()
-            filters = self.search_bar.filters()
-            self._filters_active = any(value for value in filters.values())
-            if self._filters_active:
-                self._apply_filter_state(filters)
-            else:
-                self._filtered_base = self._students[:]
-                self._apply_filters_and_sort()
+            criteria = self._toolbar_filter_values()
+            self._filters_active = any(value for value in self.search_bar.filters().values())
+            items, total = self._student_service.search_students_page(
+                search_text=self.search_bar.text().strip(),
+                status=criteria.status,
+                enrollment_status=criteria.enrollment_status,
+                assessment_status=criteria.assessment_status,
+                page=self._current_page,
+                per_page=self._page_size,
+                sort_by=self._sort_key or "student_code",
+                ascending=self._sort_asc,
+            )
+            max_page = max(1, (total + self._page_size - 1) // self._page_size)
+            if self._current_page > max_page:
+                self._current_page = max_page
+                items, total = self._student_service.search_students_page(
+                    search_text=self.search_bar.text().strip(),
+                    status=criteria.status,
+                    enrollment_status=criteria.enrollment_status,
+                    assessment_status=criteria.assessment_status,
+                    page=self._current_page,
+                    per_page=self._page_size,
+                    sort_by=self._sort_key or "student_code",
+                    ascending=self._sort_asc,
+                )
+            self._filtered = list(items)
+            self._total_rows = total
+            self._populate_table(server_side=True)
         except Exception as exc:
             logger.exception("Failed to refresh student list")
             self.data_table.set_error(
@@ -228,6 +277,7 @@ class StudentListPage(WorkspaceBase):
         self._update_button_states()
 
     def _apply_filters_and_sort(self) -> None:
+        """Legacy advanced-filter fallback; parents are batch-loaded by repository."""
         filtered = self._filter_students(self.search_bar.text())
         if self._sort_key:
             filtered.sort(
@@ -235,7 +285,7 @@ class StudentListPage(WorkspaceBase):
                 reverse=not self._sort_asc,
             )
         self._filtered = filtered
-        self._populate_table()
+        self._populate_table(server_side=False)
 
     def _filter_students(self, text: str) -> List[Student]:
         base = self._filtered_base
@@ -247,14 +297,15 @@ class StudentListPage(WorkspaceBase):
         for student in base:
             student_code = (student.student_code or "").lower()
             full_name = (student.full_name or "").lower()
-            if lower in student_code or lower in full_name:
+            preferred_name = (student.preferred_name or "").lower()
+            if (
+                lower in student_code
+                or lower in full_name
+                or lower in preferred_name
+            ):
                 results.append(student)
                 continue
-            try:
-                parents = self._parent_service.get_parents_for_student(student.id)
-            except Exception:
-                parents = []
-            for parent in parents or []:
+            for parent in getattr(student, "parents", None) or []:
                 parent_name = (
                     getattr(parent, "full_name", None)
                     or getattr(parent, "name", None)
@@ -266,7 +317,7 @@ class StudentListPage(WorkspaceBase):
                     break
         return results
 
-    def _populate_table(self) -> None:
+    def _populate_table(self, *, server_side: bool) -> None:
         data = [
             {
                 "student_code": student.student_code,
@@ -278,7 +329,15 @@ class StudentListPage(WorkspaceBase):
             }
             for student in self._filtered
         ]
-        self.data_table.set_data(data, len(data))
+        if server_side:
+            self.data_table.set_server_data(
+                data,
+                self._total_rows,
+                page=self._current_page,
+                page_size=self._page_size,
+            )
+        else:
+            self.data_table.set_data(data, len(data))
 
         has_search_context = bool(self.search_bar.text().strip() or self._filters_active)
         if not data and has_search_context:
@@ -295,43 +354,37 @@ class StudentListPage(WorkspaceBase):
             self.list_state_stack.setCurrentWidget(self.data_table)
         self.data_updated.emit()
 
-    def _on_search(self, _text: str) -> None:
-        self._apply_filters_and_sort()
+    def _on_search_text_changed(self, _text: str) -> None:
+        self._search_debounce.start()
 
-    def _apply_filter_state(self, filters: Dict[str, str]) -> None:
-        from centermanager.dto.student_filter_dto import StudentFilter
+    def _apply_debounced_search(self) -> None:
+        if self._advanced_filter_active:
+            self._apply_filters_and_sort()
+            return
+        self._current_page = 1
+        self._load_server_page()
 
-        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
-        enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
-        assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
-        filter_dto = StudentFilter(
-            status=status_map.get(filters.get("status", "")),
-            enrollment_status=enrollment_map.get(filters.get("enrollment", "")),
-            assessment_status=assessment_map.get(filters.get("assessment", "")),
-        )
-        self._filtered_base = (
-            self._filter_service.filter_students(filter_dto)
-            if self._filters_active
-            else self._students[:]
-        )
-        self._apply_filters_and_sort()
-
-    def _on_filter_changed(self, filters: Dict[str, str]) -> None:
-        self._filters_active = any(value for value in filters.values())
-        try:
-            self._apply_filter_state(filters)
-        except Exception as exc:
-            logger.exception("Student filter failed")
-            self._feedback.system_error(
-                exc,
-                message="The student filters could not be applied. Try again.",
-                key="student-filter",
-            )
+    def _on_filter_changed(self, _filters: Dict[str, str]) -> None:
+        self._search_debounce.stop()
+        self._advanced_filter_active = False
+        self._current_page = 1
+        self._load_server_page()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
         self._sort_key = key
         self._sort_asc = ascending
-        self._apply_filters_and_sort()
+        if self._advanced_filter_active:
+            self._apply_filters_and_sort()
+            return
+        self._current_page = 1
+        self._load_server_page()
+
+    def _on_page_requested(self, page: int, page_size: int) -> None:
+        if self._advanced_filter_active:
+            return
+        self._current_page = page
+        self._page_size = page_size
+        self._load_server_page()
 
     def _on_selection_changed(self, indices: List[int]) -> None:
         self._selected_ids = []
@@ -563,6 +616,7 @@ class StudentListPage(WorkspaceBase):
             return
         try:
             self._filters_active = True
+            self._advanced_filter_active = True
             self._filtered_base = self._filter_service.filter_students(filter_criteria)
             self._apply_filters_and_sort()
         except Exception as exc:

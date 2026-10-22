@@ -76,11 +76,12 @@ def test_latest_report_policy_is_preserved():
     assert "latest" in REPORT.lower()
 
 
-def test_filter_search_sort_share_one_filtered_base():
+def test_filter_search_sort_share_one_filtered_base_without_parent_n_plus_one():
     section = _section(LIST, "def _filter_students", "def _populate_table")
     assert "base = self._filtered_base" in section
     assert "parent_phone" in section
-    assert "get_parents_for_student" in section
+    assert 'getattr(student, "parents", None)' in section
+    assert "get_parents_for_student" not in section
 
 
 def test_all_student_lifecycle_filters_are_supported():

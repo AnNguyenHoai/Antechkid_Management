@@ -440,6 +440,34 @@ class StudentService:
             repo = self._repository_provider.students(session)
             return repo.search_students(query)
 
+    def search_students_page(
+        self,
+        *,
+        search_text: str = "",
+        status: Optional[str] = None,
+        enrollment_status: Optional[str] = None,
+        assessment_status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+        sort_by: str = "student_code",
+        ascending: bool = True,
+    ):
+        """Return one server-side Student page for the operational list."""
+        page = max(1, int(page))
+        per_page = max(1, int(per_page))
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            return repo.search_page(
+                search_text=search_text,
+                status=status,
+                enrollment_status=enrollment_status,
+                assessment_status=assessment_status,
+                offset=(page - 1) * per_page,
+                limit=per_page,
+                sort_by=sort_by,
+                ascending=ascending,
+            )
+
     def get_student_with_relations(self, student_id: int) -> Student:
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)

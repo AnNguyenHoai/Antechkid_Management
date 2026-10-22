@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -94,7 +94,7 @@ class IncomeListPage(QWidget):
         self.search_bar = SearchBar(
             "Tìm theo học sinh, mã HS, lớp, loại, ghi chú, người thu..."
         )
-        self.search_bar.text_changed.connect(self._filters_changed)
+        self.search_bar.text_changed.connect(self._schedule_search)
         top_row.addWidget(self.search_bar)
 
         self.refresh_btn = SecondaryButton("🔄 Làm mới")
@@ -182,6 +182,12 @@ class IncomeListPage(QWidget):
         self.loading = LoadingWidget()
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
+
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(300)
+        self._search_debounce.timeout.connect(self._apply_debounced_search)
+
         self._apply_action_state()
 
     def _notify(self, message: str, level: str = "warning") -> None:
@@ -284,7 +290,15 @@ class IncomeListPage(QWidget):
             "status": self.status_combo.currentData() or Income.STATUS_ACTIVE,
         }
 
+    def _schedule_search(self, _text: str) -> None:
+        self._search_debounce.start()
+
+    def _apply_debounced_search(self) -> None:
+        self._current_page = 1
+        self._load_page()
+
     def _filters_changed(self, *_args) -> None:
+        self._search_debounce.stop()
         self._current_page = 1
         self._load_page()
 
@@ -523,24 +537,31 @@ class IncomeListPage(QWidget):
             QMessageBox.critical(self, "Lỗi xuất CSV", str(exc))
 
     def _clear_filters(self) -> None:
-        previous = [
-            self.type_combo.blockSignals(True),
-            self.method_combo.blockSignals(True),
-            self.status_combo.blockSignals(True),
-        ]
-        self.search_bar.clear()
-        self.type_combo.setCurrentIndex(0)
-        self.method_combo.setCurrentIndex(0)
-        self.status_combo.setCurrentIndex(0)
-        self.type_combo.blockSignals(previous[0])
-        self.method_combo.blockSignals(previous[1])
-        self.status_combo.blockSignals(previous[2])
-
-        if self._period_start is not None and self._period_end is not None:
-            self._reset_date_filters_to_period()
-        else:
-            self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
-            self.date_to_edit.setDate(QDate.currentDate())
+        self._search_debounce.stop()
+        widgets = (
+            self.search_bar,
+            self.type_combo,
+            self.method_combo,
+            self.status_combo,
+            self.date_from_edit,
+            self.date_to_edit,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
+        try:
+            self.search_bar.clear()
+            self.type_combo.setCurrentIndex(0)
+            self.method_combo.setCurrentIndex(0)
+            self.status_combo.setCurrentIndex(0)
+            if self._period_start is not None and self._period_end is not None:
+                self.date_from_edit.setDate(self._to_qdate(self._period_start))
+                self.date_to_edit.setDate(self._to_qdate(self._period_end))
+            else:
+                self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
+                self.date_to_edit.setDate(QDate.currentDate())
+        finally:
+            for widget in widgets:
+                widget.blockSignals(False)
 
         self._current_page = 1
         self._load_page()
