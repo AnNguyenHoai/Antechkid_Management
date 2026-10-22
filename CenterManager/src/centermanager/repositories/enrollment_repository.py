@@ -91,15 +91,24 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         self,
         query: str = "",
         *,
-        include_historical: bool = False,
+        mode: str = "ACTIVE",
         limit: int = 20,
     ) -> List[Enrollment]:
-        """Search operational Enrollment identities for tuition payment entry.
+        """Search Enrollment identities for tuition payment entry.
 
-        Archived/deleted Students and archived Classes are excluded. Historical
-        Enrollment contracts are opt-in so the default Finance picker stays
-        focused on currently active tuition contracts.
+        Modes:
+        - ACTIVE: current operational contracts only; archived Students/Classes hidden.
+        - OLD_DEBT: historical contracts; archived Students/Classes remain eligible
+          because archival must not erase outstanding financial obligations.
+        - ALL: all canonical contracts for non-deleted Students.
+
+        Debt itself is calculated by IncomeService from the canonical tuition
+        accrual/settlement policy; this repository only scopes candidate identities.
         """
+        normalized_mode = (mode or "ACTIVE").upper()
+        if normalized_mode not in {"ACTIVE", "OLD_DEBT", "ALL"}:
+            raise ValueError(f"Unsupported tuition picker mode: {mode}")
+
         q = (
             self._session.query(Enrollment)
             .options(
@@ -113,12 +122,17 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             .filter(
                 Enrollment.reconciled_into_enrollment_id.is_(None),
                 Student.deleted_at.is_(None),
+            )
+        )
+
+        if normalized_mode == "ACTIVE":
+            q = q.filter(
+                Enrollment.status == "ACTIVE",
                 Student.status != "ARCHIVED",
                 Class.deleted_at.is_(None),
             )
-        )
-        if not include_historical:
-            q = q.filter(Enrollment.status == "ACTIVE")
+        elif normalized_mode == "OLD_DEBT":
+            q = q.filter(Enrollment.status.in_(("WITHDRAWN", "COMPLETED")))
 
         term = (query or "").strip()
         if term:
@@ -138,10 +152,14 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             )
 
         active_first = case((Enrollment.status == "ACTIVE", 0), else_=1)
+        archived_student_last = case((Student.status == "ARCHIVED", 1), else_=0)
+        archived_class_last = case((Class.deleted_at.is_not(None), 1), else_=0)
         return (
             q.distinct()
             .order_by(
                 active_first,
+                archived_student_last,
+                archived_class_last,
                 Student.full_name.asc(),
                 Class.name.asc(),
                 Enrollment.id.desc(),

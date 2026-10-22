@@ -6,7 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -40,11 +40,15 @@ class TuitionEnrollmentPicker(QWidget):
         )
         search_row.addWidget(self.search_edit, 1)
 
-        self.include_historical = QCheckBox(
-            "Bao gồm Enrollment lịch sử (WITHDRAWN/COMPLETED)",
-            self,
+        self.mode_combo = QComboBox(self)
+        self.mode_combo.addItem("Đang học", "ACTIVE")
+        self.mode_combo.addItem("Công nợ cũ", "OLD_DEBT")
+        self.mode_combo.addItem("Tất cả", "ALL")
+        self.mode_combo.setToolTip(
+            "Đang học: Enrollment ACTIVE. Công nợ cũ: WITHDRAWN/COMPLETED "
+            "còn nợ, kể cả học sinh/lớp đã archive."
         )
-        search_row.addWidget(self.include_historical)
+        search_row.addWidget(self.mode_combo)
         root.addLayout(search_row)
 
         self.results = QListWidget(self)
@@ -61,7 +65,7 @@ class TuitionEnrollmentPicker(QWidget):
         self._debounce.timeout.connect(self.refresh)
 
         self.search_edit.textChanged.connect(lambda _text: self._debounce.start())
-        self.include_historical.toggled.connect(lambda _checked: self.refresh())
+        self.mode_combo.currentIndexChanged.connect(lambda _index: self.refresh())
         self.results.itemSelectionChanged.connect(self._on_selection_changed)
 
 
@@ -81,8 +85,14 @@ class TuitionEnrollmentPicker(QWidget):
             balance = "Đã cân bằng học phí"
 
         course = f" · {choice.course_name}" if choice.course_name else ""
+        flags = []
+        if choice.student_status == "ARCHIVED":
+            flags.append("HS ARCHIVED")
+        if choice.class_archived:
+            flags.append("LỚP ARCHIVED")
+        flag_text = f" · {' / '.join(flags)}" if flags else ""
         return (
-            f"{choice.student_name} · {choice.student_code}\n"
+            f"{choice.student_name} · {choice.student_code}{flag_text}\n"
             f"{choice.class_name}{course} · {choice.enrollment_status} · "
             f"Enrollment #{choice.enrollment_id}\n"
             f"{balance}"
@@ -97,7 +107,7 @@ class TuitionEnrollmentPicker(QWidget):
         try:
             choices = self._income_service.search_tuition_enrollment_choices(
                 self.search_edit.text(),
-                include_historical=self.include_historical.isChecked(),
+                mode=str(self.mode_combo.currentData() or "ACTIVE"),
                 limit=20,
             )
         except Exception as exc:
@@ -119,7 +129,7 @@ class TuitionEnrollmentPicker(QWidget):
 
         if not choices:
             item = QListWidgetItem("Không tìm thấy Enrollment phù hợp.")
-            item.setData(256, None)
+            item.setData(Qt.ItemDataRole.UserRole, None)
             self.results.addItem(item)
 
         self.results.blockSignals(False)

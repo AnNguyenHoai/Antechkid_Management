@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "centermanager"
 
 
-def test_repository_search_is_enrollment_centric_and_excludes_archived_by_default():
+def test_repository_search_modes_preserve_archived_old_debt_without_polluting_active():
     source = (
         SRC / "repositories" / "enrollment_repository.py"
     ).read_text(encoding="utf-8")
@@ -19,12 +19,20 @@ def test_repository_search_is_enrollment_centric_and_excludes_archived_by_defaul
         "def list_for_outstanding", 1
     )[0]
 
-    assert 'Student.status != "ARCHIVED"' in method
     assert "Student.deleted_at.is_(None)" in method
-    assert "Class.deleted_at.is_(None)" in method
     assert "Enrollment.reconciled_into_enrollment_id.is_(None)" in method
-    assert 'q = q.filter(Enrollment.status == "ACTIVE")' in method
-    assert "include_historical" in method
+    assert 'normalized_mode == "ACTIVE"' in method
+    assert 'Enrollment.status == "ACTIVE"' in method
+    assert 'Student.status != "ARCHIVED"' in method
+    assert "Class.deleted_at.is_(None)" in method
+    assert 'normalized_mode == "OLD_DEBT"' in method
+    assert 'Enrollment.status.in_(("WITHDRAWN", "COMPLETED"))' in method
+
+    old_debt_section = method.split('normalized_mode == "OLD_DEBT"', 1)[1].split(
+        "term =", 1
+    )[0]
+    assert 'Student.status != "ARCHIVED"' not in old_debt_section
+    assert "Class.deleted_at.is_(None)" not in old_debt_section
     assert ".limit(max(1, min(int(limit or 20), 100)))" in method
 
 
@@ -75,7 +83,7 @@ def test_income_service_projects_signed_outstanding_for_picker():
     assert "TuitionAccrualService.calculate_from_records(" in source
 
 
-def test_picker_is_search_first_debounced_and_historical_is_opt_in():
+def test_picker_is_search_first_debounced_and_uses_clear_status_modes():
     source = (
         SRC / "ui" / "finance_workspace" / "tuition_enrollment_picker.py"
     ).read_text(encoding="utf-8")
@@ -83,8 +91,10 @@ def test_picker_is_search_first_debounced_and_historical_is_opt_in():
     assert "QTimer" in source
     assert "setInterval(250)" in source
     assert "Tìm theo tên, mã HS, SĐT phụ huynh" in source
-    assert "Bao gồm Enrollment lịch sử (WITHDRAWN/COMPLETED)" in source
-    assert "include_historical=self.include_historical.isChecked()" in source
+    assert 'addItem("Đang học", "ACTIVE")' in source
+    assert 'addItem("Công nợ cũ", "OLD_DEBT")' in source
+    assert 'addItem("Tất cả", "ALL")' in source
+    assert 'mode=str(self.mode_combo.currentData() or "ACTIVE")' in source
     assert "limit=20" in source
     assert "Còn phải đóng" in source
     assert "Trả trước" in source
@@ -130,3 +140,32 @@ def test_student_service_exposes_non_archived_operational_list():
     source = (SRC / "services" / "student_service.py").read_text(encoding="utf-8")
     assert "def list_active_non_archived_students(" in source
     assert "return repo.list_active_non_archived()" in source
+
+def test_old_debt_mode_filters_to_positive_historical_debt_and_keeps_archive_metadata():
+    source = (SRC / "services" / "income_service.py").read_text(encoding="utf-8")
+    method = source.split("def search_tuition_enrollment_choices(", 1)[1].split(
+        "@require_permission", 1
+    )[0]
+
+    assert 'normalized_mode == "OLD_DEBT"' in method
+    assert 'choice.enrollment_status in {"WITHDRAWN", "COMPLETED"}' in method
+    assert "choice.tuition_configured" in method
+    assert "choice.debt_amount > 0" in method
+    assert "repository_limit = min(max(int(limit) * 5, 50), 100)" in method
+
+    projection = source.split("def _tuition_choice_from_enrollment(", 1)[1].split(
+        "def search_tuition_enrollment_choices(", 1
+    )[0]
+    assert 'student_status=getattr(student, "status", "ACTIVE") or "ACTIVE"' in projection
+    assert 'class_archived=getattr(class_obj, "deleted_at", None) is not None' in projection
+
+
+def test_picker_marks_archived_student_and_class_in_old_debt_results():
+    source = (
+        SRC / "ui" / "finance_workspace" / "tuition_enrollment_picker.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'flags.append("HS ARCHIVED")' in source
+    assert 'flags.append("LỚP ARCHIVED")' in source
+    assert "Công nợ cũ: WITHDRAWN/COMPLETED" in source
+

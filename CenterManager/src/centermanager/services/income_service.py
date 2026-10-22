@@ -71,6 +71,8 @@ class TuitionEnrollmentChoice:
     outstanding: Decimal
     balance_state: str
     tuition_configured: bool
+    student_status: str = "ACTIVE"
+    class_archived: bool = False
 
     @property
     def debt_amount(self) -> Decimal:
@@ -398,6 +400,8 @@ class IncomeService:
             outstanding=outstanding,
             balance_state=balance_state,
             tuition_configured=configured,
+            student_status=getattr(student, "status", "ACTIVE") or "ACTIVE",
+            class_archived=getattr(class_obj, "deleted_at", None) is not None,
         )
 
     @require_permission("finance.view")
@@ -405,27 +409,57 @@ class IncomeService:
         self,
         query: str = "",
         *,
-        include_historical: bool = False,
+        mode: str = "ACTIVE",
         limit: int = 20,
     ) -> List[TuitionEnrollmentChoice]:
         """Search exact tuition contracts for Income entry.
 
-        Default results intentionally exclude archived Students and historical
-        Enrollment contracts. Historical contracts are opt-in for collecting
-        old debt or correcting prior tuition settlement.
+        ACTIVE is the operational default. OLD_DEBT intentionally includes
+        archived Students/Classes, then keeps only historical contracts whose
+        canonical signed tuition balance is still positive (money owed).
         """
+        normalized_mode = (mode or "ACTIVE").upper()
+        if normalized_mode not in {"ACTIVE", "OLD_DEBT", "ALL"}:
+            raise IncomeValidationError(f"Unsupported tuition picker mode: {mode}")
+
+        repository_limit = int(limit)
+        if normalized_mode == "OLD_DEBT":
+            # Debt filtering happens after canonical accrual/settlement projection.
+            # Fetch a bounded wider candidate window so settled history does not
+            # crowd debt rows out of the first visible results.
+            repository_limit = min(max(int(limit) * 5, 50), 100)
+
         with self._session_factory() as session:
             enrollments = self._repository_provider.enrollments(
                 session
             ).search_tuition_payment_candidates(
                 query,
-                include_historical=include_historical,
-                limit=limit,
+                mode=normalized_mode,
+                limit=repository_limit,
             )
-            return [
+            choices = [
                 self._tuition_choice_from_enrollment(session, enrollment)
                 for enrollment in enrollments
             ]
+
+        if normalized_mode == "OLD_DEBT":
+            choices = [
+                choice
+                for choice in choices
+                if choice.enrollment_status in {"WITHDRAWN", "COMPLETED"}
+                and choice.tuition_configured
+                and choice.debt_amount > 0
+            ]
+            choices.sort(
+                key=lambda choice: (
+                    -choice.debt_amount,
+                    choice.student_name.casefold(),
+                    choice.class_name.casefold(),
+                    -choice.enrollment_id,
+                )
+            )
+
+        return choices[: max(1, int(limit))]
 
     @require_permission("finance.view")
     def list_tuition_enrollments(self, student_id: int, class_id: int) -> List[Enrollment]:
