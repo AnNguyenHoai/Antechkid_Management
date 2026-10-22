@@ -255,7 +255,11 @@ class IncomeFormDialog(QDialog):
 
     def _load_students(self) -> None:
         try:
-            students = self._student_service.list_active_non_archived_students()
+            students = (
+                self._student_service.list_students()
+                if self._is_edit
+                else self._student_service.list_active_non_archived_students()
+            )
             self.student_combo.clear()
             for student in students:
                 self.student_combo.addItem(
@@ -291,6 +295,11 @@ class IncomeFormDialog(QDialog):
         )
         self._set_enrollment_visible(self._is_edit and is_tuition)
         if not is_tuition:
+            self.enrollment_combo.clear()
+            return
+        if not self._is_edit:
+            # Create Tuition uses the search-first Enrollment picker and must not
+            # issue legacy Student/Class combo attribution queries in parallel.
             self.enrollment_combo.clear()
             return
 
