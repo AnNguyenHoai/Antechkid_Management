@@ -12,12 +12,17 @@ def test_search_matches_current_filtered_base_not_global_list():
     section = SOURCE[start:end]
     assert "base = self._filtered_base" in section
 
-def test_search_matches_parent_name_and_phone_as_promised_by_placeholder():
-    start = SOURCE.index("def _filter_students")
-    end = SOURCE.index("def _populate_table", start)
-    section = SOURCE[start:end]
-    assert "get_parents_for_student" in section
-    assert "parent_phone" in section
+def test_search_matches_parent_name_and_phone_without_per_row_service_queries():
+    page = SOURCE[SOURCE.index("def _load_server_page"):SOURCE.index("def _filter_students")]
+    fallback = SOURCE[SOURCE.index("def _filter_students"):SOURCE.index("def _populate_table")]
+    repository = Path("src/centermanager/repositories/student_repository.py").read_text(encoding="utf-8")
+
+    assert "search_students_page(" in page
+    assert "get_parents_for_student" not in SOURCE
+    assert "Student.parents.any(" in repository
+    assert "Parent.phone.ilike" in repository
+    assert "Parent.name.ilike" in repository
+    assert 'getattr(student, "parents", None)' in fallback
 
 def test_refresh_clears_stale_selection():
     start = SOURCE.index("def refresh")
