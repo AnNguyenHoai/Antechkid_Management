@@ -10,7 +10,8 @@ SR=Path("src/centermanager/repositories/student_repository.py").read_text(encodi
 def test_archived_filter_uses_status(): assert 'Student.status == "ARCHIVED"' in SR
 def test_ui_preserves_filter_base():
     assert "self._filtered_base" in L
-    assert "self._filter_service.filter_students(filter_dto)" in L
+    assert "self._filter_service.filter_students(filter_criteria)" in L
+    assert "self._advanced_filter_active = True" in L
 def test_latest_report_singleton_and_atomic(): 
     assert '"StudentProfile.pdf"' in R
     assert 'temp_path' in R and 'file_path.replace(output_path)' in R
