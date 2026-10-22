@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -94,7 +94,7 @@ class IncomeListPage(QWidget):
         self.search_bar = SearchBar(
             "Tìm theo học sinh, mã HS, lớp, loại, ghi chú, người thu..."
         )
-        self.search_bar.text_changed.connect(self._filters_changed)
+        self.search_bar.text_changed.connect(self._schedule_search)
         top_row.addWidget(self.search_bar)
 
         self.refresh_btn = SecondaryButton("🔄 Làm mới")
@@ -182,6 +182,12 @@ class IncomeListPage(QWidget):
         self.loading = LoadingWidget()
         self.loading.setVisible(False)
         layout.addWidget(self.loading)
+
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(300)
+        self._search_debounce.timeout.connect(self._apply_debounced_search)
+
         self._apply_action_state()
 
     def _notify(self, message: str, level: str = "warning") -> None:
@@ -284,7 +290,15 @@ class IncomeListPage(QWidget):
             "status": self.status_combo.currentData() or Income.STATUS_ACTIVE,
         }
 
+    def _schedule_search(self, _text: str) -> None:
+        self._search_debounce.start()
+
+    def _apply_debounced_search(self) -> None:
+        self._current_page = 1
+        self._load_page()
+
     def _filters_changed(self, *_args) -> None:
+        self._search_debounce.stop()
         self._current_page = 1
         self._load_page()
 
@@ -523,6 +537,7 @@ class IncomeListPage(QWidget):
             QMessageBox.critical(self, "Lỗi xuất CSV", str(exc))
 
     def _clear_filters(self) -> None:
+        self._search_debounce.stop()
         previous = [
             self.type_combo.blockSignals(True),
             self.method_combo.blockSignals(True),
