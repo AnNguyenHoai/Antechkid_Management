@@ -39,10 +39,12 @@ def test_student_list_uses_v2_table_states_feedback_and_confirmation() -> None:
     assert "QMessageBox" not in text
 
 
-def test_student_list_parent_search_uses_parent_service_contract() -> None:
+def test_student_list_parent_search_uses_server_query_contract() -> None:
     text = assert_parses("student_workspace/student_list_page.py")
-    assert "get_parents_for_student" in text
-    assert "get_parents_by_student" not in text
+    assert "search_students_page(" in text
+    assert "get_parents_for_student" not in text
+    assert "set_server_data(" in text
+    assert "page_requested.connect" in text
 
 
 def test_student_form_uses_canonical_save_flow_and_inline_validation() -> None:
