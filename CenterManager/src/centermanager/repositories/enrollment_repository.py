@@ -127,6 +127,7 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
                 or_(
                     Student.student_code.ilike(like),
                     Student.full_name.ilike(like),
+                    Student.preferred_name.ilike(like),
                     Parent.name.ilike(like),
                     Parent.phone.ilike(like),
                     Class.name.ilike(like),
