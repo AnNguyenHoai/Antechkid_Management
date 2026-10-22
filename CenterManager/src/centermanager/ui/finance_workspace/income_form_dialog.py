@@ -194,6 +194,8 @@ class IncomeFormDialog(QDialog):
         use_picker = not self._is_edit and is_student and is_tuition
 
         self._set_field_visible(self.tuition_picker, use_picker)
+        if use_picker and self.tuition_picker.results.count() == 0:
+            self.tuition_picker.refresh()
         self._set_field_visible(self.student_combo, is_student and not use_picker)
         self._set_field_visible(self.class_combo, is_student and not use_picker)
         self._set_enrollment_visible(self._is_edit and is_student and is_tuition)
