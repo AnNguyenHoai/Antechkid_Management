@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -40,7 +40,10 @@ class TuitionEnrollmentPicker(QWidget):
         )
         search_row.addWidget(self.search_edit, 1)
 
-        self.include_historical = QCheckBox("Include historical enrollments", self)
+        self.include_historical = QCheckBox(
+            "Bao gồm Enrollment lịch sử (WITHDRAWN/COMPLETED)",
+            self,
+        )
         search_row.addWidget(self.include_historical)
         root.addLayout(search_row)
 
@@ -61,7 +64,6 @@ class TuitionEnrollmentPicker(QWidget):
         self.include_historical.toggled.connect(lambda _checked: self.refresh())
         self.results.itemSelectionChanged.connect(self._on_selection_changed)
 
-        self.refresh()
 
     @staticmethod
     def _money(value) -> str:
@@ -100,7 +102,7 @@ class TuitionEnrollmentPicker(QWidget):
             )
         except Exception as exc:
             item = QListWidgetItem(f"Không thể tải Enrollment: {exc}")
-            item.setData(256, None)
+            item.setData(Qt.ItemDataRole.UserRole, None)
             self.results.addItem(item)
             self.results.blockSignals(False)
             self.selection_label.setText("Không thể tải Enrollment học phí.")
@@ -110,7 +112,7 @@ class TuitionEnrollmentPicker(QWidget):
         selected_row = None
         for row, choice in enumerate(choices):
             item = QListWidgetItem(self._choice_label(choice))
-            item.setData(256, choice)
+            item.setData(Qt.ItemDataRole.UserRole, choice)
             self.results.addItem(item)
             if previous_id is not None and choice.enrollment_id == previous_id:
                 selected_row = row
@@ -129,7 +131,7 @@ class TuitionEnrollmentPicker(QWidget):
 
     def _on_selection_changed(self) -> None:
         item = self.results.currentItem()
-        choice = item.data(256) if item is not None else None
+        choice = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         self._selected = choice if isinstance(choice, TuitionEnrollmentChoice) else None
         if self._selected is None:
             self.selection_label.setText("Chưa chọn Enrollment học phí.")
