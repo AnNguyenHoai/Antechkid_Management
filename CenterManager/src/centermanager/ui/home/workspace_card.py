@@ -43,6 +43,7 @@ class WorkspaceCard(QFrame):
         self.setObjectName("HomeWorkspaceCard")
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumHeight(168)
         self.setAccessibleName(name)
@@ -93,6 +94,7 @@ class WorkspaceCard(QFrame):
             f"""
             QFrame#HomeWorkspaceCard {{ background-color: {COLORS["surface_card"]}; border: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]}; border-radius: {RADIUS["lg"]}px; }}
             QFrame#HomeWorkspaceCard:hover {{ background-color: {COLORS["surface_hover"]}; border-color: {COLORS["border_strong"]}; }}
+            QFrame#HomeWorkspaceCard:focus {{ border: 2px solid {COLORS["focus_ring"]}; }}
             QLabel#HomeWorkspaceName {{ color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["card_title"]}px; font-weight: {FONT_WEIGHTS["semibold"]}; border: none; }}
             QLabel#HomeWorkspaceDescription {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
             QLabel#HomeWorkspaceSummary {{ color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body"]}px; font-weight: {FONT_WEIGHTS["medium"]}; border: none; }}
@@ -110,6 +112,13 @@ class WorkspaceCard(QFrame):
         if normalized == "critical":
             return "Critical", BadgeTone.DANGER
         return "Status", BadgeTone.NEUTRAL
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit(self._workspace_id)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
