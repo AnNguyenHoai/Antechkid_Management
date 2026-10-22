@@ -335,13 +335,32 @@ class ExpenseListPage(QWidget):
 
     def _clear_filters(self) -> None:
         self._search_debounce.stop()
-        self.search_bar.clear()
-        self.category_combo.setCurrentIndex(0); self.method_combo.setCurrentIndex(0); self.status_combo.setCurrentIndex(0)
-        if self._period_start is not None and self._period_end is not None:
-            self._reset_date_filters_to_period()
-        else:
-            self.date_from.setDate(QDate.currentDate().addDays(-30)); self.date_to.setDate(QDate.currentDate())
-        self._current_page = 1; self._load_page()
+        self.search_bar.blockSignals(True)
+        self.category_combo.blockSignals(True)
+        self.method_combo.blockSignals(True)
+        self.status_combo.blockSignals(True)
+        self.date_from.blockSignals(True)
+        self.date_to.blockSignals(True)
+        try:
+            self.search_bar.clear()
+            self.category_combo.setCurrentIndex(0)
+            self.method_combo.setCurrentIndex(0)
+            self.status_combo.setCurrentIndex(0)
+            if self._period_start is not None and self._period_end is not None:
+                self.date_from.setDate(self._to_qdate(self._period_start))
+                self.date_to.setDate(self._to_qdate(self._period_end))
+            else:
+                self.date_from.setDate(QDate.currentDate().addDays(-30))
+                self.date_to.setDate(QDate.currentDate())
+        finally:
+            self.search_bar.blockSignals(False)
+            self.category_combo.blockSignals(False)
+            self.method_combo.blockSignals(False)
+            self.status_combo.blockSignals(False)
+            self.date_from.blockSignals(False)
+            self.date_to.blockSignals(False)
+        self._current_page = 1
+        self._load_page()
 
     def _apply_action_state(self) -> None:
         self.add_btn.setEnabled(self._can(Capability.FINANCE_EXPENSE_CREATE))
