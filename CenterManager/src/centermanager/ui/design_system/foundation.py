@@ -224,7 +224,7 @@ class Button(QPushButton):
                 background-color: {palette["pressed_bg"]};
             }}
             QPushButton:focus {{
-                border-color: {COLORS["focus_ring"]};
+                border: 2px solid {COLORS["focus_ring"]};
             }}
             QPushButton:disabled {{
                 background-color: {STATES["disabled"]["background"]};
@@ -291,7 +291,7 @@ class Input(QLineEdit):
                 border-color: {COLORS["border_strong"]};
             }}
             QLineEdit:focus {{
-                border-color: {COLORS["focus_ring"]};
+                border: 2px solid {COLORS["focus_ring"]};
             }}
             QLineEdit:disabled {{
                 background-color: {STATES["disabled"]["background"]};
@@ -374,7 +374,7 @@ class Select(QComboBox):
                 border-color: {COLORS["border_strong"]};
             }}
             QComboBox:focus {{
-                border-color: {COLORS["focus_ring"]};
+                border: 2px solid {COLORS["focus_ring"]};
             }}
             QComboBox:disabled {{
                 background-color: {STATES["disabled"]["background"]};
