@@ -144,7 +144,11 @@ class StudentRepository(BaseRepository[Student]):
 
     def filter_students(self, filter_criteria: StudentFilter) -> List[Student]:
         """Apply database-backed Student filters; age filtering stays in the service."""
-        q = self._session.query(Student).filter(Student.deleted_at.is_(None))
+        q = (
+            self._session.query(Student)
+            .options(selectinload(Student.parents))
+            .filter(Student.deleted_at.is_(None))
+        )
         if filter_criteria.status == "ARCHIVED":
             q = q.filter(Student.status == "ARCHIVED")
         elif filter_criteria.status == "ACTIVE":
