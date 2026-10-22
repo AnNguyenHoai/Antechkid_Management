@@ -39,6 +39,7 @@ def test_repository_search_supports_student_parent_class_and_course_terms():
     for field in (
         "Student.student_code.ilike",
         "Student.full_name.ilike",
+        "Student.preferred_name.ilike",
         "Parent.name.ilike",
         "Parent.phone.ilike",
         "Class.name.ilike",
