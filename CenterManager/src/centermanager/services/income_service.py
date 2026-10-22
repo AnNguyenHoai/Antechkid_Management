@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
@@ -36,6 +37,10 @@ from centermanager.services.finance_ledger_guard import (
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
+from centermanager.services.tuition_accrual_service import (
+    TuitionAccrualService,
+    TuitionAccrualUnresolvedError,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +56,29 @@ class IncomeNotFoundError(IncomeServiceError):
 
 class IncomeValidationError(IncomeServiceError):
     pass
+
+
+@dataclass(frozen=True)
+class TuitionEnrollmentChoice:
+    enrollment_id: int
+    student_id: int
+    student_name: str
+    student_code: str
+    class_id: int
+    class_name: str
+    course_name: Optional[str]
+    enrollment_status: str
+    outstanding: Decimal
+    balance_state: str
+    tuition_configured: bool
+
+    @property
+    def debt_amount(self) -> Decimal:
+        return max(self.outstanding, Decimal("0"))
+
+    @property
+    def prepaid_amount(self) -> Decimal:
+        return max(-self.outstanding, Decimal("0"))
 
 
 class IncomeService:
@@ -310,6 +338,94 @@ class IncomeService:
                 "(income_id=%s).",
                 kwargs.get("metadata", {}).get("income_id"),
             )
+
+    def _tuition_choice_from_enrollment(
+        self,
+        session,
+        enrollment: Enrollment,
+    ) -> TuitionEnrollmentChoice:
+        student = enrollment.student or self._repository_provider.students(session).get_by_id(
+            enrollment.student_id
+        )
+        class_obj = enrollment.class_ or self._repository_provider.classes(session).get_by_id(
+            enrollment.class_id
+        )
+        configured = bool(enrollment.has_tuition_contract)
+        accrued = Decimal("0")
+        if configured:
+            try:
+                accrual = TuitionAccrualService.calculate_from_records(
+                    enrollment,
+                    self._repository_provider.sessions(session).get_by_class(
+                        enrollment.class_id
+                    ),
+                    get_clock().today(),
+                )
+                accrued = Decimal(str(accrual.net_accrued or 0))
+            except TuitionAccrualUnresolvedError:
+                configured = False
+
+        paid = Decimal(
+            str(
+                self._repository_provider.incomes(
+                    session
+                ).sum_active_tuition_for_enrollment(
+                    int(enrollment.id),
+                    as_of_date=get_clock().today(),
+                )
+                or 0
+            )
+        )
+        outstanding = accrued - paid
+        if not configured:
+            balance_state = "NO_TUITION_CONFIGURED"
+        elif outstanding > 0:
+            balance_state = "OWED"
+        elif outstanding < 0:
+            balance_state = "PREPAID"
+        else:
+            balance_state = "PAID"
+
+        return TuitionEnrollmentChoice(
+            enrollment_id=int(enrollment.id),
+            student_id=int(enrollment.student_id),
+            student_name=student.full_name,
+            student_code=student.student_code,
+            class_id=int(enrollment.class_id),
+            class_name=class_obj.name,
+            course_name=enrollment.course_name or class_obj.course,
+            enrollment_status=enrollment.status,
+            outstanding=outstanding,
+            balance_state=balance_state,
+            tuition_configured=configured,
+        )
+
+    @require_permission("finance.view")
+    def search_tuition_enrollment_choices(
+        self,
+        query: str = "",
+        *,
+        include_historical: bool = False,
+        limit: int = 20,
+    ) -> List[TuitionEnrollmentChoice]:
+        """Search exact tuition contracts for Income entry.
+
+        Default results intentionally exclude archived Students and historical
+        Enrollment contracts. Historical contracts are opt-in for collecting
+        old debt or correcting prior tuition settlement.
+        """
+        with self._session_factory() as session:
+            enrollments = self._repository_provider.enrollments(
+                session
+            ).search_tuition_payment_candidates(
+                query,
+                include_historical=include_historical,
+                limit=limit,
+            )
+            return [
+                self._tuition_choice_from_enrollment(session, enrollment)
+                for enrollment in enrollments
+            ]
 
     @require_permission("finance.view")
     def list_tuition_enrollments(self, student_id: int, class_id: int) -> List[Enrollment]:
