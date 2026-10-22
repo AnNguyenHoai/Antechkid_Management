@@ -538,24 +538,30 @@ class IncomeListPage(QWidget):
 
     def _clear_filters(self) -> None:
         self._search_debounce.stop()
-        previous = [
-            self.type_combo.blockSignals(True),
-            self.method_combo.blockSignals(True),
-            self.status_combo.blockSignals(True),
-        ]
-        self.search_bar.clear()
-        self.type_combo.setCurrentIndex(0)
-        self.method_combo.setCurrentIndex(0)
-        self.status_combo.setCurrentIndex(0)
-        self.type_combo.blockSignals(previous[0])
-        self.method_combo.blockSignals(previous[1])
-        self.status_combo.blockSignals(previous[2])
-
-        if self._period_start is not None and self._period_end is not None:
-            self._reset_date_filters_to_period()
-        else:
-            self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
-            self.date_to_edit.setDate(QDate.currentDate())
+        widgets = (
+            self.search_bar,
+            self.type_combo,
+            self.method_combo,
+            self.status_combo,
+            self.date_from_edit,
+            self.date_to_edit,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
+        try:
+            self.search_bar.clear()
+            self.type_combo.setCurrentIndex(0)
+            self.method_combo.setCurrentIndex(0)
+            self.status_combo.setCurrentIndex(0)
+            if self._period_start is not None and self._period_end is not None:
+                self.date_from_edit.setDate(self._to_qdate(self._period_start))
+                self.date_to_edit.setDate(self._to_qdate(self._period_end))
+            else:
+                self.date_from_edit.setDate(QDate.currentDate().addDays(-30))
+                self.date_to_edit.setDate(QDate.currentDate())
+        finally:
+            for widget in widgets:
+                widget.blockSignals(False)
 
         self._current_page = 1
         self._load_page()
