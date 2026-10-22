@@ -73,11 +73,7 @@ class StudentRepository(BaseRepository[Student]):
         ascending: bool = True,
     ) -> Tuple[List[Student], int]:
         """Server-side Student search/filter page without per-row relationship queries."""
-        q = (
-            self._session.query(Student)
-            .options(selectinload(Student.parents))
-            .filter(Student.deleted_at.is_(None))
-        )
+        q = self._session.query(Student).filter(Student.deleted_at.is_(None))
 
         if status == "ACTIVE":
             q = q.filter(Student.status == "ACTIVE")
