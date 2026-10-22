@@ -162,6 +162,12 @@ class StudentService:
             repo = self._repository_provider.students(session)
             return repo.list_active()
 
+    def list_active_non_archived_students(self) -> List[Student]:
+        """Return operational Students, excluding soft-deleted and ARCHIVED rows."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.students(session)
+            return repo.list_active_non_archived()
+
     def archive_student(self, student_id: int) -> None:
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)

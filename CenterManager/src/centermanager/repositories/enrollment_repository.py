@@ -5,11 +5,12 @@ from datetime import date
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, or_
+from sqlalchemy import case, desc, or_
 
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.student import Student
 from centermanager.models.class_ import Class
+from centermanager.models.parent import Parent
 from centermanager.repositories.base import BaseRepository
 
 
@@ -85,6 +86,69 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
         ).filter(
             Enrollment.student_id == student_id
         ).order_by(desc(Enrollment.created_at)).all()
+
+    def search_tuition_payment_candidates(
+        self,
+        query: str = "",
+        *,
+        include_historical: bool = False,
+        limit: int = 20,
+    ) -> List[Enrollment]:
+        """Search operational Enrollment identities for tuition payment entry.
+
+        Archived/deleted Students and archived Classes are excluded. Historical
+        Enrollment contracts are opt-in so the default Finance picker stays
+        focused on currently active tuition contracts.
+        """
+        q = (
+            self._session.query(Enrollment)
+            .options(
+                joinedload(Enrollment.student),
+                joinedload(Enrollment.class_),
+                joinedload(Enrollment.freezes),
+            )
+            .join(Enrollment.student)
+            .join(Enrollment.class_)
+            .outerjoin(Student.parents)
+            .filter(
+                Enrollment.reconciled_into_enrollment_id.is_(None),
+                Student.deleted_at.is_(None),
+                Student.status != "ARCHIVED",
+                Class.deleted_at.is_(None),
+            )
+        )
+        if not include_historical:
+            q = q.filter(Enrollment.status == "ACTIVE")
+
+        term = (query or "").strip()
+        if term:
+            like = f"%{term}%"
+            q = q.filter(
+                or_(
+                    Student.student_code.ilike(like),
+                    Student.full_name.ilike(like),
+                    Student.preferred_name.ilike(like),
+                    Parent.name.ilike(like),
+                    Parent.phone.ilike(like),
+                    Class.name.ilike(like),
+                    Class.course.ilike(like),
+                    Enrollment.class_name.ilike(like),
+                    Enrollment.course_name.ilike(like),
+                )
+            )
+
+        active_first = case((Enrollment.status == "ACTIVE", 0), else_=1)
+        return (
+            q.distinct()
+            .order_by(
+                active_first,
+                Student.full_name.asc(),
+                Class.name.asc(),
+                Enrollment.id.desc(),
+            )
+            .limit(max(1, min(int(limit or 20), 100)))
+            .all()
+        )
 
     def list_for_outstanding(
         self,
