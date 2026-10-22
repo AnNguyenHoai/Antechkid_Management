@@ -26,6 +26,7 @@ from centermanager.services.class_service import ClassService
 from centermanager.services.income_service import IncomeService, IncomeValidationError
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
+from centermanager.ui.finance_workspace.tuition_enrollment_picker import TuitionEnrollmentPicker
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,9 @@ class IncomeFormDialog(QDialog):
             "Ngày thu chỉ quyết định kỳ kế toán, không quyết định Enrollment."
         )
         form.addRow("Enrollment học phí *", self.enrollment_combo)
+
+        self.tuition_picker = TuitionEnrollmentPicker(self._income_service, self)
+        form.addRow("Học phí cho *", self.tuition_picker)
 
         self.other_source_edit = QLineEdit()
         self.other_source_edit.setPlaceholderText("Ví dụ: Tiền quyên góp, Lãi ngân hàng...")
@@ -170,12 +174,29 @@ class IncomeFormDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self._on_source_changed(0)
         self._reload_enrollments()
+        self._update_identity_fields()
 
     def _set_enrollment_visible(self, visible: bool) -> None:
         self.enrollment_combo.setVisible(visible)
         label = self._form.labelForField(self.enrollment_combo)
         if label is not None:
             label.setVisible(visible)
+
+    def _set_field_visible(self, widget, visible: bool) -> None:
+        widget.setVisible(visible)
+        label = self._form.labelForField(widget)
+        if label is not None:
+            label.setVisible(visible)
+
+    def _update_identity_fields(self) -> None:
+        is_student = self.source_combo.currentIndex() == 0
+        is_tuition = self.type_combo.currentText() == "Tuition"
+        use_picker = not self._is_edit and is_student and is_tuition
+
+        self._set_field_visible(self.tuition_picker, use_picker)
+        self._set_field_visible(self.student_combo, is_student and not use_picker)
+        self._set_field_visible(self.class_combo, is_student and not use_picker)
+        self._set_enrollment_visible(self._is_edit and is_student and is_tuition)
 
     def _set_credit_fields_visible(self, visible: bool) -> None:
         widgets = (
@@ -198,9 +219,8 @@ class IncomeFormDialog(QDialog):
 
     def _on_source_changed(self, index: int) -> None:
         is_student = index == 0
-        self.student_combo.setVisible(is_student)
-        self.class_combo.setVisible(is_student)
         self.other_source_edit.setVisible(not is_student)
+        self._update_identity_fields()
 
         if not self._is_edit:
             if is_student:
@@ -226,6 +246,7 @@ class IncomeFormDialog(QDialog):
             elif self.source_combo.currentIndex() != 0:
                 self.source_combo.setCurrentIndex(0)
         self._reload_enrollments()
+        self._update_identity_fields()
         self._set_credit_fields_visible(
             not self._is_edit
             and self.source_combo.currentIndex() == 0
@@ -234,7 +255,7 @@ class IncomeFormDialog(QDialog):
 
     def _load_students(self) -> None:
         try:
-            students = self._student_service.list_students()
+            students = self._student_service.list_active_non_archived_students()
             self.student_combo.clear()
             for student in students:
                 self.student_combo.addItem(
@@ -268,7 +289,7 @@ class IncomeFormDialog(QDialog):
             self.source_combo.currentIndex() == 0
             and self.type_combo.currentText() == "Tuition"
         )
-        self._set_enrollment_visible(is_tuition)
+        self._set_enrollment_visible(self._is_edit and is_tuition)
         if not is_tuition:
             self.enrollment_combo.clear()
             return
@@ -303,6 +324,7 @@ class IncomeFormDialog(QDialog):
         self.student_combo.setEnabled(False)
         self.class_combo.setEnabled(False)
         self.enrollment_combo.setEnabled(False)
+        self.tuition_picker.setEnabled(False)
         self.type_combo.setEnabled(False)
         self.other_source_edit.setEnabled(False)
         self._set_credit_fields_visible(False)
@@ -371,18 +393,30 @@ class IncomeFormDialog(QDialog):
     def _create_identity_payload(self):
         source_type = self.source_combo.currentText()
         if source_type == "Từ học sinh":
-            student_id = self.student_combo.currentData()
-            class_id = self.class_combo.currentData()
-            if not student_id or not class_id:
-                raise IncomeValidationError("Vui lòng chọn học sinh và lớp học.")
             income_type = self.type_combo.currentText()
             enrollment_id = None
-            if income_type == "Tuition":
-                enrollment_id = self.enrollment_combo.currentData()
-                if enrollment_id is None:
+
+            if income_type == "Tuition" and not self._is_edit:
+                choice = self.tuition_picker.selected_choice()
+                if choice is None:
                     raise IncomeValidationError(
-                        "Vui lòng chọn đúng Enrollment cho khoản học phí."
+                        "Vui lòng tìm và chọn đúng Enrollment học phí."
                     )
+                student_id = choice.student_id
+                class_id = choice.class_id
+                enrollment_id = choice.enrollment_id
+            else:
+                student_id = self.student_combo.currentData()
+                class_id = self.class_combo.currentData()
+                if not student_id or not class_id:
+                    raise IncomeValidationError("Vui lòng chọn học sinh và lớp học.")
+                if income_type == "Tuition":
+                    enrollment_id = self.enrollment_combo.currentData()
+                    if enrollment_id is None:
+                        raise IncomeValidationError(
+                            "Vui lòng chọn đúng Enrollment cho khoản học phí."
+                        )
+
             note = self.note_edit.text().strip() or None
             return student_id, class_id, enrollment_id, income_type, note
 
