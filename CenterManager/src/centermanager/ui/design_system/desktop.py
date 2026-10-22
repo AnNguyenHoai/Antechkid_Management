@@ -119,6 +119,59 @@ def desktop_stylesheet() -> str:
             background: {COLORS['border_subtle']};
             margin: {SPACING['xs']}px {SPACING['sm']}px;
         }}
+        QTableView, QTreeView, QListView {{
+            background: {COLORS['surface_card']};
+            alternate-background-color: {COLORS['surface_hover']};
+            color: {COLORS['text_primary']};
+            border: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
+            gridline-color: {COLORS['border_subtle']};
+            selection-background-color: {COLORS['action_primary_selected']};
+            selection-color: {COLORS['text_primary']};
+            outline: none;
+        }}
+        QTableView::item:hover, QTreeView::item:hover, QListView::item:hover {{
+            background: {COLORS['surface_hover']};
+        }}
+        QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{
+            background: {COLORS['action_primary_selected']};
+            color: {COLORS['text_primary']};
+        }}
+        QHeaderView::section {{
+            background: {COLORS['gray_100']};
+            color: {COLORS['text_secondary']};
+            border: none;
+            border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']};
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            font-family: {FONT_FAMILY};
+            font-size: {TYPOGRAPHY['body_small']}px;
+            font-weight: 600;
+        }}
+        QTabBar::tab {{
+            background: transparent;
+            color: {COLORS['text_muted']};
+            border: none;
+            border-bottom: {COMPONENT_METRICS['tab_indicator_width']}px solid transparent;
+            padding: {SPACING['sm']}px {SPACING['md']}px;
+            min-width: {COMPONENT_METRICS['tab_min_width']}px;
+            font-family: {FONT_FAMILY};
+            font-size: {TYPOGRAPHY['body']}px;
+        }}
+        QTabBar::tab:hover {{
+            color: {COLORS['text_primary']};
+            background: {COLORS['surface_hover']};
+        }}
+        QTabBar::tab:selected {{
+            color: {COLORS['action_primary']};
+            border-bottom-color: {COLORS['action_primary']};
+            font-weight: 600;
+        }}
+        QStatusBar {{
+            background: {COLORS['surface_page']};
+            color: {COLORS['text_muted']};
+            border-top: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_subtle']};
+            font-family: {FONT_FAMILY};
+            font-size: {TYPOGRAPHY['caption']}px;
+        }}
         QScrollBar:vertical {{
             background: transparent;
             width: {SPACING['md']}px;
@@ -166,10 +219,9 @@ def desktop_stylesheet() -> str:
         QDateEdit:focus,
         QPlainTextEdit:focus,
         QTextEdit:focus {{
-            border-color: {COLORS['focus_ring']};
+            border: 2px solid {COLORS['focus_ring']};
         }}
     """
-
 
 def _settings() -> QSettings:
     return QSettings(_SETTINGS_ORGANIZATION, _SETTINGS_APPLICATION)

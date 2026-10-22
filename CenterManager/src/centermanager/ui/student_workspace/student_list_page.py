@@ -86,6 +86,7 @@ class StudentListPage(WorkspaceBase):
         self._page_size = 20
         self._total_rows = 0
         self._advanced_filter_active = False
+        self._advanced_filter_criteria = None
         self._selected_ids: List[int] = []
         self._filters_active = False
         self._write_enabled = False
@@ -129,6 +130,10 @@ class StudentListPage(WorkspaceBase):
         toolbar.add_widget(self.search_bar, align="start")
 
         self.filter_btn = toolbar.add_action("More filters", self.filter_clicked.emit, variant=ButtonVariant.SECONDARY)
+        # Student clear is intentionally atomic: reset the whole toolbar and
+        # execute exactly one server refresh instead of one refresh per control.
+        self.search_bar.clear_btn.clicked.disconnect(self.search_bar.clear)
+        self.search_bar.clear_btn.clicked.connect(self._clear_toolbar_filters)
         self.refresh_btn = toolbar.add_action("Refresh", self.refresh, variant=ButtonVariant.SECONDARY)
         self.import_btn = toolbar.add_action("Import", self.show_import_dialog, variant=ButtonVariant.SECONDARY)
         self.export_btn = toolbar.add_action("Export", self.export_students, variant=ButtonVariant.SECONDARY)
@@ -170,7 +175,7 @@ class StudentListPage(WorkspaceBase):
         self.data_table.context_menu_requested.connect(self._on_context_menu)
 
         self.empty_search_state = EmptySearchState(
-            clear_callback=self.search_bar.clear,
+            clear_callback=self._clear_toolbar_filters,
             parent=self,
         )
         self.list_state_stack = QStackedWidget(self)
@@ -222,8 +227,21 @@ class StudentListPage(WorkspaceBase):
         )
 
     def refresh(self) -> None:
-        self._advanced_filter_active = False
-        self._current_page = 1
+        """Refresh the current view without discarding the user's list context."""
+        if self._advanced_filter_active and self._advanced_filter_criteria is not None:
+            try:
+                self._filtered_base = self._filter_service.filter_students(
+                    self._advanced_filter_criteria
+                )
+                self._apply_filters_and_sort()
+            except Exception as exc:
+                logger.exception("Advanced filter refresh failed")
+                self._feedback.system_error(
+                    exc,
+                    message="The student filters could not be refreshed.",
+                    key="student-filter",
+                )
+            return
         self._load_server_page()
 
     def _load_server_page(self) -> None:
@@ -364,9 +382,31 @@ class StudentListPage(WorkspaceBase):
         self._current_page = 1
         self._load_server_page()
 
+    def _clear_toolbar_filters(self) -> None:
+        """Reset search + toolbar filters atomically and reload once."""
+        self._search_debounce.stop()
+        widgets = [self.search_bar.search_input, *self.search_bar.filter_controls.values()]
+        previous = [widget.blockSignals(True) for widget in widgets]
+        try:
+            self.search_bar.search_input.clear()
+            for combo in self.search_bar.filter_controls.values():
+                combo.setCurrentIndex(0)
+        finally:
+            for widget, blocked in zip(widgets, previous):
+                widget.blockSignals(blocked)
+
+        self._advanced_filter_active = False
+        self._advanced_filter_criteria = None
+        self._filters_active = False
+        self.filter_btn.setText("More filters")
+        self._current_page = 1
+        self._load_server_page()
+
     def _on_filter_changed(self, _filters: Dict[str, str]) -> None:
         self._search_debounce.stop()
         self._advanced_filter_active = False
+        self._advanced_filter_criteria = None
+        self.filter_btn.setText("More filters")
         self._current_page = 1
         self._load_server_page()
 
@@ -617,6 +657,8 @@ class StudentListPage(WorkspaceBase):
         try:
             self._filters_active = True
             self._advanced_filter_active = True
+            self._advanced_filter_criteria = filter_criteria
+            self.filter_btn.setText("More filters • Active")
             self._filtered_base = self._filter_service.filter_students(filter_criteria)
             self._apply_filters_and_sort()
         except Exception as exc:
