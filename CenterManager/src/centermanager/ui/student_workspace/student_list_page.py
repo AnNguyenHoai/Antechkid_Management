@@ -212,7 +212,7 @@ class StudentListPage(WorkspaceBase):
         from centermanager.dto.student_filter_dto import StudentFilter
 
         filters = self.search_bar.filters()
-        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED"}
+        status_map = {"Active": "ACTIVE", "Archived": "ARCHIVED", "Deleted": "DELETED"}
         enrollment_map = {"Enrolled": "enrolled", "Not Enrolled": "not_enrolled"}
         assessment_map = {"Has Assessment": "has_assessment", "No Assessment": "no_assessment"}
         return StudentFilter(
