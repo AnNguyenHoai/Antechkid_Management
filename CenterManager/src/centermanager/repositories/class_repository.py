@@ -6,7 +6,7 @@ from datetime import date
 from typing import List, Optional
 import re
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload, with_loader_criteria
 from sqlalchemy import or_
 
 from centermanager.models.class_ import Class
@@ -24,6 +24,30 @@ class ClassRepository(BaseRepository[Class]):
 
     def list_active(self) -> List[Class]:
         return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).filter(Class.deleted_at.is_(None)).order_by(Class.name).all()
+
+    def list_active_with_students(self) -> List[Class]:
+        """Return operational ACTIVE classes with only active, unreconciled enrollments."""
+        return (
+            self._session.query(Class)
+            .options(
+                selectinload(Class.teachers),
+                selectinload(Class.enrollments).selectinload(Enrollment.student),
+                with_loader_criteria(
+                    Enrollment,
+                    lambda enrollment: (
+                        (enrollment.status == "ACTIVE")
+                        & (enrollment.reconciled_into_enrollment_id.is_(None))
+                    ),
+                    include_aliases=True,
+                ),
+            )
+            .filter(
+                Class.deleted_at.is_(None),
+                Class.status == "ACTIVE",
+            )
+            .order_by(Class.name)
+            .all()
+        )
 
     def list_archived(self) -> List[Class]:
         return self._session.query(Class).options(joinedload(Class.teachers), joinedload(Class.enrollments)).filter(Class.deleted_at.is_not(None)).order_by(Class.name).all()
