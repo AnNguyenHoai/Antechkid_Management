@@ -105,7 +105,8 @@ class ClassDashboardPage(QWidget):
                 1
                 for class_obj in classes
                 for enrollment in (class_obj.enrollments or [])
-                if enrollment.status == "ACTIVE"
+                if class_obj.is_active
+                and enrollment.status == "ACTIVE"
                 and enrollment.reconciled_into_enrollment_id is None
             )
             upcoming_sessions = 0
