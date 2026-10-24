@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from PySide6.QtCore import QRegularExpression, Signal
+from PySide6.QtCore import QRegularExpression, Qt, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QFrame,
@@ -59,10 +59,7 @@ class MoneyLineEdit(QLineEdit):
         super().__init__(parent)
         self._optional = optional
         self.setPlaceholderText(placeholder)
-        self.setAlignment(
-            self.alignment()
-            | self.alignment().AlignRight
-        )
+        self.setAlignment(Qt.AlignmentFlag.AlignRight)
         # Allows digits, optional leading minus sign, grouping separators and
         # at most two decimal places. Currency symbol is presentation-only.
         pattern = QRegularExpression(r"^-?[0-9,]*(?:\.[0-9]{0,2})?$")
@@ -168,7 +165,7 @@ class FinancialSettlementPage(QWidget):
         header_layout.addLayout(title_block, 1)
 
         self.status_label = QLabel("DRAFT", self)
-        self.status_label.setAlignment(self.status_label.alignment().AlignCenter)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setMinimumWidth(120)
         self.status_label.setStyleSheet(
             f"padding:{SPACING['sm']}px {SPACING['md']}px; "
@@ -298,7 +295,7 @@ class FinancialSettlementPage(QWidget):
     @staticmethod
     def _column_header(text: str) -> QLabel:
         label = QLabel(text)
-        label.setAlignment(label.alignment().AlignRight)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight)
         label.setStyleSheet(
             f"font-family:{FONT_FAMILY}; font-size:{TYPOGRAPHY['body']}px; "
             f"font-weight:{FONT_WEIGHTS['bold']}; color:{COLORS['text_secondary']};"
@@ -332,7 +329,7 @@ class FinancialSettlementPage(QWidget):
     @staticmethod
     def _money_label(*, strong: bool = False) -> QLabel:
         label = QLabel("0 ₫")
-        label.setAlignment(label.alignment().AlignRight | label.alignment().AlignVCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         size = TYPOGRAPHY["body"] + (2 if strong else 1)
         weight = FONT_WEIGHTS["semibold"] if strong else FONT_WEIGHTS["medium"]
         label.setMinimumHeight(38)
