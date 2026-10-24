@@ -12,6 +12,7 @@ from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.class_workspace.class_list_page import ClassListPage
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
 from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage
+from centermanager.ui.class_workspace.class_overview_page import ClassOverviewPage
 from centermanager.events.class_events import (
     ClassCreated, ClassUpdated, ClassArchived, ClassRestored, ClassSessionChanged,
 )
@@ -76,6 +77,7 @@ class ClassWorkspaceShell(QWidget):
 
         pages = [
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
+            {"id": "overview", "icon": "👥", "label": "Class Overview"},
             {"id": "classes", "icon": "📚", "label": "Classes"},
         ]
         self.nav = WorkspaceNavigation("Class Workspace", pages)
@@ -92,6 +94,11 @@ class ClassWorkspaceShell(QWidget):
             self._timeline_service
         )
         self.content_stack.addWidget(self.dashboard_page)
+
+        # Active class/student operational overview
+        self.overview_page = ClassOverviewPage(self._class_service)
+        self.overview_page.class_selected.connect(self._on_class_selected)
+        self.content_stack.addWidget(self.overview_page)
 
         # Class List
         self.list_page = ClassListPage(
@@ -159,6 +166,7 @@ class ClassWorkspaceShell(QWidget):
         # for every class-affecting mutation.
         self.list_page.refresh()
         self.dashboard_page.refresh()
+        self.overview_page.refresh()
 
         # Only reload detail when it is currently showing the affected class.
         if self._current_class_id == class_id:
@@ -172,6 +180,11 @@ class ClassWorkspaceShell(QWidget):
             self.nav.set_active_page("dashboard")
             self.header.set_context("Class Workspace", "Dashboard")
             self.dashboard_page.refresh()
+        elif page_id == "overview":
+            self.content_stack.setCurrentWidget(self.overview_page)
+            self.nav.set_active_page("overview")
+            self.header.set_context("Class Workspace", "Class Overview")
+            self.overview_page.refresh()
         elif page_id == "classes":
             self.content_stack.setCurrentWidget(self.list_page)
             self.nav.set_active_page("classes")
@@ -191,6 +204,8 @@ class ClassWorkspaceShell(QWidget):
 
     def _on_class_updated(self) -> None:
         self.list_page.refresh()
+        self.overview_page.refresh()
+        self.dashboard_page.refresh()
         self.attendance_updated.emit()
 
     def show_class(self, class_id: int) -> None:

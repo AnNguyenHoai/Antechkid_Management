@@ -279,6 +279,47 @@ class ClassService:
         with self._session_factory() as session:
             return self._repository_provider.classes(session).list_archived()
 
+    def get_active_class_overview(self) -> list[dict]:
+        """Read-only projection for the operational Class Overview page."""
+        with self._session_factory() as session:
+            classes = self._repository_provider.classes(session).list_active_with_students()
+            overview = []
+            for class_obj in classes:
+                students = []
+                for enrollment in class_obj.enrollments or []:
+                    student = getattr(enrollment, "student", None)
+                    if student is None:
+                        continue
+                    students.append(
+                        {
+                            "student_id": student.id,
+                            "student_code": student.student_code or "",
+                            "full_name": student.full_name or "",
+                        }
+                    )
+                students.sort(
+                    key=lambda item: (
+                        item["full_name"].casefold(),
+                        item["student_code"].casefold(),
+                    )
+                )
+                overview.append(
+                    {
+                        "class_id": class_obj.id,
+                        "class_name": class_obj.name,
+                        "course": class_obj.course or "",
+                        "capacity": class_obj.capacity,
+                        "teachers": [
+                            teacher.full_name
+                            for teacher in (class_obj.teachers or [])
+                            if getattr(teacher, "full_name", None)
+                        ],
+                        "students": students,
+                        "active_student_count": len(students),
+                    }
+                )
+            return overview
+
     def search_classes(self, query: str) -> List[Class]:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)

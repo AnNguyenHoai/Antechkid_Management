@@ -101,7 +101,14 @@ class ClassDashboardPage(QWidget):
             classes = self._class_service.list_classes()
             total = len(classes)
             active = sum(1 for c in classes if c.is_active)
-            total_students = sum(c.student_count for c in classes)
+            total_students = sum(
+                1
+                for class_obj in classes
+                for enrollment in (class_obj.enrollments or [])
+                if class_obj.is_active
+                and enrollment.status == "ACTIVE"
+                and enrollment.reconciled_into_enrollment_id is None
+            )
             upcoming_sessions = 0
             from datetime import date, timedelta
             today = date.today()
