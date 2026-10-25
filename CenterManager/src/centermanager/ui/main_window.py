@@ -2,6 +2,8 @@
 """MainWindow - Application main window with platform integration."""
 
 import logging
+import time
+from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, QThread, QEvent
@@ -170,6 +172,8 @@ class MainWindow(QMainWindow):
         self._editing_idle_timer.setSingleShot(True)
         self._editing_idle_timer.setInterval(self.EDITING_IDLE_TIMEOUT_MS)
         self._editing_idle_timer.timeout.connect(self._on_editing_idle_timeout)
+        self._last_user_activity_monotonic = time.monotonic()
+        self._last_user_activity_at = datetime.now()
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -381,16 +385,50 @@ class MainWindow(QMainWindow):
         reason = "Active editing lease renewal failed"
         if detail:
             reason = f"{reason}: {detail}"
+        logger.warning(
+            "Editing authority pause requested; source=LEASE_RENEWAL_FAILED "
+            "last_activity_at=%s detail=%s",
+            self._last_user_activity_at.isoformat(timespec="seconds"),
+            detail or "renewal_failed",
+        )
         if self._transaction.pause_editing_for_lost_authority(reason):
             self.statusBar().showMessage(
-                "Editing paused because WRITE authority could not be renewed. Recover editing before continuing.",
-                8000,
+                "WRITE lease renewal failed. Editing was paused for data safety; this was not an inactivity timeout.",
+                10000,
             )
             self._update_write_buttons()
 
     def _on_editing_idle_timeout(self) -> None:
         if not self._transaction.is_editing:
             return
+
+        elapsed_ms = int(
+            (time.monotonic() - self._last_user_activity_monotonic) * 1000
+        )
+        # Defend against a stale/queued timeout callback racing with a recent
+        # user interaction. The monotonic activity clock is authoritative.
+        if elapsed_ms < self.EDITING_IDLE_TIMEOUT_MS:
+            remaining_ms = max(
+                1,
+                self.EDITING_IDLE_TIMEOUT_MS - elapsed_ms,
+            )
+            logger.info(
+                "Ignoring stale editing idle timeout callback; "
+                "last_activity_at=%s elapsed_ms=%s remaining_ms=%s",
+                self._last_user_activity_at.isoformat(timespec="seconds"),
+                elapsed_ms,
+                remaining_ms,
+            )
+            self._editing_idle_timer.start(remaining_ms)
+            return
+
+        logger.warning(
+            "Editing idle timeout confirmed; source=IDLE_TIMER "
+            "last_activity_at=%s elapsed_ms=%s threshold_ms=%s",
+            self._last_user_activity_at.isoformat(timespec="seconds"),
+            elapsed_ms,
+            self.EDITING_IDLE_TIMEOUT_MS,
+        )
         if self._transaction.pause_editing_for_idle_timeout():
             self.statusBar().showMessage(
                 "Editing paused after 30 minutes of inactivity. Recover editing to continue.",
@@ -398,21 +436,41 @@ class MainWindow(QMainWindow):
             )
             self._update_write_buttons()
 
-    def _arm_editing_idle_timer(self) -> None:
+    def _record_user_activity(self, source: str) -> None:
+        self._last_user_activity_monotonic = time.monotonic()
+        self._last_user_activity_at = datetime.now()
         if self._transaction.is_editing:
             self._editing_idle_timer.start(self.EDITING_IDLE_TIMEOUT_MS)
+            logger.debug(
+                "Editing activity observed; source=%s at=%s",
+                source,
+                self._last_user_activity_at.isoformat(timespec="seconds"),
+            )
+
+    def _arm_editing_idle_timer(self) -> None:
+        if self._transaction.is_editing:
+            # Starting the editing-state timer is not itself user activity.
+            # Only initialize the activity clock when entering Editing with no
+            # timer currently armed; later system/UI refreshes must not extend it.
+            if not self._editing_idle_timer.isActive():
+                self._last_user_activity_monotonic = time.monotonic()
+                self._last_user_activity_at = datetime.now()
+                self._editing_idle_timer.start(self.EDITING_IDLE_TIMEOUT_MS)
         else:
             self._editing_idle_timer.stop()
 
     def eventFilter(self, watched, event):
-        if event.type() in (
+        activity_types = {
             QEvent.Type.KeyPress,
             QEvent.Type.MouseButtonPress,
             QEvent.Type.MouseButtonDblClick,
             QEvent.Type.Wheel,
             QEvent.Type.TouchBegin,
-        ):
-            self._arm_editing_idle_timer()
+            QEvent.Type.InputMethod,
+            QEvent.Type.Shortcut,
+        }
+        if event.type() in activity_types:
+            self._record_user_activity(event.type().name)
         return super().eventFilter(watched, event)
 
     def _update_poller_status(self) -> None:
