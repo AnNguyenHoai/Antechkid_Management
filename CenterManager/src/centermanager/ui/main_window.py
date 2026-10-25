@@ -449,7 +449,13 @@ class MainWindow(QMainWindow):
 
     def _arm_editing_idle_timer(self) -> None:
         if self._transaction.is_editing:
-            self._record_user_activity("editing-state-arm")
+            # Starting the editing-state timer is not itself user activity.
+            # Only initialize the activity clock when entering Editing with no
+            # timer currently armed; later system/UI refreshes must not extend it.
+            if not self._editing_idle_timer.isActive():
+                self._last_user_activity_monotonic = time.monotonic()
+                self._last_user_activity_at = datetime.now()
+                self._editing_idle_timer.start(self.EDITING_IDLE_TIMEOUT_MS)
         else:
             self._editing_idle_timer.stop()
 
