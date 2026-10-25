@@ -9,7 +9,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QMenu, QSizePolicy
+    QFrame, QMessageBox, QMenu, QSizePolicy, QComboBox
 )
 from PySide6.QtGui import QAction
 
@@ -51,7 +51,7 @@ class ClassListPage(QWidget):
         self._notification_service = notification_service
         self._classes: List[Class] = []
         self._filtered: List[Class] = []
-        self._sort_key: Optional[str] = None
+        self._sort_key: Optional[str] = "name"
         self._sort_asc: bool = True
         self._selected_ids: List[int] = []
 
@@ -80,6 +80,16 @@ class ClassListPage(QWidget):
         self.search_bar = SearchBar("Search by name, course, teacher...")
         self.search_bar.text_changed.connect(self._on_search)
         top_row.addWidget(self.search_bar)
+
+        self.status_filter = QComboBox(toolbar)
+        self.status_filter.setMinimumWidth(125)
+        self.status_filter.addItem("Active", "ACTIVE")
+        self.status_filter.addItem("Inactive", "INACTIVE")
+        self.status_filter.addItem("All", "ALL")
+        self.status_filter.setCurrentIndex(0)
+        self.status_filter.setToolTip("Filter classes by operational status")
+        self.status_filter.currentIndexChanged.connect(self._on_status_filter_changed)
+        top_row.addWidget(self.status_filter)
 
         self.refresh_btn = SecondaryButton("🔄 Refresh")
         self.refresh_btn.setFixedHeight(34)
@@ -157,19 +167,41 @@ class ClassListPage(QWidget):
     def _apply_filters_and_sort(self) -> None:
         filtered = self._filter_classes(self.search_bar.text())
         if self._sort_key:
-            filtered.sort(key=lambda c: getattr(c, self._sort_key, ""), reverse=not self._sort_asc)
+            filtered.sort(
+                key=lambda c: (getattr(c, self._sort_key, "") or "").casefold()
+                if isinstance(getattr(c, self._sort_key, ""), str)
+                else getattr(c, self._sort_key, ""),
+                reverse=not self._sort_asc,
+            )
         self._filtered = filtered
         self._populate_table()
 
     def _filter_classes(self, text: str) -> List[Class]:
-        if not text.strip():
-            return self._classes[:]
-        try:
-            return self._class_service.search_classes(text.strip())
-        except Exception:
-            lower = text.strip().lower()
-            return [c for c in self._classes
-                    if lower in c.name.lower() or lower in (c.course or "").lower()]
+        status = self.status_filter.currentData() or "ACTIVE"
+        normalized = text.strip().casefold()
+        filtered = [
+            class_obj
+            for class_obj in self._classes
+            if status == "ALL" or (class_obj.status or "ACTIVE") == status
+        ]
+        if not normalized:
+            return filtered
+
+        result = []
+        for class_obj in filtered:
+            teacher_names = " ".join(
+                teacher.full_name
+                for teacher in (class_obj.teachers or [])
+                if getattr(teacher, "full_name", None)
+            )
+            haystacks = (
+                class_obj.name or "",
+                class_obj.course or "",
+                teacher_names,
+            )
+            if any(normalized in value.casefold() for value in haystacks):
+                result.append(class_obj)
+        return result
 
     def _populate_table(self) -> None:
         data = []
@@ -188,6 +220,10 @@ class ClassListPage(QWidget):
         self.data_table.set_data(data, len(data))
 
     def _on_search(self, text: str) -> None:
+        self._apply_filters_and_sort()
+
+    def _on_status_filter_changed(self, _index: int) -> None:
+        self._clear_selection()
         self._apply_filters_and_sort()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
