@@ -77,8 +77,11 @@ class TeacherListPage(QWidget):
         )
         self.search_bar.search_changed.connect(self._on_search)
         self.search_bar.filters_changed.connect(self._on_toolbar_filters_changed)
-        self.search_bar.set_filter_value("status", "Active")
-        self.search_bar.set_filter_value("assignment", "All Assignments")
+        for key, value in (("status", "Active"), ("assignment", "All Assignments")):
+            control = self.search_bar.filter_controls[key]
+            previous = control.blockSignals(True)
+            self.search_bar.set_filter_value(key, value)
+            control.blockSignals(previous)
         toolbar.add_widget(self.search_bar, align="start")
 
         self.refresh_btn = toolbar.add_action(
