@@ -12,7 +12,7 @@ from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME, APPLICATION_PRODUCT_NAME
 from centermanager.ui.application_icon import build_application_icon
@@ -215,22 +215,22 @@ class ApplicationTopBar(QFrame):
         hero_host.setLayout(hero_stack)
         shell_layout.addWidget(hero_host)
 
-        shadow = QGraphicsDropShadowEffect(self.header)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 5)
+        self._header_shadow = QGraphicsDropShadowEffect(self.header)
+        self._header_shadow.setBlurRadius(24)
+        self._header_shadow.setOffset(0, 5)
         shadow_color = QColor(COLORS["shadow_color"])
         shadow_color.setAlpha(34)
-        shadow.setColor(shadow_color)
-        self.header.setGraphicsEffect(shadow)
+        self._header_shadow.setColor(shadow_color)
+        self.header.setGraphicsEffect(self._header_shadow)
 
         self.feedback_controller = feedback_controller or FeedbackController(self)
         self.feedback_host = FeedbackHost(self.feedback_controller, parent=self)
         shell_layout.addWidget(self.feedback_host)
 
         self.state_zone = right_zone
-        self._state_opacity = QGraphicsOpacityEffect(self.state_zone)
-        self.state_zone.setGraphicsEffect(self._state_opacity)
-        self._state_animation = QPropertyAnimation(self._state_opacity, b"opacity", self)
+        self._state_animation = QPropertyAnimation(
+            self._header_shadow, b"blurRadius", self
+        )
         self._state_animation.setDuration(180)
         self._state_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
@@ -317,7 +317,14 @@ class ApplicationTopBar(QFrame):
         install_desktop_polish(self.window())
 
     def _animate_state_change(self) -> None:
-        self._state_animation.stop(); self._state_animation.setStartValue(0.58); self._state_animation.setEndValue(1.0); self._state_animation.start()
+        # Keep routine state feedback lightweight without applying a second
+        # QGraphicsEffect to the header's child tree. Nested effects caused the
+        # Windows raster backend to cache the right zone as invisible until a
+        # hover-triggered repaint.
+        self._state_animation.stop()
+        self._state_animation.setStartValue(18.0)
+        self._state_animation.setEndValue(24.0)
+        self._state_animation.start()
 
     def _start_activity(self, message: str) -> None:
         """Show indeterminate activity without claiming backend progress percentage."""
