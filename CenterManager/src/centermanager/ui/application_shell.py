@@ -72,7 +72,7 @@ class ApplicationTopBar(QFrame):
     def __init__(self, *, user_name: str, role_name: str = "", runtime_version: str = "", sync_status: str = "disabled", feedback_controller: Optional[FeedbackController] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("ApplicationTopBar")
-        self.setMinimumHeight(136)
+        self.setMinimumHeight(COMPONENT_METRICS["app_top_bar_height"])
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._editing_operation_id: Optional[str] = None
         self._activity_frame_index = 0
@@ -87,7 +87,7 @@ class ApplicationTopBar(QFrame):
 
         self.header = QFrame(self)
         self.header.setObjectName("ApplicationHeroHeader")
-        self.header.setMinimumHeight(116)
+        self.header.setMinimumHeight(COMPONENT_METRICS["hero_header_card_height"])
         header_layout = QHBoxLayout(self.header)
         header_layout.setContentsMargins(SPACING["xl"], SPACING["lg"], SPACING["xl"], SPACING["lg"])
         header_layout.setSpacing(SPACING["xl"])
@@ -204,7 +204,7 @@ class ApplicationTopBar(QFrame):
 
         accent = QFrame(self.header)
         accent.setObjectName("HeroAccentLine")
-        accent.setFixedHeight(5)
+        accent.setFixedHeight(COMPONENT_METRICS["hero_header_accent_height"])
 
         hero_stack = QVBoxLayout()
         hero_stack.setContentsMargins(0, 0, 0, 0)
