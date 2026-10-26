@@ -33,7 +33,7 @@ def test_class_list_uses_shared_toolbar_search_bulk_and_compact_table():
 
     assert "toolbar = Toolbar(self)" in source
     assert "self.search_bar = SearchToolbar(" in source
-    assert '"options": ["Active", "Inactive"]' in source
+    assert '"options": ["Active", "Inactive", "Archived"]' in source
     assert 'self.search_bar.set_filter_value("status", "Active")' in source
     assert "self.bulk_bar = BulkActionBar(toolbar)" in source
     assert "density=TableDensity.COMPACT" in source
