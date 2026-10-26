@@ -70,18 +70,17 @@ class TeacherListPage(QWidget):
         self.search_bar = SearchToolbar(
             placeholder="Search by code, name, phone, email...",
             filters=[
-                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "Archived", "All Current"]},
-                {"key": "assignment", "label": "Assignment", "options": ["All Assignments", "Has Classes", "No Classes"]},
+                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "Archived"]},
+                {"key": "assignment", "label": "Assignment", "options": ["Has Classes", "No Classes"]},
             ],
             parent=toolbar,
         )
         self.search_bar.search_changed.connect(self._on_search)
         self.search_bar.filters_changed.connect(self._on_toolbar_filters_changed)
-        for key, value in (("status", "Active"), ("assignment", "All Assignments")):
-            control = self.search_bar.filter_controls[key]
-            previous = control.blockSignals(True)
-            self.search_bar.set_filter_value(key, value)
-            control.blockSignals(previous)
+        status_control = self.search_bar.filter_controls["status"]
+        previous = status_control.blockSignals(True)
+        self.search_bar.set_filter_value("status", "Active")
+        status_control.blockSignals(previous)
         toolbar.add_widget(self.search_bar, align="start")
 
         self.refresh_btn = toolbar.add_action(
@@ -201,18 +200,16 @@ class TeacherListPage(QWidget):
             "Active": "ACTIVE",
             "Inactive": "INACTIVE",
             "Archived": "ARCHIVED",
-            "All Current": "ALL",
         }
         assignment_map = {
-            "All Assignments": "ALL",
             "Has Classes": "ASSIGNED",
             "No Classes": "UNASSIGNED",
         }
         previous_status = self._status_filter
-        self._status_filter = status_map.get(filters.get("status", "Active"), "ACTIVE")
-        self._assignment_filter = assignment_map.get(
-            filters.get("assignment", "All Assignments"), "ALL"
-        )
+        status_label = filters.get("status", "")
+        assignment_label = filters.get("assignment", "")
+        self._status_filter = status_map.get(status_label, "ALL")
+        self._assignment_filter = assignment_map.get(assignment_label, "ALL")
         assignment_control = self.search_bar.filter_controls.get("assignment")
         if assignment_control is not None:
             assignment_control.setEnabled(self._status_filter != "ARCHIVED")
