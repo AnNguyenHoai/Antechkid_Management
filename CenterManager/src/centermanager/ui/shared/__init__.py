@@ -14,6 +14,7 @@ from .search_toolbar import SearchToolbar
 from .loading_widget import LoadingWidget, LoadingSkeleton
 from .data_table import BulkActionBar, DataTable as _DataTable, TableDensity
 from .chart_card import ChartCard
+from .entity_header import EntityHeader
 
 
 class DataTable(_DataTable):
@@ -47,4 +48,5 @@ __all__ = [
     "DataTable",
     "TableDensity",
     "ChartCard",
+    "EntityHeader",
 ]

@@ -30,7 +30,8 @@ def test_restore_requires_write_and_uses_service():
 
 def test_detail_can_load_archived_teacher_and_exposes_restore():
     assert "get_archived_teacher(teacher_id)" in DETAIL
-    assert 'PrimaryButton("↩ Restore")' in DETAIL
+    assert 'PrimaryButton("Restore")' in DETAIL
+    assert 'EntityHeader(' in DETAIL
     assert "def _on_restore" in DETAIL
     assert "restore_teacher(self._current_teacher_id)" in DETAIL
 

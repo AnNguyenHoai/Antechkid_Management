@@ -7,7 +7,7 @@ WORKING = Path("src/centermanager/ui/employee_workspace/employee_working_time_wi
 
 
 def test_management_profile_is_tabbed_and_embedded():
-    assert 'self.tabs = QTabWidget()' in PROFILE
+    assert 'self.tabs = Tabs(self)' in PROFILE
     assert 'self.tabs.addTab(page, "Overview")' in PROFILE
     assert 'self.tabs.addTab(page, "Schedule")' in PROFILE
     assert 'self.tabs.addTab(page, "Attendance")' in PROFILE
@@ -16,7 +16,9 @@ def test_management_profile_is_tabbed_and_embedded():
 
 
 def test_profile_has_explicit_in_window_back_navigation():
-    assert 'self.back_btn = QPushButton("← Employees")' in PROFILE
+    assert 'self.back_btn = Button(' in PROFILE
+    assert '"Employees",' in PROFILE
+    assert 'self.entity_header.add_action(self.back_btn)' in PROFILE
     assert 'self.back_requested.emit' in PROFILE
 
 

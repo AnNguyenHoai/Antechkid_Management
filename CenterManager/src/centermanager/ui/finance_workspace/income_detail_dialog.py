@@ -17,6 +17,9 @@ from PySide6.QtWidgets import (
 
 from centermanager.models.income import Income
 from centermanager.services.income_service import IncomeService
+from centermanager.ui.design_system.form_detail import DetailSection
+from centermanager.ui.design_system.foundation import Button, ButtonVariant, ComponentSize
+from centermanager.ui.design_system.tokens import SPACING
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +43,18 @@ class IncomeDetailDialog(QDialog):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        form = QFormLayout()
-        form.setSpacing(8)
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
+        layout.setSpacing(SPACING["md"])
+
+        detail_section = DetailSection(
+            "Income details",
+            "Read-only transaction, linkage and audit information.",
+            parent=self,
+        )
+        form_host = QWidget(detail_section)
+        form = QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(SPACING["sm"])
 
         self.source_label = QLabel()
         self.student_label = QLabel()
@@ -83,7 +95,8 @@ class IncomeDetailDialog(QDialog):
         form.addRow("Void lúc:", self.voided_at_label)
         form.addRow("Void bởi:", self.voided_by_label)
         form.addRow("Lý do void:", self.void_reason_label)
-        layout.addLayout(form)
+        detail_section.add_widget(form_host)
+        layout.addWidget(detail_section)
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -92,8 +105,12 @@ class IncomeDetailDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("Đóng")
-        close_btn.setFixedWidth(100)
+        close_btn = Button(
+            "Đóng",
+            variant=ButtonVariant.SECONDARY,
+            size=ComponentSize.SMALL,
+            parent=self,
+        )
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)

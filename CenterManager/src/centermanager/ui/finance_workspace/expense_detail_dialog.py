@@ -2,11 +2,14 @@
 import logging
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLabel, QPushButton,
+    QDialog, QVBoxLayout, QFormLayout, QLabel, QPushButton, QWidget,
     QHBoxLayout, QFrame, QMessageBox
 )
 
 from centermanager.services.expense_service import ExpenseService
+from centermanager.ui.design_system.form_detail import DetailSection
+from centermanager.ui.design_system.foundation import Button, ButtonVariant, ComponentSize
+from centermanager.ui.design_system.tokens import SPACING
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +28,18 @@ class ExpenseDetailDialog(QDialog):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
+        layout.setSpacing(SPACING["md"])
 
-        form = QFormLayout()
-        form.setSpacing(8)
+        detail_section = DetailSection(
+            "Expense details",
+            "Read-only transaction and payment information.",
+            parent=self,
+        )
+        form_host = QWidget(detail_section)
+        form = QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(SPACING["sm"])
 
         self.category_label = QLabel()
         self.desc_label = QLabel()
@@ -50,7 +61,8 @@ class ExpenseDetailDialog(QDialog):
         form.addRow("Status:", self.status_label)
         form.addRow("Note:", self.note_label)
 
-        layout.addLayout(form)
+        detail_section.add_widget(form_host)
+        layout.addWidget(detail_section)
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -59,8 +71,12 @@ class ExpenseDetailDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.setFixedWidth(100)
+        close_btn = Button(
+            "Close",
+            variant=ButtonVariant.SECONDARY,
+            size=ComponentSize.SMALL,
+            parent=self,
+        )
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
