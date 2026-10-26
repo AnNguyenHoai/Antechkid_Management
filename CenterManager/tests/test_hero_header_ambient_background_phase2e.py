@@ -79,3 +79,13 @@ def test_phase_2e_geometry_is_token_owned():
     assert '"hero_header_accent_height": 5' in tokens
     assert '"ambient_base_start":' in tokens
     assert '"ambient_network":' in tokens
+
+
+def test_hero_header_does_not_stack_graphics_effects_on_state_zone():
+    source = _source("application_shell.py")
+
+    assert "QGraphicsOpacityEffect" not in source
+    assert "self.state_zone.setGraphicsEffect" not in source
+    assert 'QPropertyAnimation(\n            self._header_shadow, b"blurRadius", self\n        )' in source
+    assert "self._state_animation.setStartValue(18.0)" in source
+    assert "self._state_animation.setEndValue(24.0)" in source
