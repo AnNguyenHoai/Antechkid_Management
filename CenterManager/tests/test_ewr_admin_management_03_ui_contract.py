@@ -11,7 +11,7 @@ def read(name):
 def test_employee_workspace_exposes_admin_employee_delete_action():
     source = read("employee_list_page.py")
     assert 'QInputDialog' in source
-    assert 'self.delete_btn = QPushButton("Delete Employee")' in source
+    assert 'self.delete_btn = toolbar.add_action(\n            "Delete Employee", self.delete_selected, variant=ButtonVariant.DANGER\n        )' in source
     assert 'self.table.selection_changed.connect(self._on_selection_changed)' in source
     assert 'def delete_selected(self):' in source
     assert 'self._admin_service.delete_employee(employee_id, reason=reason.strip())' in source

@@ -35,7 +35,7 @@ def test_student_selection_controls_do_not_add_a_dynamic_vertical_row():
 
 def test_teacher_selection_uses_page_aware_data_mapping_and_stable_toolbar():
     source = _source("ui/teacher_workspace/teacher_list_page.py")
-    assert "top_row.addWidget(self.bulk_bar)" in source
+    assert 'toolbar.add_widget(self.bulk_bar, align="end")' in source
     assert "layout.addWidget(self.bulk_bar)" not in source
     assert source.count("data_index_for_visible_row") >= 3
 

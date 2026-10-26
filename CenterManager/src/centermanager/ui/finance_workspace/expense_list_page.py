@@ -13,9 +13,9 @@ from PySide6.QtWidgets import (
 from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.services.expense_service import ExpenseService
-from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system import PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
 from centermanager.ui.finance_workspace.expense_detail_dialog import ExpenseDetailDialog
@@ -53,23 +53,23 @@ class ExpenseListPage(QWidget):
         layout.setSpacing(0)
         toolbar = QWidget()
         toolbar.setStyleSheet(
-            f"background: {COLORS['surface']}; padding: {SPACING['sm']}px {SPACING['md']}px; "
-            f"border-bottom: 1px solid {COLORS['border_light']};"
+            f"background: {COLORS['surface_page']}; padding: {SPACING['sm']}px {SPACING['md']}px; "
+            f"border-bottom: 1px solid {COLORS['border_default']};"
         )
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
 
         top_row = QHBoxLayout()
-        self.search_bar = SearchBar("Tìm kiếm theo nội dung, người chi, ghi chú...")
-        self.search_bar.text_changed.connect(self._schedule_search)
+        self.search_bar = SearchToolbar(placeholder="Tìm kiếm theo nội dung, người chi, ghi chú...")
+        self.search_bar.search_changed.connect(self._schedule_search)
         top_row.addWidget(self.search_bar)
-        self.refresh_btn = SecondaryButton("🔄 Làm mới")
+        self.refresh_btn = SecondaryButton("Làm mới")
         self.refresh_btn.clicked.connect(self.refresh)
         top_row.addWidget(self.refresh_btn)
-        self.export_btn = SecondaryButton("⬇ Xuất CSV")
+        self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
-        self.add_btn = PrimaryButton("+ Thêm chi phí")
+        self.add_btn = PrimaryButton("Thêm chi phí")
         self.add_btn.clicked.connect(self._show_add_dialog)
         top_row.addWidget(self.add_btn)
         toolbar_layout.addLayout(top_row)
@@ -116,7 +116,7 @@ class ExpenseListPage(QWidget):
             {"key": "paid_by", "label": "Người chi", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
-        self.data_table = DataTable(columns, page_size=self._page_size)
+        self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)

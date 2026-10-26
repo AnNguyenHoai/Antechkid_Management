@@ -8,8 +8,7 @@ from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QComboBox, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QMenu, QSizePolicy, QHeaderView
+    QWidget, QVBoxLayout, QMessageBox, QMenu, QHeaderView
 )
 from PySide6.QtGui import QAction
 
@@ -18,11 +17,10 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.ui.design_system import (
-    SearchBar, EmptyState, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.shared import (
+    BulkActionBar, DataTable, LoadingWidget, SearchToolbar, TableDensity
 )
-from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
@@ -68,75 +66,43 @@ class TeacherListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        toolbar = QWidget()
-        toolbar.setStyleSheet(f"""
-            background: {COLORS['surface']};
-            padding: {SPACING['sm']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
-        """)
-        toolbar_layout = QVBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(SPACING['xs'])
+        toolbar = Toolbar(self)
+        self.search_bar = SearchToolbar(
+            placeholder="Search by code, name, phone, email...",
+            filters=[
+                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "Archived"]},
+                {"key": "assignment", "label": "Assignment", "options": ["Has Classes", "No Classes"]},
+            ],
+            parent=toolbar,
+        )
+        self.search_bar.search_changed.connect(self._on_search)
+        self.search_bar.filters_changed.connect(self._on_toolbar_filters_changed)
+        self.status_filter = self.search_bar.filter_controls["status"]
+        self.assignment_filter = self.search_bar.filter_controls["assignment"]
+        status_control = self.status_filter
+        previous = status_control.blockSignals(True)
+        self.search_bar.set_filter_value("status", "Active")
+        status_control.blockSignals(previous)
+        toolbar.add_widget(self.search_bar, align="start")
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(SPACING['sm'])
+        self.refresh_btn = toolbar.add_action(
+            "Refresh", self.refresh, variant=ButtonVariant.SECONDARY
+        )
+        self.add_btn = toolbar.add_action(
+            "Add Teacher", self.show_add_dialog, variant=ButtonVariant.PRIMARY
+        )
 
-        self.search_bar = SearchBar("Search by code, name, phone, email...")
-        self.search_bar.text_changed.connect(self._on_search)
-        top_row.addWidget(self.search_bar)
-
-        self.status_filter = QComboBox()
-        self.status_filter.addItem("Active", "ACTIVE")
-        self.status_filter.addItem("Inactive", "INACTIVE")
-        self.status_filter.addItem("Archived", "ARCHIVED")
-        self.status_filter.addItem("All Current", "ALL")
-        self.status_filter.currentIndexChanged.connect(self._on_status_filter_changed)
-        self.status_filter.setMinimumWidth(130)
-        top_row.addWidget(self.status_filter)
-
-        self.assignment_filter = QComboBox()
-        self.assignment_filter.addItem("All Assignments", "ALL")
-        self.assignment_filter.addItem("Has Classes", "ASSIGNED")
-        self.assignment_filter.addItem("No Classes", "UNASSIGNED")
-        self.assignment_filter.currentIndexChanged.connect(self._on_assignment_filter_changed)
-        self.assignment_filter.setMinimumWidth(150)
-        top_row.addWidget(self.assignment_filter)
-
-        self.refresh_btn = SecondaryButton("🔄 Refresh")
-        self.refresh_btn.setFixedHeight(34)
-        self.refresh_btn.clicked.connect(self.refresh)
-        top_row.addWidget(self.refresh_btn)
-
-        self.add_btn = PrimaryButton("+ Add Teacher")
-        self.add_btn.setFixedHeight(34)
-        self.add_btn.clicked.connect(self.show_add_dialog)
-        top_row.addWidget(self.add_btn)
-
-        # Selection controls live in the toolbar so selecting a row does not
-        # insert a new vertical strip and move the table.
-        self.bulk_bar = QWidget(toolbar)
-        self.bulk_bar.setStyleSheet(f"""
-            background: {COLORS['primary_hover']};
-            padding: {SPACING['xs']}px {SPACING['sm']}px;
-            border-radius: 4px;
-        """)
-        self.bulk_bar.setVisible(False)
-        bulk_layout = QHBoxLayout(self.bulk_bar)
-        bulk_layout.setContentsMargins(0, 0, 0, 0)
-        bulk_layout.setSpacing(SPACING['xs'])
-        self.bulk_count_label = QLabel("0 selected")
-        self.bulk_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 500;")
-        bulk_layout.addWidget(self.bulk_count_label)
-        self.bulk_archive_btn = QPushButton("Archive Selected")
-        self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
-        self.bulk_archive_btn.clicked.connect(self._bulk_archive)
-        bulk_layout.addWidget(self.bulk_archive_btn)
-        self.bulk_clear_btn = QPushButton("Clear")
-        self.bulk_clear_btn.clicked.connect(self._clear_selection)
-        bulk_layout.addWidget(self.bulk_clear_btn)
-        top_row.addWidget(self.bulk_bar)
-
-        toolbar_layout.addLayout(top_row)
+        self.bulk_bar = BulkActionBar(toolbar)
+        self.bulk_archive_btn = self.bulk_bar.add_action(
+            "archive",
+            "Archive selected",
+            self._bulk_archive,
+            variant=ButtonVariant.DANGER,
+        )
+        self.bulk_bar.clear_requested.connect(self._clear_selection)
+        self.bulk_count_label = self.bulk_bar.count_label
+        self.bulk_clear_btn = self.bulk_bar.clear_button
+        toolbar.add_widget(self.bulk_bar, align="end")
         layout.addWidget(toolbar)
 
         columns = [
@@ -147,7 +113,13 @@ class TeacherListPage(QWidget):
             {"key": "status", "label": "Status", "sortable": True},
             {"key": "classes", "label": "Assigned Classes", "sortable": False},
         ]
-        self.data_table = DataTable(columns, page_size=20)
+        self.data_table = DataTable(
+            columns,
+            page_size=20,
+            density=TableDensity.COMPACT,
+            empty_title="No teachers found",
+            empty_message="Teacher records matching the current view will appear here.",
+        )
         self.data_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.data_table.table.horizontalHeader().setStretchLastSection(False)
         self.data_table.sort_requested.connect(self._on_sort)
@@ -225,16 +197,30 @@ class TeacherListPage(QWidget):
     def _on_search(self, text: str) -> None:
         self._apply_filters_and_sort()
 
-    def _on_status_filter_changed(self) -> None:
-        self._status_filter = self.status_filter.currentData()
-        archived = self._status_filter == "ARCHIVED"
-        self.assignment_filter.setEnabled(not archived)
-        self.add_btn.setEnabled(not archived)
-        self.refresh()
-
-    def _on_assignment_filter_changed(self) -> None:
-        self._assignment_filter = self.assignment_filter.currentData()
-        self._apply_filters_and_sort()
+    def _on_toolbar_filters_changed(self, filters) -> None:
+        status_map = {
+            "Active": "ACTIVE",
+            "Inactive": "INACTIVE",
+            "Archived": "ARCHIVED",
+        }
+        assignment_map = {
+            "Has Classes": "ASSIGNED",
+            "No Classes": "UNASSIGNED",
+        }
+        previous_status = self._status_filter
+        status_label = filters.get("status", "")
+        assignment_label = filters.get("assignment", "")
+        self._status_filter = status_map.get(status_label, "ALL")
+        self._assignment_filter = assignment_map.get(assignment_label, "ALL")
+        assignment_control = self.search_bar.filter_controls.get("assignment")
+        if assignment_control is not None:
+            assignment_control.setEnabled(self._status_filter != "ARCHIVED")
+        self.add_btn.setEnabled(self._status_filter != "ARCHIVED")
+        if (previous_status == "ARCHIVED") != (self._status_filter == "ARCHIVED"):
+            self.refresh()
+        else:
+            self._clear_selection()
+            self._apply_filters_and_sort()
 
     def _on_sort(self, key: str, ascending: bool) -> None:
         self._sort_key = key

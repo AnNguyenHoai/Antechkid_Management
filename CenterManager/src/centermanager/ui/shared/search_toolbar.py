@@ -14,7 +14,7 @@ from centermanager.ui.design_system.foundation import (
     Input,
     Select,
 )
-from centermanager.ui.design_system.tokens import COMPONENT_METRICS, SPACING
+from centermanager.ui.design_system.tokens import COLORS, COMPONENT_METRICS, RADIUS, SPACING
 
 
 class SearchToolbar(QWidget):
@@ -41,7 +41,17 @@ class SearchToolbar(QWidget):
         self._setup_ui(placeholder)
 
     def _setup_ui(self, placeholder: str) -> None:
+        self.setObjectName("SharedSearchToolbar")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(COMPONENT_METRICS["toolbar_height"] - SPACING["sm"])
+        self.setStyleSheet(
+            f"""
+            QWidget#SharedSearchToolbar {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING["sm"])
@@ -53,6 +63,7 @@ class SearchToolbar(QWidget):
             parent=self,
         )
         self.search_input.setMinimumWidth(COMPONENT_METRICS["data_search_min_width"])
+        self.search_input.setMaximumWidth(520)
         self.search_input.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_input, 1)
 
@@ -84,6 +95,7 @@ class SearchToolbar(QWidget):
             parent=self,
         )
         self.clear_btn.setToolTip("Clear search and filters")
+        self.clear_btn.setAccessibleName("Clear search and filters")
         self.clear_btn.clicked.connect(self.clear)
         layout.addWidget(self.clear_btn)
 

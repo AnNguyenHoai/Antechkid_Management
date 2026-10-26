@@ -48,5 +48,7 @@ def test_recent_activity_eager_loads_teacher_before_service_session_closes():
     assert ".options(joinedload(TeacherTimelineEvent.teacher))" in body
 
 
-def test_teacher_list_imports_qcombobox_for_status_and_assignment_filters():
-    assert "QComboBox" in LIST.split(")", 1)[0]
+def test_teacher_list_uses_shared_search_toolbar_for_status_and_assignment_filters():
+    assert "SearchToolbar" in LIST
+    assert 'self.status_filter = self.search_bar.filter_controls["status"]' in LIST
+    assert 'self.assignment_filter = self.search_bar.filter_controls["assignment"]' in LIST

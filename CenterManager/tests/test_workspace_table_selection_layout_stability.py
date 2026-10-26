@@ -45,9 +45,8 @@ def test_class_selection_controls_are_inside_fixed_toolbar_row():
         UI_ROOT / "class_workspace" / "class_list_page.py"
     ).read_text(encoding="utf-8")
 
-    assert "self.bulk_bar = QWidget(toolbar)" in source
-    assert "self.bulk_bar.setFixedHeight(34)" in source
-    assert "top_row.addWidget(self.bulk_bar)" in source
+    assert "self.bulk_bar = BulkActionBar(toolbar)" in source
+    assert 'toolbar.add_widget(self.bulk_bar, align="end")' in source
     assert "layout.addWidget(self.bulk_bar)" not in source
 
 
@@ -62,7 +61,7 @@ def test_student_and_teacher_selection_controls_remain_toolbar_bound():
     assert "toolbar.add_widget(self.bulk_bar" in student
     assert "layout.addWidget(self.bulk_bar)" not in student
 
-    assert "top_row.addWidget(self.bulk_bar)" in teacher
+    assert 'toolbar.add_widget(self.bulk_bar, align="end")' in teacher
     assert "layout.addWidget(self.bulk_bar)" not in teacher
 
 
