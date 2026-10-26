@@ -188,3 +188,67 @@ def test_unconfigured_shared_period_returns_zero_period_kpis():
     assert data["expense_period"] == 0
     assert data["net_cash_flow"] == 0
     assert data["total_outstanding"] == 0
+
+
+def test_dashboard_payment_method_normalization_uses_canonical_wallet_resolver():
+    assert FinanceDashboardService._normalize_payment_method("CASH") == "Cash"
+    assert FinanceDashboardService._normalize_payment_method("Cash") == "Cash"
+    assert FinanceDashboardService._normalize_payment_method("TÀI KHOẢN CÁ NHÂN") == "Cash"
+    assert FinanceDashboardService._normalize_payment_method("BANK") == "Bank"
+    assert FinanceDashboardService._normalize_payment_method("Bank Transfer") == "Bank"
+    assert FinanceDashboardService._normalize_payment_method("TÀI KHOẢN CÔNG TY") == "Bank"
+    assert FinanceDashboardService._normalize_payment_method("Legacy Mystery") == "Other"
+
+
+def test_dashboard_canonical_cash_and_bank_values_do_not_fall_into_other():
+    period_start = date(2026, 10, 1)
+    period_end = date(2026, 10, 31)
+
+    class IncomeService:
+        def list_incomes(self, **kwargs):
+            if kwargs.get("date_from") == period_start:
+                return [
+                    SimpleNamespace(amount=100, payment_method="CASH"),
+                    SimpleNamespace(amount=300, payment_method="BANK"),
+                ], 2
+            return [], 0
+
+    class ExpenseService:
+        def list_expenses(self, **kwargs):
+            if kwargs.get("date_from") == period_start:
+                return [
+                    SimpleNamespace(amount=40, payment_method="CASH"),
+                    SimpleNamespace(amount=80, payment_method="BANK"),
+                ], 2
+            return [], 0
+
+    service = FinanceDashboardService(IncomeService(), ExpenseService())
+    service._get_today_date = lambda: period_end
+
+    data = service.get_dashboard_data(
+        target_date=period_start,
+        period_start=period_start,
+        period_end=period_end,
+        period_configured=True,
+    )
+
+    assert data["revenue_by_method_period"] == {
+        "Cash": 100.0,
+        "Bank": 300.0,
+        "Other": 0.0,
+    }
+    assert data["expense_by_method_period"] == {
+        "Cash": 40.0,
+        "Bank": 80.0,
+        "Other": 0.0,
+    }
+    assert data["cash_vs_bank"]["Cash"]["income"] == 100.0
+    assert data["cash_vs_bank"]["Bank"]["income"] == 300.0
+
+
+def test_zero_total_pie_chart_has_explicit_no_data_state():
+    chart_source = _source(
+        ROOT / "src" / "centermanager" / "ui" / "shared" / "chart_card.py"
+    )
+    assert 'if total <= 0:' in chart_source
+    assert 'painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data")' in chart_source
