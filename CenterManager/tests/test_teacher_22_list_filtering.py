@@ -26,7 +26,9 @@ def test_assignment_filter_does_not_trigger_extra_service_query():
     end = LIST.index("def _on_sort", start)
     body = LIST[start:end]
     assert "self._apply_filters_and_sort()" in body
-    assert 'if (previous_status == "ARCHIVED") != (self._status_filter == "ARCHIVED"):' in body
+    assert "dataset_scope_changed" in body
+    assert 'previous_status in {"ARCHIVED", "ALL"}' in body
+    assert 'self._status_filter in {"ARCHIVED", "ALL"}' in body
 
 
 def test_status_and_assignment_filters_are_composable():
@@ -43,3 +45,12 @@ def test_archived_filter_remains_separate_from_current_status_filters():
     assert 'self._teacher_service.list_archived_teachers()' in LIST
     assert 'self._status_filter == "ARCHIVED"' in LIST
     assert '"options": ["Active", "Inactive", "Archived"]' in LIST
+
+
+def test_all_status_loads_current_and_archived_teachers():
+    start = LIST.index("def refresh")
+    end = LIST.index("def _apply_filters_and_sort", start)
+    body = LIST[start:end]
+    assert 'elif self._status_filter == "ALL":' in body
+    assert 'self._teacher_service.list_teachers()' in body
+    assert 'self._teacher_service.list_archived_teachers()' in body
