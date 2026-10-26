@@ -65,7 +65,7 @@ class ClassListPage(QWidget):
         self.search_bar = SearchToolbar(
             placeholder="Search by name, course, teacher...",
             filters=[
-                {"key": "status", "label": "Status", "options": ["Active", "Inactive"]},
+                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "Archived"]},
             ],
             parent=toolbar,
         )
@@ -127,7 +127,7 @@ class ClassListPage(QWidget):
     def refresh(self) -> None:
         self.loading.setVisible(True)
         try:
-            self._classes = self._class_service.list_classes()
+            self._classes = self._class_service.list_classes(include_archived=True)
             self._apply_filters_and_sort()
         except Exception as e:
             logger.exception("Failed to refresh class list")
@@ -152,11 +152,21 @@ class ClassListPage(QWidget):
         status_label = self.search_bar.filters().get("status", "")
         status = status_map.get(status_label, "ALL")
         normalized = text.strip().casefold()
-        filtered = [
-            class_obj
-            for class_obj in self._classes
-            if status == "ALL" or (class_obj.status or "ACTIVE") == status
-        ]
+
+        if status_label == "Archived":
+            filtered = [
+                class_obj for class_obj in self._classes
+                if class_obj.deleted_at is not None
+            ]
+        else:
+            filtered = [
+                class_obj
+                for class_obj in self._classes
+                if (
+                    (status == "ALL" or (class_obj.status or "ACTIVE") == status)
+                    and (status == "ALL" or class_obj.deleted_at is None)
+                )
+            ]
         if not normalized:
             return filtered
 
@@ -186,7 +196,7 @@ class ClassListPage(QWidget):
                 "course": c.course or "-",
                 "teacher_names": teacher_names,
                 "student_count": str(c.student_count),
-                "status": c.status or "ACTIVE",
+                "status": "ARCHIVED" if c.deleted_at is not None else (c.status or "ACTIVE"),
                 "schedule": schedule,
                 "_id": c.id,
             })
@@ -242,8 +252,16 @@ class ClassListPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to archive classes.")
 
     def _on_row_double_clicked(self, row: int) -> None:
-        if row < len(self._filtered):
-            self.class_selected.emit(self._filtered[row].id)
+        if row >= len(self._filtered):
+            return
+        class_obj = self._filtered[row]
+        if class_obj.deleted_at is not None:
+            self._notification_service.notify(
+                "Archived class is read-only. Restore it before opening the class workspace.",
+                "info",
+            )
+            return
+        self.class_selected.emit(class_obj.id)
 
     def _on_context_menu(self, pos, row: int) -> None:
         if row < 0 or row >= len(self._filtered):
@@ -254,14 +272,20 @@ class ClassListPage(QWidget):
         view_action.triggered.connect(lambda: self.class_selected.emit(class_obj.id))
         menu.addAction(view_action)
 
-        edit_action = QAction("Edit Class", self)
-        edit_action.triggered.connect(lambda: self._edit_class(class_obj.id))
-        menu.addAction(edit_action)
+        if class_obj.deleted_at is None:
+            edit_action = QAction("Edit Class", self)
+            edit_action.triggered.connect(lambda: self._edit_class(class_obj.id))
+            menu.addAction(edit_action)
 
         menu.addSeparator()
-        archive_action = QAction("Archive Class", self)
-        archive_action.triggered.connect(lambda: self._archive_class(class_obj.id))
-        menu.addAction(archive_action)
+        if class_obj.deleted_at is not None:
+            restore_action = QAction("Restore Class", self)
+            restore_action.triggered.connect(lambda: self._restore_class(class_obj.id))
+            menu.addAction(restore_action)
+        else:
+            archive_action = QAction("Archive Class", self)
+            archive_action.triggered.connect(lambda: self._archive_class(class_obj.id))
+            menu.addAction(archive_action)
 
         menu.exec(pos)
 
@@ -289,6 +313,26 @@ class ClassListPage(QWidget):
             except Exception as e:
                 logger.exception("Archive failed")
                 QMessageBox.critical(self, "Error", "Failed to archive class.")
+
+    def _restore_class(self, class_id: int) -> None:
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(
+                "You must be in WRITE mode to restore a class.", "warning"
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Restore",
+            "Restore this archived class?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._class_service.restore_class(class_id)
+                self.refresh()
+            except Exception:
+                logger.exception("Restore failed")
+                QMessageBox.critical(self, "Error", "Failed to restore class.")
 
     def show_add_dialog(self) -> None:
         if not self._collaboration_manager.ensure_write():

@@ -58,7 +58,7 @@ def test_class_list_defaults_to_active_and_name_sort():
     page = _source("ui/class_workspace/class_list_page.py")
 
     assert 'self._sort_key: Optional[str] = "name"' in page
-    assert '"options": ["Active", "Inactive"]' in page
+    assert '"options": ["Active", "Inactive", "Archived"]' in page
     assert 'self.search_bar.set_filter_value("status", "Active")' in page
     assert "self.status_filter = status_control" in page
 
@@ -71,6 +71,8 @@ def test_class_search_preserves_selected_status_filter():
 
     assert 'status_label = self.search_bar.filters().get("status", "")' in filter_block
     assert 'status = status_map.get(status_label, "ALL")' in filter_block
-    assert 'if status == "ALL" or (class_obj.status or "ACTIVE") == status' in filter_block
+    assert 'if status_label == "Archived":' in filter_block
+    assert 'if class_obj.deleted_at is not None' in filter_block
+    assert 'class_obj.deleted_at is None' in filter_block
     assert "teacher_names" in filter_block
     assert "self._class_service.search_classes" not in filter_block

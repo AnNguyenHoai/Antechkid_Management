@@ -44,9 +44,9 @@ def test_top_bar_branding_is_owned_by_hero_header():
 
     assert 'self.header.setObjectName("ApplicationHeroHeader")' in source
     assert 'brand_label = QLabel("ANTECHKIDS", brand_zone)' in source
-    assert 'product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)' in source
-    assert 'self.version_label = ElidedLabel(' in source
-    assert 'self.sync_label = ElidedLabel(' in source
+    assert 'self.product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)' in source
+    assert 'self.version_label = _HeaderPill(' in source
+    assert 'self.sync_label = _HeaderPill(' in source
 
 
 def test_home_workspace_cards_have_one_density_and_one_cta():

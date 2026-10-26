@@ -151,7 +151,10 @@ class ChartWidget(QWidget):
 
     def _draw_pie_chart(self, painter: QPainter, rect: QRectF) -> None:
         total = sum(v for _, v in self._data)
-        if total == 0:
+        if total <= 0:
+            painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
+            painter.setFont(QFont("Arial", 9))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data")
             return
 
         start_angle = 0

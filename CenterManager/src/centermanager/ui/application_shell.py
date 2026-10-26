@@ -330,7 +330,7 @@ class ApplicationTopBar(QFrame):
         action_row.addStretch()
 
         self.start_edit_button = Button("Start editing", variant="primary", size="lg")
-        self.finish_edit_button = Button("Finish editing", variant="primary", size="lg")
+        self.finish_edit_button = Button("Finish editing", variant="accent", size="lg")
         self.cancel_edit_button = Button("Cancel request", variant="ghost", size="sm")
         for button in (self.start_edit_button, self.finish_edit_button):
             button.setFixedHeight(COMPONENT_METRICS["hero_header_cta_height"])
@@ -566,8 +566,12 @@ class ApplicationTopBar(QFrame):
         if self._editing_operation_id is not None:
             return False
         self._editing_operation_id = operation_id
-        self._start_activity(message)
-        self._animate_state_change()
+        if hasattr(self, "_start_activity"):
+            self._start_activity(message)
+        else:
+            self.set_transaction_text(message)
+        if hasattr(self, "_animate_state_change"):
+            self._animate_state_change()
         for button in (self.start_edit_button, self.finish_edit_button, self.cancel_edit_button):
             button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -578,12 +582,14 @@ class ApplicationTopBar(QFrame):
         finally:
             QApplication.restoreOverrideCursor()
             self._editing_operation_id = None
-            self._stop_activity()
+            if hasattr(self, "_stop_activity"):
+                self._stop_activity()
             waiting = self.start_edit_button.text().strip().lower().startswith("waiting")
             self.start_edit_button.setEnabled(not waiting)
             self.finish_edit_button.setEnabled(True)
             self.cancel_edit_button.setEnabled(True)
-            self._animate_state_change()
+            if hasattr(self, "_animate_state_change"):
+                self._animate_state_change()
 
     def set_mode(self, mode: str, tone: str = "neutral") -> None:
         changed = self.mode_badge.text() != f"Mode: {mode}"
