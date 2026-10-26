@@ -24,9 +24,9 @@ from centermanager.services.student_highlight_service import StudentHighlightSer
 from centermanager.services.student_service import StudentService
 from centermanager.services.attendance_service import AttendanceService
 from centermanager.services.enrollment_transfer_service import EnrollmentTransferService
-from centermanager.ui.design_system import (
-    Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
-)
+from centermanager.ui.design_system import SectionHeader, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.shared import EntityHeader
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
@@ -83,19 +83,14 @@ class ClassDetailPage(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Top bar
-        top_bar = QWidget()
-        top_bar.setStyleSheet(f"""
-            background: {COLORS['surface']};
-            border-bottom: 1px solid {COLORS['border_light']};
-            padding: {SPACING['xs']}px {SPACING['md']}px;
-        """)
-        top_bar_layout = QHBoxLayout(top_bar)
-        self.back_btn = SecondaryButton("← Back")
-        self.back_btn.clicked.connect(self.back_clicked.emit)
-        top_bar_layout.addWidget(self.back_btn)
-        top_bar_layout.addStretch()
-        main_layout.addWidget(top_bar)
+        toolbar = Toolbar(self)
+        self.back_btn = toolbar.add_action(
+            "Back",
+            self.back_clicked.emit,
+            variant=ButtonVariant.GHOST,
+            align="start",
+        )
+        main_layout.addWidget(toolbar)
 
         # Overview tab (no tabs, just scroll)
         self.overview_tab = self._create_overview_tab()
@@ -114,45 +109,21 @@ class ClassDetailPage(QWidget):
         container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # Profile header
-        self.profile_widget = QWidget()
-        profile_layout = QHBoxLayout(self.profile_widget)
-        profile_layout.setSpacing(SPACING['lg'])
+        self.entity_header = EntityHeader(
+            icon="class",
+            parent=container,
+        )
+        self.profile_widget = self.entity_header
+        self.name_label = self.entity_header.title_label
+        self.code_label = self.entity_header.identifier_label
+        self.status_badge = self.entity_header
+        self.course_label = self.entity_header.subtitle_label
 
-        self.avatar = Avatar("📚", size=56)
-        self.avatar.setFixedSize(56, 56)
-        self.avatar.setStyleSheet("font-size: 28px; background: #e3f2fd; border-radius: 28px;")
-        profile_layout.addWidget(self.avatar)
-
-        info = QVBoxLayout()
-        info.setSpacing(SPACING['xs'])
-        self.name_label = QLabel()
-        self.name_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {COLORS['text_primary']};")
-        info.addWidget(self.name_label)
-
-        code_status = QHBoxLayout()
-        code_status.setSpacing(SPACING['sm'])
-        self.code_label = QLabel()
-        self.code_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_muted']}; font-weight: 500;")
-        code_status.addWidget(self.code_label)
-        self.status_badge = StatusBadge("")
-        code_status.addWidget(self.status_badge)
-        code_status.addStretch()
-        info.addLayout(code_status)
-
-        self.course_label = QLabel()
-        self.course_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']};")
-        info.addWidget(self.course_label)
-
-        profile_layout.addLayout(info)
-        profile_layout.addStretch()
-
-        self.edit_btn = PrimaryButton("✏️ Edit")
+        self.edit_btn = PrimaryButton("Edit")
         self.edit_btn.setFixedHeight(34)
         self.edit_btn.clicked.connect(self._on_edit)
-        profile_layout.addWidget(self.edit_btn)
-
-        container_layout.addWidget(self.profile_widget)
+        self.entity_header.add_action(self.edit_btn)
+        container_layout.addWidget(self.entity_header)
 
         # Divider
         container_layout.addWidget(self._divider())
@@ -162,7 +133,7 @@ class ClassDetailPage(QWidget):
         container_layout.addWidget(self.stats_widget)
 
         # Teacher Assignment
-        self.teacher_section = self._create_section("👨‍🏫 Assigned Teacher")
+        self.teacher_section = self._create_section("Assigned Teachers")
         self.teacher_container = QWidget()
         self.teacher_layout = QVBoxLayout(self.teacher_container)
         self.teacher_layout.setSpacing(SPACING['sm'])
@@ -171,7 +142,7 @@ class ClassDetailPage(QWidget):
         container_layout.addWidget(self.teacher_section)
 
         # Students
-        self.student_section = self._create_section("👨‍🎓 Enrolled Students")
+        self.student_section = self._create_section("Enrolled Students")
         self.student_container = QWidget()
         self.student_layout = QVBoxLayout(self.student_container)
         self.student_layout.setSpacing(SPACING['sm'])
@@ -186,11 +157,11 @@ class ClassDetailPage(QWidget):
         schedule_layout.setSpacing(SPACING['xs'])
 
         schedule_header = QHBoxLayout()
-        title_label = QLabel("📅 Weekly Schedule & Assessment")
+        title_label = QLabel("Weekly Schedule & Assessment")
         title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['text_primary']};")
         schedule_header.addWidget(title_label)
         schedule_header.addStretch()
-        self.add_session_btn = PrimaryButton("+ Add Session")
+        self.add_session_btn = PrimaryButton("Add Session")
         self.add_session_btn.setFixedHeight(30)
         self.add_session_btn.clicked.connect(self._on_add_session)
         schedule_header.addWidget(self.add_session_btn)
@@ -216,7 +187,7 @@ class ClassDetailPage(QWidget):
 
         # Timeline
         self.timeline_widget = TimelineWidget()
-        timeline_section = self._create_section("📅 Timeline")
+        timeline_section = self._create_section("Timeline")
         timeline_section.layout().addWidget(self.timeline_widget)
         container_layout.addWidget(timeline_section)
 
@@ -230,7 +201,7 @@ class ClassDetailPage(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        line.setStyleSheet(f"background-color: {COLORS['border_default']}; height: 1px;")
         return line
 
     def _create_section(self, title: str) -> QWidget:
@@ -275,10 +246,12 @@ class ClassDetailPage(QWidget):
             self._show_empty()
 
     def _populate(self, class_obj: Class) -> None:
-        self.name_label.setText(class_obj.name)
-        self.code_label.setText(class_obj.name)
-        self.status_badge.set_status(class_obj.status or "")
-        self.course_label.setText(f"Course: {class_obj.course or '-'}")
+        self.entity_header.set_identity(
+            title=class_obj.name,
+            identifier=class_obj.name,
+            status=class_obj.status or "",
+            subtitle=f"Course: {class_obj.course or '-'}",
+        )
         self.students_label.setText(f"{class_obj.student_count} students")
         self.capacity_label.setText(f"Capacity: {class_obj.capacity if class_obj.capacity else 'Unlimited'}")
 
@@ -313,8 +286,8 @@ class ClassDetailPage(QWidget):
         self._clear_layout(self.teacher_layout)
 
         if not teachers:
-            btn = QPushButton("+ Assign Teacher")
-            btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+            btn = QPushButton("Assign Teacher")
+            btn.setStyleSheet(f"color: {COLORS['action_primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_assign_teacher)
             self.teacher_layout.addWidget(btn)
             self._apply_dynamic_write_state()
@@ -334,8 +307,8 @@ class ClassDetailPage(QWidget):
             layout.addWidget(remove_btn)
             self.teacher_layout.addWidget(w)
 
-        add_btn = QPushButton("+ Assign Another Teacher")
-        add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+        add_btn = QPushButton("Assign Another Teacher")
+        add_btn.setStyleSheet(f"color: {COLORS['action_primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_assign_teacher)
         self.teacher_layout.addWidget(add_btn)
         self._apply_dynamic_write_state()
@@ -352,8 +325,8 @@ class ClassDetailPage(QWidget):
             students = []
 
         if not students:
-            btn = QPushButton("+ Enroll Student")
-            btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+            btn = QPushButton("Enroll Student")
+            btn.setStyleSheet(f"color: {COLORS['action_primary']}; background: transparent; border: none; font-size: 14px;")
             btn.clicked.connect(self._on_enroll_student)
             self.student_layout.addWidget(btn)
             self._apply_dynamic_write_state()
@@ -369,7 +342,7 @@ class ClassDetailPage(QWidget):
             layout.addStretch()
             transfer_btn = QPushButton("Transfer")
             transfer_btn.setStyleSheet(
-                f"color: {COLORS['primary']}; background: transparent; border: none;"
+                f"color: {COLORS['action_primary']}; background: transparent; border: none;"
             )
             transfer_btn.setToolTip("Transfer this student to another active class.")
             transfer_btn.clicked.connect(
@@ -389,7 +362,7 @@ class ClassDetailPage(QWidget):
             self.student_layout.addWidget(w)
 
         add_btn = QPushButton("+ Enroll Another Student")
-        add_btn.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; border: none; font-size: 14px;")
+        add_btn.setStyleSheet(f"color: {COLORS['action_primary']}; background: transparent; border: none; font-size: 14px;")
         add_btn.clicked.connect(self._on_enroll_student)
         self.student_layout.addWidget(add_btn)
         self._apply_dynamic_write_state()
