@@ -32,7 +32,7 @@ from centermanager.services.tuition_detail_service import TuitionDetailService
 from centermanager.ui.design_system import SearchBar, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.finance_workspace.tuition_detail_dialog import TuitionDetailDialog
-from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,9 @@ class OutstandingListPage(QWidget):
 
         toolbar = QWidget()
         toolbar.setStyleSheet(
-            f"background: {COLORS['surface']}; "
+            f"background: {COLORS['surface_page']}; "
             f"padding: {SPACING['sm']}px {SPACING['md']}px; "
-            f"border-bottom: 1px solid {COLORS['border_light']};"
+            f"border-bottom: 1px solid {COLORS['border_default']};"
         )
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
@@ -83,16 +83,16 @@ class OutstandingListPage(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(SPACING["sm"])
-        self.search_bar = SearchBar("Tìm theo tên học sinh, mã, lớp hoặc khóa học...")
-        self.search_bar.text_changed.connect(self._filters_changed)
+        self.search_bar = SearchToolbar(placeholder="Tìm theo tên học sinh, mã, lớp hoặc khóa học...")
+        self.search_bar.search_changed.connect(self._filters_changed)
         top_row.addWidget(self.search_bar)
 
-        self.refresh_btn = SecondaryButton("🔄 Làm mới")
+        self.refresh_btn = SecondaryButton("Làm mới")
         self.refresh_btn.setFixedHeight(34)
         self.refresh_btn.clicked.connect(self.refresh)
         top_row.addWidget(self.refresh_btn)
 
-        self.export_btn = SecondaryButton("⬇ Xuất CSV")
+        self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.setFixedHeight(34)
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
@@ -157,7 +157,7 @@ class OutstandingListPage(QWidget):
             {"key": "outstanding", "label": "Số dư", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
-        self.data_table = DataTable(columns, page_size=self._page_size)
+        self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
         self.data_table.setToolTip("Nhấp đúp một dòng để xem chi tiết học phí Enrollment.")
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
