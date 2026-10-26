@@ -74,16 +74,19 @@ class _TodayPanel(QFrame):
                 border-radius: {RADIUS["lg"]}px;
             }}
             QLabel#HomePanelEyebrow {{
+                background: transparent;
                 color: {COLORS["action_accent"]}; font-family: {FONT_FAMILY};
                 font-size: {TYPOGRAPHY["badge"]}px; font-weight: {FONT_WEIGHTS["bold"]};
                 border: none;
             }}
             QLabel#HomeTodayHeadline {{
+                background: transparent;
                 color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY};
                 font-size: {TYPOGRAPHY["section_title"]}px; font-weight: {FONT_WEIGHTS["bold"]};
                 border: none;
             }}
             QLabel#HomeTodayDetail {{
+                background: transparent;
                 color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY};
                 font-size: {TYPOGRAPHY["body"]}px; font-weight: {FONT_WEIGHTS["regular"]};
                 border: none;
@@ -210,14 +213,13 @@ class HomePage(QWidget):
         self.workspace_grid = QGridLayout()
         self.workspace_grid.setHorizontalSpacing(SPACING["md"])
         self.workspace_grid.setVerticalSpacing(SPACING["md"])
-        self.workspace_grid.setColumnStretch(0, 5)
-        self.workspace_grid.setColumnStretch(1, 3)
-        self.workspace_grid.setColumnStretch(2, 3)
+        for column in range(3):
+            self.workspace_grid.setColumnStretch(column, 1)
         content.addLayout(self.workspace_grid)
         self.dashboard_content.setStyleSheet(
             f"""
-            QLabel#HomeSectionTitle {{ color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["section_title"]}px; font-weight: {FONT_WEIGHTS["semibold"]}; }}
-            QLabel#HomeSectionHelp {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; }}
+            QLabel#HomeSectionTitle {{ background: transparent; border: none; color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["section_title"]}px; font-weight: {FONT_WEIGHTS["semibold"]}; }}
+            QLabel#HomeSectionHelp {{ background: transparent; border: none; color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; }}
             """
         )
         self.container_layout.addWidget(self.dashboard_content)
@@ -243,8 +245,8 @@ class HomePage(QWidget):
         panel.setStyleSheet(
             f"""
             QFrame#{object_name} {{ background-color: {panel_bg}; border: {COMPONENT_METRICS["border_width"]}px solid {panel_border}; border-radius: {RADIUS["lg"]}px; }}
-            QLabel#HomeInfoTitle {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["badge"]}px; font-weight: {FONT_WEIGHTS["bold"]}; border: none; }}
-            QLabel#HomeInfoDetail {{ color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
+            QLabel#HomeInfoTitle {{ background: transparent; color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["badge"]}px; font-weight: {FONT_WEIGHTS["bold"]}; border: none; }}
+            QLabel#HomeInfoDetail {{ background: transparent; color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
             """
         )
         return panel
@@ -269,22 +271,21 @@ class HomePage(QWidget):
             return
 
         self._render_overview(summaries)
-        placement = {
-            "student": (0, 0, 2, 1, "featured"),
-            "class": (0, 1, 1, 1, "regular"),
-            "teacher": (1, 1, 1, 1, "regular"),
-            "finance": (0, 2, 1, 1, "compact"),
-            "employee": (1, 2, 1, 1, "compact"),
-            "admin": (2, 2, 1, 1, "compact"),
+        order = {
+            "student": 0,
+            "teacher": 1,
+            "class": 2,
+            "finance": 3,
+            "employee": 4,
+            "admin": 5,
         }
-        fallback_row = 3
-        for summary in summaries:
-            row, column, row_span, column_span, variant = placement.get(
-                summary.workspace_id,
-                (fallback_row, 0, 1, 3, "compact"),
-            )
-            if summary.workspace_id not in placement:
-                fallback_row += 1
+        ordered_summaries = sorted(
+            summaries,
+            key=lambda item: (order.get(item.workspace_id, 99), item.name.casefold()),
+        )
+        for index, summary in enumerate(ordered_summaries):
+            row = index // 3
+            column = index % 3
             card = WorkspaceCard(
                 workspace_id=summary.workspace_id,
                 name=summary.name,
@@ -294,12 +295,12 @@ class HomePage(QWidget):
                 health_status=summary.health_status,
                 health_details=summary.health_details,
                 quick_action_label=summary.quick_action_label,
-                variant=variant,
+                variant="regular",
                 parent=self.dashboard_content,
             )
             card.clicked.connect(self._on_workspace_clicked)
             self._cards.append(card)
-            self.workspace_grid.addWidget(card, row, column, row_span, column_span)
+            self.workspace_grid.addWidget(card, row, column)
         self._show_dashboard_content()
 
     def _render_overview(self, summaries: Iterable[WorkspaceSummary]) -> None:

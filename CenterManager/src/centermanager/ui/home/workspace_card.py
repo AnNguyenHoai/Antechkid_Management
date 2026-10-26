@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.foundation import Badge, BadgeTone, Button, ButtonVariant, ComponentSize
 from centermanager.ui.design_system.tokens import COLORS, COMPONENT_METRICS, FONT_FAMILY, FONT_WEIGHTS, RADIUS, SPACING, TYPOGRAPHY
 
@@ -47,20 +48,33 @@ class WorkspaceCard(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        min_height = 230 if self._variant == "featured" else (118 if self._variant == "compact" else 156)
-        self.setMinimumHeight(min_height)
+        self.setMinimumHeight(146)
+        self.setMaximumHeight(164)
         self.setAccessibleName(name)
         self.setToolTip(f"Open {name}")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["md"])
+        root.setContentsMargins(SPACING["lg"], SPACING["md"], SPACING["lg"], SPACING["md"])
         root.setSpacing(SPACING["sm"])
 
         heading = QHBoxLayout()
         heading.setSpacing(SPACING["sm"])
-        self.icon_label = QLabel(self._icon or "•", self)
-        self.icon_label.setObjectName("HomeWorkspaceIcon")
-        self.icon_label.setFixedWidth(24)
+        icon_name = {
+            "student": "student",
+            "teacher": "teacher",
+            "class": "class",
+            "finance": "finance",
+            "employee": "employee",
+            "admin": "settings",
+        }.get(self._workspace_id, "reports")
+        self.icon_label = AppIcon(
+            icon_name,
+            size=18,
+            color=COLORS["action_primary"],
+            tile_color=COLORS["blue_50"],
+            tile_size=36,
+            parent=self,
+        )
         heading.addWidget(self.icon_label, alignment=Qt.AlignmentFlag.AlignTop)
         self.name_label = QLabel(name, self)
         self.name_label.setObjectName("HomeWorkspaceName")
@@ -74,7 +88,7 @@ class WorkspaceCard(QFrame):
         self.description_label = QLabel(description, self)
         self.description_label.setObjectName("HomeWorkspaceDescription")
         self.description_label.setWordWrap(True)
-        self.description_label.setVisible(self._variant != "compact")
+        self.description_label.setVisible(False)
         root.addWidget(self.description_label)
 
         self.summary_label = QLabel(summary_text, self)
@@ -85,16 +99,13 @@ class WorkspaceCard(QFrame):
         self.health_details_label = QLabel(health_details, self)
         self.health_details_label.setObjectName("HomeWorkspaceHealthDetails")
         self.health_details_label.setWordWrap(True)
-        self.health_details_label.setVisible(
-            bool(health_details.strip()) and self._variant != "compact"
-        )
+        self.health_details_label.setVisible(bool(health_details.strip()))
         root.addWidget(self.health_details_label)
         root.addStretch()
 
         action_row = QHBoxLayout()
         action_row.addStretch()
-        action_text = quick_action_label.strip() or "Open"
-        self.action_btn = Button(action_text, variant=ButtonVariant.GHOST, size=ComponentSize.SMALL, parent=self)
+        self.action_btn = Button("Open →", variant=ButtonVariant.GHOST, size=ComponentSize.SMALL, parent=self)
         self.action_btn.setAccessibleName(f"Open {name}")
         self.action_btn.clicked.connect(lambda: self.clicked.emit(self._workspace_id))
         action_row.addWidget(self.action_btn)
@@ -105,7 +116,6 @@ class WorkspaceCard(QFrame):
             QFrame#HomeWorkspaceCard {{ background-color: {COLORS["surface_card"]}; border: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]}; border-radius: {RADIUS["lg"]}px; }}
             QFrame#HomeWorkspaceCard:hover {{ background-color: {COLORS["surface_hover"]}; border-color: {COLORS["border_strong"]}; }}
             QFrame#HomeWorkspaceCard:focus {{ border: 2px solid {COLORS["focus_ring"]}; }}
-            QLabel#HomeWorkspaceIcon {{ color: {COLORS["action_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["icon"]}px; font-weight: {FONT_WEIGHTS["bold"]}; border: none; }}
             QLabel#HomeWorkspaceName {{ color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["card_title"]}px; font-weight: {FONT_WEIGHTS["semibold"]}; border: none; }}
             QLabel#HomeWorkspaceDescription {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
             QLabel#HomeWorkspaceSummary {{ color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body"]}px; font-weight: {FONT_WEIGHTS["medium"]}; border: none; }}

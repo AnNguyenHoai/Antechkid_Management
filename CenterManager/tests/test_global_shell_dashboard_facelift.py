@@ -24,14 +24,15 @@ def test_application_shell_has_persistent_global_sidebar():
 def test_global_sidebar_exposes_center_and_workspace_navigation():
     sidebar = _source("global_navigation.py")
 
-    assert '"home", "⌂", "Center overview"' in sidebar
-    assert '"student", "●", "Student Workspace"' in sidebar
-    assert '"teacher", "✓", "Teacher Workspace"' in sidebar
-    assert '"class", "◆", "Class Workspace"' in sidebar
-    assert '"finance", "▣", "Finance Workspace"' in sidebar
-    assert '"employee", "▤", "Employee Workspace"' in sidebar
-    assert '"settings", "⚙", "Settings"' in sidebar
-    assert '"reports", "▥", "Reports"' in sidebar
+    assert '"home", "home", "Center overview"' in sidebar
+    assert '"student", "student", "Student Workspace"' in sidebar
+    assert '"teacher", "teacher", "Teacher Workspace"' in sidebar
+    assert '"class", "class", "Class Workspace"' in sidebar
+    assert '"finance", "finance", "Finance Workspace"' in sidebar
+    assert '"employee", "employee", "Employee Workspace"' in sidebar
+    assert '"settings", "settings", "Settings"' in sidebar
+    assert '"reports", "reports", "Reports"' in sidebar
+    assert "AppIcon" in sidebar
     assert "QPushButton:checked" in sidebar
 
 
@@ -53,12 +54,12 @@ def test_home_dashboard_uses_operational_three_column_composition():
 
     assert 'title = QLabel("Dashboard"' in home
     assert 'workspace_title = QLabel("Center operations"' in home
-    assert "self.workspace_grid.setColumnStretch(0, 5)" in home
-    assert "self.workspace_grid.setColumnStretch(1, 3)" in home
-    assert "self.workspace_grid.setColumnStretch(2, 3)" in home
-    assert '"student": (0, 0, 2, 1, "featured")' in home
-    assert '"finance": (0, 2, 1, 1, "compact")' in home
-    assert '"employee": (1, 2, 1, 1, "compact")' in home
+    assert "for column in range(3):" in home
+    assert "self.workspace_grid.setColumnStretch(column, 1)" in home
+    assert "row = index // 3" in home
+    assert "column = index % 3" in home
+    assert "self.workspace_grid.addWidget(card, row, column)" in home
+    assert '"student": (0, 0, 2, 1, "featured")' not in home
     assert 'COLORS["state_warning_bg"] if object_name == "HomeAttentionPanel"' in home
 
 
@@ -67,7 +68,10 @@ def test_workspace_cards_support_visual_density_without_new_business_data():
 
     assert 'variant: str = "regular"' in card
     assert 'self._variant = variant' in card
-    assert 'self._variant == "featured"' in card
-    assert 'self._variant == "compact"' in card
-    assert 'self.icon_label = QLabel(self._icon or "•", self)' in card
-    assert 'self.description_label.setVisible(self._variant != "compact")' in card
+    assert 'self.setMinimumHeight(146)' in card
+    assert 'self.setMaximumHeight(164)' in card
+    assert 'self.icon_label = AppIcon(' in card
+    assert 'self.description_label.setVisible(False)' in card
+    assert 'self.action_btn = Button("Open →"' in card
+    assert 'self._variant == "featured"' not in card
+    assert 'self._variant == "compact"' not in card
