@@ -19,9 +19,9 @@ from centermanager.services.teacher_service import TeacherService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.teacher_document_service import TeacherDocumentService
 from centermanager.services.teacher_timeline_service import TeacherTimelineService
-from centermanager.ui.design_system import (
-    Avatar, StatusBadge, SectionHeader, PrimaryButton, SecondaryButton
-)
+from centermanager.ui.design_system import SectionHeader, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.shared import EntityHeader
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.teacher_workspace.teacher_form_dialog import TeacherFormDialog
 from centermanager.ui.teacher_workspace.teacher_assignment_dialog import TeacherAssignmentDialog
@@ -66,19 +66,14 @@ class TeacherDetailPage(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Top bar
-        top_bar = QWidget()
-        top_bar.setStyleSheet(f"""
-            background: {COLORS['surface']};
-            border-bottom: 1px solid {COLORS['border_light']};
-            padding: {SPACING['xs']}px {SPACING['md']}px;
-        """)
-        top_bar_layout = QHBoxLayout(top_bar)
-        self.back_btn = SecondaryButton("← Back")
-        self.back_btn.clicked.connect(self.back_clicked.emit)
-        top_bar_layout.addWidget(self.back_btn)
-        top_bar_layout.addStretch()
-        main_layout.addWidget(top_bar)
+        toolbar = Toolbar(self)
+        self.back_btn = toolbar.add_action(
+            "Back",
+            self.back_clicked.emit,
+            variant=ButtonVariant.GHOST,
+            align="start",
+        )
+        main_layout.addWidget(toolbar)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -88,51 +83,27 @@ class TeacherDetailPage(QWidget):
         container_layout.setContentsMargins(SPACING['md'], SPACING['lg'], SPACING['md'], SPACING['lg'])
         container_layout.setSpacing(SPACING['xl'])
 
-        # Profile header
-        self.profile_widget = QWidget()
-        profile_layout = QHBoxLayout(self.profile_widget)
-        profile_layout.setSpacing(SPACING['lg'])
+        self.entity_header = EntityHeader(
+            icon="teacher",
+            parent=container,
+        )
+        self.profile_widget = self.entity_header
+        self.name_label = self.entity_header.title_label
+        self.code_label = self.entity_header.identifier_label
+        self.status_badge = self.entity_header
+        self.email_phone_label = self.entity_header.subtitle_label
 
-        self.avatar = Avatar("", size=64)
-        self.avatar.setFixedSize(64, 64)
-        profile_layout.addWidget(self.avatar)
-
-        info = QVBoxLayout()
-        info.setSpacing(SPACING['xs'])
-        self.name_label = QLabel()
-        self.name_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {COLORS['text_primary']};")
-        info.addWidget(self.name_label)
-
-        code_status = QHBoxLayout()
-        code_status.setSpacing(SPACING['sm'])
-        self.code_label = QLabel()
-        self.code_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_muted']}; font-weight: 500;")
-        code_status.addWidget(self.code_label)
-        self.status_badge = StatusBadge("")
-        code_status.addWidget(self.status_badge)
-        code_status.addStretch()
-        info.addLayout(code_status)
-
-        self.email_phone_label = QLabel()
-        self.email_phone_label.setStyleSheet(f"font-size: 13px; color: {COLORS['text_secondary']};")
-        info.addWidget(self.email_phone_label)
-
-        profile_layout.addLayout(info)
-        profile_layout.addStretch()
-
-        # Edit button
-        self.edit_btn = PrimaryButton("✏️ Edit")
+        self.edit_btn = PrimaryButton("Edit")
         self.edit_btn.setFixedHeight(34)
         self.edit_btn.clicked.connect(self._on_edit)
-        profile_layout.addWidget(self.edit_btn)
+        self.entity_header.add_action(self.edit_btn)
 
-        self.restore_btn = PrimaryButton("↩ Restore")
+        self.restore_btn = PrimaryButton("Restore")
         self.restore_btn.setFixedHeight(34)
         self.restore_btn.clicked.connect(self._on_restore)
         self.restore_btn.setVisible(False)
-        profile_layout.addWidget(self.restore_btn)
-
-        container_layout.addWidget(self.profile_widget)
+        self.entity_header.add_action(self.restore_btn)
+        container_layout.addWidget(self.entity_header)
 
         # Divider
         container_layout.addWidget(self._divider())
@@ -171,7 +142,7 @@ class TeacherDetailPage(QWidget):
 
         # Timeline
         self.timeline_widget = TimelineWidget()
-        timeline_section = self._create_section("📅 Timeline")
+        timeline_section = self._create_section("Timeline")
         timeline_section.layout().addWidget(self.timeline_widget)
         container_layout.addWidget(timeline_section)
 
@@ -183,7 +154,7 @@ class TeacherDetailPage(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet(f"background-color: {COLORS['border_light']}; height: 1px;")
+        line.setStyleSheet(f"background-color: {COLORS['border_default']}; height: 1px;")
         return line
 
     def _create_section(self, title: str) -> QWidget:
@@ -254,11 +225,13 @@ class TeacherDetailPage(QWidget):
             self._show_empty()
 
     def _populate(self, teacher: Teacher) -> None:
-        self.avatar.set_name(teacher.full_name)
-        self.name_label.setText(teacher.full_name)
-        self.code_label.setText(teacher.teacher_code)
         status_text = "ARCHIVED" if teacher.deleted_at is not None else (teacher.status or "")
-        self.status_badge.set_status(status_text)
+        self.entity_header.set_identity(
+            title=teacher.full_name,
+            identifier=teacher.teacher_code,
+            status=status_text,
+            subtitle=f"{teacher.email or '-'}  •  {teacher.phone or '-'}",
+        )
         self.restore_btn.setVisible(teacher.deleted_at is not None)
         self.edit_btn.setVisible(teacher.deleted_at is None)
         self.manage_classes_btn.setEnabled(
@@ -266,7 +239,6 @@ class TeacherDetailPage(QWidget):
             and self.edit_btn.isEnabled()
             and self._can_manage_class_assignments()
         )
-        self.email_phone_label.setText(f"{teacher.email or '-'}  •  {teacher.phone or '-'}")
 
         # Professional info
         self._field_0.setText(teacher.join_date.strftime("%d/%m/%Y") if teacher.join_date else "-")
@@ -295,20 +267,20 @@ class TeacherDetailPage(QWidget):
             return
 
         for cls in classes:
-            btn = QPushButton(f"📚 {cls.name}")
+            btn = QPushButton(cls.name)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     text-align: left;
                     background: {COLORS['surface_hover']};
-                    border: 1px solid {COLORS['border_light']};
+                    border: 1px solid {COLORS['border_default']};
                     border-radius: 4px;
                     padding: 8px 12px;
                     font-size: 14px;
-                    color: {COLORS['primary']};
+                    color: {COLORS['action_primary']};
                 }}
                 QPushButton:hover {{
-                    background: {COLORS['primary_hover']};
-                    border-color: {COLORS['primary']};
+                    background: {COLORS['blue_50']};
+                    border-color: {COLORS['action_primary']};
                 }}
             """)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
