@@ -86,5 +86,11 @@ class AppIcon(QLabel):
         painter.end()
         self.setPixmap(pixmap)
 
+    def set_color(self, color: str) -> None:
+        if color == self._color:
+            return
+        self._color = color
+        self._render()
+
 
 __all__ = ["AppIcon"]
