@@ -123,7 +123,7 @@ class ApplicationTopBar(QFrame):
         meta_row.addStretch()
         brand_layout.addLayout(brand_row)
         brand_layout.addLayout(meta_row)
-        header_layout.addWidget(brand_zone, 3)
+        header_layout.addWidget(brand_zone, 1)
 
         right_zone = QWidget(self.header)
         right_layout = QVBoxLayout(right_zone)
@@ -200,7 +200,7 @@ class ApplicationTopBar(QFrame):
         user_layout.addWidget(self.role_label)
         action_row.addLayout(user_layout)
         right_layout.addLayout(action_row)
-        header_layout.addWidget(right_zone, 2)
+        header_layout.addWidget(right_zone, 1)
 
         accent = QFrame(self.header)
         accent.setObjectName("HeroAccentLine")
