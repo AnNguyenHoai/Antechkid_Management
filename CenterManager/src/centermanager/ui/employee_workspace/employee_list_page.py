@@ -19,8 +19,8 @@ from centermanager.services.employee_admin_management_service import (
 )
 from centermanager.models.role import RoleDefinitions
 from centermanager.core.current_user import get_current_user
-from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
-from centermanager.ui.shared import DataTable, SearchToolbar, TableDensity
+from centermanager.ui.design_system.foundation import Button, ButtonVariant, ComponentSize, Tabs, Toolbar
+from centermanager.ui.shared import DataTable, EntityHeader, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
 
@@ -62,34 +62,26 @@ class EmployeeProfileDialog(QDialog):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(14)
 
-        # Profile header: identity + employment summary + explicit navigation.
-        header_row = QHBoxLayout()
-        identity = QVBoxLayout()
-        self.header = QLabel()
-        self.header.setStyleSheet("font-size: 24px; font-weight: 700;")
-        self.subheader = QLabel()
-        self.subheader.setStyleSheet("font-size: 13px;")
-        identity.addWidget(self.header)
-        identity.addWidget(self.subheader)
-        header_row.addLayout(identity, 1)
-
-        self.status_badge = QLabel("ACTIVE")
-        self.status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_badge.setMinimumWidth(90)
-        self.status_badge.setStyleSheet(
-            "font-weight: 700; padding: 6px 12px; border: 1px solid #b8c2cc; "
-            "border-radius: 12px; background: #f4f7f9;"
+        self.entity_header = EntityHeader(
+            icon="employee",
+            parent=self,
         )
-        header_row.addWidget(self.status_badge, 0, Qt.AlignmentFlag.AlignTop)
+        self.header = self.entity_header.title_label
+        self.subheader = self.entity_header.subtitle_label
+        self.status_badge = self.entity_header.status_label
 
         if self.embedded:
-            self.back_btn = QPushButton("← Employees")
+            self.back_btn = Button(
+                "Employees",
+                variant=ButtonVariant.GHOST,
+                size=ComponentSize.SMALL,
+                parent=self.entity_header,
+            )
             self.back_btn.clicked.connect(self.back_requested.emit)
-            header_row.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignTop)
-        root.addLayout(header_row)
+            self.entity_header.add_action(self.back_btn)
+        root.addWidget(self.entity_header)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
+        self.tabs = Tabs(self)
         root.addWidget(self.tabs, 1)
 
         self._build_overview_tab()
@@ -108,8 +100,18 @@ class EmployeeProfileDialog(QDialog):
             # Embedded page uses the global WRITE state; keep a compact save bar.
             self.save_bar = QHBoxLayout()
             self.save_bar.addStretch()
-            self.save_btn = QPushButton("Save Changes")
-            self.cancel_btn = QPushButton("Reset")
+            self.save_btn = Button(
+                "Save Changes",
+                variant=ButtonVariant.PRIMARY,
+                size=ComponentSize.SMALL,
+                parent=self,
+            )
+            self.cancel_btn = Button(
+                "Reset",
+                variant=ButtonVariant.SECONDARY,
+                size=ComponentSize.SMALL,
+                parent=self,
+            )
             self.save_btn.clicked.connect(self.save)
             self.cancel_btn.clicked.connect(self._load)
             self.save_bar.addWidget(self.cancel_btn)
@@ -242,8 +244,18 @@ class EmployeeProfileDialog(QDialog):
         documents_layout.addWidget(self.docs, 1)
 
         actions = QHBoxLayout()
-        self.upload_btn = QPushButton("Upload / Replace CV")
-        self.open_btn = QPushButton("Open Selected")
+        self.upload_btn = Button(
+            "Upload / Replace CV",
+            variant=ButtonVariant.SECONDARY,
+            size=ComponentSize.SMALL,
+            parent=documents,
+        )
+        self.open_btn = Button(
+            "Open Selected",
+            variant=ButtonVariant.GHOST,
+            size=ComponentSize.SMALL,
+            parent=documents,
+        )
         actions.addWidget(self.upload_btn)
         actions.addWidget(self.open_btn)
         actions.addStretch()
@@ -255,12 +267,15 @@ class EmployeeProfileDialog(QDialog):
 
     def _load(self):
         e = self.employee
-        self.header.setText(e.full_name or "Employee")
-        self.subheader.setText(
-            f"{e.employee_code or '-'}  •  {e.position or 'Position not set'}  •  "
-            f"{e.department or 'Department not set'}"
+        self.entity_header.set_identity(
+            title=e.full_name or "Employee",
+            identifier=e.employee_code or "-",
+            subtitle=(
+                f"{e.position or 'Position not set'}  •  "
+                f"{e.department or 'Department not set'}"
+            ),
+            status=e.employment_status or "UNKNOWN",
         )
-        self.status_badge.setText((e.employment_status or "UNKNOWN").replace("_", " "))
         self.code.setText(e.employee_code or "-")
         self.name.setText(e.full_name or "")
         if e.date_of_birth:
@@ -318,7 +333,7 @@ class EmployeeProfileDialog(QDialog):
         try:
             for doc in self.ds.list_documents(self.employee.id):
                 item = QListWidgetItem()
-                item.setText(f"📄  {doc.original_filename}\n    {doc.document_type}")
+                item.setText(f"{doc.original_filename}\n{doc.document_type}")
                 item.setData(Qt.ItemDataRole.UserRole, doc.relative_path)
                 self.docs.addItem(item)
         except Exception:
