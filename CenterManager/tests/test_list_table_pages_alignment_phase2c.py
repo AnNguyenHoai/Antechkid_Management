@@ -15,7 +15,7 @@ def test_shared_search_toolbar_has_compact_consistent_surface():
     source = _source("shared/search_toolbar.py")
 
     assert 'self.setObjectName("SharedSearchToolbar")' in source
-    assert 'self.setMaximumWidth(520)' in source
+    assert 'self.search_input.setMaximumWidth(520)' in source
     assert 'self.clear_btn.setAccessibleName("Clear search and filters")' in source
 
 
