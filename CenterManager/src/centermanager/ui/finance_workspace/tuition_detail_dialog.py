@@ -27,6 +27,8 @@ from centermanager.dto.outstanding_dto import (
     BALANCE_STATE_PREPAID,
 )
 from centermanager.services.tuition_detail_service import TuitionDetailReadModel
+from centermanager.ui.design_system.foundation import Tabs
+from centermanager.ui.design_system.tokens import COLORS, FONT_FAMILY, FONT_WEIGHTS, SPACING, TYPOGRAPHY
 
 
 def _money(value: Optional[Decimal]) -> str:
@@ -75,6 +77,8 @@ class TuitionDetailDialog(QDialog):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
+        layout.setSpacing(SPACING["md"])
 
         identity = QLabel(
             f"<b>{self._detail.student_name}</b> ({self._detail.student_code}) · "
@@ -82,6 +86,10 @@ class TuitionDetailDialog(QDialog):
             f"Enrollment #{self._detail.enrollment_id}"
         )
         identity.setTextFormat(Qt.TextFormat.RichText)
+        identity.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-family: {FONT_FAMILY}; "
+            f"font-size: {TYPOGRAPHY['section_title']}px; font-weight: {FONT_WEIGHTS['semibold']};"
+        )
         layout.addWidget(identity)
 
         summary_box = QGroupBox("Tóm tắt học phí")
@@ -126,9 +134,12 @@ class TuitionDetailDialog(QDialog):
             "của thanh toán, hoàn tiền, điều chỉnh tín dụng và tín dụng chuyển lớp thuộc Enrollment."
         )
         note.setWordWrap(True)
+        note.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['body_small']}px;"
+        )
         layout.addWidget(note)
 
-        tabs = QTabWidget()
+        tabs = Tabs(self)
         tabs.addTab(self._session_tab(), "Buổi học")
         tabs.addTab(self._settlement_tab(), "Đối soát học phí")
         tabs.addTab(self._payment_tab(), "Lịch sử thanh toán")
