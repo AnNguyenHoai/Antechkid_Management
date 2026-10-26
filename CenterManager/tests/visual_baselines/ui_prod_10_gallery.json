@@ -5,7 +5,7 @@
     "height": 720
   },
   "geometry": {
-    "top_bar_min_height": 60,
+    "top_bar_min_height": 136,
     "page_header_min_height": 78
   },
   "image_quality": {

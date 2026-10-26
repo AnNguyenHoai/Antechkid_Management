@@ -39,12 +39,14 @@ def test_global_sidebar_uses_vector_icons_and_stable_alignment():
     assert 'super().__init__(f"{icon}  {label}", parent)' not in source
 
 
-def test_top_bar_brand_column_matches_sidebar_width():
+def test_top_bar_branding_is_owned_by_hero_header():
     source = _source("application_shell.py")
 
-    assert "left_zone.setFixedWidth(204)" in source
-    assert 'layout.setContentsMargins(0, 0, SPACING["lg"], 0)' in source
-    assert 'left_layout.setContentsMargins(SPACING["lg"], 0, SPACING["md"], 0)' in source
+    assert 'self.header.setObjectName("ApplicationHeroHeader")' in source
+    assert 'brand_label = QLabel("ANTECHKIDS", brand_zone)' in source
+    assert 'product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)' in source
+    assert 'self.version_label = ElidedLabel(' in source
+    assert 'self.sync_label = ElidedLabel(' in source
 
 
 def test_home_workspace_cards_have_one_density_and_one_cta():

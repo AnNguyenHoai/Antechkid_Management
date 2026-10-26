@@ -45,9 +45,15 @@ class StudentAnalyticsPage(QWidget):
 
         self.summary_grid = QHBoxLayout()
         self.summary_grid.setSpacing(SPACING["md"])
-        self.avg_score_widget = MetricCard("Score", "Average Score", "0", "")
-        self.total_students_widget = MetricCard("Students", "Total Students", "0", "")
-        self.growth_widget = MetricCard("Growth", "Monthly Growth", "0%", "")
+        self.avg_score_widget = MetricCard(
+            "reports", "Average Score", "0", "", tone="info"
+        )
+        self.total_students_widget = MetricCard(
+            "student", "Total Students", "0", "", tone="primary"
+        )
+        self.growth_widget = MetricCard(
+            "trend", "Monthly Growth", "0%", "", tone="success"
+        )
         self.summary_grid.addWidget(self.avg_score_widget)
         self.summary_grid.addWidget(self.total_students_widget)
         self.summary_grid.addWidget(self.growth_widget)

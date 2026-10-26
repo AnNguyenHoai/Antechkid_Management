@@ -77,6 +77,11 @@ COLORS = {
     "state_info": "#0288d1",
     "state_info_bg": "#e1f5fe",
     "shadow_color": "#000000",
+    "ambient_base_start": "#fbfcfe",
+    "ambient_base_mid": "#f8fbfd",
+    "ambient_base_end": "#f6f9fc",
+    "ambient_network": "#265a82",
+    "ambient_gear": "#416987",
 }
 
 COLORS.update({
@@ -210,7 +215,9 @@ COMPONENT_METRICS = {
     "loading_height": 8,
     "skeleton_row_height": 48,
     # Application Shell V2
-    "app_top_bar_height": 60,
+    "app_top_bar_height": 136,
+    "hero_header_card_height": 116,
+    "hero_header_accent_height": 5,
     "workspace_sidebar_width": 224,
     "workspace_sidebar_header_height": 72,
     "page_header_height": 78,

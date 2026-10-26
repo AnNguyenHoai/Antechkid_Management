@@ -16,7 +16,8 @@ def app():
 
 def test_header_keeps_routine_editing_state_in_fixed_header(app):
     top = ApplicationTopBar(user_name="An", role_name="Admin", runtime_version="v1", sync_status="idle")
-    assert top.header.height() == COMPONENT_METRICS["app_top_bar_height"]
+    assert top.minimumHeight() == COMPONENT_METRICS["app_top_bar_height"]
+    assert top.header.minimumHeight() == COMPONENT_METRICS["hero_header_card_height"]
     assert top.state_zone.parent() is top.header
     assert top.mode_badge.parent() is top.state_zone
     assert top.transaction_label.parent() is top.state_zone
@@ -54,5 +55,6 @@ def test_pr_c_source_separates_routine_state_from_feedback():
     body = text.split("def _run_edit_operation", 1)[1].split("def set_mode", 1)[0]
     assert "begin_operation(" not in body
     assert "finish_operation(" not in body
-    assert "ApplicationTopBarStateZone" in text
+    assert "ApplicationHeroHeader" in text
+    assert "HeroAccentLine" in text
     assert "QPropertyAnimation" in text

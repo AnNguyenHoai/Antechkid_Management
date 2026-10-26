@@ -119,7 +119,8 @@ class HomePage(QWidget):
 
     def _setup_ui(self) -> None:
         self.setObjectName("HomeDashboardV3")
-        self.setStyleSheet(f"QWidget#HomeDashboardV3 {{ background-color: {COLORS['surface_app']}; }}")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("QWidget#HomeDashboardV3 { background: transparent; }")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -129,12 +130,16 @@ class HomePage(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setStyleSheet(f"QScrollArea#HomeDashboardScrollArea {{ background-color: {COLORS['surface_app']}; border: none; }}")
+        self.scroll_area.setStyleSheet(
+            "QScrollArea#HomeDashboardScrollArea { background: transparent; border: none; }"
+            "QScrollArea#HomeDashboardScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        self.scroll_area.viewport().setAutoFillBackground(False)
         root.addWidget(self.scroll_area)
 
         self.container = QWidget(self.scroll_area)
         self.container.setObjectName("HomeDashboardContent")
-        self.container.setStyleSheet(f"QWidget#HomeDashboardContent {{ background-color: {COLORS['surface_app']}; }}")
+        self.container.setStyleSheet("QWidget#HomeDashboardContent { background: transparent; }")
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setContentsMargins(SPACING["xxl"], SPACING["xl"], SPACING["xxl"], SPACING["xxl"])
         self.container_layout.setSpacing(SPACING["xl"])

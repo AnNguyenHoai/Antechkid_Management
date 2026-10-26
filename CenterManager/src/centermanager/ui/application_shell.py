@@ -11,12 +11,14 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt, Signal
-from PySide6.QtWidgets import QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from centermanager.core.application_identity import APPLICATION_DISPLAY_NAME, APPLICATION_PRODUCT_NAME
 from centermanager.ui.application_icon import build_application_icon
 from centermanager.ui.design_system.desktop import ElidedLabel, install_desktop_polish
 from centermanager.ui.design_system.feedback import FeedbackController, FeedbackHost, FeedbackRequest
+from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.foundation import Badge, Button
 from centermanager.ui.design_system.tokens import COLORS, COMPONENT_METRICS, FONT_FAMILY, FONT_WEIGHTS, SPACING, TYPOGRAPHY
 
@@ -60,7 +62,7 @@ class Breadcrumbs(QWidget):
 
 
 class ApplicationTopBar(QFrame):
-    """Balanced three-zone application header with inline WRITE-state UX."""
+    """Hero application header with clear brand, state, primary action and user identity."""
     start_edit_requested = Signal()
     finish_edit_requested = Signal()
     cancel_edit_requested = Signal()
@@ -78,100 +80,240 @@ class ApplicationTopBar(QFrame):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(140)
         self._activity_timer.timeout.connect(self._advance_activity_frame)
+
         shell_layout = QVBoxLayout(self)
-        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setContentsMargins(SPACING["xl"], SPACING["lg"], SPACING["xl"], 0)
         shell_layout.setSpacing(0)
+
         self.header = QFrame(self)
-        self.header.setObjectName("ApplicationTopBarHeader")
-        self.header.setFixedHeight(COMPONENT_METRICS["app_top_bar_height"])
-        layout = QHBoxLayout(self.header)
-        layout.setContentsMargins(0, 0, SPACING["lg"], 0)
-        layout.setSpacing(SPACING["lg"])
+        self.header.setObjectName("ApplicationHeroHeader")
+        self.header.setMinimumHeight(COMPONENT_METRICS["hero_header_card_height"])
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(SPACING["xl"], SPACING["lg"], SPACING["xl"], SPACING["lg"])
+        header_layout.setSpacing(SPACING["xl"])
 
-        left_zone = QWidget(self.header)
-        left_zone.setObjectName("ApplicationTopBarLeftZone")
-        left_layout = QVBoxLayout(left_zone)
-        left_layout.setContentsMargins(SPACING["lg"], 0, SPACING["md"], 0)
-        left_layout.setSpacing(1)
-        brand_row = QHBoxLayout(); brand_row.setContentsMargins(0, 0, 0, 0); brand_row.setSpacing(SPACING["sm"])
-        brand_label = QLabel("ANTECHKIDS")
-        brand_label.setStyleSheet(f"color: {COLORS['action_primary']}; font-size: {TYPOGRAPHY['body_small']}px; font-weight: {FONT_WEIGHTS['bold']}; letter-spacing: 0.6px;")
-        product_label = QLabel(APPLICATION_PRODUCT_NAME)
-        product_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body']}px; font-weight: {FONT_WEIGHTS['semibold']};")
-        brand_row.addWidget(brand_label); brand_row.addWidget(product_label); brand_row.addStretch()
-        meta_row = QHBoxLayout(); meta_row.setContentsMargins(0, 0, 0, 0); meta_row.setSpacing(SPACING["sm"])
+        brand_zone = QWidget(self.header)
+        brand_layout = QVBoxLayout(brand_zone)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(SPACING["sm"])
+
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(SPACING["md"])
+        brand_label = QLabel("ANTECHKIDS", brand_zone)
+        brand_label.setObjectName("HeroBrand")
+        product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)
+        product_label.setObjectName("HeroProduct")
+        brand_row.addWidget(brand_label)
+        brand_row.addWidget(product_label)
+        brand_row.addStretch()
+
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(SPACING["sm"])
         self.version_label = ElidedLabel(f"Runtime: {runtime_version}" if runtime_version else "Runtime")
+        self.version_label.setObjectName("HeroMeta")
+        separator = QLabel("|", brand_zone)
+        separator.setObjectName("HeroMetaSeparator")
         self.sync_label = ElidedLabel(f"Sync: {sync_status}")
-        for label in (self.version_label, self.sync_label):
-            label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;")
-            meta_row.addWidget(label)
-        meta_row.addStretch(); left_layout.addLayout(brand_row); left_layout.addLayout(meta_row)
-        left_zone.setFixedWidth(204)
-        layout.addWidget(left_zone)
+        self.sync_label.setObjectName("HeroMeta")
+        meta_row.addWidget(self.version_label)
+        meta_row.addWidget(separator)
+        meta_row.addWidget(self.sync_label)
+        meta_row.addStretch()
+        brand_layout.addLayout(brand_row)
+        brand_layout.addLayout(meta_row)
+        header_layout.addWidget(brand_zone, 1)
 
-        self.state_zone = QFrame(self.header)
-        self.state_zone.setObjectName("ApplicationTopBarStateZone")
-        state_layout = QHBoxLayout(self.state_zone)
-        state_layout.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], SPACING["xs"])
-        state_layout.setSpacing(SPACING["sm"])
+        right_zone = QWidget(self.header)
+        right_layout = QVBoxLayout(right_zone)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(SPACING["md"])
+
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(SPACING["md"])
+        status_row.addStretch()
+
+        key_icon = AppIcon("key", size=16, color=COLORS["action_primary"], tile_size=18, parent=right_zone)
+        status_row.addWidget(key_icon)
         self.mode_badge = Badge("Mode: READ", tone="neutral")
-        self.editor_badge = Badge("No active editor", tone="neutral")
         self.mode_badge.setAccessibleName("Application editing mode")
+        status_row.addWidget(self.mode_badge)
+
+        editor_icon = AppIcon("student", size=16, color=COLORS["action_primary"], tile_size=18, parent=right_zone)
+        status_row.addWidget(editor_icon)
+        self.editor_badge = Badge("No active editor", tone="neutral")
         self.editor_badge.setAccessibleName("Active editor status")
-        self.activity_label = QLabel("", self.state_zone)
+        status_row.addWidget(self.editor_badge)
+
+        ready_icon = AppIcon("check", size=16, color=COLORS["state_success"], tile_size=18, parent=right_zone)
+        status_row.addWidget(ready_icon)
+        self.transaction_label = ElidedLabel("Ready")
+        self.transaction_label.setObjectName("HeroTransaction")
+        status_row.addWidget(self.transaction_label)
+
+        self.activity_label = QLabel("", right_zone)
         self.activity_label.setObjectName("EditingActivityIndicator")
         self.activity_label.setFixedWidth(18)
         self.activity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.activity_label.setVisible(False)
         self.activity_label.setAccessibleName("Editing operation in progress")
-        self.transaction_label = ElidedLabel("Ready")
-        self.transaction_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: {TYPOGRAPHY['caption']}px; font-weight: {FONT_WEIGHTS['medium']};")
-        self.start_edit_button = Button("Start editing", variant="primary", size="sm")
-        self.finish_edit_button = Button("Finish editing", variant="accent", size="sm")
+        status_row.addWidget(self.activity_label)
+        right_layout.addLayout(status_row)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(SPACING["md"])
+        action_row.addStretch()
+
+        self.start_edit_button = Button("Start editing", variant="primary", size="lg")
+        self.finish_edit_button = Button("Finish editing", variant="accent", size="lg")
         self.cancel_edit_button = Button("Cancel request", variant="ghost", size="sm")
         self.start_edit_button.setAccessibleName("Start editing")
         self.finish_edit_button.setAccessibleName("Finish editing")
         self.cancel_edit_button.setAccessibleName("Cancel editing request")
-        self.finish_edit_button.setVisible(False); self.cancel_edit_button.setVisible(False)
+        self.finish_edit_button.setVisible(False)
+        self.cancel_edit_button.setVisible(False)
         self.start_edit_button.clicked.connect(self._request_start_editing)
         self.finish_edit_button.clicked.connect(self._request_finish_editing)
         self.cancel_edit_button.clicked.connect(self.cancel_edit_requested.emit)
-        state_layout.addWidget(self.mode_badge); state_layout.addWidget(self.editor_badge); state_layout.addWidget(self.activity_label); state_layout.addWidget(self.transaction_label, 1)
-        state_layout.addWidget(self.start_edit_button); state_layout.addWidget(self.finish_edit_button); state_layout.addWidget(self.cancel_edit_button)
-        layout.addWidget(self.state_zone, 2)
+        action_row.addWidget(self.start_edit_button)
+        action_row.addWidget(self.finish_edit_button)
+        action_row.addWidget(self.cancel_edit_button)
+
+        initials = "".join(part[:1] for part in (user_name or "U").split()[:2]).upper() or "U"
+        self.user_avatar = QLabel(initials, right_zone)
+        self.user_avatar.setObjectName("HeroUserAvatar")
+        self.user_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.user_avatar.setFixedSize(42, 42)
+        action_row.addWidget(self.user_avatar)
+
+        user_layout = QVBoxLayout()
+        user_layout.setContentsMargins(0, 0, 0, 0)
+        user_layout.setSpacing(1)
+        self.user_label = ElidedLabel(user_name)
+        self.user_label.setObjectName("HeroUserName")
+        self.role_label = ElidedLabel(role_name or "User")
+        self.role_label.setObjectName("HeroUserRole")
+        user_layout.addWidget(self.user_label)
+        user_layout.addWidget(self.role_label)
+        action_row.addLayout(user_layout)
+        right_layout.addLayout(action_row)
+        header_layout.addWidget(right_zone, 1)
+
+        accent = QFrame(self.header)
+        accent.setObjectName("HeroAccentLine")
+        accent.setFixedHeight(COMPONENT_METRICS["hero_header_accent_height"])
+
+        hero_stack = QVBoxLayout()
+        hero_stack.setContentsMargins(0, 0, 0, 0)
+        hero_stack.setSpacing(0)
+        hero_stack.addWidget(self.header)
+        hero_stack.addWidget(accent)
+        hero_host = QWidget(self)
+        hero_host.setLayout(hero_stack)
+        shell_layout.addWidget(hero_host)
+
+        shadow = QGraphicsDropShadowEffect(self.header)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 5)
+        shadow_color = QColor(COLORS["shadow_color"])
+        shadow_color.setAlpha(34)
+        shadow.setColor(shadow_color)
+        self.header.setGraphicsEffect(shadow)
+
+        self.feedback_controller = feedback_controller or FeedbackController(self)
+        self.feedback_host = FeedbackHost(self.feedback_controller, parent=self)
+        shell_layout.addWidget(self.feedback_host)
+
+        self.state_zone = right_zone
         self._state_opacity = QGraphicsOpacityEffect(self.state_zone)
         self.state_zone.setGraphicsEffect(self._state_opacity)
         self._state_animation = QPropertyAnimation(self._state_opacity, b"opacity", self)
         self._state_animation.setDuration(180)
         self._state_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        user_separator = QFrame(); user_separator.setFrameShape(QFrame.Shape.VLine); user_separator.setStyleSheet(f"color: {COLORS['border_default']};")
-        layout.addWidget(user_separator)
-        user_layout = QVBoxLayout(); user_layout.setContentsMargins(0, 0, 0, 0); user_layout.setSpacing(0)
-        self.user_label = ElidedLabel(user_name)
-        self.user_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: {TYPOGRAPHY['body_small']}px; font-weight: {FONT_WEIGHTS['semibold']};")
-        self.role_label = ElidedLabel(role_name or "User")
-        self.role_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;")
-        user_layout.addWidget(self.user_label, alignment=Qt.AlignmentFlag.AlignRight); user_layout.addWidget(self.role_label, alignment=Qt.AlignmentFlag.AlignRight)
-        layout.addLayout(user_layout)
+        self.setStyleSheet(
+            f"""
+            QFrame#ApplicationTopBar {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#ApplicationHeroHeader {{
+                background: {COLORS['surface_card']};
+                border: 1px solid {COLORS['border_default']};
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }}
+            QFrame#ApplicationHeroHeader QLabel {{
+                border: none;
+                background: transparent;
+                font-family: {FONT_FAMILY};
+            }}
+            QLabel#HeroBrand {{
+                color: {COLORS['brand_blue_900']};
+                font-size: {TYPOGRAPHY['page_title']}px;
+                font-weight: {FONT_WEIGHTS['bold']};
+                letter-spacing: 0.8px;
+            }}
+            QLabel#HeroProduct {{
+                color: {COLORS['text_secondary']};
+                font-size: {TYPOGRAPHY['section_title']}px;
+                font-weight: {FONT_WEIGHTS['regular']};
+            }}
+            QLabel#HeroMeta, QLabel#HeroMetaSeparator {{
+                color: {COLORS['text_muted']};
+                font-size: {TYPOGRAPHY['body_small']}px;
+                font-weight: {FONT_WEIGHTS['regular']};
+            }}
+            QLabel#HeroTransaction {{
+                color: {COLORS['text_secondary']};
+                font-size: {TYPOGRAPHY['body_small']}px;
+                font-weight: {FONT_WEIGHTS['medium']};
+            }}
+            QLabel#HeroUserAvatar {{
+                color: {COLORS['text_inverse']};
+                background: {COLORS['brand_blue_700']};
+                border: 2px solid {COLORS['blue_100']};
+                border-radius: 21px;
+                font-size: {TYPOGRAPHY['body_large']}px;
+                font-weight: {FONT_WEIGHTS['bold']};
+            }}
+            QLabel#HeroUserName {{
+                color: {COLORS['text_primary']};
+                font-size: {TYPOGRAPHY['body']}px;
+                font-weight: {FONT_WEIGHTS['semibold']};
+            }}
+            QLabel#HeroUserRole {{
+                color: {COLORS['text_muted']};
+                font-size: {TYPOGRAPHY['caption']}px;
+            }}
+            QFrame#HeroAccentLine {{
+                background: {COLORS['action_accent']};
+                border: none;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
+            }}
+            QLabel#EditingActivityIndicator {{
+                color: {COLORS['action_primary']};
+                font-size: {TYPOGRAPHY['body']}px;
+                font-weight: {FONT_WEIGHTS['bold']};
+            }}
+            """
+        )
 
-        shell_layout.addWidget(self.header)
-        self.feedback_controller = feedback_controller or FeedbackController(self)
-        self.feedback_host = FeedbackHost(self.feedback_controller, parent=self)
-        shell_layout.addWidget(self.feedback_host)
-        self.setStyleSheet(f"""
-            QFrame#ApplicationTopBar {{ background-color: {COLORS['surface_page']}; border: none; }}
-            QFrame#ApplicationTopBarHeader {{ background-color: {COLORS['surface_page']}; border: none; border-bottom: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_default']}; }}
-            QFrame#ApplicationTopBarHeader QLabel {{ border: none; background: transparent; font-family: {FONT_FAMILY}; }}
-            QFrame#ApplicationTopBarStateZone {{ background-color: {COLORS['surface_hover']}; border: {COMPONENT_METRICS['border_width']}px solid {COLORS['border_subtle']}; border-radius: {SPACING['sm']}px; }}
-            QLabel#EditingActivityIndicator {{ color: {COLORS['action_primary']}; font-size: {TYPOGRAPHY['body']}px; font-weight: {FONT_WEIGHTS['bold']}; }}
-        """)
-        self.mode_label = self.mode_badge; self.waiting_indicator = self.editor_badge; self.tx_state_label = self.transaction_label
-        self.start_edit_btn = self.start_edit_button; self.finish_edit_btn = self.finish_edit_button; self.cancel_btn = self.cancel_edit_button
-        self.resize(self.width(), COMPONENT_METRICS["app_top_bar_height"])
+        self.mode_label = self.mode_badge
+        self.waiting_indicator = self.editor_badge
+        self.tx_state_label = self.transaction_label
+        self.start_edit_btn = self.start_edit_button
+        self.finish_edit_btn = self.finish_edit_button
+        self.cancel_btn = self.cancel_edit_button
+
         top_level = self.window()
         if top_level is not self:
-            top_level.setWindowTitle(APPLICATION_DISPLAY_NAME); top_level.setWindowIcon(build_application_icon())
+            top_level.setWindowTitle(APPLICATION_DISPLAY_NAME)
+            top_level.setWindowIcon(build_application_icon())
         install_desktop_polish(self.window())
 
     def _animate_state_change(self) -> None:
