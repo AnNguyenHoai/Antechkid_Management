@@ -72,6 +72,7 @@ class ClassListPage(QWidget):
         self.search_bar.search_changed.connect(self._on_search)
         self.search_bar.filters_changed.connect(self._on_status_filters_changed)
         status_control = self.search_bar.filter_controls["status"]
+        self.status_filter = status_control  # compatibility alias
         previous = status_control.blockSignals(True)
         self.search_bar.set_filter_value("status", "Active")
         status_control.blockSignals(previous)
