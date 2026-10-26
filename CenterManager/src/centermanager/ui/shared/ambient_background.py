@@ -23,9 +23,9 @@ class AmbientBackground(QWidget):
         rect = self.rect()
 
         base = QLinearGradient(0, 0, rect.width(), rect.height())
-        base.setColorAt(0.0, QColor("#fbfcfe"))
-        base.setColorAt(0.45, QColor("#f8fbfd"))
-        base.setColorAt(1.0, QColor("#f6f9fc"))
+        base.setColorAt(0.0, QColor(COLORS["ambient_base_start"]))
+        base.setColorAt(0.45, QColor(COLORS["ambient_base_mid"]))
+        base.setColorAt(1.0, QColor(COLORS["ambient_base_end"]))
         painter.fillRect(rect, base)
 
         self._paint_warm_glow(painter, rect)
@@ -35,6 +35,12 @@ class AmbientBackground(QWidget):
         self._paint_chip(painter, rect)
         self._paint_gears(painter, rect)
         painter.end()
+
+    @staticmethod
+    def _with_alpha(color: str, alpha: int) -> QColor:
+        value = QColor(color)
+        value.setAlpha(alpha)
+        return value
 
     @staticmethod
     def _paint_warm_glow(painter: QPainter, rect) -> None:
@@ -47,14 +53,14 @@ class AmbientBackground(QWidget):
     @staticmethod
     def _paint_cool_glow(painter: QPainter, rect) -> None:
         gradient = QLinearGradient(rect.width(), 0, rect.width() * 0.48, rect.height() * 0.72)
-        gradient.setColorAt(0.0, QColor(25, 118, 210, 30))
+        gradient.setColorAt(0.0, AmbientBackground._with_alpha(COLORS["action_primary"], 30))
         gradient.setColorAt(0.4, QColor(66, 165, 245, 12))
         gradient.setColorAt(1.0, QColor(66, 165, 245, 0))
         painter.fillRect(rect, gradient)
 
     @staticmethod
     def _paint_network(painter: QPainter, rect) -> None:
-        pen = QPen(QColor(38, 90, 130, 24), 1)
+        pen = QPen(AmbientBackground._with_alpha(COLORS["ambient_network"], 24), 1)
         painter.setPen(pen)
         left = [
             (0.02, 0.18), (0.10, 0.08), (0.16, 0.28), (0.23, 0.14),
@@ -68,7 +74,7 @@ class AmbientBackground(QWidget):
             mapped = [QPointF(rect.width() * x, rect.height() * y) for x, y in points]
             for a, b in zip(mapped, mapped[1:]):
                 painter.drawLine(a, b)
-            painter.setBrush(QColor(38, 90, 130, 34))
+            painter.setBrush(AmbientBackground._with_alpha(COLORS["ambient_network"], 34))
             painter.setPen(Qt.PenStyle.NoPen)
             for point in mapped:
                 painter.drawEllipse(point, 3, 3)
@@ -79,13 +85,13 @@ class AmbientBackground(QWidget):
         x = rect.width() * 0.035
         y = rect.height() * 0.70
         size = max(44.0, min(rect.width(), rect.height()) * 0.08)
-        pen = QPen(QColor(52, 95, 130, 22), 2)
+        pen = QPen(AmbientBackground._with_alpha(COLORS["ambient_network"], 22), 2)
         painter.setPen(pen)
         painter.setBrush(QColor(255, 255, 255, 60))
         for dx, dy, scale in ((0, 0, 1.0), (0.78, 0.20, 0.86), (0.35, -0.62, 0.72)):
             box = QRectF(x + dx * size, y + dy * size, size * scale, size * scale)
             painter.drawRoundedRect(box, 8, 8)
-        painter.setPen(QPen(QColor(25, 118, 210, 32), 2))
+        painter.setPen(QPen(AmbientBackground._with_alpha(COLORS["action_primary"], 32), 2))
         painter.drawText(QRectF(x, y, size, size), Qt.AlignmentFlag.AlignCenter, "A")
 
     @staticmethod
@@ -94,8 +100,8 @@ class AmbientBackground(QWidget):
         x = rect.width() - size * 1.55
         y = rect.height() * 0.06
         chip = QRectF(x, y, size, size)
-        painter.setPen(QPen(QColor(25, 118, 210, 24), 2))
-        painter.setBrush(QColor(25, 118, 210, 10))
+        painter.setPen(QPen(AmbientBackground._with_alpha(COLORS["action_primary"], 24), 2))
+        painter.setBrush(AmbientBackground._with_alpha(COLORS["action_primary"], 10))
         painter.drawRoundedRect(chip, 10, 10)
         painter.setPen(QPen(QColor(25, 118, 210, 30), 2))
         painter.drawText(chip, Qt.AlignmentFlag.AlignCenter, "AI")
@@ -108,8 +114,8 @@ class AmbientBackground(QWidget):
 
     @staticmethod
     def _paint_gears(painter: QPainter, rect) -> None:
-        painter.setPen(QPen(QColor(65, 105, 135, 20), 2))
-        painter.setBrush(QColor(65, 105, 135, 8))
+        painter.setPen(QPen(AmbientBackground._with_alpha(COLORS["ambient_gear"], 20), 2))
+        painter.setBrush(AmbientBackground._with_alpha(COLORS["ambient_gear"], 8))
         for x, y, radius in ((0.19, 0.24, 22), (0.225, 0.29, 14), (0.70, 0.22, 12)):
             center = QPointF(rect.width() * x, rect.height() * y)
             painter.drawEllipse(center, radius, radius)
