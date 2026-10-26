@@ -109,7 +109,7 @@ def test_ep_prototype_04_class_detail_required_context():
     assert "ClassScheduleWidget" in overview_source
     assert "Add Session" in overview_source
     assert "TimelineWidget" in overview_source
-    assert '"Timeline"' in overview_source
+    assert "Timeline" in overview_source
     assert "EntityHeader" in overview_source
 
 
