@@ -36,7 +36,7 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.income_detail_dialog import IncomeDetailDialog
 from centermanager.ui.finance_workspace.income_form_dialog import IncomeFormDialog
-from centermanager.ui.shared import DataTable, LoadingWidget
+from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
 
@@ -83,29 +83,27 @@ class IncomeListPage(QWidget):
 
         toolbar = QWidget()
         toolbar.setStyleSheet(
-            f"background: {COLORS['surface']}; "
+            f"background: {COLORS['surface_page']}; "
             f"padding: {SPACING['sm']}px {SPACING['md']}px; "
-            f"border-bottom: 1px solid {COLORS['border_light']};"
+            f"border-bottom: 1px solid {COLORS['border_default']};"
         )
         toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
 
         top_row = QHBoxLayout()
-        self.search_bar = SearchBar(
-            "Tìm theo học sinh, mã HS, lớp, loại, ghi chú, người thu..."
-        )
-        self.search_bar.text_changed.connect(self._schedule_search)
+        self.search_bar = SearchToolbar(placeholder="Tìm theo học sinh, mã HS, lớp, loại, ghi chú, người thu...")
+        self.search_bar.search_changed.connect(self._schedule_search)
         top_row.addWidget(self.search_bar)
 
-        self.refresh_btn = SecondaryButton("🔄 Làm mới")
+        self.refresh_btn = SecondaryButton("Làm mới")
         self.refresh_btn.clicked.connect(self.refresh)
         top_row.addWidget(self.refresh_btn)
 
-        self.export_btn = SecondaryButton("⬇ Xuất CSV")
+        self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
 
-        self.add_btn = PrimaryButton("+ Thêm thu nhập")
+        self.add_btn = PrimaryButton("Thêm thu nhập")
         self.add_btn.clicked.connect(self._show_add_dialog)
         top_row.addWidget(self.add_btn)
         toolbar_layout.addLayout(top_row)
@@ -172,7 +170,7 @@ class IncomeListPage(QWidget):
             {"key": "received_by", "label": "Người thu", "sortable": True},
             {"key": "note", "label": "Ghi chú", "sortable": False},
         ]
-        self.data_table = DataTable(columns, page_size=self._page_size)
+        self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
