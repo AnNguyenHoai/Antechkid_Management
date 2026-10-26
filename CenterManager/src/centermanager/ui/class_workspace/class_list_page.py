@@ -8,8 +8,7 @@ from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QMessageBox, QMenu, QSizePolicy, QComboBox
+    QWidget, QVBoxLayout, QMessageBox, QMenu
 )
 from PySide6.QtGui import QAction
 
@@ -17,11 +16,10 @@ from centermanager.models.class_ import Class
 from centermanager.services.class_service import ClassService
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
-from centermanager.ui.design_system import (
-    SearchBar, EmptyState, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.shared import (
+    BulkActionBar, DataTable, LoadingWidget, SearchToolbar, TableDensity
 )
-from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget
 from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
 from centermanager.platform.collaboration import CollaborationManager
@@ -63,74 +61,37 @@ class ClassListPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar
-        toolbar = QWidget()
-        toolbar.setStyleSheet(f"""
-            background: {COLORS['surface']};
-            padding: {SPACING['sm']}px {SPACING['md']}px;
-            border-bottom: 1px solid {COLORS['border_light']};
-        """)
-        toolbar_layout = QVBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(SPACING['xs'])
-
-        top_row = QHBoxLayout()
-        top_row.setSpacing(SPACING['sm'])
-
-        self.search_bar = SearchBar("Search by name, course, teacher...")
-        self.search_bar.text_changed.connect(self._on_search)
-        top_row.addWidget(self.search_bar)
-
-        self.status_filter = QComboBox(toolbar)
-        self.status_filter.setMinimumWidth(125)
-        self.status_filter.addItem("Active", "ACTIVE")
-        self.status_filter.addItem("Inactive", "INACTIVE")
-        self.status_filter.addItem("All", "ALL")
-        self.status_filter.setCurrentIndex(0)
-        self.status_filter.setToolTip("Filter classes by operational status")
-        self.status_filter.currentIndexChanged.connect(self._on_status_filter_changed)
-        top_row.addWidget(self.status_filter)
-
-        self.refresh_btn = SecondaryButton("🔄 Refresh")
-        self.refresh_btn.setFixedHeight(34)
-        self.refresh_btn.clicked.connect(self.refresh)
-        top_row.addWidget(self.refresh_btn)
-
-        self.add_btn = PrimaryButton("+ Add Class")
-        self.add_btn.setFixedHeight(34)
-        self.add_btn.clicked.connect(self.show_add_dialog)
-        top_row.addWidget(self.add_btn)
-
-        # Selection controls stay inside the existing toolbar row. Showing or
-        # hiding them must never insert/remove a vertical strip above the table.
-        self.bulk_bar = QWidget(toolbar)
-        self.bulk_bar.setFixedHeight(34)
-        self.bulk_bar.setStyleSheet(f"""
-            background: {COLORS['primary_hover']};
-            padding: 0 {SPACING['sm']}px;
-            border-radius: 4px;
-        """)
-        self.bulk_bar.setVisible(False)
-        bulk_layout = QHBoxLayout(self.bulk_bar)
-        bulk_layout.setContentsMargins(0, 0, 0, 0)
-        bulk_layout.setSpacing(SPACING['xs'])
-        self.bulk_count_label = QLabel("0 selected")
-        self.bulk_count_label.setStyleSheet(
-            f"color: {COLORS['text_primary']}; font-weight: 500;"
+        toolbar = Toolbar(self)
+        self.search_bar = SearchToolbar(
+            placeholder="Search by name, course, teacher...",
+            filters=[
+                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "All"]},
+            ],
+            parent=toolbar,
         )
-        bulk_layout.addWidget(self.bulk_count_label)
-        self.bulk_archive_btn = QPushButton("Archive Selected")
-        self.bulk_archive_btn.setFixedHeight(28)
-        self.bulk_archive_btn.setStyleSheet(f"color: {COLORS['danger']};")
-        self.bulk_archive_btn.clicked.connect(self._bulk_archive)
-        bulk_layout.addWidget(self.bulk_archive_btn)
-        self.bulk_clear_btn = QPushButton("Clear")
-        self.bulk_clear_btn.setFixedHeight(28)
-        self.bulk_clear_btn.clicked.connect(self._clear_selection)
-        bulk_layout.addWidget(self.bulk_clear_btn)
-        top_row.addWidget(self.bulk_bar)
+        self.search_bar.search_changed.connect(self._on_search)
+        self.search_bar.filters_changed.connect(self._on_status_filters_changed)
+        self.search_bar.set_filter_value("status", "Active")
+        toolbar.add_widget(self.search_bar, align="start")
 
-        toolbar_layout.addLayout(top_row)
+        self.refresh_btn = toolbar.add_action(
+            "Refresh", self.refresh, variant=ButtonVariant.SECONDARY
+        )
+        self.add_btn = toolbar.add_action(
+            "Add Class", self.show_add_dialog, variant=ButtonVariant.PRIMARY
+        )
+
+        self.bulk_bar = BulkActionBar(toolbar)
+        self.bulk_archive_btn = self.bulk_bar.add_action(
+            "archive",
+            "Archive selected",
+            self._bulk_archive,
+            variant=ButtonVariant.DANGER,
+        )
+        self.bulk_bar.clear_requested.connect(self._clear_selection)
+        self.bulk_count_label = self.bulk_bar.count_label
+        self.bulk_clear_btn = self.bulk_bar.clear_button
+        toolbar.add_widget(self.bulk_bar, align="end")
         layout.addWidget(toolbar)
 
         # Data Table
@@ -142,7 +103,13 @@ class ClassListPage(QWidget):
             {"key": "status", "label": "Status", "sortable": True},
             {"key": "schedule", "label": "Schedule", "sortable": False},
         ]
-        self.data_table = DataTable(columns, page_size=20)
+        self.data_table = DataTable(
+            columns,
+            page_size=20,
+            density=TableDensity.COMPACT,
+            empty_title="No classes found",
+            empty_message="Class records matching the current view will appear here.",
+        )
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.selection_changed.connect(self._on_selection_changed)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -177,7 +144,8 @@ class ClassListPage(QWidget):
         self._populate_table()
 
     def _filter_classes(self, text: str) -> List[Class]:
-        status = self.status_filter.currentData() or "ACTIVE"
+        status_map = {"Active": "ACTIVE", "Inactive": "INACTIVE", "All": "ALL"}
+        status = status_map.get(self.search_bar.filters().get("status", "Active"), "ACTIVE")
         normalized = text.strip().casefold()
         filtered = [
             class_obj
@@ -222,7 +190,7 @@ class ClassListPage(QWidget):
     def _on_search(self, text: str) -> None:
         self._apply_filters_and_sort()
 
-    def _on_status_filter_changed(self, _index: int) -> None:
+    def _on_status_filters_changed(self, _filters) -> None:
         self._clear_selection()
         self._apply_filters_and_sort()
 
@@ -240,8 +208,7 @@ class ClassListPage(QWidget):
 
     def _update_bulk_bar(self) -> None:
         count = len(self._selected_ids)
-        self.bulk_bar.setVisible(count > 0)
-        self.bulk_count_label.setText(f"{count} selected")
+        self.bulk_bar.set_selection_count(count)
 
     def _clear_selection(self) -> None:
         self.data_table.clear_selection()
