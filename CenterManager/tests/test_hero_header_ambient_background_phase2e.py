@@ -68,7 +68,7 @@ def test_home_reveals_ambient_surface_without_making_cards_translucent():
     assert 'self.setStyleSheet("QWidget#HomeDashboardV3 { background: transparent; }")' in home
     assert "self.scroll_area.viewport().setAutoFillBackground(False)" in home
     assert 'self.container.setStyleSheet("QWidget#HomeDashboardContent { background: transparent; }")' in home
-    assert "background-color: {COLORS['surface_card']}" in cards or 'background: {COLORS["surface_card"]}' in cards
+    assert 'background-color: {COLORS["surface_card"]}' in cards
 
 
 def test_phase_2e_geometry_is_token_owned():
