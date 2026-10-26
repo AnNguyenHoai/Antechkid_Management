@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QLabel, QWidget
 
@@ -64,7 +64,7 @@ class AppIcon(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if self._tile_color:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self._tile_color)
+            painter.setBrush(QColor(self._tile_color))
             painter.drawRoundedRect(
                 QRectF(0, 0, self._tile_size, self._tile_size),
                 RADIUS["md"],
