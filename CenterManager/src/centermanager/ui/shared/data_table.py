@@ -235,7 +235,7 @@ class DataTable(QWidget):
                 font-size: {TYPOGRAPHY["body_small"]}px;
             }}
             QTableWidget#DataTableGrid:focus {{
-                border-color: {COLORS["focus_ring"]};
+                border: 2px solid {COLORS["focus_ring"]};
             }}
             QTableWidget#DataTableGrid::item {{
                 padding-left: {SPACING["sm"]}px;
@@ -244,6 +244,10 @@ class DataTable(QWidget):
             }}
             QTableWidget#DataTableGrid::item:hover {{
                 background-color: {COLORS["surface_hover"]};
+            }}
+            QTableWidget#DataTableGrid::item:selected {{
+                background-color: {COLORS["action_primary_selected"]};
+                color: {COLORS["action_primary_hover"]};
             }}
             QHeaderView::section {{
                 background-color: {COLORS["gray_50"]};
@@ -333,7 +337,7 @@ class DataTable(QWidget):
             QFrame#DataTableFooter {{
                 background-color: {COLORS["surface_page"]};
                 border: none;
-                border-top: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_subtle"]};
+                border-top: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]};
             }}
             QLabel#DataTableResultCount,
             QLabel#DataTablePageLabel,
