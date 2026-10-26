@@ -19,7 +19,8 @@ from centermanager.services.employee_admin_management_service import (
 )
 from centermanager.models.role import RoleDefinitions
 from centermanager.core.current_user import get_current_user
-from centermanager.ui.shared import DataTable
+from centermanager.ui.design_system.foundation import ButtonVariant, Toolbar
+from centermanager.ui.shared import DataTable, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
 
@@ -424,50 +425,64 @@ class EmployeeListPage(QWidget):
 
     def _setup(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        title_row = QHBoxLayout()
-        title = QLabel("Employees")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
-        self.count_label = QLabel("0 employees")
-        self.count_label.setStyleSheet("color: #68737d;")
-        title_row.addWidget(title)
-        title_row.addStretch()
-        title_row.addWidget(self.count_label)
-        layout.addLayout(title_row)
+        toolbar = Toolbar(self)
+        self.search_bar = SearchToolbar(
+            placeholder="Search code, name, phone, email...",
+            filters=[
+                {
+                    "key": "status",
+                    "label": "Status",
+                    "options": [
+                        status.replace("_", " ").title()
+                        for status in sorted(Employee.VALID_STATUSES)
+                    ],
+                },
+            ],
+            parent=toolbar,
+        )
+        self.search_bar.search_changed.connect(self.apply)
+        self.search_bar.filters_changed.connect(lambda _filters: self.apply())
+        toolbar.add_widget(self.search_bar, align="start")
 
-        subtitle = QLabel("Select an employee to open the full profile.")
-        subtitle.setStyleSheet("color: #68737d;")
-        layout.addWidget(subtitle)
+        # Compatibility aliases used by existing filtering logic.
+        self.search = self.search_bar.search_input
+        self.filter = self.search_bar.filter_controls["status"]
 
-        bar = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search code, name, phone, email...")
-        self.search.textChanged.connect(self.apply)
-        self.filter = QComboBox(); self.filter.addItem("All", "ALL")
-        for status in sorted(Employee.VALID_STATUSES):
-            self.filter.addItem(status.replace("_", " ").title(), status)
-        self.filter.currentIndexChanged.connect(self.apply)
-        self.refresh_btn = QPushButton("Refresh"); self.refresh_btn.clicked.connect(self.refresh)
-        self.delete_btn = QPushButton("Delete Employee")
-        self.delete_btn.setToolTip("Delete an employee only when no operational history exists.")
-        self.delete_btn.clicked.connect(self.delete_selected)
-        for w in (self.search, self.filter, self.refresh_btn, self.delete_btn): bar.addWidget(w)
-        layout.addLayout(bar)
+        self.count_label = QLabel("0 employees", toolbar)
+        toolbar.add_widget(self.count_label, align="end")
+        self.refresh_btn = toolbar.add_action(
+            "Refresh", self.refresh, variant=ButtonVariant.SECONDARY
+        )
+        self.delete_btn = toolbar.add_action(
+            "Delete Employee", self.delete_selected, variant=ButtonVariant.DANGER
+        )
+        self.delete_btn.setToolTip(
+            "Delete an employee only when no operational history exists."
+        )
+        layout.addWidget(toolbar)
 
-        self.table = DataTable([
-            {"key":"code","label":"Code","sortable":True},
-            {"key":"name","label":"Name","sortable":True},
-            {"key":"position","label":"Position","sortable":True},
-            {"key":"department","label":"Department","sortable":True},
-            {"key":"phone","label":"Phone","sortable":True},
-            {"key":"status","label":"Status","sortable":True},
-            {"key":"hire_date","label":"Hire Date","sortable":True},
-            {"key":"account","label":"Account","sortable":True},
-        ], page_size=20)
+        self.table = DataTable(
+            [
+                {"key": "code", "label": "Code", "sortable": True},
+                {"key": "name", "label": "Name", "sortable": True},
+                {"key": "position", "label": "Position", "sortable": True},
+                {"key": "department", "label": "Department", "sortable": True},
+                {"key": "phone", "label": "Phone", "sortable": True},
+                {"key": "status", "label": "Status", "sortable": True},
+                {"key": "hire_date", "label": "Hire Date", "sortable": True},
+                {"key": "account", "label": "Account", "sortable": True},
+            ],
+            page_size=20,
+            density=TableDensity.COMPACT,
+            empty_title="No employees found",
+            empty_message="Employee records matching the current view will appear here.",
+        )
         self.table.row_double_clicked.connect(self.edit_selected)
         self.table.selection_changed.connect(self._on_selection_changed)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, 1)
 
     @staticmethod
     def _is_admin():
@@ -536,10 +551,16 @@ class EmployeeListPage(QWidget):
         self.apply()
 
     def apply(self):
-        q = self.search.text().lower().strip(); status = self.filter.currentData()
+        q = self.search.text().lower().strip()
+        status_label = self.search_bar.filters().get("status", "")
+        status = None
+        if status_label:
+            normalized = status_label.upper().replace(" ", "_")
+            status = normalized if normalized in Employee.VALID_STATUSES else None
         data = []
         for e in self.rows:
-            if status != "ALL" and e.employment_status != status: continue
+            if status is not None and e.employment_status != status:
+                continue
             blob = " ".join([e.employee_code,e.full_name,e.phone or "",e.email or "",e.position or "",e.department or ""]).lower()
             if q and q not in blob: continue
             data.append({"code":e.employee_code,"name":e.full_name,"position":e.position or "-",
