@@ -71,7 +71,10 @@ class ClassListPage(QWidget):
         )
         self.search_bar.search_changed.connect(self._on_search)
         self.search_bar.filters_changed.connect(self._on_status_filters_changed)
+        status_control = self.search_bar.filter_controls["status"]
+        previous = status_control.blockSignals(True)
         self.search_bar.set_filter_value("status", "Active")
+        status_control.blockSignals(previous)
         toolbar.add_widget(self.search_bar, align="start")
 
         self.refresh_btn = toolbar.add_action(
