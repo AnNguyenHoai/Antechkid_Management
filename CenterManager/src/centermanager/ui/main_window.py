@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.ui.application_shell import ApplicationTopBar
 from centermanager.ui.global_navigation import GlobalSidebar
+from centermanager.ui.shared import AmbientBackground
 from centermanager.ui.design_system.tokens import COLORS, FONT_FAMILY, SPACING, TYPOGRAPHY
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
@@ -223,9 +224,8 @@ class MainWindow(QMainWindow):
         if self._sync_service is not None:
             sync_status = str(self._sync_service.current_state().get("status", "idle"))
 
-        root = QWidget(self)
+        root = AmbientBackground(self)
         root.setObjectName("ApplicationShellRoot")
-        root.setStyleSheet(f"background: {COLORS['surface_app']};")
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -244,6 +244,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.app_top_bar)
 
         shell_body = QWidget(root)
+        shell_body.setObjectName("ApplicationShellBody")
+        shell_body.setStyleSheet("QWidget#ApplicationShellBody { background: transparent; }")
         shell_body_layout = QHBoxLayout(shell_body)
         shell_body_layout.setContentsMargins(0, 0, 0, 0)
         shell_body_layout.setSpacing(0)
