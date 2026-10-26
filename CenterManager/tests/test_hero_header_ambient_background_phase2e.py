@@ -16,15 +16,15 @@ def test_hero_header_exposes_reference_visual_hierarchy_without_changing_edit_ap
 
     assert 'self.header.setObjectName("ApplicationHeroHeader")' in source
     assert 'brand_label = QLabel("ANTECHKIDS", brand_zone)' in source
-    assert 'product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)' in source
-    assert 'self.version_label = ElidedLabel(' in source
-    assert 'self.sync_label = ElidedLabel(' in source
-    assert 'self.mode_badge = Badge("Mode: READ"' in source
-    assert 'self.editor_badge = Badge("No active editor"' in source
-    assert 'self.transaction_label = ElidedLabel("Ready")' in source
+    assert 'self.product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)' in source
+    assert 'self.version_label = _HeaderPill(' in source
+    assert 'self.sync_label = _HeaderPill(' in source
+    assert 'self.mode_badge = _HeaderPill(' in source
+    assert 'self.editor_badge = _HeaderPill(' in source
+    assert 'self.transaction_label = _HeaderPill(' in source
     assert 'self.start_edit_button = Button("Start editing", variant="primary", size="lg")' in source
-    assert 'self.finish_edit_button = Button("Finish editing", variant="accent", size="lg")' in source
-    assert 'self.user_avatar = QLabel(initials, right_zone)' in source
+    assert 'self.finish_edit_button = Button("Finish editing", variant="primary", size="lg")' in source
+    assert 'self.user_avatar = QLabel(initials, control_zone)' in source
     assert 'accent.setObjectName("HeroAccentLine")' in source
 
 
@@ -32,10 +32,11 @@ def test_hero_header_uses_deterministic_vector_status_icons():
     shell = _source("application_shell.py")
     icons = _source("app_icon.py")
 
-    assert 'AppIcon("key"' in shell
-    assert 'AppIcon("student"' in shell
-    assert 'AppIcon("check"' in shell
-    assert '"key":' in icons
+    assert 'icon="edit"' in shell
+    assert 'icon="users"' in shell
+    assert 'icon="check"' in shell
+    assert '"edit":' in icons
+    assert '"users":' in icons
 
 
 def test_ambient_background_is_responsive_painted_surface_not_raster_wallpaper():

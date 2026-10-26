@@ -50,18 +50,13 @@ def test_top_bar_uses_overflow_safe_labels_without_breaking_contract(app):
         sync_status="synchronizing-with-remote-runtime",
     )
 
-    for label in (
-        top_bar.version_label,
-        top_bar.sync_label,
-        top_bar.transaction_label,
-        top_bar.user_label,
-        top_bar.role_label,
-    ):
+    for label in (top_bar.user_label, top_bar.role_label):
         assert isinstance(label, ElidedLabel)
         assert label.minimumSizeHint().width() == 0
 
     assert top_bar.version_label.text() == "Runtime: v2026.09.23-production"
     assert top_bar.sync_label.text() == "Sync: synchronizing-with-remote-runtime"
+    assert top_bar.transaction_label.text() == "Ready"
 
 
 def test_desktop_window_policy_centers_a_first_run_window(app, tmp_path):

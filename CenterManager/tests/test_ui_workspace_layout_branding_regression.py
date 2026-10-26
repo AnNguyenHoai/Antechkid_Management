@@ -63,4 +63,4 @@ def test_application_shell_applies_new_title_and_avatar():
     source = _source("ui/application_shell.py")
     assert "setWindowTitle(APPLICATION_DISPLAY_NAME)" in source
     assert "setWindowIcon(build_application_icon())" in source
-    assert "QLabel(APPLICATION_PRODUCT_NAME, brand_zone)" in source
+    assert "self.product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)" in source
