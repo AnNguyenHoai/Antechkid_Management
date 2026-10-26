@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
+from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.tokens import (
     COLORS,
     COMPONENT_METRICS,
@@ -56,10 +57,20 @@ class WarningBanner(QFrame):
         layout.setContentsMargins(SPACING["md"], SPACING["sm"], SPACING["md"], SPACING["sm"])
         layout.setSpacing(SPACING["md"])
 
-        icon_label = QLabel(icon or "!", self)
-        icon_label.setObjectName("WarningIconTile")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setFixedSize(36, 36)
+        if AppIcon.supports(icon):
+            icon_label = AppIcon(
+                icon,
+                size=18,
+                color=COLORS["text_inverse"],
+                tile_color=fg,
+                tile_size=36,
+                parent=self,
+            )
+        else:
+            icon_label = QLabel(icon or "!", self)
+            icon_label.setObjectName("WarningIconTile")
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedSize(36, 36)
         layout.addWidget(icon_label)
 
         self.message_label = QLabel(message, self)

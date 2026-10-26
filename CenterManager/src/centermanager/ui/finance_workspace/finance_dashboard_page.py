@@ -11,14 +11,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QScrollArea,
     QFrame,
-    QPushButton,
 )
 
 from centermanager.core.clock import get_clock
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
-from centermanager.ui.shared import StatisticGrid, DataTable, LoadingWidget, ChartCard
+from centermanager.ui.shared import StatisticGrid, DataTable, LoadingWidget, ChartCard, SectionHeader
+from centermanager.ui.design_system.foundation import Button, ButtonVariant, ComponentSize
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.design_system.components import SectionHeader
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,12 @@ class FinanceDashboardPage(QWidget):
             ("View Expense", "expense"),
             ("View Outstanding", "outstanding"),
         ):
-            button = QPushButton(label)
+            button = Button(
+                label,
+                variant=ButtonVariant.GHOST,
+                size=ComponentSize.SMALL,
+                parent=container,
+            )
             button.clicked.connect(
                 lambda _checked=False, target=page_id: self.drilldown_requested.emit(target)
             )
@@ -104,15 +108,18 @@ class FinanceDashboardPage(QWidget):
         income_layout.addWidget(self.income_table)
         container_layout.addWidget(income_section)
 
+        payment_method_row = QHBoxLayout()
+        payment_method_row.setContentsMargins(0, 0, 0, 0)
+        payment_method_row.setSpacing(SPACING["md"])
         self.revenue_method_chart = ChartCard(
             "Revenue by Payment Method (Selected Period)", "pie"
         )
-        container_layout.addWidget(self.revenue_method_chart)
-
         self.expense_method_chart = ChartCard(
             "Expense by Payment Method (Selected Period)", "pie"
         )
-        container_layout.addWidget(self.expense_method_chart)
+        payment_method_row.addWidget(self.revenue_method_chart, 1)
+        payment_method_row.addWidget(self.expense_method_chart, 1)
+        container_layout.addLayout(payment_method_row)
 
         expense_section = QWidget()
         expense_layout = QVBoxLayout(expense_section)
@@ -194,14 +201,14 @@ class FinanceDashboardPage(QWidget):
             return f"{value:,.0f} VND"
 
         self.stats_grid.set_metrics([
-            {"icon": "📊", "label": "Income Selected Period", "value": fmt_money(data.get("revenue_period", 0))},
-            {"icon": "📉", "label": "Expense Selected Period", "value": fmt_money(data.get("expense_period", 0))},
-            {"icon": "💰", "label": "Net Selected Period", "value": fmt_money(data.get("net_cash_flow", 0))},
-            {"icon": "🧾", "label": "Outstanding Tuition", "value": fmt_money(data.get("total_outstanding", 0))},
-            {"icon": "📈", "label": "Income Today", "value": fmt_money(data.get("revenue_today", 0))},
-            {"icon": "📉", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0))},
-            {"icon": "👥", "label": "Students With Debt", "value": str(data.get("students_with_debt", 0))},
-            {"icon": "⚠️", "label": "Tuition Not Configured", "value": str(data.get("unconfigured_tuition_count", 0))},
+            {"icon": "income", "label": "Income Selected Period", "value": fmt_money(data.get("revenue_period", 0)), "tone": "success"},
+            {"icon": "expense", "label": "Expense Selected Period", "value": fmt_money(data.get("expense_period", 0)), "tone": "danger"},
+            {"icon": "finance", "label": "Net Selected Period", "value": fmt_money(data.get("net_cash_flow", 0)), "tone": "primary"},
+            {"icon": "warning", "label": "Outstanding Tuition", "value": fmt_money(data.get("total_outstanding", 0)), "tone": "warning"},
+            {"icon": "income", "label": "Income Today", "value": fmt_money(data.get("revenue_today", 0)), "tone": "success"},
+            {"icon": "expense", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0)), "tone": "danger"},
+            {"icon": "student", "label": "Students With Debt", "value": str(data.get("students_with_debt", 0)), "tone": "warning"},
+            {"icon": "warning", "label": "Tuition Not Configured", "value": str(data.get("unconfigured_tuition_count", 0)), "tone": "warning"},
         ], columns=4)
 
     def _update_income_table(self, incomes: list) -> None:
@@ -242,14 +249,14 @@ class FinanceDashboardPage(QWidget):
         self._income_ids = []
         self._expense_ids = []
         self.stats_grid.set_metrics([
-            {"icon": "⚠️", "label": "Income Selected Period", "value": "Error"},
-            {"icon": "⚠️", "label": "Expense Selected Period", "value": "Error"},
-            {"icon": "⚠️", "label": "Net Selected Period", "value": "Error"},
-            {"icon": "⚠️", "label": "Outstanding Tuition", "value": "Error"},
-            {"icon": "⚠️", "label": "Income Today", "value": "Error"},
-            {"icon": "⚠️", "label": "Expense Today", "value": "Error"},
-            {"icon": "⚠️", "label": "Students With Debt", "value": "Error"},
-            {"icon": "⚠️", "label": "Tuition Not Configured", "value": "Error"},
+            {"icon": "warning", "label": "Income Selected Period", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Expense Selected Period", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Net Selected Period", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Outstanding Tuition", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Income Today", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Expense Today", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Students With Debt", "value": "Error", "tone": "danger"},
+            {"icon": "warning", "label": "Tuition Not Configured", "value": "Error", "tone": "danger"},
         ], columns=4)
         self.cash_vs_bank_chart.set_data([])
         self.revenue_method_chart.set_data([])

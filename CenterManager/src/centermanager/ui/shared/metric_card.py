@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.tokens import (
     COLORS,
     COMPONENT_METRICS,
@@ -107,11 +108,21 @@ class MetricCard(QFrame):
         )
         root.setSpacing(SPACING["md"])
 
-        icon_label = QLabel(icon or "•", self)
-        icon_label.setObjectName("MetricIconTile")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_size = 34 if self._compact else 40
-        icon_label.setFixedSize(icon_size, icon_size)
+        if AppIcon.supports(icon):
+            icon_label = AppIcon(
+                icon,
+                size=18 if self._compact else 20,
+                color=icon_fg,
+                tile_color=icon_bg,
+                tile_size=icon_size,
+                parent=self,
+            )
+        else:
+            icon_label = QLabel(icon or "•", self)
+            icon_label.setObjectName("MetricIconTile")
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedSize(icon_size, icon_size)
         root.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         copy = QVBoxLayout()

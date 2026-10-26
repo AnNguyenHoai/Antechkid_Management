@@ -8,6 +8,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.tokens import (
     COLORS,
     FONT_FAMILY,
@@ -40,10 +41,20 @@ class ActivityCard(QFrame):
         layout.setContentsMargins(SPACING["sm"], SPACING["sm"], SPACING["sm"], SPACING["sm"])
         layout.setSpacing(SPACING["md"])
 
-        icon_label = QLabel(icon or "•", self)
-        icon_label.setObjectName("ActivityIconTile")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setFixedSize(34, 34)
+        if AppIcon.supports(icon):
+            icon_label = AppIcon(
+                icon,
+                size=17,
+                color=COLORS["action_primary"],
+                tile_color=COLORS["blue_50"],
+                tile_size=34,
+                parent=self,
+            )
+        else:
+            icon_label = QLabel(icon or "•", self)
+            icon_label.setObjectName("ActivityIconTile")
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedSize(34, 34)
         layout.addWidget(icon_label)
 
         content_layout = QVBoxLayout()

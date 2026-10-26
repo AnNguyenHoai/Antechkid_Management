@@ -94,9 +94,9 @@ class TeacherDashboardPage(QWidget):
             total_assignments = sum(len(t.assigned_classes) for t in teachers)
 
             self.stats_grid.set_metrics([
-                {"icon": "👨‍🏫", "label": "Total Teachers", "value": str(total)},
-                {"icon": "✅", "label": "Active Teachers", "value": str(active)},
-                {"icon": "📚", "label": "Total Assignments", "value": str(total_assignments)},
+                {"icon": "teacher", "label": "Total Teachers", "value": str(total), "tone": "primary"},
+                {"icon": "check", "label": "Active Teachers", "value": str(active), "tone": "success"},
+                {"icon": "assignment", "label": "Total Assignments", "value": str(total_assignments), "tone": "info"},
             ])
 
             self._refresh_recent_activities()
@@ -104,9 +104,9 @@ class TeacherDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to refresh teacher dashboard")
             self.stats_grid.set_metrics([
-                {"icon": "👨‍🏫", "label": "Total Teachers", "value": "0"},
-                {"icon": "✅", "label": "Active Teachers", "value": "0"},
-                {"icon": "📚", "label": "Total Assignments", "value": "0"},
+                {"icon": "teacher", "label": "Total Teachers", "value": "0", "tone": "primary"},
+                {"icon": "check", "label": "Active Teachers", "value": "0", "tone": "success"},
+                {"icon": "assignment", "label": "Total Assignments", "value": "0", "tone": "info"},
             ])
 
     def _refresh_recent_activities(self) -> None:
@@ -117,16 +117,16 @@ class TeacherDashboardPage(QWidget):
             if recent:
                 for ev in recent:
                     icon_map = {
-                        "TeacherCreated": "👨‍🏫",
-                        "TeacherUpdated": "✏️",
-                        "TeacherArchived": "🗑️",
-                        "TeacherRestored": "🔄",
-                        "TeacherAssigned": "📚",
-                        "TeacherUnassigned": "🚫",
-                        "DocumentUploaded": "📎",
-                        "DocumentDeleted": "🗑️",
+                        "TeacherCreated": "teacher",
+                        "TeacherUpdated": "teacher",
+                        "TeacherArchived": "archive",
+                        "TeacherRestored": "teacher",
+                        "TeacherAssigned": "assignment",
+                        "TeacherUnassigned": "assignment",
+                        "DocumentUploaded": "reports",
+                        "DocumentDeleted": "archive",
                     }
-                    icon = icon_map.get(ev.event_type, "📌")
+                    icon = icon_map.get(ev.event_type, "reports")
                     teacher_name = ev.teacher.full_name if ev.teacher is not None else f"Teacher #{ev.teacher_id}"
                     subtitle = f"Teacher: {teacher_name}"
                     card = ActivityCard(
