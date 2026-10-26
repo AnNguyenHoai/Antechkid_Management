@@ -71,13 +71,16 @@ def test_legacy_editor_text_is_sanitized_before_rendering(app):
     assert top.waiting_indicator.text() == "Other user is editing"
 
 
-def test_primary_edit_actions_use_same_high_priority_style(app):
+def test_primary_edit_actions_keep_finish_action_visually_prominent(app):
     top = ApplicationTopBar(user_name="An")
+    source = _source("application_shell.py")
 
     assert top.start_edit_button.objectName() == "HeroPrimaryEditAction"
     assert top.finish_edit_button.objectName() == "HeroPrimaryEditAction"
     assert top.start_edit_button.height() == 48
     assert top.finish_edit_button.height() == 48
+    assert 'Button("Start editing", variant="primary", size="lg")' in source
+    assert 'Button("Finish editing", variant="accent", size="lg")' in source
 
 
 def test_header_responsive_contract_hides_secondary_content_first():
