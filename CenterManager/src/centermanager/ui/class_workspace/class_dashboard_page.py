@@ -118,10 +118,10 @@ class ClassDashboardPage(QWidget):
                 upcoming_sessions += sum(1 for s in sessions if today <= s.scheduled_date <= week_later and s.status == "Scheduled")
 
             self.stats_grid.set_metrics([
-                {"icon": "📚", "label": "Total Classes", "value": str(total)},
-                {"icon": "✅", "label": "Active Classes", "value": str(active)},
-                {"icon": "👨‍🎓", "label": "Total Students", "value": str(total_students)},
-                {"icon": "📅", "label": "Upcoming Sessions (7d)", "value": str(upcoming_sessions)},
+                {"icon": "class", "label": "Total Classes", "value": str(total), "tone": "primary"},
+                {"icon": "check", "label": "Active Classes", "value": str(active), "tone": "success"},
+                {"icon": "student", "label": "Students in Active Classes", "value": str(total_students), "tone": "info"},
+                {"icon": "calendar", "label": "Upcoming Sessions (7d)", "value": str(upcoming_sessions), "tone": "warning"},
             ])
 
             self.upcoming_label.setText(f"{upcoming_sessions} sessions scheduled in the next 7 days.")
@@ -132,10 +132,10 @@ class ClassDashboardPage(QWidget):
         except Exception as e:
             logger.exception("Failed to refresh class dashboard")
             self.stats_grid.set_metrics([
-                {"icon": "📚", "label": "Total Classes", "value": "0"},
-                {"icon": "✅", "label": "Active Classes", "value": "0"},
-                {"icon": "👨‍🎓", "label": "Total Students", "value": "0"},
-                {"icon": "📅", "label": "Upcoming Sessions (7d)", "value": "0"},
+                {"icon": "class", "label": "Total Classes", "value": "0", "tone": "primary"},
+                {"icon": "check", "label": "Active Classes", "value": "0", "tone": "success"},
+                {"icon": "student", "label": "Students in Active Classes", "value": "0", "tone": "info"},
+                {"icon": "calendar", "label": "Upcoming Sessions (7d)", "value": "0", "tone": "warning"},
             ])
             self.upcoming_label.setText("Unable to load data.")
 
@@ -162,18 +162,18 @@ class ClassDashboardPage(QWidget):
             if recent:
                 for ev in recent:
                     icon_map = {
-                        "ClassCreated": "📚",
-                        "ClassUpdated": "✏️",
-                        "ClassArchived": "🗑️",
-                        "ClassRestored": "🔄",
-                        "TeacherAssigned": "👨‍🏫",
-                        "TeacherReplaced": "🔄",
-                        "TeacherRemoved": "❌",
-                        "StudentEnrolled": "👨‍🎓",
-                        "StudentRemoved": "🚫",
-                        "ScheduleUpdated": "📅",
+                        "ClassCreated": "class",
+                        "ClassUpdated": "class",
+                        "ClassArchived": "archive",
+                        "ClassRestored": "class",
+                        "TeacherAssigned": "teacher",
+                        "TeacherReplaced": "teacher",
+                        "TeacherRemoved": "teacher",
+                        "StudentEnrolled": "student",
+                        "StudentRemoved": "student",
+                        "ScheduleUpdated": "calendar",
                     }
-                    icon = icon_map.get(ev['event_type'], "📌")
+                    icon = icon_map.get(ev['event_type'], "reports")
                     subtitle = f"Class: {ev['class_name']}"
                     card = ActivityCard(
                         icon=icon,
