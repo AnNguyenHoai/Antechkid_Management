@@ -25,11 +25,11 @@ def test_archived_rows_show_archived_lifecycle_state():
 
 
 def test_archived_mode_disables_assignment_filter_and_add_action():
-    start = LIST.index("def _on_status_filter_changed")
-    end = LIST.index("def _on_assignment_filter_changed", start)
+    start = LIST.index("def _on_toolbar_filters_changed")
+    end = LIST.index("def _on_sort", start)
     body = LIST[start:end]
-    assert "self.assignment_filter.setEnabled(not archived)" in body
-    assert "self.add_btn.setEnabled(not archived)" in body
+    assert 'assignment_control.setEnabled(self._status_filter != "ARCHIVED")' in body
+    assert 'self.add_btn.setEnabled(self._status_filter != "ARCHIVED")' in body
 
 
 def test_write_mode_cannot_reenable_add_or_bulk_archive_in_archived_view():
