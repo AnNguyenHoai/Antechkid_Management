@@ -4,9 +4,11 @@ LIST = Path("src/centermanager/ui/teacher_workspace/teacher_list_page.py").read_
 
 
 def test_assignment_filter_options_are_available():
-    assert 'self.assignment_filter.addItem("All Assignments", "ALL")' in LIST
-    assert 'self.assignment_filter.addItem("Has Classes", "ASSIGNED")' in LIST
-    assert 'self.assignment_filter.addItem("No Classes", "UNASSIGNED")' in LIST
+    assert '"options": ["Has Classes", "No Classes"]' in LIST
+    assert 'self.assignment_filter = self.search_bar.filter_controls["assignment"]' in LIST
+    assert 'assignment_map = {' in LIST
+    assert '"Has Classes": "ASSIGNED"' in LIST
+    assert '"No Classes": "UNASSIGNED"' in LIST
 
 
 def test_assignment_filter_reuses_loaded_teacher_data():
@@ -20,11 +22,11 @@ def test_assignment_filter_reuses_loaded_teacher_data():
 
 
 def test_assignment_filter_does_not_trigger_extra_service_query():
-    start = LIST.index("def _on_assignment_filter_changed")
+    start = LIST.index("def _on_toolbar_filters_changed")
     end = LIST.index("def _on_sort", start)
     body = LIST[start:end]
     assert "self._apply_filters_and_sort()" in body
-    assert "refresh()" not in body
+    assert 'if (previous_status == "ARCHIVED") != (self._status_filter == "ARCHIVED"):' in body
 
 
 def test_status_and_assignment_filters_are_composable():
@@ -40,4 +42,4 @@ def test_status_and_assignment_filters_are_composable():
 def test_archived_filter_remains_separate_from_current_status_filters():
     assert 'self._teacher_service.list_archived_teachers()' in LIST
     assert 'self._status_filter == "ARCHIVED"' in LIST
-    assert 'self.status_filter.addItem("Archived", "ARCHIVED")' in LIST
+    assert '"options": ["Active", "Inactive", "Archived"]' in LIST
