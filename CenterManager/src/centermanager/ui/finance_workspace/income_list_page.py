@@ -29,7 +29,6 @@ from centermanager.services.income_service import IncomeService
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system import (
     PrimaryButton,
-    SearchBar,
     SecondaryButton,
 )
 from centermanager.ui.design_system.tokens import COLORS, SPACING
