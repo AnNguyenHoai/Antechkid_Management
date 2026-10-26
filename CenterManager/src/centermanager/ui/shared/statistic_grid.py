@@ -1,40 +1,58 @@
 # -*- coding: utf-8 -*-
-"""
-StatisticGrid - Grid layout for metric cards.
-"""
-from typing import Optional, List, Dict
+"""Responsive grid for shared workspace KPI cards."""
+from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QGridLayout, QSizePolicy
+from typing import Dict, List, Optional
 
-from centermanager.ui.shared.metric_card import MetricCard
+from PySide6.QtWidgets import QGridLayout, QWidget
+
 from centermanager.ui.design_system.tokens import SPACING
+from centermanager.ui.shared.metric_card import MetricCard
 
 
 class StatisticGrid(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._layout = QGridLayout(self)
-        self._layout.setSpacing(SPACING['md'])  # Tăng từ 12 lên 16
+        self._layout.setHorizontalSpacing(SPACING["md"])
+        self._layout.setVerticalSpacing(SPACING["md"])
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._cards = []
+        self._cards: list[MetricCard] = []
 
-    def set_metrics(self, metrics: List[Dict[str, str]], columns: int = 4) -> None:
+    def set_metrics(
+        self,
+        metrics: List[Dict[str, str]],
+        columns: Optional[int] = None,
+    ) -> None:
+        """Render metrics using a balanced column count unless explicitly supplied."""
         self._clear()
-        row, col = 0, 0
-        for metric in metrics:
+        if not metrics:
+            return
+
+        resolved_columns = max(
+            1,
+            min(
+                int(columns) if columns is not None else min(len(metrics), 4),
+                len(metrics),
+            ),
+        )
+        for column in range(resolved_columns):
+            self._layout.setColumnStretch(column, 1)
+
+        for index, metric in enumerate(metrics):
+            row = index // resolved_columns
+            column = index % resolved_columns
             card = MetricCard(
-                icon=metric.get('icon', '📊'),
-                label=metric.get('label', ''),
-                value=metric.get('value', '0'),
-                sub_value=metric.get('sub_value', None)
+                icon=metric.get("icon", "•"),
+                label=metric.get("label", ""),
+                value=metric.get("value", "0"),
+                sub_value=metric.get("sub_value"),
+                tone=metric.get("tone", "neutral"),
+                compact=bool(metric.get("compact", False)),
+                parent=self,
             )
-            self._layout.addWidget(card, row, col)
+            self._layout.addWidget(card, row, column)
             self._cards.append(card)
-            col += 1
-            if col >= columns:
-                col = 0
-                row += 1
 
     def _clear(self) -> None:
         while self._layout.count():
@@ -46,3 +64,6 @@ class StatisticGrid(QWidget):
     def update_value(self, index: int, value: str) -> None:
         if 0 <= index < len(self._cards):
             self._cards[index].set_value(value)
+
+
+__all__ = ["StatisticGrid"]
