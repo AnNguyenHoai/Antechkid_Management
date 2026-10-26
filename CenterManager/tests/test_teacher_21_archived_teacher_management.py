@@ -6,7 +6,8 @@ SERVICE = Path("src/centermanager/services/teacher_service.py").read_text(encodi
 
 
 def test_archived_filter_is_available_and_loads_archived_teachers():
-    assert 'self.status_filter.addItem("Archived", "ARCHIVED")' in LIST
+    assert '"options": ["Active", "Inactive", "Archived"]' in LIST
+    assert 'self.status_filter = self.search_bar.filter_controls["status"]' in LIST
     assert 'self._teacher_service.list_archived_teachers()' in LIST
     assert 'self._status_filter == "ARCHIVED"' in LIST
 
