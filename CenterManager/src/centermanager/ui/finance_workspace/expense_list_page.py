@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.services.expense_service import ExpenseService
-from centermanager.ui.design_system import SearchBar, PrimaryButton, SecondaryButton
+from centermanager.ui.design_system import PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 from centermanager.ui.finance_workspace.action_state import can_mutate
