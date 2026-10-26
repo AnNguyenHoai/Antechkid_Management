@@ -10,6 +10,7 @@ from centermanager.services.income_service import IncomeService
 from centermanager.services.expense_service import ExpenseService
 from centermanager.models.income import Income
 from centermanager.models.expense import Expense
+from centermanager.core.wallet import Wallet, WalletMappingError, resolve_wallet
 
 logger = logging.getLogger(__name__)
 
@@ -373,15 +374,11 @@ class FinanceDashboardService:
 
     @staticmethod
     def _normalize_payment_method(value):
-        mapping = {
-            "Bank Transfer": "Bank",
-            "Bank": "Bank",
-            "Cash": "Cash",
-            "Other": "Other",
-            "TÀI KHOẢN CÁ NHÂN": "Cash",
-            "TÀI KHOẢN CÔNG TY": "Bank",
-        }
-        return mapping.get(value, "Other")
+        try:
+            wallet = resolve_wallet(value)
+        except WalletMappingError:
+            return "Other"
+        return "Cash" if wallet is Wallet.CASH else "Bank"
 
     def get_dashboard_snapshot(self, target_date: Optional[date] = None):
         """Backward-compatible snapshot API used by older dashboard callers/tests."""
