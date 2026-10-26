@@ -26,6 +26,7 @@ class WorkspaceCard(QFrame):
         health_status: str,
         health_details: str,
         quick_action_label: str = "Open",
+        variant: str = "regular",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -33,6 +34,7 @@ class WorkspaceCard(QFrame):
         # Kept for API compatibility. V3 deliberately uses one text/icon language.
         self._icon = icon
         self._health_status = health_status
+        self._variant = variant
         self._setup_ui(name, description, summary_text, health_status, health_details, quick_action_label)
 
     @property
@@ -45,7 +47,8 @@ class WorkspaceCard(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(168)
+        min_height = 230 if self._variant == "featured" else (118 if self._variant == "compact" else 156)
+        self.setMinimumHeight(min_height)
         self.setAccessibleName(name)
         self.setToolTip(f"Open {name}")
 
@@ -55,6 +58,10 @@ class WorkspaceCard(QFrame):
 
         heading = QHBoxLayout()
         heading.setSpacing(SPACING["sm"])
+        self.icon_label = QLabel(self._icon or "•", self)
+        self.icon_label.setObjectName("HomeWorkspaceIcon")
+        self.icon_label.setFixedWidth(24)
+        heading.addWidget(self.icon_label, alignment=Qt.AlignmentFlag.AlignTop)
         self.name_label = QLabel(name, self)
         self.name_label.setObjectName("HomeWorkspaceName")
         self.name_label.setWordWrap(True)
@@ -67,6 +74,7 @@ class WorkspaceCard(QFrame):
         self.description_label = QLabel(description, self)
         self.description_label.setObjectName("HomeWorkspaceDescription")
         self.description_label.setWordWrap(True)
+        self.description_label.setVisible(self._variant != "compact")
         root.addWidget(self.description_label)
 
         self.summary_label = QLabel(summary_text, self)
@@ -77,7 +85,9 @@ class WorkspaceCard(QFrame):
         self.health_details_label = QLabel(health_details, self)
         self.health_details_label.setObjectName("HomeWorkspaceHealthDetails")
         self.health_details_label.setWordWrap(True)
-        self.health_details_label.setVisible(bool(health_details.strip()))
+        self.health_details_label.setVisible(
+            bool(health_details.strip()) and self._variant != "compact"
+        )
         root.addWidget(self.health_details_label)
         root.addStretch()
 
@@ -95,6 +105,7 @@ class WorkspaceCard(QFrame):
             QFrame#HomeWorkspaceCard {{ background-color: {COLORS["surface_card"]}; border: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]}; border-radius: {RADIUS["lg"]}px; }}
             QFrame#HomeWorkspaceCard:hover {{ background-color: {COLORS["surface_hover"]}; border-color: {COLORS["border_strong"]}; }}
             QFrame#HomeWorkspaceCard:focus {{ border: 2px solid {COLORS["focus_ring"]}; }}
+            QLabel#HomeWorkspaceIcon {{ color: {COLORS["action_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["icon"]}px; font-weight: {FONT_WEIGHTS["bold"]}; border: none; }}
             QLabel#HomeWorkspaceName {{ color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["card_title"]}px; font-weight: {FONT_WEIGHTS["semibold"]}; border: none; }}
             QLabel#HomeWorkspaceDescription {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
             QLabel#HomeWorkspaceSummary {{ color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body"]}px; font-weight: {FONT_WEIGHTS["medium"]}; border: none; }}
