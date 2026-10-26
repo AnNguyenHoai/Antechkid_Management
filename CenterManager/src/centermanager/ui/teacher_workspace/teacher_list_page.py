@@ -137,6 +137,11 @@ class TeacherListPage(QWidget):
         try:
             if self._status_filter == "ARCHIVED":
                 self._teachers = self._teacher_service.list_archived_teachers()
+            elif self._status_filter == "ALL":
+                self._teachers = (
+                    self._teacher_service.list_teachers()
+                    + self._teacher_service.list_archived_teachers()
+                )
             else:
                 self._teachers = self._teacher_service.list_teachers()
             self._clear_selection()
@@ -216,7 +221,11 @@ class TeacherListPage(QWidget):
         if assignment_control is not None:
             assignment_control.setEnabled(self._status_filter != "ARCHIVED")
         self.add_btn.setEnabled(self._status_filter != "ARCHIVED")
-        if (previous_status == "ARCHIVED") != (self._status_filter == "ARCHIVED"):
+        dataset_scope_changed = (
+            previous_status in {"ARCHIVED", "ALL"}
+            or self._status_filter in {"ARCHIVED", "ALL"}
+        ) and previous_status != self._status_filter
+        if dataset_scope_changed:
             self.refresh()
         else:
             self._clear_selection()
