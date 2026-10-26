@@ -91,10 +91,9 @@ class GlobalNavItem(QPushButton):
         self._sync_visual_state(False)
 
     def _sync_visual_state(self, checked: bool) -> None:
-        self.icon_widget._color = (
+        self.icon_widget.set_color(
             COLORS["action_primary"] if checked else COLORS["text_secondary"]
         )
-        self.icon_widget._render()
 
 
 class GlobalSidebar(QFrame):
