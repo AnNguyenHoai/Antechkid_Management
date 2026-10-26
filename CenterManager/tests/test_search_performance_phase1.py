@@ -68,7 +68,7 @@ def test_income_text_search_is_debounced_but_filters_remain_immediate():
 
     assert "QTimer" in source
     assert "setInterval(300)" in source
-    assert "text_changed.connect(self._schedule_search)" in source
+    assert "search_changed.connect(self._schedule_search)" in source
     assert "timeout.connect(self._apply_debounced_search)" in source
     assert "currentIndexChanged.connect(self._filters_changed)" in source
     assert "dateChanged.connect(self._filters_changed)" in source
@@ -79,7 +79,7 @@ def test_expense_text_search_is_debounced_but_filters_remain_immediate():
 
     assert "QTimer" in source
     assert "setInterval(300)" in source
-    assert "text_changed.connect(self._schedule_search)" in source
+    assert "search_changed.connect(self._schedule_search)" in source
     assert "timeout.connect(self._apply_debounced_search)" in source
     assert "currentIndexChanged.connect(self._filters_changed)" in source
     assert "dateChanged.connect(self._filters_changed)" in source
