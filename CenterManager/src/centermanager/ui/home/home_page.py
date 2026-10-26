@@ -47,10 +47,10 @@ class _TodayPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("HomeTodayPanel")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(176)
+        self.setMinimumHeight(128)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["xl"])
+        layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
         layout.setSpacing(SPACING["sm"])
 
         eyebrow = QLabel("TODAY", self)
@@ -153,14 +153,10 @@ class HomePage(QWidget):
         header_layout.setSpacing(SPACING["lg"])
         copy_layout = QVBoxLayout()
         copy_layout.setSpacing(SPACING["xs"])
-        eyebrow = QLabel("HOME", self.container)
-        eyebrow.setObjectName("HomeEyebrow")
-        title = QLabel("Center overview", self.container)
+        title = QLabel("Dashboard", self.container)
         title.setObjectName("HomeTitle")
-        subtitle = QLabel("See what needs attention, then jump back into your work.", self.container)
+        subtitle = QLabel("Center overview and quick access", self.container)
         subtitle.setObjectName("HomeSubtitle")
-        subtitle.setWordWrap(True)
-        copy_layout.addWidget(eyebrow)
         copy_layout.addWidget(title)
         copy_layout.addWidget(subtitle)
         header_layout.addLayout(copy_layout, 1)
@@ -174,7 +170,6 @@ class HomePage(QWidget):
         header.setLayout(header_layout)
         header.setStyleSheet(
             f"""
-            QLabel#HomeEyebrow {{ color: {COLORS["action_accent"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["badge"]}px; font-weight: {FONT_WEIGHTS["bold"]}; }}
             QLabel#HomeTitle {{ color: {COLORS["text_primary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["page_title"]}px; font-weight: {FONT_WEIGHTS["bold"]}; }}
             QLabel#HomeSubtitle {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body"]}px; font-weight: {FONT_WEIGHTS["regular"]}; }}
             """
@@ -201,21 +196,23 @@ class HomePage(QWidget):
         overview.addLayout(side, 1)
         content.addLayout(overview)
 
-        launcher_header = QVBoxLayout()
-        launcher_header.setSpacing(SPACING["xs"])
-        workspace_title = QLabel("Workspace launcher", self.dashboard_content)
+        section_row = QHBoxLayout()
+        workspace_title = QLabel("Center operations", self.dashboard_content)
         workspace_title.setObjectName("HomeSectionTitle")
-        workspace_help = QLabel("Only workspaces available to your account are shown.", self.dashboard_content)
+        workspace_help = QLabel("Open a workspace or review its current summary.", self.dashboard_content)
         workspace_help.setObjectName("HomeSectionHelp")
-        launcher_header.addWidget(workspace_title)
-        launcher_header.addWidget(workspace_help)
-        content.addLayout(launcher_header)
+        section_row.addWidget(workspace_title)
+        section_row.addSpacing(SPACING["sm"])
+        section_row.addWidget(workspace_help)
+        section_row.addStretch()
+        content.addLayout(section_row)
 
         self.workspace_grid = QGridLayout()
         self.workspace_grid.setHorizontalSpacing(SPACING["md"])
         self.workspace_grid.setVerticalSpacing(SPACING["md"])
-        for column in range(3):
-            self.workspace_grid.setColumnStretch(column, 1)
+        self.workspace_grid.setColumnStretch(0, 5)
+        self.workspace_grid.setColumnStretch(1, 3)
+        self.workspace_grid.setColumnStretch(2, 3)
         content.addLayout(self.workspace_grid)
         self.dashboard_content.setStyleSheet(
             f"""
@@ -241,9 +238,11 @@ class HomePage(QWidget):
         layout.addWidget(detail)
         layout.addStretch()
         panel.detail_label = detail
+        panel_bg = COLORS["state_warning_bg"] if object_name == "HomeAttentionPanel" else COLORS["surface_card"]
+        panel_border = COLORS["state_warning"] if object_name == "HomeAttentionPanel" else COLORS["border_default"]
         panel.setStyleSheet(
             f"""
-            QFrame#{object_name} {{ background-color: {COLORS["surface_card"]}; border: {COMPONENT_METRICS["border_width"]}px solid {COLORS["border_default"]}; border-radius: {RADIUS["lg"]}px; }}
+            QFrame#{object_name} {{ background-color: {panel_bg}; border: {COMPONENT_METRICS["border_width"]}px solid {panel_border}; border-radius: {RADIUS["lg"]}px; }}
             QLabel#HomeInfoTitle {{ color: {COLORS["text_muted"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["badge"]}px; font-weight: {FONT_WEIGHTS["bold"]}; border: none; }}
             QLabel#HomeInfoDetail {{ color: {COLORS["text_secondary"]}; font-family: {FONT_FAMILY}; font-size: {TYPOGRAPHY["body_small"]}px; font-weight: {FONT_WEIGHTS["regular"]}; border: none; }}
             """
@@ -270,7 +269,22 @@ class HomePage(QWidget):
             return
 
         self._render_overview(summaries)
-        for index, summary in enumerate(summaries):
+        placement = {
+            "student": (0, 0, 2, 1, "featured"),
+            "class": (0, 1, 1, 1, "regular"),
+            "teacher": (1, 1, 1, 1, "regular"),
+            "finance": (0, 2, 1, 1, "compact"),
+            "employee": (1, 2, 1, 1, "compact"),
+            "admin": (2, 2, 1, 1, "compact"),
+        }
+        fallback_row = 3
+        for summary in summaries:
+            row, column, row_span, column_span, variant = placement.get(
+                summary.workspace_id,
+                (fallback_row, 0, 1, 3, "compact"),
+            )
+            if summary.workspace_id not in placement:
+                fallback_row += 1
             card = WorkspaceCard(
                 workspace_id=summary.workspace_id,
                 name=summary.name,
@@ -280,11 +294,12 @@ class HomePage(QWidget):
                 health_status=summary.health_status,
                 health_details=summary.health_details,
                 quick_action_label=summary.quick_action_label,
+                variant=variant,
                 parent=self.dashboard_content,
             )
             card.clicked.connect(self._on_workspace_clicked)
             self._cards.append(card)
-            self.workspace_grid.addWidget(card, index // 3, index % 3)
+            self.workspace_grid.addWidget(card, row, column, row_span, column_span)
         self._show_dashboard_content()
 
     def _render_overview(self, summaries: Iterable[WorkspaceSummary]) -> None:
