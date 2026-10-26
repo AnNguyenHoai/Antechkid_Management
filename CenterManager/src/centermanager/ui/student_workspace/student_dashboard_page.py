@@ -151,13 +151,13 @@ class StudentDashboardPage(QWidget):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(SPACING['sm'])
 
-        add_btn = PrimaryButton("➕ Add Student")
+        add_btn = PrimaryButton("Add Student")
         add_btn.setFixedHeight(38)
         add_btn.clicked.connect(self.add_student_clicked.emit)
-        import_btn = SecondaryButton("📥 Import")
+        import_btn = SecondaryButton("Import")
         import_btn.setFixedHeight(38)
         import_btn.clicked.connect(self.import_students_clicked.emit)
-        export_btn = SecondaryButton("📤 Export")
+        export_btn = SecondaryButton("Export")
         export_btn.setFixedHeight(38)
         export_btn.clicked.connect(self.export_students_clicked.emit)
 
@@ -186,10 +186,10 @@ class StudentDashboardPage(QWidget):
         try:
             stats = self._service.get_stats()
             self.stats_grid.set_metrics([
-                {"icon": "👥", "label": "Total Students", "value": str(stats.total)},
-                {"icon": "✅", "label": "Active", "value": str(stats.active)},
-                {"icon": "📦", "label": "Archived", "value": str(stats.archived)},
-                {"icon": "🌟", "label": "New This Month", "value": str(stats.new_this_month)},
+                {"icon": "student", "label": "Total Students", "value": str(stats.total), "tone": "primary"},
+                {"icon": "check", "label": "Active", "value": str(stats.active), "tone": "success"},
+                {"icon": "archive", "label": "Archived", "value": str(stats.archived), "tone": "warning"},
+                {"icon": "star", "label": "New This Month", "value": str(stats.new_this_month), "tone": "info"},
             ])
         except Exception as e:
             logger.exception("Failed to get dashboard stats")
@@ -199,11 +199,11 @@ class StudentDashboardPage(QWidget):
         try:
             summary = self._service.get_today_summary()
             items = [
-                (f"📚 {summary.today_classes} classes today", "Scheduled classes"),
-                (f"📊 {summary.today_assessments} assessments today", "Assessments recorded"),
-                (f"🎂 {len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
-                (f"📅 {summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
-                (f"⚠️ {summary.pending_tasks} pending tasks", "Students needing attention"),
+                (f"{summary.today_classes} classes today", "Scheduled classes"),
+                (f"{summary.today_assessments} assessments today", "Assessments recorded"),
+                (f"{len(summary.today_birthdays)} birthdays today", ", ".join(summary.today_birthdays) if summary.today_birthdays else "None"),
+                (f"{summary.upcoming_sessions} upcoming sessions", "Next 7 days"),
+                (f"{summary.pending_tasks} pending tasks", "Students needing attention"),
             ]
             for label, detail in items:
                 widget = QWidget()
@@ -224,9 +224,9 @@ class StudentDashboardPage(QWidget):
         try:
             insights = self._service.get_quick_insights()
             self.insights_grid.set_metrics([
-                {"icon": "📊", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5"},
-                {"icon": "🎂", "label": "Avg Age", "value": str(insights.avg_age)},
-                {"icon": "👨‍👩‍👧", "label": "Parent Coverage", "value": f"{insights.parent_coverage_rate}%"},
+                {"icon": "reports", "label": "Avg Assessment", "value": f"{insights.avg_assessment_score}/5", "tone": "info"},
+                {"icon": "student", "label": "Avg Age", "value": str(insights.avg_age), "tone": "neutral"},
+                {"icon": "student", "label": "Parent Coverage", "value": f"{insights.parent_coverage_rate}%", "tone": "primary"},
             ], columns=3)
         except Exception as e:
             logger.exception("Failed to load insights")
@@ -239,7 +239,7 @@ class StudentDashboardPage(QWidget):
                 for item in attention:
                     banner = WarningBanner(
                         message=f"{item.full_name} ({item.student_code}) – {item.reason}",
-                        icon="⚠️",
+                        icon="warning",
                         severity="warning",
                         action_text="Open →",
                         action_data=item.student_id
@@ -262,11 +262,9 @@ class StudentDashboardPage(QWidget):
             events = self._service.get_upcoming_events()
             if events:
                 for ev in events[:10]:
-                    icon_map = {"birthday": "🎂", "assessment": "📊", "session": "📚"}
-                    icon = icon_map.get(ev.event_type, "📌")
-                    label_text = f"{icon} {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
+                    label_text = f"{ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     if ev.student_name:
-                        label_text = f"{icon} {ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
+                        label_text = f"{ev.student_name} ({ev.student_code}) – {ev.details} – {ev.date.strftime('%d/%m/%Y')}"
                     label = QLabel(label_text)
                     label.setStyleSheet(f"""
                         font-size: 13px;
@@ -297,7 +295,7 @@ class StudentDashboardPage(QWidget):
             if activities:
                 for act in activities:
                     card = ActivityCard(
-                        icon="📌",
+                        icon="reports",
                         title=act.title,
                         subtitle=f"{act.student_name} ({act.student_code})",
                         time=act.time
