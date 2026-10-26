@@ -20,7 +20,7 @@ from centermanager.ui.design_system.desktop import ElidedLabel, install_desktop_
 from centermanager.ui.design_system.feedback import FeedbackController, FeedbackHost, FeedbackRequest
 from centermanager.ui.app_icon import AppIcon
 from centermanager.ui.design_system.foundation import Button
-from centermanager.ui.design_system.tokens import COLORS, COMPONENT_METRICS, FONT_FAMILY, FONT_WEIGHTS, SPACING, TYPOGRAPHY
+from centermanager.ui.design_system.tokens import COLORS, COMPONENT_METRICS, FONT_FAMILY, FONT_WEIGHTS, RADIUS, SPACING, TYPOGRAPHY
 
 
 class Breadcrumbs(QWidget):
@@ -252,11 +252,11 @@ class ApplicationTopBar(QFrame):
         divider = QFrame(brand_zone)
         divider.setObjectName("HeroBrandDivider")
         divider.setFixedSize(1, 28)
-        product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)
-        product_label.setObjectName("HeroProduct")
+        self.product_label = QLabel(APPLICATION_PRODUCT_NAME, brand_zone)
+        self.product_label.setObjectName("HeroProduct")
         brand_row.addWidget(brand_label)
         brand_row.addWidget(divider)
-        brand_row.addWidget(product_label)
+        brand_row.addWidget(self.product_label)
         brand_row.addStretch()
 
         meta_row = QHBoxLayout()
@@ -285,7 +285,7 @@ class ApplicationTopBar(QFrame):
 
         # Zone 2: contextual editing guidance.
         self.guidance_panel = _EditingGuidancePanel(self.header)
-        self.guidance_panel.setMinimumWidth(340)
+        self.guidance_panel.setMinimumWidth(280)
         header_layout.addWidget(self.guidance_panel, 36)
 
         # Zone 3: editing state + primary action + user identity.
@@ -400,6 +400,8 @@ class ApplicationTopBar(QFrame):
         shell_layout.addWidget(self.feedback_host)
 
         self.state_zone = control_zone
+        self.brand_zone = brand_zone
+        self.control_zone = control_zone
         self._state_animation = QPropertyAnimation(
             self._header_shadow, b"blurRadius", self
         )
@@ -490,6 +492,21 @@ class ApplicationTopBar(QFrame):
             top_level.setWindowTitle(APPLICATION_DISPLAY_NAME)
             top_level.setWindowIcon(build_application_icon())
         install_desktop_polish(self.window())
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        width = self.width()
+        compact = width < COMPONENT_METRICS["hero_header_compact_breakpoint"]
+        narrow = width < COMPONENT_METRICS["hero_header_guidance_breakpoint"]
+
+        self.product_label.setVisible(not compact)
+        self.guidance_panel.setVisible(not narrow)
+        if compact:
+            self.start_edit_button.setMinimumWidth(144)
+            self.finish_edit_button.setMinimumWidth(144)
+        else:
+            self.start_edit_button.setMinimumWidth(168)
+            self.finish_edit_button.setMinimumWidth(168)
 
     def _animate_state_change(self) -> None:
         self._state_animation.stop()
