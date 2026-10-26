@@ -13,11 +13,13 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
 )
 
 from centermanager.ui.application_shell import ApplicationTopBar
+from centermanager.ui.global_navigation import GlobalSidebar
 from centermanager.ui.design_system.tokens import COLORS, FONT_FAMILY, SPACING, TYPOGRAPHY
 from centermanager.ui.home import HomePage
 from centermanager.ui.student_workspace import StudentWorkspaceShell
@@ -241,10 +243,20 @@ class MainWindow(QMainWindow):
         self.app_top_bar.cancel_edit_requested.connect(self._on_cancel_waiting)
         layout.addWidget(self.app_top_bar)
 
-        # Keep the long-standing application stack construction contract while
-        # letting the layout re-parent it into the Application Shell V2 root.
-        self.central_stack = QStackedWidget()
-        layout.addWidget(self.central_stack, 1)
+        shell_body = QWidget(root)
+        shell_body_layout = QHBoxLayout(shell_body)
+        shell_body_layout.setContentsMargins(0, 0, 0, 0)
+        shell_body_layout.setSpacing(0)
+
+        self.global_sidebar = GlobalSidebar(shell_body)
+        self.global_sidebar.navigation_requested.connect(self._on_global_navigation)
+        shell_body_layout.addWidget(self.global_sidebar)
+
+        # Keep the long-standing central stack contract; only its shell
+        # composition changes so workspace behaviour remains untouched.
+        self.central_stack = QStackedWidget(shell_body)
+        shell_body_layout.addWidget(self.central_stack, 1)
+        layout.addWidget(shell_body, 1)
         self.setCentralWidget(root)
         self._shell_root = root
 
@@ -1099,6 +1111,25 @@ class MainWindow(QMainWindow):
 
     # ===== Workspace Navigation =====
 
+    def _on_global_navigation(self, target: str) -> None:
+        if target == "home":
+            self._go_home()
+            return
+        if target == "settings":
+            if self._permission_helper.has_permission("user.manage"):
+                self._on_workspace_selected("admin")
+                self.admin_workspace.navigate_to("settings")
+                self.global_sidebar.set_active("settings")
+            else:
+                self.statusBar().showMessage("Permission denied for settings")
+            return
+        if target == "reports":
+            self._on_workspace_selected("student")
+            self.student_workspace.navigate_to("analytics")
+            self.global_sidebar.set_active("reports")
+            return
+        self._on_workspace_selected(target)
+
     def _on_workspace_selected(self, workspace_id: str) -> None:
         permission_map = {
             "student": None,
@@ -1126,6 +1157,7 @@ class MainWindow(QMainWindow):
                 return
 
         if workspace_id == "student":
+            self.global_sidebar.set_active("student")
             self.central_stack.setCurrentWidget(self.student_workspace)
             if self.student_workspace._current_student_id is not None:
                 self.student_workspace.show_student(
@@ -1138,21 +1170,25 @@ class MainWindow(QMainWindow):
             self.student_workspace.dashboard_page.refresh()
             self._update_waiting_status()
         elif workspace_id == "teacher":
+            self.global_sidebar.set_active("teacher")
             self.central_stack.setCurrentWidget(self.teacher_workspace)
             self.teacher_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Teacher Workspace")
             self._update_waiting_status()
         elif workspace_id == "class":
+            self.global_sidebar.set_active("class")
             self.central_stack.setCurrentWidget(self.class_workspace)
             self.class_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Class Workspace")
             self._update_waiting_status()
         elif workspace_id == "finance":
+            self.global_sidebar.set_active("finance")
             self.central_stack.setCurrentWidget(self.finance_workspace)
             self.finance_workspace.navigate_to("dashboard")
             self.statusBar().showMessage("Finance Workspace")
             self._update_waiting_status()
         elif workspace_id == "employee":
+            self.global_sidebar.set_active("employee")
             self.central_stack.setCurrentWidget(self.employee_workspace)
             user = get_current_user()
             if self._employee_service.can_view_all(user):
@@ -1172,6 +1208,7 @@ class MainWindow(QMainWindow):
             )
 
     def _go_home(self) -> None:
+        self.global_sidebar.set_active("home")
         self.central_stack.setCurrentWidget(self.home_page)
         self.home_page.refresh()
         self.statusBar().showMessage("Home")
@@ -1202,6 +1239,24 @@ class MainWindow(QMainWindow):
             logger.exception("Failed to refresh student list")
 
     def _apply_menu_permissions(self) -> None:
+        self.global_sidebar.set_item_visible(
+            "teacher",
+            self._permission_helper.has_permission("teacher.view"),
+        )
+        self.global_sidebar.set_item_visible(
+            "class",
+            self._permission_helper.has_permission("class.view"),
+        )
+        self.global_sidebar.set_item_visible(
+            "finance",
+            self._permission_helper.has_permission("finance.view"),
+        )
+        self.global_sidebar.set_item_visible(
+            "employee",
+            self._employee_service.can_access_workspace(get_current_user()),
+        )
+        can_manage = self._permission_helper.has_permission("user.manage")
+        self.global_sidebar.set_item_visible("settings", can_manage)
         self.home_page.refresh()
 
     def _on_attendance_updated(self) -> None:

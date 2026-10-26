@@ -61,11 +61,29 @@ def test_ep_prototype_02_main_window_owns_application_page_stack():
     class_node = _main_window_class()
     init = _method(class_node, "__init__")
     literals = _string_literals(init)
+    source = _read(MAIN_WINDOW_PATH)
+    tree = _parse(MAIN_WINDOW_PATH)
 
-    assert "QStackedWidget" in _read(MAIN_WINDOW_PATH)
-    assert "central_stack" in literals or "central_stack" in _read(MAIN_WINDOW_PATH)
-    assert "self.central_stack = QStackedWidget()" in _read(MAIN_WINDOW_PATH)
-    assert "self.central_stack.setCurrentWidget(self.home_page)" in _read(MAIN_WINDOW_PATH)
+    assert "QStackedWidget" in source
+    assert "central_stack" in literals or "central_stack" in source
+
+    stack_assignments = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "central_stack"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "QStackedWidget"
+    ]
+    assert stack_assignments, "MainWindow must own a QStackedWidget application page stack"
+    assert "self.central_stack.setCurrentWidget(self.home_page)" in source
 
 
 def test_ep_prototype_02_home_exposes_single_workspace_selection_boundary():
