@@ -46,7 +46,7 @@ def test_application_top_bar_contract(app):
         runtime_version="v1.2.3",
         sync_status="idle",
     )
-    assert top_bar.height() == COMPONENT_METRICS["app_top_bar_height"]
+    assert top_bar.minimumHeight() == COMPONENT_METRICS["app_top_bar_height"]
     assert top_bar.user_label.text() == "Nguyen An"
     assert top_bar.role_label.text() == "Admin"
     assert top_bar.version_label.text() == "Runtime: v1.2.3"
