@@ -106,8 +106,8 @@ class ApplicationTopBar(QFrame):
             label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['caption']}px;")
             meta_row.addWidget(label)
         meta_row.addStretch(); left_layout.addLayout(brand_row); left_layout.addLayout(meta_row)
-        left_zone.setMinimumWidth(250)
-        layout.addWidget(left_zone, 1)
+        left_zone.setFixedWidth(204)
+        layout.addWidget(left_zone)
 
         self.state_zone = QFrame(self.header)
         self.state_zone.setObjectName("ApplicationTopBarStateZone")
