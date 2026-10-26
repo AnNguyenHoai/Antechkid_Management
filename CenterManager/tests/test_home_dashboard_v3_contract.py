@@ -22,7 +22,7 @@ def test_home_v3_has_required_information_hierarchy() -> None:
     assert 'QLabel("TODAY"' in source
     assert '"ATTENTION"' in source
     assert '"QUICK ACCESS"' in source
-    assert 'QLabel("Workspace launcher"' in source
+    assert 'QLabel("Center operations"' in source
 
 
 def test_home_v3_keeps_service_and_navigation_contract() -> None:
