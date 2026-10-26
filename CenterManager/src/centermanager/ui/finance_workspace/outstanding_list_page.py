@@ -29,7 +29,7 @@ from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 from centermanager.services.outstanding_service import OutstandingService
 from centermanager.services.tuition_detail_service import TuitionDetailService
-from centermanager.ui.design_system import SearchBar, SecondaryButton
+from centermanager.ui.design_system import SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.finance_workspace.tuition_detail_dialog import TuitionDetailDialog
 from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
