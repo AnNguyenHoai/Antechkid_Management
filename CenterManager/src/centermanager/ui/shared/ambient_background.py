@@ -103,7 +103,7 @@ class AmbientBackground(QWidget):
         painter.setPen(QPen(AmbientBackground._with_alpha(COLORS["action_primary"], 24), 2))
         painter.setBrush(AmbientBackground._with_alpha(COLORS["action_primary"], 10))
         painter.drawRoundedRect(chip, 10, 10)
-        painter.setPen(QPen(QColor(25, 118, 210, 30), 2))
+        painter.setPen(QPen(AmbientBackground._with_alpha(COLORS["action_primary"], 30), 2))
         painter.drawText(chip, Qt.AlignmentFlag.AlignCenter, "AI")
         for i in range(5):
             off = (i + 1) * size / 6
