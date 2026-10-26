@@ -65,7 +65,7 @@ class ClassListPage(QWidget):
         self.search_bar = SearchToolbar(
             placeholder="Search by name, course, teacher...",
             filters=[
-                {"key": "status", "label": "Status", "options": ["Active", "Inactive", "All"]},
+                {"key": "status", "label": "Status", "options": ["Active", "Inactive"]},
             ],
             parent=toolbar,
         )
@@ -147,8 +147,9 @@ class ClassListPage(QWidget):
         self._populate_table()
 
     def _filter_classes(self, text: str) -> List[Class]:
-        status_map = {"Active": "ACTIVE", "Inactive": "INACTIVE", "All": "ALL"}
-        status = status_map.get(self.search_bar.filters().get("status", "Active"), "ACTIVE")
+        status_map = {"Active": "ACTIVE", "Inactive": "INACTIVE"}
+        status_label = self.search_bar.filters().get("status", "")
+        status = status_map.get(status_label, "ALL")
         normalized = text.strip().casefold()
         filtered = [
             class_obj
