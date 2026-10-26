@@ -23,7 +23,7 @@ def test_hero_header_exposes_reference_visual_hierarchy_without_changing_edit_ap
     assert 'self.editor_badge = _HeaderPill(' in source
     assert 'self.transaction_label = _HeaderPill(' in source
     assert 'self.start_edit_button = Button("Start editing", variant="primary", size="lg")' in source
-    assert 'self.finish_edit_button = Button("Finish editing", variant="primary", size="lg")' in source
+    assert 'self.finish_edit_button = Button("Finish editing", variant="accent", size="lg")' in source
     assert 'self.user_avatar = QLabel(initials, control_zone)' in source
     assert 'accent.setObjectName("HeroAccentLine")' in source
 
