@@ -386,9 +386,51 @@ class MainWindow(QMainWindow):
 
     def _on_poller_snapshot_changed(self, snapshot: CollaborationSnapshot) -> None:
         if QThread.currentThread() != self.thread():
-            QTimer.singleShot(0, self._update_waiting_status)
+            QTimer.singleShot(
+                0,
+                lambda snapshot=snapshot: self._apply_poller_snapshot(snapshot),
+            )
         else:
-            self._update_waiting_status()
+            self._apply_poller_snapshot(snapshot)
+
+    def _apply_poller_snapshot(self, snapshot: CollaborationSnapshot) -> None:
+        self._update_waiting_status()
+        self._project_holder_waiting_requests(snapshot)
+
+    def _project_holder_waiting_requests(
+        self,
+        snapshot: CollaborationSnapshot,
+    ) -> None:
+        if not self._transaction.is_editing:
+            self.app_top_bar.set_waiting_requests(0)
+            self._last_holder_waiting_request_count = 0
+            return
+
+        current_session = self._collaboration_manager.get_session_id()
+        queue = snapshot.queue or {}
+        requests = [
+            request
+            for request in (queue.get("requests") or [])
+            if request.get("status", "pending") == "pending"
+            and request.get("session_id") != current_session
+        ]
+        count = len(requests)
+        next_username = ""
+        if requests:
+            next_username = str(requests[0].get("username") or "").strip()
+
+        previous_count = getattr(self, "_last_holder_waiting_request_count", 0)
+        self._last_holder_waiting_request_count = count
+        self.app_top_bar.set_waiting_requests(count, next_username)
+
+        if count > 0 and count != previous_count:
+            if count == 1 and next_username:
+                message = f"{next_username} is waiting for editing access."
+            elif next_username:
+                message = f"{count} users are waiting for editing access. Next: {next_username}."
+            else:
+                message = f"{count} users are waiting for editing access."
+            self.statusBar().showMessage(message, 8000)
 
     def _on_lease_renewal_failed(self, payload) -> None:
         if not self._transaction.is_editing:
@@ -561,6 +603,8 @@ class MainWindow(QMainWindow):
             return
 
         if state == WriteTransactionState.IDLE:
+            self.app_top_bar.set_waiting_requests(0)
+            self._last_holder_waiting_request_count = 0
             self.start_edit_btn.setText("Start editing")
             self.start_edit_btn.setEnabled(True)
             self.start_edit_btn.setVisible(True)
