@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import date, datetime
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import asc, desc, func, or_
@@ -147,6 +148,29 @@ class ExpenseRepository(BaseRepository[Expense]):
             finance_period_start=finance_period_start,
             realized_only=realized_only,
         ).count()
+
+    def sum_filtered_amount(
+        self,
+        category: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        status: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
+        realized_only: bool = False,
+    ) -> Decimal:
+        query = self._filtered_query(
+            category=category,
+            payment_method=payment_method,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            finance_period_start=finance_period_start,
+            realized_only=realized_only,
+        ).with_entities(func.coalesce(func.sum(Expense.amount), 0))
+        return Decimal(str(query.scalar() or 0))
 
     def aggregate_realized_amounts_by_payment_method(
         self,
