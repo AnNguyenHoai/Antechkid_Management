@@ -59,6 +59,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._token = token
         self._branch = branch
         self._lock_branch = f"lock-{branch}"  # e.g., lock-main
+        self._queue_branch = f"queue-{branch}"  # shared cross-machine WRITE queue
+        self._queue_request_ttl_seconds = 120
         self._username = username or os.environ.get("GIT_USER", "CenterManager")
         self._email = email or os.environ.get("GIT_EMAIL", "centermanager@local")
         self._repo: Optional[Repo] = None
@@ -448,6 +450,262 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 return True
             logger.warning(f"Failed to delete lock branch: {e}")
             return False
+
+    # ===== Shared WRITE queue branch =====
+
+    def _remote_queue_oid(self) -> Optional[str]:
+        if not self._has_remote_origin():
+            return None
+        output = self._run_git_command(
+            ["ls-remote", "origin", f"refs/heads/{self._queue_branch}"],
+            check=False,
+        )
+        if not output:
+            return None
+        return output.split()[0]
+
+    def _fetch_queue_branch(self) -> bool:
+        if not self._has_remote_origin():
+            return False
+        self._run_git_command(
+            ["fetch", "origin", self._queue_branch],
+            check=False,
+        )
+        return True
+
+    def _read_queue_from_oid(self, oid: Optional[str]) -> Dict[str, Any]:
+        if not oid:
+            return {"requests": []}
+        content = self._run_git_command(
+            ["show", f"{oid}:queue.json"],
+            check=False,
+        )
+        if not content:
+            self._fetch_queue_branch()
+            content = self._run_git_command(
+                ["show", f"{oid}:queue.json"],
+                check=False,
+            )
+        if not content:
+            return {"requests": []}
+        try:
+            payload = json.loads(content)
+        except Exception:
+            logger.warning("Remote queue payload is invalid JSON; treating as empty")
+            return {"requests": []}
+        if isinstance(payload, list):
+            payload = {"requests": payload}
+        requests = payload.get("requests")
+        if not isinstance(requests, list):
+            requests = []
+        return {"requests": requests}
+
+    def _filter_live_queue_requests(self, requests: list) -> list:
+        now = datetime.now()
+        live = []
+        for item in requests:
+            if not isinstance(item, dict) or item.get("status", "pending") != "pending":
+                continue
+            timestamp = item.get("timestamp")
+            if timestamp:
+                try:
+                    age = (now - datetime.fromisoformat(timestamp)).total_seconds()
+                    if age > self._queue_request_ttl_seconds:
+                        continue
+                except Exception:
+                    pass
+            live.append(dict(item))
+        live.sort(
+            key=lambda item: (
+                -int(item.get("priority", 0) or 0),
+                item.get("enqueue_timestamp") or item.get("timestamp") or "",
+            )
+        )
+        return live
+
+    def _create_queue_commit_plumbing(
+        self,
+        requests: list,
+        parent_oid: Optional[str],
+    ) -> Optional[str]:
+        temp_path = None
+        temp_dir = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".json",
+                delete=False,
+                encoding="utf-8",
+            ) as f:
+                json.dump(
+                    {"requests": requests},
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                temp_path = f.name
+
+            blob_sha = self._run_git_command(
+                ["hash-object", "-w", temp_path],
+                check=True,
+            ).strip()
+            os.unlink(temp_path)
+            temp_path = None
+
+            temp_dir = tempfile.mkdtemp()
+            index_path = os.path.join(temp_dir, "index")
+            env = self._get_env()
+            env["GIT_INDEX_FILE"] = index_path
+            self._run_git_command(["read-tree", "--empty"], env=env, check=True)
+            self._run_git_command(
+                [
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "100644",
+                    blob_sha,
+                    "queue.json",
+                ],
+                env=env,
+                check=True,
+            )
+            tree_sha = self._run_git_command(
+                ["write-tree"],
+                env=env,
+                check=True,
+            ).strip()
+            cmd = ["commit-tree", tree_sha]
+            if parent_oid:
+                cmd.extend(["-p", parent_oid])
+            cmd.extend(["-m", "Update shared WRITE queue"])
+            return self._run_git_command(cmd, check=True).strip()
+        except Exception:
+            logger.exception("Failed to create shared queue commit")
+            return None
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _push_queue_branch(
+        self,
+        commit_sha: str,
+        expected_oid: Optional[str],
+    ) -> bool:
+        try:
+            args = [
+                "push",
+                "origin",
+                f"{commit_sha}:refs/heads/{self._queue_branch}",
+            ]
+            if expected_oid:
+                args.append(
+                    f"--force-with-lease={self._queue_branch}:{expected_oid}"
+                )
+            self._run_git_command(args, check=True)
+            return True
+        except Exception as exc:
+            logger.info("Shared queue CAS update lost a race: %s", exc)
+            return False
+
+    def _mutate_remote_queue(self, mutator, retries: int = 5) -> bool:
+        for _ in range(max(1, retries)):
+            expected_oid = self._remote_queue_oid()
+            if expected_oid:
+                self._fetch_queue_branch()
+            payload = self._read_queue_from_oid(expected_oid)
+            requests = self._filter_live_queue_requests(payload.get("requests", []))
+            changed, requests = mutator(requests)
+            requests = self._filter_live_queue_requests(requests)
+            if not changed:
+                return True
+            commit_sha = self._create_queue_commit_plumbing(
+                requests,
+                expected_oid,
+            )
+            if commit_sha and self._push_queue_branch(commit_sha, expected_oid):
+                return True
+        return False
+
+    def remote_queue_status(self) -> Dict[str, Any]:
+        try:
+            oid = self._remote_queue_oid()
+            requests = self._filter_live_queue_requests(
+                self._read_queue_from_oid(oid).get("requests", [])
+            )
+            return {
+                "length": len(requests),
+                "requests": requests,
+                "next": requests[0] if requests else None,
+            }
+        except Exception:
+            logger.exception("Failed to read shared WRITE queue")
+            return {"length": 0, "requests": [], "next": None}
+
+    def enqueue_remote_write_request(self, request: Dict[str, Any]) -> bool:
+        request = dict(request)
+
+        def mutate(requests):
+            if any(
+                item.get("session_id") == request.get("session_id")
+                for item in requests
+            ):
+                return False, requests
+            requests.append(request)
+            return True, requests
+
+        return self._mutate_remote_queue(mutate)
+
+    def refresh_remote_write_request(
+        self,
+        request_id: str,
+        session_id: str,
+    ) -> bool:
+        refreshed = {"found": False}
+
+        def mutate(requests):
+            changed = False
+            for item in requests:
+                if (
+                    item.get("request_id") == request_id
+                    and item.get("session_id") == session_id
+                ):
+                    item["timestamp"] = datetime.now().isoformat()
+                    refreshed["found"] = True
+                    changed = True
+                    break
+            return changed, requests
+
+        if not self._mutate_remote_queue(mutate):
+            return False
+        return refreshed["found"]
+
+    def cancel_remote_write_request(
+        self,
+        request_id: str,
+        session_id: Optional[str] = None,
+    ) -> bool:
+        removed = {"found": False}
+
+        def mutate(requests):
+            kept = []
+            for item in requests:
+                matches = item.get("request_id") == request_id
+                if session_id is not None:
+                    matches = matches and item.get("session_id") == session_id
+                if matches:
+                    removed["found"] = True
+                    continue
+                kept.append(item)
+            return removed["found"], kept
+
+        if not self._mutate_remote_queue(mutate):
+            return False
+        return removed["found"]
 
     # ===== Atomic lock operations =====
 

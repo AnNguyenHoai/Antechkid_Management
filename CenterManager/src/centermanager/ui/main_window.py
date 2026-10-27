@@ -394,8 +394,54 @@ class MainWindow(QMainWindow):
             self._apply_poller_snapshot(snapshot)
 
     def _apply_poller_snapshot(self, snapshot: CollaborationSnapshot) -> None:
+        self._reconcile_waiting_transaction(snapshot)
         self._update_waiting_status()
         self._project_holder_waiting_requests(snapshot)
+
+    def _reconcile_waiting_transaction(
+        self,
+        snapshot: CollaborationSnapshot,
+    ) -> None:
+        if self._transaction.state != WriteTransactionState.WAITING:
+            return
+
+        current_session = self._collaboration_manager.get_session_id()
+        expected_request_id = getattr(
+            self._transaction,
+            "_waiting_request_id",
+            "",
+        )
+        requests = snapshot.queue.get("requests") or []
+        own_request = next(
+            (
+                request
+                for request in requests
+                if request.get("session_id") == current_session
+                and (
+                    not expected_request_id
+                    or request.get("request_id") == expected_request_id
+                )
+            ),
+            None,
+        )
+
+        if own_request is None:
+            self._transaction.cancel_waiting(
+                "Authoritative WRITE queue no longer contains this request"
+            )
+            self.statusBar().showMessage(
+                "Your editing request is no longer in the queue. "
+                "Start editing again if you still need write access.",
+                8000,
+            )
+            self._update_write_buttons()
+            return
+
+        # Keep the displayed position aligned with the shared canonical order.
+        for index, request in enumerate(requests, start=1):
+            if request is own_request:
+                self._transaction._waiting_position = index
+                break
 
     def _project_holder_waiting_requests(
         self,

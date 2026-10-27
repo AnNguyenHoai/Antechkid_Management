@@ -128,6 +128,81 @@ class CollaborationManager:
             logger.warning(f"Failed to get remote lock status: {e}")
             return {"locked": False, "owner": None, "session_id": None}
 
+    def _remote_queue_supported(self) -> bool:
+        return bool(
+            self._sync_provider is not None
+            and hasattr(self._sync_provider, "remote_queue_status")
+        )
+
+    def _queue_snapshot(self) -> Dict[str, Any]:
+        if self._remote_queue_supported():
+            return self._sync_provider.remote_queue_status()
+        requests = self._queue.get_requests()
+        return {
+            "length": len(requests),
+            "requests": [request.to_dict() for request in requests],
+            "next": requests[0].to_dict() if requests else None,
+        }
+
+    def _queue_requests(self) -> List[WriteRequest]:
+        snapshot = self._queue_snapshot()
+        result = []
+        for item in snapshot.get("requests") or []:
+            try:
+                result.append(WriteRequest.from_dict(item))
+            except Exception:
+                logger.warning("Ignoring invalid WRITE queue request: %r", item)
+        return result
+
+    def _queue_get_by_session(self, session_id: str) -> Optional[WriteRequest]:
+        for request in self._queue_requests():
+            if request.session_id == session_id:
+                return request
+        return None
+
+    def _queue_peek(self) -> Optional[WriteRequest]:
+        requests = self._queue_requests()
+        return requests[0] if requests else None
+
+    def _queue_position(self, session_id: str) -> int:
+        for index, request in enumerate(self._queue_requests(), start=1):
+            if request.session_id == session_id:
+                return index
+        return 0
+
+    def _queue_count(self) -> int:
+        return len(self._queue_requests())
+
+    def _queue_enqueue(self, request: WriteRequest) -> bool:
+        if self._remote_queue_supported():
+            return bool(
+                self._sync_provider.enqueue_remote_write_request(
+                    request.to_dict()
+                )
+            )
+        self._queue.enqueue(request)
+        return True
+
+    def _queue_refresh(self, request: WriteRequest) -> bool:
+        if self._remote_queue_supported():
+            return bool(
+                self._sync_provider.refresh_remote_write_request(
+                    request.request_id,
+                    request.session_id,
+                )
+            )
+        return self._queue.refresh(request.request_id)
+
+    def _queue_cancel(self, request: WriteRequest) -> bool:
+        if self._remote_queue_supported():
+            return bool(
+                self._sync_provider.cancel_remote_write_request(
+                    request.request_id,
+                    request.session_id,
+                )
+            )
+        return self._queue.cancel(request.request_id)
+
     def _build_lock_data(self) -> Dict[str, Any]:
         """Build lock data for acquisition."""
         now = datetime.now()
@@ -270,9 +345,9 @@ class CollaborationManager:
             logger.warning(f"Failed to sync local lock: {e}")
 
     def _enqueue_or_return_waiting(self, reason: str, request_id: str) -> WriteRequestInfo:
-        existing = self._queue.get_by_session(self._session.session_id)
+        existing = self._queue_get_by_session(self._session.session_id)
         if existing:
-            position = self._queue.get_position(self._session.session_id)
+            position = self._queue_position(self._session.session_id)
             logger.info(f"Session {self._session.username} already waiting (pos={position})")
             return WriteRequestInfo(
                 WriteRequestResult.WAITING,
@@ -292,8 +367,8 @@ class CollaborationManager:
             reason=reason,
             status="pending",
         )
-        self._queue.enqueue(request)
-        position = self._queue.get_position(self._session.session_id)
+        self._queue_enqueue(request)
+        position = self._queue_position(self._session.session_id)
 
         self._event_bus.publish(WriteRequested(
             request_id=request_id,
@@ -305,8 +380,8 @@ class CollaborationManager:
             queue_position=position,
         ))
         self._event_bus.publish(QueueUpdated(
-            queue_length=self._queue.count(),
-            next_writer=self._queue.peek().username if self._queue.peek() else None,
+            queue_length=self._queue_count(),
+            next_writer=self._queue_peek().username if self._queue_peek() else None,
         ))
 
         logger.info(f"Write request enqueued for {self._session.username} (pos={position})")
@@ -339,6 +414,10 @@ class CollaborationManager:
             return
         if self._is_writing:
             self._release_write_internal()
+        elif self._session is not None:
+            request = self._queue_get_by_session(self._session.session_id)
+            if request is not None:
+                self._queue_cancel(request)
         if self._heartbeat_manager:
             self._heartbeat_manager.stop()
         if self._session:
@@ -352,7 +431,7 @@ class CollaborationManager:
         if self._is_writing:
             return WriteRequestInfo(WriteRequestResult.GRANTED, message="Already in WRITE mode")
         request_id = str(uuid.uuid4())
-        existing = self._queue.get_by_session(self._session.session_id)
+        existing = self._queue_get_by_session(self._session.session_id)
         if existing:
             if self._sync_provider is not None:
                 remote_lock = self._get_remote_lock_status()
@@ -360,9 +439,9 @@ class CollaborationManager:
             else:
                 locked = self._lock.is_locked()
             if not locked:
-                self._queue.cancel(existing.request_id)
+                self._queue_cancel(existing)
             else:
-                position = self._queue.get_position(self._session.session_id)
+                position = self._queue_position(self._session.session_id)
                 return WriteRequestInfo(WriteRequestResult.WAITING, existing.request_id, position, f"Waiting (position {position})")
 
         if self._sync_provider is not None:
@@ -459,18 +538,18 @@ class CollaborationManager:
         self._ensure_initialized()
         if self._session is None:
             return False
-        request = self._queue.get_by_session(self._session.session_id)
+        request = self._queue_get_by_session(self._session.session_id)
         if request is None:
             return False
         if request_id and request.request_id != request_id:
             return False
-        return self._queue.refresh(request.request_id)
+        return self._queue_refresh(request)
 
     def has_pending_waiting_request(self, request_id: Optional[str] = None) -> bool:
         self._ensure_initialized()
         if self._session is None:
             return False
-        request = self._queue.get_by_session(self._session.session_id)
+        request = self._queue_get_by_session(self._session.session_id)
         if request is None:
             return False
         return not request_id or request.request_id == request_id
@@ -479,11 +558,11 @@ class CollaborationManager:
         self._ensure_initialized()
         if self._is_writing or self._session is None:
             return False
-        request = self._queue.get_by_session(self._session.session_id)
+        request = self._queue_get_by_session(self._session.session_id)
         if request is None or (request_id and request.request_id != request_id):
             return False
         request_id = request.request_id
-        queue_head = self._queue.peek()
+        queue_head = self._queue_peek()
         if queue_head is None or queue_head.request_id != request_id:
             return False
 
@@ -511,8 +590,8 @@ class CollaborationManager:
                     return False
             self._event_bus.publish(WriteGranted(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username, request_id=request_id, queue_position=0))
             self._event_bus.publish(ModeChanged(mode="WRITE"))
-            self._queue.cancel(request_id)
-            self._event_bus.publish(QueueUpdated(queue_length=self._queue.count(), next_writer=self._queue.peek().username if self._queue.peek() else None))
+            self._queue_cancel(request)
+            self._event_bus.publish(QueueUpdated(queue_length=self._queue_count(), next_writer=self._queue_peek().username if self._queue_peek() else None))
             return True
 
         if self._lock.is_locked():
@@ -526,8 +605,8 @@ class CollaborationManager:
             self._is_writing = True; self._lock_acquired = True
             self._event_bus.publish(WriteGranted(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username, request_id=request_id, queue_position=0))
             self._event_bus.publish(ModeChanged(mode="WRITE"))
-            self._queue.cancel(request_id)
-            self._event_bus.publish(QueueUpdated(queue_length=self._queue.count(), next_writer=self._queue.peek().username if self._queue.peek() else None))
+            self._queue_cancel(request)
+            self._event_bus.publish(QueueUpdated(queue_length=self._queue_count(), next_writer=self._queue_peek().username if self._queue_peek() else None))
             return True
         except LockTimeoutError:
             return False
@@ -632,7 +711,7 @@ class CollaborationManager:
 
     def get_queue(self) -> Dict[str, Any]:
         self._ensure_initialized()
-        return {"length": self._queue.count(), "requests": [r.to_dict() for r in self._queue.get_requests()], "next": self._queue.peek().to_dict() if self._queue.peek() else None}
+        return self._queue_snapshot()
 
     def get_session(self) -> Optional[RuntimeSession]: return self._session
     def is_initialized(self) -> bool: return self._initialized
@@ -640,7 +719,7 @@ class CollaborationManager:
     def _on_heartbeat(self, session: RuntimeSession) -> None: self._heartbeat_repo.update(session)
     def _ensure_initialized(self) -> None:
         if not self._initialized: raise CollaborationNotInitializedError("Collaboration not initialized. Call initialize() first.")
-    def get_queue_length(self) -> int: return self._queue.count()
+    def get_queue_length(self) -> int: return self._queue_count()
     def has_writer(self) -> bool: return self._is_writing or self._lock.is_locked()
     def ensure_write(self) -> bool:
         self._ensure_initialized()
@@ -665,21 +744,17 @@ class CollaborationManager:
             return {"locked": False, "owner": None, "session_id": None}
 
     def get_waiting_requests(self) -> List[Dict[str, Any]]:
-        if not self._queue_dir.exists(): return []
-        requests=[]
-        for file in self._queue_dir.glob("*.json"):
-            try:
-                with open(file, 'r', encoding='utf-8') as f: data=json.load(f)
-                if data.get("status") == "pending": requests.append(data)
-            except Exception: continue
-        return requests
+        return [request.to_dict() for request in self._queue_requests()]
 
     def cancel_waiting_request(self) -> bool:
-        if not self._initialized or not self._session: return False
-        request = self._queue.get_by_session(self._session.session_id)
-        if request:
-            self._queue.cancel(request.request_id); return True
-        return False
+        if not self._initialized or not self._session:
+            return False
+        request = self._queue_get_by_session(self._session.session_id)
+        if request is None:
+            # Idempotent cancel: an expired/removed request already means the
+            # caller is no longer in the queue, so UI can safely leave WAITING.
+            return True
+        return self._queue_cancel(request)
 
     def get_diagnostics(self) -> Dict[str, Any]:
         self._ensure_initialized()
@@ -710,11 +785,11 @@ class CollaborationManager:
 
     def get_waiting_users(self) -> list:
         self._ensure_initialized()
-        return [{"username":r.username,"priority":r.priority,"request_id":r.request_id,"session_id":r.session_id,"timestamp":r.timestamp} for r in self._queue.get_requests() if not self._heartbeat_repo.is_expired(r.session_id)]
+        return [{"username":r.username,"priority":r.priority,"request_id":r.request_id,"session_id":r.session_id,"timestamp":r.timestamp} for r in self._queue_requests()]
 
     def is_next_eligible(self) -> bool:
         if not self._initialized or not self._session: return False
-        next_req=self._queue.peek(); return bool(next_req and next_req.session_id == self._session.session_id)
+        next_req=self._queue_peek(); return bool(next_req and next_req.session_id == self._session.session_id)
 
     def is_collaboration_available(self) -> bool:
         if self._sync_provider is not None:
