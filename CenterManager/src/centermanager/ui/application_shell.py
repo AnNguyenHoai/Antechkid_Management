@@ -221,6 +221,8 @@ class ApplicationTopBar(QFrame):
         self._mode = "READ"
         self._editor_text = "No active editor"
         self._transaction_text = "Ready"
+        self._waiting_request_count = 0
+        self._next_waiting_username = ""
 
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(140)
@@ -311,9 +313,15 @@ class ApplicationTopBar(QFrame):
         self.transaction_label = _HeaderPill(
             "Ready", icon="check", tone="success", parent=control_zone
         )
+        self.waiting_request_badge = _HeaderPill(
+            "0 waiting", icon="users", tone="warning", parent=control_zone
+        )
+        self.waiting_request_badge.setAccessibleName("Pending write requests")
+        self.waiting_request_badge.setVisible(False)
         status_row.addWidget(self.mode_badge)
         status_row.addWidget(self.editor_badge)
         status_row.addWidget(self.transaction_label)
+        status_row.addWidget(self.waiting_request_badge)
 
         self.activity_label = QLabel("", control_zone)
         self.activity_label.setObjectName("EditingActivityIndicator")
@@ -528,6 +536,22 @@ class ApplicationTopBar(QFrame):
             message = "Another edit session is active. Your request will continue when editing becomes available."
         elif "failed" in tx or "offline" in tx:
             message = "Changes are not fully synchronized yet. Review the status before continuing."
+        elif (mode == "WRITE" or tx == "editing") and self._waiting_request_count > 0:
+            if self._waiting_request_count == 1 and self._next_waiting_username:
+                message = (
+                    f"{self._next_waiting_username} is waiting for editing access. "
+                    "Finish editing when you are ready to hand over."
+                )
+            elif self._next_waiting_username:
+                message = (
+                    f"{self._waiting_request_count} users are waiting for editing access. "
+                    f"Next: {self._next_waiting_username}. Finish editing when you are ready."
+                )
+            else:
+                message = (
+                    f"{self._waiting_request_count} users are waiting for editing access. "
+                    "Finish editing when you are ready to hand over."
+                )
         elif mode == "WRITE" or tx == "editing":
             message = "After changing data, click Finish editing so your changes are saved and synchronized."
         else:
@@ -622,6 +646,22 @@ class ApplicationTopBar(QFrame):
         else:
             tone = "info"
         self.transaction_label.set_tone(tone)
+        self._refresh_guidance()
+
+    def set_waiting_requests(self, count: int, next_username: str = "") -> None:
+        self._waiting_request_count = max(0, int(count or 0))
+        self._next_waiting_username = (next_username or "").strip()
+        if self._waiting_request_count > 0:
+            label = (
+                "1 waiting"
+                if self._waiting_request_count == 1
+                else f"{self._waiting_request_count} waiting"
+            )
+            self.waiting_request_badge.setText(label)
+            self.waiting_request_badge.set_tone("warning")
+            self.waiting_request_badge.setVisible(True)
+        else:
+            self.waiting_request_badge.setVisible(False)
         self._refresh_guidance()
 
     def set_runtime_version(self, version: str) -> None:
