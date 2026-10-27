@@ -180,7 +180,7 @@ class CollaborationManager:
                     request.to_dict()
                 )
             )
-        self._queue_enqueue(request)
+        self._queue.enqueue(request)
         return True
 
     def _queue_refresh(self, request: WriteRequest) -> bool:
@@ -191,7 +191,7 @@ class CollaborationManager:
                     request.session_id,
                 )
             )
-        return self._queue_refresh(request)
+        return self._queue.refresh(request.request_id)
 
     def _queue_cancel(self, request: WriteRequest) -> bool:
         if self._remote_queue_supported():
