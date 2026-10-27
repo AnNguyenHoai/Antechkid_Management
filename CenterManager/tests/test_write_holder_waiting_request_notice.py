@@ -27,7 +27,7 @@ def test_header_shows_single_waiter_to_active_editor(app):
     top.set_transaction_text("Editing")
     top.set_waiting_requests(1, "Hoàng Việt")
 
-    assert top.waiting_request_badge.isVisible()
+    assert not top.waiting_request_badge.isHidden()
     assert top.waiting_request_badge.text() == "1 waiting"
     assert "Hoàng Việt is waiting for editing access" in top.guidance_panel.label.text()
     assert "Finish editing" in top.guidance_panel.label.text()
@@ -51,7 +51,7 @@ def test_header_clears_waiter_notice_when_queue_is_empty(app):
     top.set_waiting_requests(1, "User B")
     top.set_waiting_requests(0)
 
-    assert not top.waiting_request_badge.isVisible()
+    assert top.waiting_request_badge.isHidden()
     assert "After changing data" in top.guidance_panel.label.text()
 
 
