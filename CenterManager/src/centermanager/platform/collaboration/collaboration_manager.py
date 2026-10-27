@@ -439,7 +439,7 @@ class CollaborationManager:
             else:
                 locked = self._lock.is_locked()
             if not locked:
-                self._queue.cancel(existing.request_id)
+                self._queue_cancel(existing)
             else:
                 position = self._queue_position(self._session.session_id)
                 return WriteRequestInfo(WriteRequestResult.WAITING, existing.request_id, position, f"Waiting (position {position})")
