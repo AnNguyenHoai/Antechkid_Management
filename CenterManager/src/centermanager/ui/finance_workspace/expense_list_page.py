@@ -15,7 +15,7 @@ from centermanager.core.clock import get_clock
 from centermanager.services.expense_service import ExpenseService
 from centermanager.ui.design_system import PrimaryButton, SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
-from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
+from centermanager.ui.shared import DataTable, FilterSummaryBar, LoadingWidget, SearchToolbar, TableDensity
 from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
 from centermanager.ui.finance_workspace.expense_detail_dialog import ExpenseDetailDialog
@@ -35,6 +35,7 @@ class ExpenseListPage(QWidget):
         self._notification_service = notification_service
         self._expenses = []
         self._total_rows = 0
+        self._filtered_amount = 0
         self._current_page = 1
         self._page_size = 20
         self._sort_by = "payment_date"
@@ -122,6 +123,11 @@ class ExpenseListPage(QWidget):
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
         self.data_table.context_menu_requested.connect(self._on_context_menu)
         layout.addWidget(self.data_table)
+        self.summary_bar = FilterSummaryBar(
+            amount_label="Tổng giá trị chi theo bộ lọc:",
+            parent=self,
+        )
+        layout.addWidget(self.summary_bar)
         self.loading = LoadingWidget(); self.loading.setVisible(False); layout.addWidget(self.loading)
         self._search_debounce = QTimer(self)
         self._search_debounce.setSingleShot(True)
@@ -216,10 +222,10 @@ class ExpenseListPage(QWidget):
 
     def _load_page(self) -> None:
         if self._period_configured is False:
-            self._expenses = []; self._total_rows = 0; self._populate_table(); return
+            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._populate_table(); return
         kwargs = self._filter_kwargs()
         if kwargs["date_from"] > kwargs["date_to"]:
-            self._expenses = []; self._total_rows = 0; self._populate_table(); return
+            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._populate_table(); return
         items, total = self._service.list_expenses(
             **kwargs,
             finance_period_start=self._period_start,
@@ -236,6 +242,10 @@ class ExpenseListPage(QWidget):
                 per_page=self._page_size, sort_by=self._sort_by, ascending=self._sort_ascending,
             )
         self._expenses, self._total_rows = items, total
+        self._filtered_amount = self._service.sum_expenses(
+            **kwargs,
+            finance_period_start=self._period_start,
+        )
         self._populate_table()
 
     def _populate_table(self) -> None:
@@ -246,6 +256,7 @@ class ExpenseListPage(QWidget):
             "paid_by": exp.paid_by or "-", "status": exp.status,
         } for exp in self._expenses]
         self.data_table.set_server_data(data, self._total_rows, page=self._current_page, page_size=self._page_size)
+        self.summary_bar.set_summary(self._total_rows, self._filtered_amount)
 
     def _on_page_requested(self, page: int, page_size: int) -> None:
         self._current_page, self._page_size = page, page_size

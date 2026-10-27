@@ -165,6 +165,27 @@ class IncomeRepository(BaseRepository[Income]):
         )
         return query.count()
 
+    def sum_records(self, *, student_id=None, class_id=None, enrollment_id=None, income_type=None,
+                    payment_method=None, payment_period=None, date_from=None, date_to=None,
+                    search_text=None, finance_period_start=None,
+                    status: Optional[str] = Income.STATUS_ACTIVE) -> Decimal:
+        query = self._session.query(func.coalesce(func.sum(Income.amount), 0))
+        query = self._apply_filters(
+            query,
+            student_id=student_id,
+            class_id=class_id,
+            enrollment_id=enrollment_id,
+            income_type=income_type,
+            payment_method=payment_method,
+            payment_period=payment_period,
+            date_from=date_from,
+            date_to=date_to,
+            search_text=search_text,
+            finance_period_start=finance_period_start,
+            status=status,
+        )
+        return self._decimal(query.scalar())
+
     def list_active(self, student_id=None, class_id=None, income_type=None, payment_method=None,
                     payment_period=None, date_from=None, date_to=None, search_text=None,
                     offset: int = 0, limit: int = 20, finance_period_start=None,
