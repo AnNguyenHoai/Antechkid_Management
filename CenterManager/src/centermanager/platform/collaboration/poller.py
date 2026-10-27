@@ -223,18 +223,31 @@ class CollaborationPoller(QObject):
     def _renew_active_lease(self) -> None:
         if self._stop_requested or not self._running:
             return
+
+        # WRITE holders renew the remote lock lease. WAITING clients renew their
+        # own queue request lease so a healthy waiter cannot disappear after
+        # the queue TTL while another editor is still working.
         try:
-            renewed = self._cm.renew_remote_lease()
+            if self._cm.is_writing():
+                renewed = self._cm.renew_remote_lease()
+                if not renewed:
+                    logger.warning(
+                        "Active editing remote lease renewal was not successful"
+                    )
+                    self.lease_renewal_failed.emit({"error": "renewal_failed"})
+                return
+
+            if self._cm.has_pending_waiting_request():
+                if not self._cm.refresh_waiting_request():
+                    logger.warning("Waiting WRITE request lease refresh failed")
         except AttributeError:
             return
         except Exception as e:
-            logger.warning(f"Active editing lease renewal failed: {e}")
-            self.lease_renewal_failed.emit({"error": str(e)})
-            return
-
-        if not renewed:
-            logger.warning("Active editing remote lease renewal was not successful")
-            self.lease_renewal_failed.emit({"error": "renewal_failed"})
+            if self._cm.is_writing():
+                logger.warning(f"Active editing lease renewal failed: {e}")
+                self.lease_renewal_failed.emit({"error": str(e)})
+            else:
+                logger.warning("Waiting WRITE request refresh failed: %s", e)
 
     def _try_handoff_waiting_request(self, remote_lock: Dict[str, Any], queue: Dict[str, Any]) -> None:
         """Automatically grant this session when it is the queue head and the lock is free.
@@ -245,7 +258,10 @@ class CollaborationPoller(QObject):
         """
         if self._stop_requested or not self._running:
             return
-        if remote_lock.get("locked", False):
+        if (
+            remote_lock.get("locked", False)
+            and not self._cm._is_lock_stale(remote_lock)
+        ):
             return
         if self._cm.is_writing():
             return
