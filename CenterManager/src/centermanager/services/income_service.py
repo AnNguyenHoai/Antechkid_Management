@@ -825,6 +825,38 @@ class IncomeService:
             total = repo.count_records(**common)
             return items, total
 
+    @require_permission("finance.view")
+    def sum_incomes(
+        self,
+        student_id: Optional[int] = None,
+        class_id: Optional[int] = None,
+        enrollment_id: Optional[int] = None,
+        income_type: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        payment_period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
+        status: Optional[str] = Income.STATUS_ACTIVE,
+    ) -> Decimal:
+        normalized_status = self._validate_status(status)
+        with self._session_factory() as session:
+            repo = self._repository_provider.incomes(session)
+            return repo.sum_records(
+                student_id=student_id,
+                class_id=class_id,
+                enrollment_id=enrollment_id,
+                income_type=income_type,
+                payment_method=payment_method,
+                payment_period=payment_period,
+                date_from=date_from,
+                date_to=date_to,
+                search_text=search_text,
+                finance_period_start=finance_period_start,
+                status=normalized_status,
+            )
+
     @require_permission("finance.income.update")
     def reconcile_tuition_enrollment(self, income_id: int, enrollment_id: int) -> Income:
         """Explicitly link one legacy Tuition row; never infer/backfill silently."""
