@@ -228,6 +228,31 @@ class ExpenseService:
                     repo.count_active(**kwargs))
 
     @require_permission("finance.view")
+    def sum_expenses(
+        self,
+        category: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        status: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        search_text: Optional[str] = None,
+        finance_period_start: Optional[date] = None,
+        realized_only: bool = False,
+    ):
+        with self._session_factory() as session:
+            repo = self._repository_provider.expenses(session)
+            return repo.sum_filtered_amount(
+                category=category,
+                payment_method=payment_method,
+                status=status,
+                date_from=date_from,
+                date_to=date_to,
+                search_text=search_text,
+                finance_period_start=finance_period_start,
+                realized_only=realized_only,
+            )
+
+    @require_permission("finance.view")
     def export_expenses_csv(self, destination: str, category: Optional[str] = None,
                             payment_method: Optional[str] = None, status: Optional[str] = None,
                             date_from: Optional[date] = None, date_to: Optional[date] = None,
