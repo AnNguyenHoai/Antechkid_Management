@@ -81,6 +81,10 @@ class FilterSummaryBar(QFrame):
             """
         )
 
+    def set_amount_label(self, text: str) -> None:
+        self._amount_label = text
+        self.amount_caption.setText(text)
+
     def set_summary(self, count: int, amount) -> None:
         self.count_label.setText(f"{int(count):,} giao dịch phù hợp")
         value = Decimal(str(amount or 0))
