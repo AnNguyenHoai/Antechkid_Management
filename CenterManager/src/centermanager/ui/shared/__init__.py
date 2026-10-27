@@ -16,6 +16,7 @@ from .data_table import BulkActionBar, DataTable as _DataTable, TableDensity
 from .chart_card import ChartCard
 from .entity_header import EntityHeader
 from .ambient_background import AmbientBackground
+from .filter_summary_bar import FilterSummaryBar
 
 
 class DataTable(_DataTable):
@@ -51,4 +52,5 @@ __all__ = [
     "ChartCard",
     "EntityHeader",
     "AmbientBackground",
+    "FilterSummaryBar",
 ]
