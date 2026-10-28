@@ -1199,6 +1199,14 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # publish-only staging boundary.
             self._sync_employee_attachments_to_repository()
 
+            # Fail closed before staging: the authoritative DB and its signed
+            # identity must agree with the workspace key and pinned generation.
+            # This prevents a successful Git push of an unbootable artifact.
+            from centermanager.database.artifact_security import (
+                validate_authoritative_repository_database,
+            )
+            validate_authoritative_repository_database()
+
             # Stage business files only. Collaboration runtime state is outside
             # the MAIN working tree and is never staged here.
             self._run_git_command(["add", "-A"])
