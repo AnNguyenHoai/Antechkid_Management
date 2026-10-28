@@ -957,7 +957,7 @@ class CollaborationManager:
         return int(getter()) if callable(getter) else 0
 
     def validate_write_authority(self, session) -> Dict[str, Any]:
-        result={"valid":False,"reason":"","generation":self._lock.get_lock_generation() if hasattr(self._lock,'get_lock_generation') else 0,"owner":self._lock.get_owner() if hasattr(self._lock,'get_owner') else None,"lease_valid":False,"finishing_deadline":None}
+        result={"valid":False,"reason":"","generation":self._lock.get_lock_generation() if hasattr(self._lock,'get_lock_generation') else 0,"generation_authoritative":False,"owner":self._lock.get_owner() if hasattr(self._lock,'get_owner') else None,"lease_valid":False,"finishing_deadline":None}
         if not self._initialized or not self._session:
             result["reason"]="Not initialized or no session"; return result
         if self._sync_provider is not None:
@@ -976,6 +976,7 @@ class CollaborationManager:
                 # Reuse this authoritative observation for fencing instead of
                 # issuing another remote lock read via get_lock_generation().
                 result["generation"]=int(remote_status.get("lock_generation",0) or 0)
+                result["generation_authoritative"]=True
                 result["owner"]=remote_status.get("owner")
             except Exception as e:
                 logger.warning(f"Remote lock validation failed: {e}"); result["reason"]=f"Remote validation error: {e}"; return result
