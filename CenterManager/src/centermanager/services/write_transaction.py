@@ -943,11 +943,12 @@ class WriteTransactionManager:
                 logger.warning(f"Entered FINISHING_STALE due to: {reason}")
                 return {"success": False, "reason": reason, "state": "STALE"}
 
-        if "generation" in auth:
+        if auth.get("generation_authoritative") is True:
             current_gen = int(auth.get("generation", 0) or 0)
         else:
             # Compatibility fallback for test doubles/custom collaboration
-            # implementations that predate generation-in-authority snapshots.
+            # implementations that do not explicitly certify the generation
+            # as coming from the same authoritative remote-lock observation.
             current_gen = self._collab_manager.get_lock_generation()
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
