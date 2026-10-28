@@ -342,16 +342,31 @@ class ClassListPage(QWidget):
             logger.exception("Archive impact preview failed")
             QMessageBox.critical(self, "Error", "Could not verify class dependencies. Archive cancelled.")
             return
+        from decimal import Decimal
         finance_changes = impact["enrollment_finance_changes"]
         changed_rows = [
             row for row in finance_changes if row["before"] != row["after"]
+        ]
+        credit_rows = [
+            row for row in finance_changes if Decimal(row["credit_after"]) > 0
+        ]
+        owed_rows = [
+            row for row in finance_changes if Decimal(row["owed_after"]) > 0
+        ]
+        detail_lines = [
+            f"{row['student_name']} (#{row['enrollment_id']}): "
+            f"debt {row['owed_after']} VND; credit {row['credit_after']} VND"
+            for row in owed_rows + credit_rows
         ]
         finance_message = (
             f"Receivables before/after: {impact['owed_before']} / {impact['owed_after']} VND\\n"
             f"Prepaid credit before/after: {impact['credit_before']} / {impact['credit_after']} VND\\n"
             f"Net balance before/after: {impact['outstanding_before']} / {impact['outstanding_after']} VND\\n"
             f"Difference: {impact['outstanding_change']} VND\\n"
-            f"Changed student balances: {len(changed_rows)}\\n\\n"
+            f"Changed student balances: {len(changed_rows)}\\n"
+            f"Students still owing: {len(owed_rows)}; with credit: {len(credit_rows)}\\n"
+            + ("\\n".join(detail_lines) if detail_lines else "No debt or prepaid credit")
+            + "\\n\\n"
             "These figures are calculated from the existing tuition rules. "
             "Please verify the impact before confirming.\\n\\n"
         )
