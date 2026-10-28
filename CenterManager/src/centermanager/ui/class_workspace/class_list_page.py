@@ -236,9 +236,24 @@ class ClassListPage(QWidget):
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify("You must be in WRITE mode to archive classes.", "warning")
             return
+        try:
+            summaries = [
+                self._class_service.preview_archive_class(cid)
+                for cid in self._selected_ids
+            ]
+        except Exception:
+            logger.exception("Bulk archive impact preview failed")
+            QMessageBox.critical(self, "Error", "Could not verify all class dependencies. Archive cancelled.")
+            return
+        active_count = sum(item["active_enrollments"] for item in summaries)
+        session_count = sum(item["sessions"] for item in summaries)
         reply = QMessageBox.question(
             self, "Confirm Archive",
-            f"Archive {len(self._selected_ids)} classes?",
+            f"Archive {len(self._selected_ids)} classes?\\n\\n"
+            f"Active enrollments affected: {active_count}\\n"
+            f"Class sessions preserved as read-only: {session_count}\\n\\n"
+            "Enrollment statuses and outstanding tuition are not settled. "
+            "Restore each class before changing its enrollments.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
