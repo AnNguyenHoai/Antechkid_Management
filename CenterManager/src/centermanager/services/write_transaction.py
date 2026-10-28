@@ -620,6 +620,9 @@ class WriteTransactionManager:
         if not self._publish_database_and_manifest():
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
+            if self._version_manager:
+                self._version_manager.clear_pending_version()
+            self._pending_version = None
             return False
         materialize_ms = (time.perf_counter() - materialize_started) * 1000
 
