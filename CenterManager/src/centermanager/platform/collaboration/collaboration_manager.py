@@ -431,12 +431,21 @@ class CollaborationManager:
                 reason=reason,
                 queue_position=position,
             ))
-            queue_snapshot = self._queue_snapshot()
-            next_request = queue_snapshot.get("next") or {}
-            self._event_bus.publish(QueueUpdated(
-                queue_length=int(queue_snapshot.get("length", 0) or 0),
-                next_writer=next_request.get("username"),
-            ))
+            try:
+                queue_snapshot = self._queue_snapshot()
+                next_request = queue_snapshot.get("next") or {}
+                self._event_bus.publish(QueueUpdated(
+                    queue_length=int(queue_snapshot.get("length", 0) or 0),
+                    next_writer=next_request.get("username"),
+                ))
+            except Exception:
+                # The request itself is already authoritatively confirmed.
+                # A later observer refresh failure must not turn WAITING into
+                # an ERROR or orphan an otherwise valid request.
+                logger.debug(
+                    "QueueUpdated refresh failed after confirmed enqueue",
+                    exc_info=True,
+                )
 
             logger.info(
                 "Write request enqueued and confirmed for %s (pos=%s)",
@@ -716,12 +725,20 @@ class CollaborationManager:
                 queue_position=0,
             ))
             self._event_bus.publish(ModeChanged(mode="WRITE"))
-            queue_snapshot = self._queue_snapshot()
-            next_request = queue_snapshot.get("next") or {}
-            self._event_bus.publish(QueueUpdated(
-                queue_length=int(queue_snapshot.get("length", 0) or 0),
-                next_writer=next_request.get("username"),
-            ))
+            try:
+                queue_snapshot = self._queue_snapshot()
+                next_request = queue_snapshot.get("next") or {}
+                self._event_bus.publish(QueueUpdated(
+                    queue_length=int(queue_snapshot.get("length", 0) or 0),
+                    next_writer=next_request.get("username"),
+                ))
+            except Exception:
+                # Lock ownership and queue consumption are already confirmed;
+                # this event is observational only.
+                logger.debug(
+                    "QueueUpdated refresh failed after confirmed grant",
+                    exc_info=True,
+                )
             return True
 
         if self._lock.is_locked():
