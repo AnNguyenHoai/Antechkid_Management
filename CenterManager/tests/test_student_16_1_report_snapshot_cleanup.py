@@ -13,10 +13,30 @@ def test_pdf_uses_attachment_directory_for_relative_profile_path():
     t = read("src/centermanager/export/pdf/student_report_generator.py")
     assert "get_paths().attachment_dir / image_path" in t
 
-def test_snapshot_deleted_after_successful_publish():
+def test_snapshot_deleted_only_after_confirmed_lock_release():
     t = read("src/centermanager/services/write_transaction.py")
     assert "def _delete_snapshot(self)" in t
-    assert "self._release_lock()\n                self._delete_snapshot()\n                self._reset_to_idle()" in t
+
+    publish_start = t.index("    def _publish(self)")
+    publish_end = t.index("    def _do_publish", publish_start)
+    publish_block = t[publish_start:publish_end]
+
+    assert "if not self._release_lock():" in publish_block
+    assert "WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING" in publish_block
+
+    pending_marker = publish_block.index(
+        "WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING"
+    )
+    delete_marker = publish_block.index("self._delete_snapshot()", pending_marker)
+    reset_marker = publish_block.index("self._reset_to_idle()", delete_marker)
+    assert pending_marker < delete_marker < reset_marker
+
+    retry_start = t.index("    def retry_lock_release(self)")
+    retry_end = t.index("    # ---- Retry / Offline", retry_start)
+    retry_block = t[retry_start:retry_end]
+    assert "if not self._release_lock():" in retry_block
+    assert "self._delete_snapshot()" in retry_block
+    assert "self._reset_to_idle()" in retry_block
 
 def test_snapshot_deleted_after_cancel():
     t = read("src/centermanager/services/write_transaction.py")
