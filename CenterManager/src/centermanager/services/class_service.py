@@ -484,6 +484,16 @@ class ClassService:
             ))
             return class_obj
 
+    def preview_archive_class(self, class_id: int) -> dict:
+        """Read-only dependency summary used before a destructive lifecycle change."""
+        with self._session_factory() as session:
+            class_obj = self._repository_provider.classes(session).get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+            if class_obj.deleted_at is not None:
+                raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
+            return self._archive_snapshot(session, class_id)
+
     def archive_class(self, class_id: int) -> None:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)
