@@ -1189,10 +1189,13 @@ class GitSynchronizationProvider(SynchronizationProvider):
         from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required
         from centermanager.database.artifact_identity import pin_validated_identity
         if database_encryption_required():
-            pin_validated_identity(
-                self._repo_path / "database" / "center.db",
-                DatabaseKeyStore().load(),
-            )
+            try:
+                pin_validated_identity(
+                    self._repo_path / "database" / "center.db",
+                    DatabaseKeyStore().load(),
+                )
+            except Exception:
+                logger.exception("Remote push succeeded; local pin will be refreshed at startup")
 
     def publish_only(self, message: str, user: str, expected_main_commit: Optional[str] = None) -> bool:
         """Publish prepared business changes without any remote synchronization.
