@@ -50,7 +50,9 @@ def test_finish_reuses_authority_generation_and_lightweight_main_observation():
         "def refresh_finishing_authority", 1
     )[0]
 
+    assert 'auth.get("generation_authoritative") is True' in finish
     assert 'current_gen = int(auth.get("generation", 0) or 0)' in finish
+    assert "self._collab_manager.get_lock_generation()" in finish
     assert "observe_remote_main_commit" in finish
     assert "PERF finish_edit" in source
 
