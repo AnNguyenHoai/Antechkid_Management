@@ -1148,6 +1148,19 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # outside the MAIN working tree. Do NOT add it here.
 
             # Check if there are changes to commit
+            # Verify the exact Git index blobs, not only working-tree files.
+            # A concurrent modification or ignored identity cannot be published.
+            protected_paths = ["database/center.db", "manifest.json"]
+            if identity_path.is_file():
+                protected_paths.append("database/center.db.identity.json")
+            staged_oids = {}
+            for relative_path in protected_paths:
+                disk_oid = self._run_git_command(["hash-object", relative_path]).strip()
+                staged_oid = self._run_git_command(["rev-parse", f":{relative_path}"]).strip()
+                if disk_oid != staged_oid:
+                    raise RuntimeError(f"Staged artifact differs from validated file: {relative_path}")
+                staged_oids[relative_path] = staged_oid
+
             status_out = self._run_git_command(["status", "--porcelain"])
             if status_out:
                 commit_message = f"{user}: {message}"
@@ -1169,6 +1182,16 @@ class GitSynchronizationProvider(SynchronizationProvider):
         except Exception as e:
             logger.error(f"Publish failed: {e}")
             raise PushFailedError(f"Push failed: {e}")
+
+    def _pin_published_database_identity(self) -> None:
+        """Advance local trust only after the remote MAIN push has succeeded."""
+        from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required
+        from centermanager.database.artifact_identity import pin_validated_identity
+        if database_encryption_required():
+            pin_validated_identity(
+                self._repo_path / "database" / "center.db",
+                DatabaseKeyStore().load(),
+            )
 
     def publish_only(self, message: str, user: str, expected_main_commit: Optional[str] = None) -> bool:
         """Publish prepared business changes without any remote synchronization.
@@ -1238,6 +1261,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
                     local_head = self._run_git_command(["rev-parse", "HEAD"]).strip()
                     if local_head != expected_main_commit:
                         self._push_only(expected_remote_commit=expected_main_commit)
+                        self._pin_published_database_identity()
                         return True
                 logger.info("No changes to commit")
                 return True
@@ -1245,6 +1269,12 @@ class GitSynchronizationProvider(SynchronizationProvider):
             commit_message = f"{user}: {message}"
             self._run_git_command(["commit", "-m", commit_message])
             logger.info(f"Committed: {commit_message}")
+            for relative_path, staged_oid in staged_oids.items():
+                committed_oid = self._run_git_command(
+                    ["rev-parse", f"HEAD:{relative_path}"]
+                ).strip()
+                if committed_oid != staged_oid:
+                    raise RuntimeError(f"Committed artifact differs from validated index: {relative_path}")
 
             # Exactly one push attempt. If the remote changed, fail safely;
             # never pull/rebase or repeat the same stale push.
@@ -1252,6 +1282,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # Do not emit a second success message here: the publish operation
             # itself must remain observably single-shot.
             self._push_only(expected_remote_commit=expected_main_commit)
+            self._pin_published_database_identity()
             return True
         except RepositoryConflictError as e:
             logger.error(f"Publish-only rejected due to concurrency conflict: {e}")
