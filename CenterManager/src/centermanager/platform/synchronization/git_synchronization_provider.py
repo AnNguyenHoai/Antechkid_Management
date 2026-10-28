@@ -1382,6 +1382,32 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.warning(f"Failed to get remote MAIN commit: {e}")
             return None
 
+    def get_fetched_remote_main_commit(self) -> Optional[str]:
+        """Read the already-fetched origin/MAIN ref without a network round-trip."""
+        if not self._connected or self._repo is None:
+            return None
+        try:
+            return self._run_git_command(
+                ["rev-parse", f"origin/{self._branch}"]
+            ).strip()
+        except Exception as e:
+            logger.warning("Failed to read fetched remote MAIN commit: %s", e)
+            return None
+
+    def observe_remote_main_commit(self) -> Optional[str]:
+        """Observe authoritative remote MAIN via ls-remote without fetching objects."""
+        if not self._connected or self._repo is None:
+            return None
+        try:
+            output = self._run_git_command(
+                ["ls-remote", "origin", f"refs/heads/{self._branch}"],
+                timeout=self._collaboration_git_timeout_seconds,
+            )
+            return output.split()[0] if output.strip() else None
+        except Exception as e:
+            logger.warning("Failed to observe remote MAIN commit: %s", e)
+            return None
+
     def get_local_main_commit(self) -> Optional[str]:
         if not self._connected or self._repo is None:
             return None
