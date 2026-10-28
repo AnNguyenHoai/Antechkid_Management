@@ -130,8 +130,8 @@ def test_copy_runtime_database_for_publish_installs_snapshot_atomically(tmp_path
     assert not list(destination.parent.glob(".center.db.publish-copy-*.tmp"))
 
 
-def test_write_transaction_uses_atomic_publication_copy(tmp_path, monkeypatch):
-    """Finish Editing must not copy the live center.db directly after checkpoint."""
+def test_write_transaction_uses_secured_database_and_identity_publication(tmp_path, monkeypatch):
+    """Finish Editing must use the secured WAL-safe DB and identity publisher."""
     runtime_root = tmp_path / "runtime"
     database_dir = runtime_root / "Database"
     repository = runtime_root / "repository"
@@ -149,16 +149,18 @@ def test_write_transaction_uses_atomic_publication_copy(tmp_path, monkeypatch):
 
     called = []
 
-    def atomic_copy(destination):
+    def secure_publish():
+        destination = repository / "database" / "center.db"
         called.append(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"wal-complete-snapshot")
+        (destination.parent / "center.db.identity.json").write_text("signed-sidecar")
         return destination
 
     monkeypatch.setattr(
         write_transaction,
-        "copy_runtime_database_for_publish",
-        atomic_copy,
+        "materialize_runtime_database_to_repository",
+        secure_publish,
     )
 
     manager = write_transaction.WriteTransactionManager(object())
@@ -166,6 +168,7 @@ def test_write_transaction_uses_atomic_publication_copy(tmp_path, monkeypatch):
     expected = repository / "database" / "center.db"
     assert called == [expected]
     assert expected.read_bytes() == b"wal-complete-snapshot"
+    assert (expected.parent / "center.db.identity.json").read_text() == "signed-sidecar"
 
 
 def test_wal_barrier_is_fail_closed_and_maintenance_owned():
