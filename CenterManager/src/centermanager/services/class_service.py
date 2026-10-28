@@ -554,7 +554,7 @@ class ClassService:
                 raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
             return {**self._archive_snapshot(session, class_id), **self._archive_finance_impact(session, class_id)}
 
-    def archive_class(self, class_id: int) -> None:
+    def archive_class(self, class_id: int, *, expected_finance_impact: Optional[dict] = None) -> None:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)
             class_obj = repo.get_by_id(class_id)
@@ -563,6 +563,12 @@ class ClassService:
             if class_obj.deleted_at is not None:
                 raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
             snapshot = self._archive_snapshot(session, class_id)
+            if expected_finance_impact is not None:
+                latest_impact = self._archive_finance_impact(session, class_id)
+                if latest_impact != expected_finance_impact:
+                    raise ClassValidationError(
+                        "Class tuition changed since the preview. Review the updated amounts before archiving."
+                    )
             # One database transaction: all active enrollments become WITHDRAWN
             # before the class is archived. Reject the entire archive if any
             # active tuition freeze needs a separate operator decision.
