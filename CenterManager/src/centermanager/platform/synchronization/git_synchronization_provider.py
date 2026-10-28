@@ -61,7 +61,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._lock_branch = f"lock-{branch}"  # e.g., lock-main
         self._queue_branch = f"queue-{branch}"  # shared cross-machine WRITE queue
         self._queue_request_ttl_seconds = 120
-        self._queue_clock_skew_tolerance_seconds = 10 * 60
+        self._queue_clock_skew_tolerance_seconds = 60
         self._username = username or os.environ.get("GIT_USER", "CenterManager")
         self._email = email or os.environ.get("GIT_EMAIL", "centermanager@local")
         self._repo: Optional[Repo] = None
@@ -100,7 +100,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         env.update(self._askpass_env)
         return env
 
-    def _run_git_command(self, args: list, cwd: Optional[Path] = None, check: bool = True, env: Optional[dict] = None) -> str:
+    def _run_git_command(self, args: list, cwd: Optional[Path] = None, check: bool = True, env: Optional[dict] = None, timeout: Optional[float] = None) -> str:
         if cwd is None:
             cwd = self._repo_path
         if env is None:
@@ -119,6 +119,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 text=True,
                 env=env,
                 check=False,
+                timeout=timeout,
             )
 
         if result.returncode != 0:
