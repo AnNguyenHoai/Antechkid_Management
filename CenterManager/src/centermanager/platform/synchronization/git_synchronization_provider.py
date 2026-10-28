@@ -426,7 +426,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 # Branch exists; atomic CAS with --force-with-lease
                 args = ["push", "origin", f"{commit_sha}:refs/heads/{self._lock_branch}"]
                 args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             logger.info(f"Lock branch pushed successfully: {self._lock_branch}")
             return True
         except RepositoryConflictError:
@@ -447,7 +451,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 args = ["push", "origin", "--delete", self._lock_branch]
                 if expected_oid is not None:
                     args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             logger.info(f"Lock branch deleted: {self._lock_branch}")
             return True
         except Exception as e:
@@ -648,7 +656,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 args.append(
                     f"--force-with-lease={self._queue_branch}:{expected_oid}"
                 )
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             return True
         except Exception as exc:
             logger.info("Shared queue CAS update lost a race: %s", exc)
