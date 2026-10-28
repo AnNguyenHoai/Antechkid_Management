@@ -1253,7 +1253,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             ]
             staged_oids = {}
             for relative_path in protected_paths:
-                disk_oid = self._run_git_command(["hash-object", relative_path]).strip()
+                disk_oid = self._run_git_command(["hash-object", "--path", relative_path, relative_path]).strip()
                 staged_oid = self._run_git_command(["rev-parse", f":{relative_path}"]).strip()
                 if disk_oid != staged_oid:
                     raise RuntimeError(f"Staged artifact differs from validated file: {relative_path}")
