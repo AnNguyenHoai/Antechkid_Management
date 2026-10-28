@@ -48,7 +48,7 @@ def test_handoff_rechecks_main_after_materialization_before_ui_grant():
     source = _source("authoritative_runtime_sync_service.py")
     method = source.split("def execute_write_handoff_sync", 1)[1].split("def _perform_sync", 1)[0]
     install_pos = method.index("self._apply_runtime_update()")
-    recheck_pos = method.index("remote_after = provider.get_remote_main_commit()")
+    recheck_pos = method.index('observe_remote = getattr(provider, "observe_remote_main_commit", None)')
     ui_pos = method.index("self._write_handoff_ui_refresh.refresh()")
     assert install_pos < recheck_pos < ui_pos
     assert "remote_after != authoritative_commit" in method

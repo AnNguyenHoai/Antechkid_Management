@@ -349,6 +349,7 @@ class SynchronizationManager:
         message: str = "",
         user: str = "system",
         expected_main_commit: Optional[str] = None,
+        repository_already_materialized: bool = False,
     ) -> SynchronizationResult:
         """Publish local changes without fetching/pulling first."""
         if self._provider is None:
@@ -398,7 +399,13 @@ class SynchronizationManager:
                 self._last_result = result
                 return result
 
-            materialize_runtime_database_to_repository()
+            if not repository_already_materialized:
+                materialize_runtime_database_to_repository()
+            else:
+                logger.info(
+                    "[%s] Reusing transaction-prepared repository DB; duplicate materialization skipped",
+                    correlation_id,
+                )
             if not self._provider.publish_only(
                 message,
                 user,

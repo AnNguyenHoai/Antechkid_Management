@@ -122,6 +122,7 @@ class CollaborationPoller(QObject):
 
         self._stop_requested = False
         self._initial_poll_enabled = True
+        self._observation_paused = False
 
         self.refresh_requested.connect(self._on_refresh_requested, Qt.QueuedConnection)
         self.mode_change_requested.connect(self._on_mode_change_requested, Qt.QueuedConnection)
@@ -165,6 +166,19 @@ class CollaborationPoller(QObject):
         """Switch polling mode (NORMAL or WAITING)."""
         if self._running and not self._stop_requested:
             self.mode_change_requested.emit(mode)
+
+    def pause_observation(self) -> None:
+        """Pause normal remote observation without stopping lease renewal."""
+        self._observation_paused = True
+        logger.debug("Collaboration observation paused for transaction critical path")
+
+    def resume_observation(self) -> None:
+        """Resume observation and immediately refresh collaboration state."""
+        was_paused = self._observation_paused
+        self._observation_paused = False
+        if was_paused:
+            logger.debug("Collaboration observation resumed")
+            self.request_refresh("transaction critical path completed")
 
     @Slot(object)
     def _on_refresh_requested(self, reason: Optional[str]) -> None:
@@ -294,6 +308,9 @@ class CollaborationPoller(QObject):
             )
 
     def _poll(self) -> None:
+        if self._observation_paused:
+            logger.debug("Poll skipped while transaction critical path owns Git")
+            return
         if self._poll_in_progress:
             logger.warning("Poll already in progress, skipping")
             return
@@ -424,4 +441,5 @@ class CollaborationPoller(QObject):
             "has_snapshot": self._last_snapshot is not None,
             "snapshot_stale": self._last_snapshot.is_stale if self._last_snapshot else False,
             "snapshot_lock_owner": self._last_snapshot.lock_owner() if self._last_snapshot else None,
+            "observation_paused": self._observation_paused,
         }

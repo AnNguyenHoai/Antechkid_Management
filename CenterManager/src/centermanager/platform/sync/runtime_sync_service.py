@@ -172,7 +172,13 @@ class RuntimeSyncService:
     def execute_sync(self) -> bool:
         return self._perform_sync()
 
-    def publish_only(self, message: str = "Finish Editing", user: str = "system", expected_main_commit: Optional[str] = None) -> bool:
+    def publish_only(
+        self,
+        message: str = "Finish Editing",
+        user: str = "system",
+        expected_main_commit: Optional[str] = None,
+        repository_already_materialized: bool = False,
+    ) -> bool:
         with self._state_mutex:
             if self._status == SyncStatus.SYNCHRONIZING:
                 logger.warning("Cannot publish while synchronization is in progress")
@@ -180,15 +186,25 @@ class RuntimeSyncService:
             self._set_status(SyncStatus.SYNCHRONIZING)
 
         try:
-            result = self._sync_manager.publish_only(message=message, user=user, expected_main_commit=expected_main_commit)
+            result = self._sync_manager.publish_only(
+                message=message,
+                user=user,
+                expected_main_commit=expected_main_commit,
+                repository_already_materialized=repository_already_materialized,
+            )
 
             if result and result.is_success():
                 self._last_sync = datetime.now()
                 self._failed_count = 0
                 self._current_version = self._get_repository_version()
+                self._remote_version = self._current_version
+                self._pending_update = False
                 with self._state_mutex:
                     self._set_status(SyncStatus.IDLE)
-                self.check_for_updates()
+                # The successful fenced push already proves remote MAIN equals
+                # the just-published commit. Avoid an immediate second remote
+                # version check on the user's Finish Editing critical path;
+                # the background sync loop will observe later changes.
                 logger.info("Publish-only completed successfully")
                 return True
             else:

@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 class RuntimeSyncService(_HardenedRuntimeSyncService):
     """Runtime sync with Git-commit-authoritative pre-WRITE fencing."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_write_handoff_main_commit = None
+
+    def get_last_write_handoff_main_commit(self):
+        """Return the exact remote MAIN commit proven by the last successful handoff."""
+        return self._last_write_handoff_main_commit
+
     def _force_latest_main_repository(self):
         """Fetch/reset local repository to the current remote MAIN, fail closed.
 
@@ -36,29 +44,26 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             logger.error("Authoritative MAIN barrier unavailable: no provider")
             return None
         try:
-            if not provider.health():
-                logger.error("Authoritative MAIN barrier refused: provider unhealthy")
-                return None
             if not provider.connect():
                 logger.error("Authoritative MAIN barrier refused: provider connect failed")
                 return None
 
             reset_to_remote = getattr(provider, "reset_to_remote", None)
-            get_remote = getattr(provider, "get_remote_main_commit", None)
+            get_remote = getattr(provider, "get_fetched_remote_main_commit", None)
+            if not callable(get_remote):
+                get_remote = getattr(provider, "get_remote_main_commit", None)
             get_local = getattr(provider, "get_local_main_commit", None)
             if not callable(reset_to_remote) or not callable(get_remote) or not callable(get_local):
                 logger.error("Authoritative MAIN barrier refused: provider lacks commit-fence API")
                 return None
 
-            # Mandatory fresh Git synchronization.  Never gate this on
-            # runtime_version: equal manifests can exist at different commits.
+            # Mandatory fresh Git synchronization. reset_to_remote() performs
+            # the authoritative fetch. Reuse that fetched ref locally instead
+            # of performing a second fetch immediately afterward.
             if not reset_to_remote():
                 logger.error("Authoritative MAIN barrier refused: fetch/reset failed")
                 return None
 
-            # get_remote_main_commit performs another fetch.  This closes the
-            # window between reset and verification; if MAIN moved, local HEAD
-            # will differ and WRITE is refused rather than using a stale base.
             remote_commit = get_remote()
             local_commit = get_local()
             if not remote_commit or not local_commit or local_commit != remote_commit:
@@ -105,7 +110,11 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             # moved MAIN during the boundary, do not grant WRITE on the older
             # snapshot.  The caller may retry and will fetch the newer commit.
             provider = self._sync_manager.provider()
-            remote_after = provider.get_remote_main_commit()
+            observe_remote = getattr(provider, "observe_remote_main_commit", None)
+            if callable(observe_remote):
+                remote_after = observe_remote()
+            else:
+                remote_after = provider.get_remote_main_commit()
             local_after = provider.get_local_main_commit()
             if (
                 not remote_after
@@ -126,6 +135,7 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
                 logger.error("WRITE handoff refused: authoritative UI refresh failed")
                 return False
 
+            self._last_write_handoff_main_commit = authoritative_commit
             self._current_version = self._get_repository_version()
             self._remote_version = self._current_version
             self._pending_update = False
