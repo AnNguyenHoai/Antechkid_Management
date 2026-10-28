@@ -3,6 +3,7 @@
 import logging
 import shutil
 import json
+import inspect
 import os
 import time
 from enum import Enum, auto
@@ -765,12 +766,20 @@ class WriteTransactionManager:
             session = self._collab_manager.get_session()
             if session and session.username:
                 user = session.username
-            return self._sync_service.publish_only(
-                message="Finish Editing",
-                user=user,
-                expected_main_commit=self._base_main_commit,
-                repository_already_materialized=True,
-            )
+            publish_only = self._sync_service.publish_only
+            kwargs = {
+                "message": "Finish Editing",
+                "user": user,
+                "expected_main_commit": self._base_main_commit,
+            }
+            try:
+                if "repository_already_materialized" in inspect.signature(
+                    publish_only
+                ).parameters:
+                    kwargs["repository_already_materialized"] = True
+            except (TypeError, ValueError):
+                pass
+            return publish_only(**kwargs)
         logger.warning("No sync service available for publish")
         return False
 
