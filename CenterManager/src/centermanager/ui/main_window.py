@@ -404,6 +404,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._transaction.state != WriteTransactionState.WAITING:
             return
+        # A stale/error snapshot is last-known-good observation, not proof that
+        # this request disappeared from the authoritative queue.
+        if snapshot.is_stale or snapshot.poll_status != "success":
+            return
 
         current_session = self._collaboration_manager.get_session_id()
         expected_request_id = getattr(
@@ -654,6 +658,7 @@ class MainWindow(QMainWindow):
             self.start_edit_btn.setText("Start editing")
             self.start_edit_btn.setEnabled(True)
             self.start_edit_btn.setVisible(True)
+            self.finish_edit_btn.setText("Finish editing")
             self.finish_edit_btn.setVisible(False)
             self.cancel_btn.setVisible(False)
             self.app_top_bar.set_transaction_text("Ready")
@@ -670,10 +675,31 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Waiting for write lock (held by {owner})")
         elif is_editing:
             self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setText("Finish editing")
+            self.finish_edit_btn.setEnabled(True)
             self.finish_edit_btn.setVisible(True)
             self.cancel_btn.setVisible(False)
             self.app_top_bar.set_transaction_text("Editing")
             self.statusBar().showMessage("Editing mode - click Finish when done")
+        elif state == WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING:
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setText("Retry release")
+            self.finish_edit_btn.setEnabled(True)
+            self.finish_edit_btn.setVisible(True)
+            self.cancel_btn.setVisible(False)
+            self.app_top_bar.set_transaction_text("Published - releasing edit lock")
+            self.app_top_bar.set_mode("FINISHING", "warning")
+            self.app_top_bar.set_editor_state(
+                "Changes are published; edit lock release is pending",
+                "warning",
+            )
+            self.statusBar().showMessage(
+                "Changes are already published. Retry releasing the edit lock; "
+                "the data will not be published again."
+            )
+            self._update_write_actions(False)
+            self._editing_idle_timer.stop()
+            return
         elif state == WriteTransactionState.PUBLISH_CONFLICT:
             self.start_edit_btn.setVisible(False)
             self.finish_edit_btn.setVisible(False)
