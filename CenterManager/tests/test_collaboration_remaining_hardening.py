@@ -41,24 +41,24 @@ def test_remote_queue_fifo_uses_authoritative_sequence_not_machine_clock(tmp_pat
     provider = _provider_without_git(tmp_path)
     now = datetime.now()
 
-    # Machine B requested first but its wall clock is five minutes ahead.
+    # Machine B requested first but its wall clock is 30 seconds ahead.
     first = {
         "request_id": "first",
         "session_id": "b",
         "priority": 100,
         "status": "pending",
-        "timestamp": (now + timedelta(minutes=5)).isoformat(),
-        "enqueue_timestamp": (now + timedelta(minutes=5)).isoformat(),
+        "timestamp": (now + timedelta(seconds=30)).isoformat(),
+        "enqueue_timestamp": (now + timedelta(seconds=30)).isoformat(),
         "queue_sequence": 1,
     }
-    # Machine C requested later but its clock is five minutes behind.
+    # Machine C requested later but its clock is 30 seconds behind.
     second = {
         "request_id": "second",
         "session_id": "c",
         "priority": 100,
         "status": "pending",
-        "timestamp": (now - timedelta(minutes=5)).isoformat(),
-        "enqueue_timestamp": (now - timedelta(minutes=5)).isoformat(),
+        "timestamp": (now - timedelta(seconds=30)).isoformat(),
+        "enqueue_timestamp": (now - timedelta(seconds=30)).isoformat(),
         "queue_sequence": 2,
     }
 
