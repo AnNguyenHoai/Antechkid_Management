@@ -146,11 +146,11 @@ def test_publish_only_retry_path_does_not_invoke_lease_lifecycle(tmp_path):
     release.assert_not_called()
 
 
-def test_runtime_publish_success_has_one_explicit_sync_check():
+def test_runtime_publish_success_avoids_redundant_post_publish_sync_check():
     """
-    Current RuntimeSyncService behavior has one explicit post-publish
-    check_for_updates() call. This is an audit guard against accidental
-    multiplication of the post-publish trigger.
+    Performance Phase 1 removes the immediate post-publish check_for_updates()
+    call. A successful fenced push already proves the just-published remote
+    state; the normal background sync loop observes subsequent changes.
     """
     sync_manager = Mock()
     sync_manager.publish_only.return_value = SynchronizationResult(
@@ -177,7 +177,9 @@ def test_runtime_publish_success_has_one_explicit_sync_check():
     assert service.publish_only("Finish Editing", "audit") is True
 
     sync_manager.publish_only.assert_called_once()
-    service.check_for_updates.assert_called_once()
+    service.check_for_updates.assert_not_called()
+    assert service._remote_version == 81
+    assert service._pending_update is False
 
 
 def test_writer_active_sync_defer_does_not_call_lease_renewal():
