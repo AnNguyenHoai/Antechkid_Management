@@ -502,6 +502,8 @@ class ClassService:
         today = get_clock().today()
         before = Decimal("0")
         after = Decimal("0")
+        owed_before = owed_after = Decimal("0")
+        credit_before = credit_after = Decimal("0")
         changes = []
         for row in enrollments:
             current = outstanding._calculate_from_enrollment(session, row, as_of_date=today)
@@ -530,17 +532,29 @@ class ClassService:
             new_balance = Decimal(str(projected.outstanding))
             before += old_balance
             after += new_balance
+            owed_before += max(old_balance, Decimal("0"))
+            owed_after += max(new_balance, Decimal("0"))
+            credit_before += max(-old_balance, Decimal("0"))
+            credit_after += max(-new_balance, Decimal("0"))
             changes.append({
                 "enrollment_id": row.id,
                 "student_name": current.student_name,
                 "before": str(old_balance),
                 "after": str(new_balance),
+                "owed_before": str(max(old_balance, Decimal("0"))),
+                "owed_after": str(max(new_balance, Decimal("0"))),
+                "credit_before": str(max(-old_balance, Decimal("0"))),
+                "credit_after": str(max(-new_balance, Decimal("0"))),
                 "boundary": simulated.withdrawn_from_session,
             })
         return {
             "outstanding_before": str(before),
             "outstanding_after": str(after),
             "outstanding_change": str(after - before),
+            "owed_before": str(owed_before),
+            "owed_after": str(owed_after),
+            "credit_before": str(credit_before),
+            "credit_after": str(credit_after),
             "enrollment_finance_changes": changes,
         }
 
