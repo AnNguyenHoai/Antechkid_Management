@@ -58,7 +58,7 @@ def install_git_output_safety(provider_cls: Any) -> None:
     if getattr(provider_cls, "_git_output_safety_installed", False):
         return
 
-    def safe_run_git_command(self, args, cwd=None, check=True, env=None):
+    def safe_run_git_command(self, args, cwd=None, check=True, env=None, timeout=None):
         if cwd is None:
             cwd = self._repo_path
         if env is None:
@@ -78,6 +78,7 @@ def install_git_output_safety(provider_cls: Any) -> None:
             text=False,
             env=env,
             check=False,
+            timeout=timeout,
             **_windows_hidden_process_kwargs(),
         )
         stdout = _decode(result.stdout)
