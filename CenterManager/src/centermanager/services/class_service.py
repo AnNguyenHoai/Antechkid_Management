@@ -503,6 +503,24 @@ class ClassService:
             if class_obj.deleted_at is not None:
                 raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
             snapshot = self._archive_snapshot(session, class_id)
+            # One database transaction: all active enrollments become WITHDRAWN
+            # before the class is archived. Reject the entire archive if any
+            # active tuition freeze needs a separate operator decision.
+            from centermanager.services.enrollment_service import EnrollmentService
+            active_enrollments = self._repository_provider.enrollments(session).get_active_by_class(class_id)
+            if any(enrollment.has_open_freeze for enrollment in active_enrollments):
+                raise ClassValidationError(
+                    "Cannot archive a class with open tuition freezes. "
+                    "Resolve the freezes first; no class or enrollment was changed."
+                )
+            all_sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+            withdrawal_date = get_clock().today()
+            for enrollment in active_enrollments:
+                enrollment.withdrawn_from_session = EnrollmentService._resolve_withdrawn_from_session(
+                    enrollment, all_sessions
+                )
+                enrollment.status = "WITHDRAWN"
+                enrollment.end_date = withdrawal_date
             class_obj.deleted_at = self._utc_now()
             session.commit()
 
@@ -513,10 +531,10 @@ class ClassService:
                     title="Class Archived",
                     description=(
                         f"{class_obj.name} was archived. Historical teacher assignments, "
-                        "enrollments, sessions, and attendance remain preserved and read-only "
-                        "until the class is restored."
+                        "sessions and attendance remain preserved. All ACTIVE enrollments "
+                        "were withdrawn at the archive boundary; tuition balances remain payable."
                     ),
-                    metadata={"dependency_snapshot": snapshot},
+                    metadata={"dependency_snapshot": snapshot, "auto_withdrawn_count": len(active_enrollments), "withdrawal_reason": "CLASS_ARCHIVED"},
                 )
 
             self._publish(ClassArchived(
