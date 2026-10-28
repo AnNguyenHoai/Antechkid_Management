@@ -197,9 +197,14 @@ class RuntimeSyncService:
                 self._last_sync = datetime.now()
                 self._failed_count = 0
                 self._current_version = self._get_repository_version()
+                self._remote_version = self._current_version
+                self._pending_update = False
                 with self._state_mutex:
                     self._set_status(SyncStatus.IDLE)
-                self.check_for_updates()
+                # The successful fenced push already proves remote MAIN equals
+                # the just-published commit. Avoid an immediate second remote
+                # version check on the user's Finish Editing critical path;
+                # the background sync loop will observe later changes.
                 logger.info("Publish-only completed successfully")
                 return True
             else:
