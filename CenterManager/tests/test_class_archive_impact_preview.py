@@ -46,8 +46,9 @@ def test_archive_finance_quote_does_not_mutate_enrollment_and_is_rechecked():
     assert "expected_finance_impact" in source
     assert "latest_impact != expected_finance_impact" in source
     page = PAGE.read_text(encoding="utf-8")
-    assert "Outstanding before:" in page
-    assert "Outstanding after:" in page
+    assert "Receivables before/after:" in page
+    assert "Prepaid credit before/after:" in page
+    assert "Net balance before/after:" in page
     assert "Difference:" in page
     assert "expected_finance_impact={" in page
 
