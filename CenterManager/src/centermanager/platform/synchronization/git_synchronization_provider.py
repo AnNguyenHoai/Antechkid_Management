@@ -455,10 +455,15 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
     def _remote_queue_oid(self) -> Optional[str]:
         if not self._has_remote_origin():
-            return None
+            raise RemoteUnavailableError(
+                "Shared WRITE queue cannot be read because no remote origin is configured."
+            )
+        # ls-remote returns success with empty stdout when the branch does not
+        # exist. A Git/network/auth failure must raise instead of masquerading
+        # as an empty authoritative queue.
         output = self._run_git_command(
             ["ls-remote", "origin", f"refs/heads/{self._queue_branch}"],
-            check=False,
+            check=True,
         )
         if not output:
             return None
@@ -466,16 +471,22 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
     def _fetch_queue_branch(self) -> bool:
         if not self._has_remote_origin():
-            return False
+            raise RemoteUnavailableError(
+                "Shared WRITE queue cannot be fetched because no remote origin is configured."
+            )
         self._run_git_command(
             ["fetch", "origin", self._queue_branch],
-            check=False,
+            check=True,
         )
         return True
 
     def _read_queue_from_oid(self, oid: Optional[str]) -> Dict[str, Any]:
         if not oid:
             return {"requests": []}
+        # A missing local object is expected on another workstation, so the
+        # first local show may fail softly. Once the authoritative branch is
+        # fetched, failure to read/parse queue.json is a state-read failure and
+        # must propagate to the poller instead of becoming queue=[].
         content = self._run_git_command(
             ["show", f"{oid}:queue.json"],
             check=False,
@@ -484,15 +495,18 @@ class GitSynchronizationProvider(SynchronizationProvider):
             self._fetch_queue_branch()
             content = self._run_git_command(
                 ["show", f"{oid}:queue.json"],
-                check=False,
+                check=True,
             )
         if not content:
-            return {"requests": []}
+            raise RuntimeError(
+                f"Shared WRITE queue commit {oid} does not contain queue.json."
+            )
         try:
             payload = json.loads(content)
-        except Exception:
-            logger.warning("Remote queue payload is invalid JSON; treating as empty")
-            return {"requests": []}
+        except Exception as exc:
+            raise RuntimeError(
+                f"Shared WRITE queue commit {oid} contains invalid queue.json."
+            ) from exc
         if isinstance(payload, list):
             payload = {"requests": payload}
         requests = payload.get("requests")
@@ -632,19 +646,15 @@ class GitSynchronizationProvider(SynchronizationProvider):
         return False
 
     def remote_queue_status(self) -> Dict[str, Any]:
-        try:
-            oid = self._remote_queue_oid()
-            requests = self._filter_live_queue_requests(
-                self._read_queue_from_oid(oid).get("requests", [])
-            )
-            return {
-                "length": len(requests),
-                "requests": requests,
-                "next": requests[0] if requests else None,
-            }
-        except Exception:
-            logger.exception("Failed to read shared WRITE queue")
-            return {"length": 0, "requests": [], "next": None}
+        oid = self._remote_queue_oid()
+        requests = self._filter_live_queue_requests(
+            self._read_queue_from_oid(oid).get("requests", [])
+        )
+        return {
+            "length": len(requests),
+            "requests": requests,
+            "next": requests[0] if requests else None,
+        }
 
     def enqueue_remote_write_request(self, request: Dict[str, Any]) -> bool:
         request = dict(request)
