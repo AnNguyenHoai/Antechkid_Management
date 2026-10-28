@@ -837,7 +837,14 @@ class MainWindow(QMainWindow):
                     return False
             return True
 
-        success = self._transaction.start_editing(save_local)
+        poller = self._poller
+        if poller is not None:
+            poller.pause_observation()
+        try:
+            success = self._transaction.start_editing(save_local)
+        finally:
+            if poller is not None:
+                poller.resume_observation()
         if success:
             self._transaction._has_changes = False
             self.statusBar().showMessage(
@@ -915,11 +922,18 @@ class MainWindow(QMainWindow):
             if self._closing_requested:
                 self._closing_requested = False
 
-        success = self._transaction.finish_editing(
-            save_callback=save_local,
-            on_publish_success=on_publish_success,
-            on_publish_failure=on_publish_failure,
-        )
+        poller = self._poller
+        if poller is not None:
+            poller.pause_observation()
+        try:
+            success = self._transaction.finish_editing(
+                save_callback=save_local,
+                on_publish_success=on_publish_success,
+                on_publish_failure=on_publish_failure,
+            )
+        finally:
+            if poller is not None:
+                poller.resume_observation()
 
         if success and not self._transaction.is_editing:
             self._update_waiting_status()
