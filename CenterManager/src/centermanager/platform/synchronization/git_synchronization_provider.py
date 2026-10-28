@@ -1148,20 +1148,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # collaboration/ is NEVER staged. It lives in runtime/collaboration/
             # outside the MAIN working tree. Do NOT add it here.
 
-            # Check if there are changes to commit
-            # Verify the exact Git index blobs, not only working-tree files.
-            # A concurrent modification or ignored identity cannot be published.
-            protected_paths = ["database/center.db", "manifest.json"]
-            if identity_path.is_file():
-                protected_paths.append("database/center.db.identity.json")
-            staged_oids = {}
-            for relative_path in protected_paths:
-                disk_oid = self._run_git_command(["hash-object", relative_path]).strip()
-                staged_oid = self._run_git_command(["rev-parse", f":{relative_path}"]).strip()
-                if disk_oid != staged_oid:
-                    raise RuntimeError(f"Staged artifact differs from validated file: {relative_path}")
-                staged_oids[relative_path] = staged_oid
-
+            # Check if there are changes to commit.
             status_out = self._run_git_command(["status", "--porcelain"])
             if status_out:
                 commit_message = f"{user}: {message}"
@@ -1239,6 +1226,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             self._run_git_command(["add", "-A"])
 
             db_path = self._repo_path / "database" / "center.db"
+            identity_path = self._repo_path / "database" / "center.db.identity.json"
             if db_path.exists():
                 self._run_git_command(["add", "--force", "database/center.db"])
                 # The identity is part of the same authoritative artifact. It
@@ -1252,6 +1240,24 @@ class GitSynchronizationProvider(SynchronizationProvider):
             manifest_path = self._repo_path / "manifest.json"
             if manifest_path.exists():
                 self._run_git_command(["add", "--force", "manifest.json"])
+
+            # Compare every present protected file against the index, then
+            # verify the committed tree before pushing. Missing optional files
+            # are not hashed (legacy/test repositories need not contain a DB).
+            protected_paths = [
+                relative for relative, disk_path in (
+                    ("database/center.db", db_path),
+                    ("database/center.db.identity.json", identity_path),
+                    ("manifest.json", manifest_path),
+                ) if disk_path.is_file()
+            ]
+            staged_oids = {}
+            for relative_path in protected_paths:
+                disk_oid = self._run_git_command(["hash-object", relative_path]).strip()
+                staged_oid = self._run_git_command(["rev-parse", f":{relative_path}"]).strip()
+                if disk_oid != staged_oid:
+                    raise RuntimeError(f"Staged artifact differs from validated file: {relative_path}")
+                staged_oids[relative_path] = staged_oid
 
             status_out = self._run_git_command(["status", "--porcelain"])
             if not status_out:
