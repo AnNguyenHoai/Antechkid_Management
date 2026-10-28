@@ -322,8 +322,21 @@ class ClassListPage(QWidget):
             logger.exception("Archive impact preview failed")
             QMessageBox.critical(self, "Error", "Could not verify class dependencies. Archive cancelled.")
             return
+        finance_changes = impact["enrollment_finance_changes"]
+        changed_rows = [
+            row for row in finance_changes if row["before"] != row["after"]
+        ]
+        finance_message = (
+            f"Outstanding before: {impact['outstanding_before']} VND\\n"
+            f"Outstanding after: {impact['outstanding_after']} VND\\n"
+            f"Difference: {impact['outstanding_change']} VND\\n"
+            f"Changed student balances: {len(changed_rows)}\\n\\n"
+            "These figures are calculated from the existing tuition rules. "
+            "Please verify the impact before confirming.\\n\\n"
+        )
         reply = QMessageBox.question(
             self, "Confirm Archive",
+            finance_message +
             "Archiving this class will make its enrollment and class records "
             "read-only until restored. Active enrollments WILL be withdrawn "
             "automatically. Outstanding tuition remains collectible.\\n\\n"
@@ -335,7 +348,15 @@ class ClassListPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self._class_service.archive_class(class_id)
+                self._class_service.archive_class(
+                    class_id, expected_finance_impact={
+                        key: impact[key]
+                        for key in (
+                            'outstanding_before', 'outstanding_after',
+                            'outstanding_change', 'enrollment_finance_changes',
+                        )
+                    },
+                )
                 self.refresh()
             except Exception as e:
                 logger.exception("Archive failed")
