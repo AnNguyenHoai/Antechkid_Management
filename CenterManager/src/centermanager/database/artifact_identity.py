@@ -181,8 +181,8 @@ def write_identity_document(path: Path, document: dict) -> None:
     _atomic_write_json(path, document)
 
 
-def validate_and_pin_identity(database_path: Path, key: bytes) -> DatabaseArtifactIdentity:
-    """Verify signature/hash and enforce the workstation's pinned identity floor."""
+def validate_identity(database_path: Path, key: bytes) -> DatabaseArtifactIdentity:
+    """Verify signature/hash and pinned floor without mutating local identity state."""
     database_path = Path(database_path)
     manifest = identity_manifest_path(database_path)
     identity = _parse_identity(
@@ -213,6 +213,13 @@ def validate_and_pin_identity(database_path: Path, key: bytes) -> DatabaseArtifa
         if identity.generation == floor:
             return identity
 
+    return identity
+
+
+def pin_validated_identity(database_path: Path, key: bytes) -> DatabaseArtifactIdentity:
+    """Persist a verified identity only after authoritative remote publication."""
+    identity = validate_identity(database_path, key)
+    state_path = local_identity_state_path()
     state_payload = {
         "format_version": FORMAT_VERSION,
         "database_id": identity.database_id,
@@ -223,3 +230,8 @@ def validate_and_pin_identity(database_path: Path, key: bytes) -> DatabaseArtifa
         _document(state_payload, key, domain=_STATE_DOMAIN),
     )
     return identity
+
+
+def validate_and_pin_identity(database_path: Path, key: bytes) -> DatabaseArtifactIdentity:
+    """Backward-compatible explicit trust-on-read operation for startup/handoff."""
+    return pin_validated_identity(database_path, key)
