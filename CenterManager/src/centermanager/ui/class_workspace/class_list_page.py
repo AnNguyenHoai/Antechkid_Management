@@ -367,7 +367,7 @@ class ClassListPage(QWidget):
             f"Students still owing: {len(owed_rows)}; with credit: {len(credit_rows)}\\n"
             + ("\\n".join(detail_lines) if detail_lines else "No debt or prepaid credit")
             + "\\n\\n"
-            "These figures are calculated from the existing tuition rules. "
+            + "These figures are calculated from the existing tuition rules. "
             "Please verify the impact before confirming.\\n\\n"
         )
         reply = QMessageBox.question(
