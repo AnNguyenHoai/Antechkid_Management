@@ -104,10 +104,11 @@ class StudentDashboardService:
             events = sorted(repo.list_all(), key=lambda ev: ev.created_at, reverse=True)[:limit]
             result = []
             for ev in events:
-                student = ev.student
+                # ClassTimelineEvent belongs to a class and has no student relation.
+                class_record = ev.class_
                 result.append(RecentActivity(
-                    student_name=student.full_name,
-                    student_code=student.student_code,
+                    student_name=class_record.name if class_record else "Class",
+                    student_code="",
                     title=ev.title,
                     time=ev.created_at
                 ))
