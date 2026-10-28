@@ -247,19 +247,33 @@ class ClassListPage(QWidget):
             return
         active_count = sum(item["active_enrollments"] for item in summaries)
         session_count = sum(item["sessions"] for item in summaries)
+        from decimal import Decimal
+        debt_before = sum(Decimal(item["outstanding_before"]) for item in summaries)
+        debt_after = sum(Decimal(item["outstanding_after"]) for item in summaries)
         reply = QMessageBox.question(
             self, "Confirm Archive",
             f"Archive {len(self._selected_ids)} classes?\\n\\n"
             f"Active enrollments affected: {active_count}\\n"
-            f"Class sessions preserved as read-only: {session_count}\\n\\n"
+            f"Class sessions preserved as read-only: {session_count}\\n"
+            f"Outstanding before: {debt_before} VND\\n"
+            f"Outstanding after: {debt_after} VND\\n"
+            f"Difference: {debt_after - debt_before} VND\\n\\n"
             "Active enrollments will be withdrawn; outstanding tuition remains collectible. "
             "Restore each class before changing its enrollments.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                for cid in self._selected_ids:
-                    self._class_service.archive_class(cid)
+                for cid, impact in zip(self._selected_ids, summaries):
+                    self._class_service.archive_class(
+                        cid, expected_finance_impact={
+                            key: impact[key]
+                            for key in (
+                                "outstanding_before", "outstanding_after",
+                                "outstanding_change", "enrollment_finance_changes",
+                            )
+                        },
+                    )
                 self._clear_selection()
                 self.refresh()
             except Exception as e:
