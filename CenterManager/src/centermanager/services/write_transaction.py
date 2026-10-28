@@ -25,6 +25,7 @@ class WriteTransactionState(Enum):
     LOCAL_SAVED = auto()
     PUBLISHING = auto()
     PUBLISHED = auto()
+    PUBLISHED_LOCK_RELEASE_PENDING = auto()
     COMPLETED = auto()
     FAILED = auto()
     OFFLINE_PENDING_PUBLISH = auto()
@@ -495,6 +496,10 @@ class WriteTransactionManager:
             logger.warning("Finish editing called in IDLE state")
             return False
 
+        if self._state == WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING:
+            logger.info("Retrying authoritative WRITE lock release after successful publish")
+            return self.retry_lock_release()
+
         if self._state == WriteTransactionState.WAITING:
             logger.warning("Finish editing called while waiting for lock")
             return False
@@ -662,7 +667,14 @@ class WriteTransactionManager:
                 self._finishing_deadline = None
                 self._finishing_started_at = None
                 self._publish_intent = False
-                self._release_lock()
+
+                if not self._release_lock():
+                    self._state = WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING
+                    logger.warning(
+                        "Transaction published successfully but remote WRITE lock release is pending"
+                    )
+                    return True
+
                 self._delete_snapshot()
                 self._reset_to_idle()
                 return True
@@ -695,11 +707,26 @@ class WriteTransactionManager:
         logger.warning("No sync service available for publish")
         return False
 
-    def _release_lock(self) -> None:
-        if self._collab_manager.is_writing():
-            self._collab_manager.release_write()
-            self._state = WriteTransactionState.COMPLETED
-            logger.info("Transaction: COMPLETED (lock released)")
+    def _release_lock(self) -> bool:
+        if not self._collab_manager.is_writing():
+            logger.warning("Cannot confirm transaction completion: local WRITE ownership is absent")
+            return False
+        if not self._collab_manager.release_write():
+            logger.warning("Remote WRITE lock release is not yet confirmed")
+            return False
+        self._state = WriteTransactionState.COMPLETED
+        logger.info("Transaction: COMPLETED (lock released)")
+        return True
+
+    def retry_lock_release(self) -> bool:
+        """Retry only the authoritative lock release after MAIN is already published."""
+        if self._state != WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING:
+            return False
+        if not self._release_lock():
+            return False
+        self._delete_snapshot()
+        self._reset_to_idle()
+        return True
 
     # ---- Retry / Offline ----
     def retry_publish(self) -> bool:

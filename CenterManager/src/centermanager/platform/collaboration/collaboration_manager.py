@@ -345,47 +345,131 @@ class CollaborationManager:
             logger.warning(f"Failed to sync local lock: {e}")
 
     def _enqueue_or_return_waiting(self, reason: str, request_id: str) -> WriteRequestInfo:
-        existing = self._queue_get_by_session(self._session.session_id)
-        if existing:
+        try:
+            existing = self._queue_get_by_session(self._session.session_id)
+            if existing:
+                position = self._queue_position(self._session.session_id)
+                logger.info(
+                    "Session %s already waiting (pos=%s)",
+                    self._session.username,
+                    position,
+                )
+                return WriteRequestInfo(
+                    WriteRequestResult.WAITING,
+                    existing.request_id,
+                    position,
+                    f"Already waiting (position {position})",
+                )
+
+            request = WriteRequest(
+                request_id=request_id,
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+                role=self._session.role,
+                priority=Priority.from_role(self._session.role),
+                timestamp=datetime.now(),
+                reason=reason,
+                status="pending",
+            )
+            if not self._queue_enqueue(request):
+                logger.error(
+                    "Shared WRITE queue rejected request %s for %s",
+                    request_id,
+                    self._session.username,
+                )
+                return WriteRequestInfo(
+                    WriteRequestResult.ERROR,
+                    request_id,
+                    0,
+                    "Unable to join the shared editing queue. Please check connectivity and try again.",
+                )
+
+            # Read-after-write acknowledgement: WAITING is only authoritative
+            # after this exact request can be observed in the shared queue.
+            confirmed = self._queue_get_by_session(self._session.session_id)
+            if confirmed is None or confirmed.request_id != request_id:
+                logger.error(
+                    "Shared WRITE queue could not confirm request %s for %s",
+                    request_id,
+                    self._session.username,
+                )
+                try:
+                    self._queue_cancel(request)
+                except Exception:
+                    logger.warning(
+                        "Unable to clean up unconfirmed WRITE request %s",
+                        request_id,
+                        exc_info=True,
+                    )
+                return WriteRequestInfo(
+                    WriteRequestResult.ERROR,
+                    request_id,
+                    0,
+                    "Editing request could not be confirmed in the shared queue. Please try again.",
+                )
+
             position = self._queue_position(self._session.session_id)
-            logger.info(f"Session {self._session.username} already waiting (pos={position})")
+            if position <= 0:
+                logger.error(
+                    "Confirmed WRITE request %s has no valid queue position",
+                    request_id,
+                )
+                return WriteRequestInfo(
+                    WriteRequestResult.ERROR,
+                    request_id,
+                    0,
+                    "Editing request was not assigned a valid queue position. Please try again.",
+                )
+
+            self._event_bus.publish(WriteRequested(
+                request_id=request_id,
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+                priority=request.priority,
+                reason=reason,
+                queue_position=position,
+            ))
+            try:
+                queue_snapshot = self._queue_snapshot()
+                next_request = queue_snapshot.get("next") or {}
+                self._event_bus.publish(QueueUpdated(
+                    queue_length=int(queue_snapshot.get("length", 0) or 0),
+                    next_writer=next_request.get("username"),
+                ))
+            except Exception:
+                # The request itself is already authoritatively confirmed.
+                # A later observer refresh failure must not turn WAITING into
+                # an ERROR or orphan an otherwise valid request.
+                logger.debug(
+                    "QueueUpdated refresh failed after confirmed enqueue",
+                    exc_info=True,
+                )
+
+            logger.info(
+                "Write request enqueued and confirmed for %s (pos=%s)",
+                self._session.username,
+                position,
+            )
             return WriteRequestInfo(
                 WriteRequestResult.WAITING,
-                existing.request_id,
+                request_id,
                 position,
-                f"Already waiting (position {position})"
+                f"Waiting (position {position})",
             )
-
-        request = WriteRequest(
-            request_id=request_id,
-            session_id=self._session.session_id,
-            user_id=self._session.user_id,
-            username=self._session.username,
-            role=self._session.role,
-            priority=Priority.from_role(self._session.role),
-            timestamp=datetime.now(),
-            reason=reason,
-            status="pending",
-        )
-        self._queue_enqueue(request)
-        position = self._queue_position(self._session.session_id)
-
-        self._event_bus.publish(WriteRequested(
-            request_id=request_id,
-            session_id=self._session.session_id,
-            user_id=self._session.user_id,
-            username=self._session.username,
-            priority=request.priority,
-            reason=reason,
-            queue_position=position,
-        ))
-        self._event_bus.publish(QueueUpdated(
-            queue_length=self._queue_count(),
-            next_writer=self._queue_peek().username if self._queue_peek() else None,
-        ))
-
-        logger.info(f"Write request enqueued for {self._session.username} (pos={position})")
-        return WriteRequestInfo(WriteRequestResult.WAITING, request_id, position, f"Waiting (position {position})")
+        except Exception as exc:
+            logger.warning(
+                "Unable to enqueue/confirm shared WRITE request for %s: %s",
+                self._session.username,
+                exc,
+            )
+            return WriteRequestInfo(
+                WriteRequestResult.ERROR,
+                request_id,
+                0,
+                "Unable to read or update the shared editing queue. Please check connectivity and try again.",
+            )
 
     def _publish_write_granted(self, request_id: str, queue_position: int) -> None:
         self._event_bus.publish(WriteGranted(
@@ -431,7 +515,19 @@ class CollaborationManager:
         if self._is_writing:
             return WriteRequestInfo(WriteRequestResult.GRANTED, message="Already in WRITE mode")
         request_id = str(uuid.uuid4())
-        existing = self._queue_get_by_session(self._session.session_id)
+        try:
+            existing = self._queue_get_by_session(self._session.session_id)
+        except Exception as exc:
+            logger.warning(
+                "Unable to read authoritative WRITE queue before request: %s",
+                exc,
+            )
+            return WriteRequestInfo(
+                WriteRequestResult.ERROR,
+                request_id,
+                0,
+                "Unable to read the shared editing queue. Please check connectivity and try again.",
+            )
         if existing:
             if self._sync_provider is not None:
                 remote_lock = self._get_remote_lock_status()
@@ -514,17 +610,27 @@ class CollaborationManager:
         with self._state_mutex:
             if self._sync_provider is not None:
                 result = self._sync_provider.release_lock(self._session.username)
+                if not result:
+                    # Keep the local WRITE projection and lease renewal alive.
+                    # The transaction has not completed until the authoritative
+                    # remote lock release is confirmed.
+                    logger.error(
+                        "Failed to release Git lock; retaining local WRITE authority for retry"
+                    )
+                    return False
+
                 self._is_writing = False
                 self._lock_acquired = False
                 self._lease_renewal_suspended = False
                 self._lock._force_release()
-                self._event_bus.publish(WriteReleased(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username))
+                self._event_bus.publish(WriteReleased(
+                    session_id=self._session.session_id,
+                    user_id=self._session.user_id,
+                    username=self._session.username,
+                ))
                 self._event_bus.publish(ModeChanged(mode="READ"))
-                if result:
-                    logger.info(f"Write released by {self._session.username}")
-                    return True
-                logger.error("Failed to release Git lock")
-                return False
+                logger.info(f"Write released by {self._session.username}")
+                return True
             self._lock.release(self._session)
             self._is_writing = False
             self._lock_acquired = False
@@ -588,10 +694,51 @@ class CollaborationManager:
                     finally:
                         self._lock._force_release(); self._lock_acquired = False; self._is_writing = False
                     return False
-            self._event_bus.publish(WriteGranted(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username, request_id=request_id, queue_position=0))
+            try:
+                consumed = self._queue_cancel(request)
+                if not consumed:
+                    # Absence is semantically consumed (for example an expired
+                    # request); only fail if the request is still authoritative.
+                    remaining = self._queue_get_by_session(self._session.session_id)
+                    consumed = remaining is None
+            except Exception:
+                consumed = False
+
+            if not consumed:
+                logger.error(
+                    "WRITE grant rollback: shared queue request %s could not be consumed",
+                    request_id,
+                )
+                try:
+                    self._sync_provider.release_lock(self._session.username)
+                finally:
+                    self._lock._force_release()
+                    self._lock_acquired = False
+                    self._is_writing = False
+                return False
+
+            self._event_bus.publish(WriteGranted(
+                session_id=self._session.session_id,
+                user_id=self._session.user_id,
+                username=self._session.username,
+                request_id=request_id,
+                queue_position=0,
+            ))
             self._event_bus.publish(ModeChanged(mode="WRITE"))
-            self._queue_cancel(request)
-            self._event_bus.publish(QueueUpdated(queue_length=self._queue_count(), next_writer=self._queue_peek().username if self._queue_peek() else None))
+            try:
+                queue_snapshot = self._queue_snapshot()
+                next_request = queue_snapshot.get("next") or {}
+                self._event_bus.publish(QueueUpdated(
+                    queue_length=int(queue_snapshot.get("length", 0) or 0),
+                    next_writer=next_request.get("username"),
+                ))
+            except Exception:
+                # Lock ownership and queue consumption are already confirmed;
+                # this event is observational only.
+                logger.debug(
+                    "QueueUpdated refresh failed after confirmed grant",
+                    exc_info=True,
+                )
             return True
 
         if self._lock.is_locked():
