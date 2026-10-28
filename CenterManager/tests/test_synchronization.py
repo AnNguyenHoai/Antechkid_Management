@@ -47,7 +47,10 @@ class TestGitSynchronizationProvider:
         
         provider = GitSynchronizationProvider(tmp_path)
         assert provider.connect() is True
-        assert provider.health() is True
+        # Collaboration health is authoritative-remote health. A local-only
+        # repository can be connected/usable for local Git operations while
+        # still being unavailable for distributed WRITE coordination.
+        assert provider.health() is False
 
     def test_status(self, tmp_path):
         """Test status."""

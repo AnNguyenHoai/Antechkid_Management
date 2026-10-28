@@ -72,7 +72,15 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
 
             try:
-                self._run_git_command(args, check=True)
+                run_kwargs = {"check": True}
+                timeout = getattr(
+                    self,
+                    "_collaboration_git_timeout_seconds",
+                    None,
+                )
+                if timeout is not None:
+                    run_kwargs["timeout"] = timeout
+                self._run_git_command(args, **run_kwargs)
                 logger.info("Lock branch pushed successfully: %s", self._lock_branch)
                 return True
             except Exception as exc:

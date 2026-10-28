@@ -61,6 +61,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._lock_branch = f"lock-{branch}"  # e.g., lock-main
         self._queue_branch = f"queue-{branch}"  # shared cross-machine WRITE queue
         self._queue_request_ttl_seconds = 120
+        self._queue_clock_skew_tolerance_seconds = 60
         self._username = username or os.environ.get("GIT_USER", "CenterManager")
         self._email = email or os.environ.get("GIT_EMAIL", "centermanager@local")
         self._repo: Optional[Repo] = None
@@ -70,6 +71,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._credential_helper: Optional[GitCredentialHelper] = None
         self._askpass_env: dict = {}
         self._lease_duration_seconds = 60
+        self._collaboration_git_timeout_seconds = 15
         self._git_executable = git_executable or str(locate_git() or "")
 
         # Serialize Git subprocesses for this provider. The CollaborationPoller
@@ -98,7 +100,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         env.update(self._askpass_env)
         return env
 
-    def _run_git_command(self, args: list, cwd: Optional[Path] = None, check: bool = True, env: Optional[dict] = None) -> str:
+    def _run_git_command(self, args: list, cwd: Optional[Path] = None, check: bool = True, env: Optional[dict] = None, timeout: Optional[float] = None) -> str:
         if cwd is None:
             cwd = self._repo_path
         if env is None:
@@ -117,6 +119,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 text=True,
                 env=env,
                 check=False,
+                timeout=timeout,
             )
 
         if result.returncode != 0:
@@ -242,7 +245,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
         try:
             output = self._run_git_command(
                 ["ls-remote", "origin", f"refs/heads/{self._lock_branch}"],
-                check=False
+                check=False,
+                timeout=self._collaboration_git_timeout_seconds,
             )
             if not output:
                 return None
@@ -302,7 +306,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
         if not self._has_remote_origin():
             return False
         try:
-            self._run_git_command(["fetch", "origin", self._lock_branch], check=False)
+            self._run_git_command(
+                ["fetch", "origin", self._lock_branch],
+                check=False,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             return True
         except Exception:
             return False
@@ -419,7 +427,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 # Branch exists; atomic CAS with --force-with-lease
                 args = ["push", "origin", f"{commit_sha}:refs/heads/{self._lock_branch}"]
                 args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             logger.info(f"Lock branch pushed successfully: {self._lock_branch}")
             return True
         except RepositoryConflictError:
@@ -440,7 +452,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 args = ["push", "origin", "--delete", self._lock_branch]
                 if expected_oid is not None:
                     args.append(f"--force-with-lease={self._lock_branch}:{expected_oid}")
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             logger.info(f"Lock branch deleted: {self._lock_branch}")
             return True
         except Exception as e:
@@ -464,6 +480,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         output = self._run_git_command(
             ["ls-remote", "origin", f"refs/heads/{self._queue_branch}"],
             check=True,
+            timeout=self._collaboration_git_timeout_seconds,
         )
         if not output:
             return None
@@ -477,6 +494,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._run_git_command(
             ["fetch", "origin", self._queue_branch],
             check=True,
+            timeout=self._collaboration_git_timeout_seconds,
         )
         return True
 
@@ -524,17 +542,36 @@ class GitSynchronizationProvider(SynchronizationProvider):
             if timestamp:
                 try:
                     age = (now - datetime.fromisoformat(timestamp)).total_seconds()
-                    if age > self._queue_request_ttl_seconds:
+                    # Cross-machine queue timestamps come from the requester's
+                    # wall clock. Protect healthy waiters from a reader whose
+                    # clock is ahead by allowing the same bounded skew grace
+                    # used by distributed lock reclamation.
+                    expiry_threshold = (
+                        self._queue_request_ttl_seconds
+                        + self._queue_clock_skew_tolerance_seconds
+                    )
+                    if age > expiry_threshold:
                         continue
                 except Exception:
                     pass
             live.append(dict(item))
-        live.sort(
-            key=lambda item: (
-                -int(item.get("priority", 0) or 0),
+
+        def queue_order_key(item):
+            priority = -int(item.get("priority", 0) or 0)
+            sequence = item.get("queue_sequence")
+            if sequence is not None:
+                try:
+                    return (priority, 0, int(sequence), "")
+                except (TypeError, ValueError):
+                    pass
+            return (
+                priority,
+                1,
+                0,
                 item.get("enqueue_timestamp") or item.get("timestamp") or "",
             )
-        )
+
+        live.sort(key=queue_order_key)
         return live
 
     def _create_queue_commit_plumbing(
@@ -620,7 +657,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 args.append(
                     f"--force-with-lease={self._queue_branch}:{expected_oid}"
                 )
-            self._run_git_command(args, check=True)
+            self._run_git_command(
+                args,
+                check=True,
+                timeout=self._collaboration_git_timeout_seconds,
+            )
             return True
         except Exception as exc:
             logger.info("Shared queue CAS update lost a race: %s", exc)
@@ -665,6 +706,26 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 for item in requests
             ):
                 return False, requests
+
+            # queue_sequence is assigned inside the CAS mutation so FIFO order
+            # is authoritative and independent of workstation wall clocks.
+            next_sequence = 1
+            for item in requests:
+                sequence = item.get("queue_sequence")
+                if sequence is not None:
+                    try:
+                        next_sequence = max(next_sequence, int(sequence) + 1)
+                    except (TypeError, ValueError):
+                        pass
+
+            # Migrate legacy requests that predate queue_sequence while
+            # preserving their already-canonical order.
+            for item in requests:
+                if item.get("queue_sequence") is None:
+                    item["queue_sequence"] = next_sequence
+                    next_sequence += 1
+
+            request["queue_sequence"] = next_sequence
             requests.append(request)
             return True, requests
 
@@ -1260,14 +1321,17 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return False
         try:
             self._run_git_command(["version"])
-            try:
-                self._run_git_command(["fetch", "origin", "--dry-run"])
-                self._offline = False
-            except Exception:
-                self._offline = True
-                return self._repo_path.exists()
+            # Collaboration availability means the authoritative remote is
+            # reachable. A healthy local clone is not sufficient for WRITE
+            # authority, queue arbitration, finishing, or lease renewal.
+            self._run_git_command(
+                ["fetch", "origin", "--dry-run"],
+                timeout=self._collaboration_git_timeout_seconds,
+            )
+            self._offline = False
             return True
         except Exception:
+            self._offline = True
             return False
 
     def name(self) -> str:
