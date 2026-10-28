@@ -19,7 +19,20 @@ def test_archive_preview_is_read_only_and_uses_dependency_snapshot():
 def test_archive_confirmation_discloses_enrollment_and_finance_consequences():
     source = PAGE.read_text(encoding="utf-8")
     assert "preview_archive_class(class_id)" in source
-    assert "Active enrollments will NOT be completed" in source
-    assert "Outstanding tuition is NOT settled" in source
+    assert "Active enrollments WILL be withdrawn" in source
+    assert "Outstanding tuition remains collectible" in source
     assert "preview_archive_class(cid)" in source
     assert "Restore each class before changing its enrollments." in source
+
+
+def test_class_archive_applies_withdrawals_and_soft_archive_in_one_commit():
+    source = SERVICE.read_text(encoding="utf-8")
+    start = source.index("    def archive_class(")
+    end = source.index("    def restore_class(", start)
+    body = source[start:end]
+    assert 'enrollment.status = "WITHDRAWN"' in body
+    assert "enrollment.withdrawn_from_session" in body
+    assert "enrollment.end_date = withdrawal_date" in body
+    assert body.index('enrollment.status = "WITHDRAWN"') < body.index("class_obj.deleted_at =")
+    assert body.count("session.commit()") == 1
+    assert "enrollment.has_open_freeze" in body
