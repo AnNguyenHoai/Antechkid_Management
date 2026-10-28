@@ -22,7 +22,7 @@ from centermanager.database.artifact_identity import (
     DatabaseArtifactIdentityError,
     identity_manifest_path,
     next_identity_document,
-    validate_and_pin_identity,
+    validate_identity,
     write_identity_document,
 )
 from centermanager.database.encryption import (
@@ -154,7 +154,7 @@ def validate_authoritative_repository_database() -> Path:
     validate_database_artifact(repo_db, encryption_required=encrypted, key=key)
     if encrypted:
         try:
-            validate_and_pin_identity(repo_db, key)
+            validate_identity(repo_db, key)
         except DatabaseArtifactIdentityError as exc:
             raise DatabaseArtifactSecurityError(
                 f"Authoritative database identity validation failed: {exc}"
@@ -181,7 +181,7 @@ def _publish_encrypted_repository_pair(
     if repo_db.exists() and manifest.exists():
         validate_database_artifact(repo_db, encryption_required=True, key=key)
         try:
-            validate_and_pin_identity(repo_db, key)
+            validate_identity(repo_db, key)
         except DatabaseArtifactIdentityError:
             if not filecmp.cmp(repo_db, source_tmp, shallow=False):
                 raise
@@ -210,7 +210,7 @@ def _publish_encrypted_repository_pair(
         manifest_installed = True
 
         validate_database_artifact(repo_db, encryption_required=True, key=key)
-        validate_and_pin_identity(repo_db, key)
+        validate_identity(repo_db, key)
     except Exception:
         if manifest_installed and manifest.exists():
             manifest.unlink(missing_ok=True)
