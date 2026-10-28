@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """ClassService - business logic for Class entity."""
 from datetime import date, datetime, timezone
+from copy import copy
+from decimal import Decimal
 from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -484,6 +486,55 @@ class ClassService:
             ))
             return class_obj
 
+    def _archive_finance_impact(self, session: Session, class_id: int) -> dict:
+        """Simulate withdrawal without modifying persistent Enrollment rows."""
+        from centermanager.services.enrollment_service import EnrollmentService
+        from centermanager.services.outstanding_service import OutstandingService
+
+        enrollments = self._repository_provider.enrollments(session).get_active_by_class(class_id)
+        if any(row.has_open_freeze for row in enrollments):
+            raise ClassValidationError(
+                "Open tuition freezes must be resolved before archive. No changes made."
+            )
+        sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+        outstanding = OutstandingService(
+            self._session_factory, repository_provider=self._repository_provider
+        )
+        today = get_clock().today()
+        before = Decimal("0")
+        after = Decimal("0")
+        changes = []
+        for row in enrollments:
+            current = outstanding._calculate_from_enrollment(session, row, as_of_date=today)
+            simulated = copy(row)
+            simulated.status = "WITHDRAWN"
+            simulated.end_date = today
+            simulated.withdrawn_from_session = EnrollmentService._resolve_withdrawn_from_session(
+                row, sessions
+            )
+            projected = outstanding._calculate_from_enrollment(
+                session, simulated, as_of_date=today
+            )
+            if current is None or projected is None:
+                raise ClassValidationError("Cannot verify tuition for every active enrollment.")
+            old_balance = Decimal(str(current.balance))
+            new_balance = Decimal(str(projected.balance))
+            before += old_balance
+            after += new_balance
+            changes.append({
+                "enrollment_id": row.id,
+                "student_name": current.student_name,
+                "before": str(old_balance),
+                "after": str(new_balance),
+                "boundary": simulated.withdrawn_from_session,
+            })
+        return {
+            "outstanding_before": str(before),
+            "outstanding_after": str(after),
+            "outstanding_change": str(after - before),
+            "enrollment_finance_changes": changes,
+        }
+
     def preview_archive_class(self, class_id: int) -> dict:
         """Read-only dependency summary used before a destructive lifecycle change."""
         with self._session_factory() as session:
@@ -492,7 +543,7 @@ class ClassService:
                 raise ClassNotFoundError(f"Class {class_id} not found.")
             if class_obj.deleted_at is not None:
                 raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
-            return self._archive_snapshot(session, class_id)
+            return {**self._archive_snapshot(session, class_id), **self._archive_finance_impact(session, class_id)}
 
     def archive_class(self, class_id: int) -> None:
         with self._session_factory() as session:
