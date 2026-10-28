@@ -229,15 +229,30 @@ class WriteTransactionManager:
         except Exception:
             logger.exception("Failed to release WRITE lease after consistency rejection")
 
+    @staticmethod
+    def _explicit_method(obj, name: str):
+        """Return an optional method only when the object's type declares it.
+
+        MagicMock/dynamic proxies synthesize arbitrary attributes via getattr;
+        treating those as real performance capabilities breaks compatibility
+        with tests and custom providers.
+        """
+        if obj is None:
+            return None
+        declared = getattr(type(obj), name, None)
+        if not callable(declared):
+            return None
+        method = getattr(obj, name, None)
+        return method if callable(method) else None
+
     def _get_handoff_main_commit(self) -> Optional[str]:
         if self._sync_service is None:
             return None
-        getter = getattr(
+        getter = self._explicit_method(
             self._sync_service,
             "get_last_write_handoff_main_commit",
-            None,
         )
-        if not callable(getter):
+        if getter is None:
             return None
         try:
             return getter()
@@ -928,7 +943,12 @@ class WriteTransactionManager:
                 logger.warning(f"Entered FINISHING_STALE due to: {reason}")
                 return {"success": False, "reason": reason, "state": "STALE"}
 
-        current_gen = int(auth.get("generation", 0) or 0)
+        if "generation" in auth:
+            current_gen = int(auth.get("generation", 0) or 0)
+        else:
+            # Compatibility fallback for test doubles/custom collaboration
+            # implementations that predate generation-in-authority snapshots.
+            current_gen = self._collab_manager.get_lock_generation()
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
             self._state = WriteTransactionState.FINISHING_STALE
@@ -938,10 +958,13 @@ class WriteTransactionManager:
         if self._collab_manager._sync_provider:
             try:
                 provider = self._collab_manager._sync_provider
-                observe_remote = getattr(provider, "observe_remote_main_commit", None)
+                observe_remote = self._explicit_method(
+                    provider,
+                    "observe_remote_main_commit",
+                )
                 current_main = (
                     observe_remote()
-                    if callable(observe_remote)
+                    if observe_remote is not None
                     else provider.get_remote_main_commit()
                 )
                 if current_main is None:
