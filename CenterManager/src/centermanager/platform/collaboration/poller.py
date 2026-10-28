@@ -31,6 +31,7 @@ class PollerMode(Enum):
 class CollaborationSnapshot:
     """Immutable snapshot of remote collaboration state."""
     timestamp: datetime = field(default_factory=datetime.now)
+    observation_started_at: Optional[datetime] = None
     remote_lock: Dict[str, Any] = field(default_factory=dict)
     queue: Dict[str, Any] = field(default_factory=dict)
     version: int = 0
@@ -318,9 +319,10 @@ class CollaborationPoller(QObject):
             logger.debug("Poll skipped due to stop requested")
             return
 
+        observation_started_at = datetime.now()
         self._poll_in_progress = True
         self._refresh_pending = False
-        self._last_poll_at = datetime.now()
+        self._last_poll_at = observation_started_at
 
         try:
             remote_lock = self._cm.get_lock_status()
@@ -333,6 +335,7 @@ class CollaborationPoller(QObject):
 
             snapshot = CollaborationSnapshot(
                 timestamp=datetime.now(),
+                observation_started_at=observation_started_at,
                 remote_lock=remote_lock,
                 queue=queue,
                 version=version,

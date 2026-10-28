@@ -62,6 +62,7 @@ class WriteTransactionManager:
         self._snapshot_path: Optional[Path] = None
         self._waiting_position: int = 0
         self._waiting_request_id: str = ""
+        self._waiting_started_at: Optional[datetime] = None
         self._session = None
         self._last_start_error: str = ""
         self._stale_editing_reason: str = ""
@@ -166,6 +167,7 @@ class WriteTransactionManager:
         self._snapshot_path = None
         self._waiting_position = 0
         self._waiting_request_id = ""
+        self._waiting_started_at = None
         self._finishing_started_at = None
         self._finishing_deadline = None
         self._publish_intent = False
@@ -538,6 +540,7 @@ class WriteTransactionManager:
             self._transition_to(WriteTransactionState.WAITING, "queued")
             self._waiting_position = result.position
             self._waiting_request_id = result.request_id
+            self._waiting_started_at = datetime.now()
             self._last_start_error = result.message or f"Waiting for write lock (position {result.position})."
             logger.info(f"Write transaction waiting (position {result.position})")
             return False
@@ -842,6 +845,9 @@ class WriteTransactionManager:
     def get_waiting_position(self) -> int:
         return self._waiting_position
 
+    def get_waiting_started_at(self) -> Optional[datetime]:
+        return self._waiting_started_at
+
     def cancel_waiting(self, reason: str = "Waiting request expired or was removed") -> None:
         """Leave WAITING when the collaboration layer no longer owns our request."""
         if self._state != WriteTransactionState.WAITING:
@@ -850,6 +856,7 @@ class WriteTransactionManager:
         self._state = WriteTransactionState.IDLE
         self._waiting_position = 0
         self._waiting_request_id = ""
+        self._waiting_started_at = None
         self._is_editing = False
         self._session = None
 
@@ -903,6 +910,7 @@ class WriteTransactionManager:
 
         self._waiting_position = 0
         self._waiting_request_id = ""
+        self._waiting_started_at = None
         self._create_snapshot()
 
         logger.info(

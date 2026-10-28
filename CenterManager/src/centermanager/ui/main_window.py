@@ -409,6 +409,25 @@ class MainWindow(QMainWindow):
         if snapshot.is_stale or snapshot.poll_status != "success":
             return
 
+        waiting_started_at = self._transaction.get_waiting_started_at()
+        observation_started_at = getattr(
+            snapshot,
+            "observation_started_at",
+            None,
+        )
+        if (
+            waiting_started_at is not None
+            and observation_started_at is not None
+            and observation_started_at < waiting_started_at
+        ):
+            logger.debug(
+                "Ignoring pre-request collaboration snapshot while WAITING: "
+                "poll_started=%s waiting_started=%s",
+                observation_started_at,
+                waiting_started_at,
+            )
+            return
+
         current_session = self._collaboration_manager.get_session_id()
         expected_request_id = getattr(
             self._transaction,
@@ -672,7 +691,9 @@ class MainWindow(QMainWindow):
             owner = lock_status.get("owner", "Unknown")
             pos = self._transaction.get_waiting_position()
             self.app_top_bar.set_transaction_text(f"Waiting (pos {pos}) - {owner}")
-            self.statusBar().showMessage(f"Waiting for write lock (held by {owner})")
+            # WAITING is already fully projected in the top bar. Avoid a
+            # duplicate bottom-row notification that consumes vertical space.
+            self.statusBar().clearMessage()
         elif is_editing:
             self.start_edit_btn.setVisible(False)
             self.finish_edit_btn.setText("Finish editing")
@@ -783,10 +804,6 @@ class MainWindow(QMainWindow):
             else:
                 self.app_top_bar.set_mode("READ", "warning")
                 self.app_top_bar.set_editor_state(f"{owner_text} is editing", "warning")
-                if self._transaction.state == WriteTransactionState.WAITING:
-                    self.statusBar().showMessage(
-                        f"Waiting for write lock (held by {owner_text})"
-                    )
         else:
             self.waiting_indicator.setText("● No active editor")
             self.app_top_bar.set_mode("READ", "neutral")
@@ -852,10 +869,16 @@ class MainWindow(QMainWindow):
                 3000,
             )
             self._update_write_buttons()
+        elif self._transaction.state == WriteTransactionState.WAITING:
+            # Queueing is a successful collaboration outcome, not an
+            # acquisition error. The top bar owns the persistent WAITING UI.
+            self.statusBar().clearMessage()
+            self._update_write_buttons()
         else:
             self.statusBar().showMessage(
-                "Could not acquire write lock. Someone else is editing.",
-                3000,
+                self._transaction.last_start_error
+                or "Could not acquire write lock.",
+                5000,
             )
             self._update_write_buttons()
 
