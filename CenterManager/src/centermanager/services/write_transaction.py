@@ -4,6 +4,7 @@ import logging
 import shutil
 import json
 import os
+import time
 from enum import Enum, auto
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
@@ -227,6 +228,22 @@ class WriteTransactionManager:
         except Exception:
             logger.exception("Failed to release WRITE lease after consistency rejection")
 
+    def _get_handoff_main_commit(self) -> Optional[str]:
+        if self._sync_service is None:
+            return None
+        getter = getattr(
+            self._sync_service,
+            "get_last_write_handoff_main_commit",
+            None,
+        )
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception:
+            logger.debug("Unable to reuse pinned WRITE handoff MAIN commit", exc_info=True)
+            return None
+
     def _verify_first_writer_consistency(self) -> bool:
         """Run the mandatory runtime/repository/remote barrier while WRITE is held."""
         provider = getattr(self._collab_manager, "_sync_provider", None)
@@ -408,6 +425,7 @@ class WriteTransactionManager:
 
     # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
+        start_total = time.perf_counter()
         self._last_start_error = ""
         self.reset_finishing()
         logger.info("Start Editing requested; transaction_state=%s", self._state.name)
@@ -426,7 +444,9 @@ class WriteTransactionManager:
             self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
 
+        request_started = time.perf_counter()
         result = self._collab_manager.request_write()
+        request_ms = (time.perf_counter() - request_started) * 1000
         logger.info(
             "Start Editing collaboration result=%s message=%s position=%s",
             result.result.value,
@@ -438,10 +458,18 @@ class WriteTransactionManager:
             # queued writers execute during handoff. Run it now while this
             # session owns the distributed lock; on failure, release the grant
             # before returning to IDLE.
+            handoff_started = time.perf_counter()
             if not self._verify_first_writer_consistency():
                 self._release_grant_after_failed_consistency_check()
                 self._transition_to(WriteTransactionState.IDLE, "consistency verification failed")
+                logger.info(
+                    "PERF start_edit total_ms=%.1f request_ms=%.1f handoff_ms=%.1f result=consistency_failed",
+                    (time.perf_counter() - start_total) * 1000,
+                    request_ms,
+                    (time.perf_counter() - handoff_started) * 1000,
+                )
                 return False
+            handoff_ms = (time.perf_counter() - handoff_started) * 1000
 
             if not self._transition_to(WriteTransactionState.EDITING, "write granted"):
                 self._release_grant_after_failed_consistency_check()
@@ -455,15 +483,30 @@ class WriteTransactionManager:
             self._expected_generation = self._collab_manager.get_lock_generation()
             logger.info(f"Expected generation captured: {self._expected_generation}")
 
-            self._base_main_commit = None
-            if self._collab_manager._sync_provider:
+            self._base_main_commit = self._get_handoff_main_commit()
+            if self._base_main_commit is None and self._collab_manager._sync_provider:
                 try:
-                    self._base_main_commit = self._collab_manager._sync_provider.get_remote_main_commit()
-                    logger.info(f"Base MAIN commit captured: {self._base_main_commit[:8] if self._base_main_commit else None}")
+                    # Compatibility fallback for older/custom sync services.
+                    self._base_main_commit = (
+                        self._collab_manager._sync_provider.get_remote_main_commit()
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to capture base MAIN commit: {e}")
+            logger.info(
+                "Base MAIN commit captured: %s",
+                self._base_main_commit[:8] if self._base_main_commit else None,
+            )
 
+            snapshot_started = time.perf_counter()
             self._create_snapshot()
+            snapshot_ms = (time.perf_counter() - snapshot_started) * 1000
+            logger.info(
+                "PERF start_edit total_ms=%.1f request_ms=%.1f handoff_ms=%.1f snapshot_ms=%.1f",
+                (time.perf_counter() - start_total) * 1000,
+                request_ms,
+                handoff_ms,
+                snapshot_ms,
+            )
             logger.info("Write transaction started: EDITING")
             return True
         elif result.is_waiting:
@@ -492,6 +535,7 @@ class WriteTransactionManager:
                        save_callback: Optional[Callable[[], bool]] = None,
                        on_publish_success: Optional[Callable[[], None]] = None,
                        on_publish_failure: Optional[Callable[[str], None]] = None) -> bool:
+        finish_total = time.perf_counter()
         if self._state == WriteTransactionState.IDLE:
             logger.warning("Finish editing called in IDLE state")
             return False
@@ -516,7 +560,9 @@ class WriteTransactionManager:
             self._reset_to_idle()
             return True
 
+        authority_started = time.perf_counter()
         result = self.enter_finishing()
+        authority_ms = (time.perf_counter() - authority_started) * 1000
         if not result.get("success"):
             if self._state in (WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
                                WriteTransactionState.FINISHING_STALE,
@@ -527,6 +573,7 @@ class WriteTransactionManager:
                 logger.error(f"Unexpected failure entering finishing: {result.get('reason')}")
                 return False
 
+        save_started = time.perf_counter()
         save_fn = save_callback or self._save_callback
         if save_fn is not None:
             try:
@@ -540,6 +587,7 @@ class WriteTransactionManager:
                 self._state = WriteTransactionState.FAILED
                 return False
 
+        save_ms = (time.perf_counter() - save_started) * 1000
         self._state = WriteTransactionState.LOCAL_SAVED
         self._on_publish_success = on_publish_success
         self._on_publish_failure = on_publish_failure
@@ -549,12 +597,26 @@ class WriteTransactionManager:
             self._state = WriteTransactionState.FAILED
             return False
 
+        materialize_started = time.perf_counter()
         if not self._publish_database_and_manifest():
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
             return False
+        materialize_ms = (time.perf_counter() - materialize_started) * 1000
 
-        return self._publish()
+        publish_started = time.perf_counter()
+        publish_result = self._publish()
+        publish_ms = (time.perf_counter() - publish_started) * 1000
+        logger.info(
+            "PERF finish_edit total_ms=%.1f authority_ms=%.1f save_ms=%.1f materialize_ms=%.1f publish_release_ms=%.1f result=%s",
+            (time.perf_counter() - finish_total) * 1000,
+            authority_ms,
+            save_ms,
+            materialize_ms,
+            publish_ms,
+            "success" if publish_result else "failed",
+        )
+        return publish_result
 
     def cancel_editing(self, force: bool = False) -> bool:
         if self.is_waiting:
@@ -703,7 +765,12 @@ class WriteTransactionManager:
             session = self._collab_manager.get_session()
             if session and session.username:
                 user = session.username
-            return self._sync_service.publish_only(message="Finish Editing", user=user, expected_main_commit=self._base_main_commit)
+            return self._sync_service.publish_only(
+                message="Finish Editing",
+                user=user,
+                expected_main_commit=self._base_main_commit,
+                repository_already_materialized=True,
+            )
         logger.warning("No sync service available for publish")
         return False
 
@@ -801,8 +868,8 @@ class WriteTransactionManager:
         self._session = self._collab_manager.get_session()
         self._expected_generation = self._collab_manager.get_lock_generation()
 
-        self._base_main_commit = None
-        if self._collab_manager._sync_provider:
+        self._base_main_commit = self._get_handoff_main_commit()
+        if self._base_main_commit is None and self._collab_manager._sync_provider:
             try:
                 self._base_main_commit = (
                     self._collab_manager._sync_provider.get_remote_main_commit()
@@ -852,7 +919,7 @@ class WriteTransactionManager:
                 logger.warning(f"Entered FINISHING_STALE due to: {reason}")
                 return {"success": False, "reason": reason, "state": "STALE"}
 
-        current_gen = self._collab_manager.get_lock_generation()
+        current_gen = int(auth.get("generation", 0) or 0)
         if current_gen != self._expected_generation:
             reason = f"Generation mismatch: expected {self._expected_generation}, current {current_gen}"
             self._state = WriteTransactionState.FINISHING_STALE
@@ -861,7 +928,13 @@ class WriteTransactionManager:
 
         if self._collab_manager._sync_provider:
             try:
-                current_main = self._collab_manager._sync_provider.get_remote_main_commit()
+                provider = self._collab_manager._sync_provider
+                observe_remote = getattr(provider, "observe_remote_main_commit", None)
+                current_main = (
+                    observe_remote()
+                    if callable(observe_remote)
+                    else provider.get_remote_main_commit()
+                )
                 if current_main is None:
                     self._state = WriteTransactionState.PUBLISH_CONFLICT
                     reason = "MAIN verification failed: cannot get remote commit"
