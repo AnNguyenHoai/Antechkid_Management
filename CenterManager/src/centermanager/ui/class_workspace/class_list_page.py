@@ -301,9 +301,21 @@ class ClassListPage(QWidget):
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
             return
+        try:
+            impact = self._class_service.preview_archive_class(class_id)
+        except Exception:
+            logger.exception("Archive impact preview failed")
+            QMessageBox.critical(self, "Error", "Could not verify class dependencies. Archive cancelled.")
+            return
         reply = QMessageBox.question(
             self, "Confirm Archive",
-            "Archive this class?",
+            "Archiving this class will make its enrollment and class records "
+            "read-only until restored. Active enrollments will NOT be completed "
+            "or withdrawn automatically. Outstanding tuition is NOT settled.\\n\\n"
+            f"Active enrollments: {impact['active_enrollments']}\\n"
+            f"Teacher assignments: {impact['teacher_assignments']}\\n"
+            f"Class sessions: {impact['sessions']}\\n\\n"
+            "Archive this class anyway?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
