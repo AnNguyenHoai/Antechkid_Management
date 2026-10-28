@@ -252,7 +252,7 @@ class ClassListPage(QWidget):
             f"Archive {len(self._selected_ids)} classes?\\n\\n"
             f"Active enrollments affected: {active_count}\\n"
             f"Class sessions preserved as read-only: {session_count}\\n\\n"
-            "Enrollment statuses and outstanding tuition are not settled. "
+            "Active enrollments will be withdrawn; outstanding tuition remains collectible. "
             "Restore each class before changing its enrollments.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -325,8 +325,8 @@ class ClassListPage(QWidget):
         reply = QMessageBox.question(
             self, "Confirm Archive",
             "Archiving this class will make its enrollment and class records "
-            "read-only until restored. Active enrollments will NOT be completed "
-            "or withdrawn automatically. Outstanding tuition is NOT settled.\\n\\n"
+            "read-only until restored. Active enrollments WILL be withdrawn "
+            "automatically. Outstanding tuition remains collectible.\\n\\n"
             f"Active enrollments: {impact['active_enrollments']}\\n"
             f"Teacher assignments: {impact['teacher_assignments']}\\n"
             f"Class sessions: {impact['sessions']}\\n\\n"
