@@ -1135,6 +1135,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
             # Force add database (even if .gitignore would ignore it)
             db_path = self._repo_path / "database" / "center.db"
+            identity_path = self._repo_path / "database" / "center.db.identity.json"
             if db_path.exists():
                 self._run_git_command(["add", "--force", "database/center.db"])
 
@@ -1240,7 +1241,6 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 # The identity is part of the same authoritative artifact. It
                 # must be included even if an ignore rule would omit sidecars.
                 from centermanager.database.encryption import database_encryption_required
-                identity_path = self._repo_path / "database" / "center.db.identity.json"
                 if database_encryption_required() and not identity_path.is_file():
                     raise RuntimeError("Signed database identity sidecar is missing")
                 if identity_path.is_file():
