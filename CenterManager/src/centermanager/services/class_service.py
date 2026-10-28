@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """ClassService - business logic for Class entity."""
 from datetime import date, datetime, timezone
-from copy import copy
 from decimal import Decimal
 from typing import Optional, List, Any
 
@@ -506,19 +505,29 @@ class ClassService:
         changes = []
         for row in enrollments:
             current = outstanding._calculate_from_enrollment(session, row, as_of_date=today)
-            simulated = copy(row)
-            simulated.status = "WITHDRAWN"
-            simulated.end_date = today
-            simulated.withdrawn_from_session = EnrollmentService._resolve_withdrawn_from_session(
-                row, sessions
+            # Avoid attaching a dirty ORM instance to the live Session.
+            class WithdrawalProjection:
+                def __init__(self, source, boundary, withdrawal_date):
+                    self._source = source
+                    self.status = "WITHDRAWN"
+                    self.end_date = withdrawal_date
+                    self.withdrawn_from_session = boundary
+
+                def __getattr__(self, name):
+                    return getattr(self._source, name)
+
+            simulated = WithdrawalProjection(
+                row,
+                EnrollmentService._resolve_withdrawn_from_session(row, sessions),
+                today,
             )
             projected = outstanding._calculate_from_enrollment(
                 session, simulated, as_of_date=today
             )
             if current is None or projected is None:
                 raise ClassValidationError("Cannot verify tuition for every active enrollment.")
-            old_balance = Decimal(str(current.balance))
-            new_balance = Decimal(str(projected.balance))
+            old_balance = Decimal(str(current.outstanding))
+            new_balance = Decimal(str(projected.outstanding))
             before += old_balance
             after += new_balance
             changes.append({
