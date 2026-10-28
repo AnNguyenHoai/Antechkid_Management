@@ -973,6 +973,10 @@ class CollaborationManager:
                 lease_expires_at=remote_status.get("lease_expires_at")
                 if self._is_lease_valid(lease_expires_at): result["lease_valid"]=True
                 else: result["reason"]="Remote lock lease expired or missing"; return result
+                # Reuse this authoritative observation for fencing instead of
+                # issuing another remote lock read via get_lock_generation().
+                result["generation"]=int(remote_status.get("lock_generation",0) or 0)
+                result["owner"]=remote_status.get("owner")
             except Exception as e:
                 logger.warning(f"Remote lock validation failed: {e}"); result["reason"]=f"Remote validation error: {e}"; return result
         else:
@@ -982,4 +986,8 @@ class CollaborationManager:
                 result["reason"]=f"Owner mismatch: lock owner={current_owner}, session={session.session_id}"; return result
         if self._is_lock_stale(self._lock.get_lock_info()):
             result["reason"]="Local lock stale"; return result
-        result["valid"]=True; result["generation"]=self.get_lock_generation(); result["owner"]=self._lock.get_owner() if hasattr(self._lock,'get_owner') else None; return result
+        result["valid"]=True
+        if self._sync_provider is None:
+            result["generation"]=self.get_lock_generation()
+            result["owner"]=self._lock.get_owner() if hasattr(self._lock,'get_owner') else None
+        return result
