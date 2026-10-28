@@ -50,3 +50,19 @@ def test_archive_finance_quote_does_not_mutate_enrollment_and_is_rechecked():
     assert "Outstanding after:" in page
     assert "Difference:" in page
     assert "expected_finance_impact={" in page
+
+
+def test_archive_reports_receivable_and_prepaid_without_netting():
+    service = SERVICE.read_text(encoding="utf-8")
+    page = PAGE.read_text(encoding="utf-8")
+    assert 'owed_before += max(old_balance, Decimal("0"))' in service
+    assert 'owed_after += max(new_balance, Decimal("0"))' in service
+    assert 'credit_before += max(-old_balance, Decimal("0"))' in service
+    assert 'credit_after += max(-new_balance, Decimal("0"))' in service
+    for field in ("owed_before", "owed_after", "credit_before", "credit_after"):
+        assert f'"{field}":' in service
+        assert field in page
+    assert "Students still owing:" in page
+    assert "with credit:" in page
+    assert 'row["credit_after"]' in page
+    assert "enrollment_finance_changes" in page
