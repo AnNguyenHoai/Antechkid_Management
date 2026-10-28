@@ -35,7 +35,9 @@ def test_soft_delete_apis_preserve_historical_student_and_class_records():
     # The class service archives the aggregate instead of deleting its related
     # records; the dependency snapshot is retained in the archive timeline.
     assert "snapshot = self._archive_snapshot(session, class_id)" in clazz
-    assert 'metadata={"dependency_snapshot": snapshot}' in clazz
+    assert '"dependency_snapshot": snapshot' in clazz
+    assert '"auto_withdrawn_count": len(active_enrollments)' in clazz
+    assert '"withdrawal_reason": "CLASS_ARCHIVED"' in clazz
     assert "teacher assignments" in clazz
     assert "enrollments" in clazz
     assert "sessions" in clazz
