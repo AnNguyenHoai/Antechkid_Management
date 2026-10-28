@@ -145,4 +145,8 @@ def test_collaboration_commands_pass_bounded_timeout_contract():
     assert "self._collaboration_git_timeout_seconds = 15" in provider_source
     assert "timeout=self._collaboration_git_timeout_seconds" in provider_source
     assert "timeout=timeout" in output_safety_source
-    assert "timeout=self._collaboration_git_timeout_seconds" in diagnostics_source
+    # The diagnostics wrapper supports production providers with a configured
+    # timeout while remaining compatible with lightweight/fake providers that
+    # intentionally do not run GitSynchronizationProvider.__init__.
+    assert '"_collaboration_git_timeout_seconds"' in diagnostics_source
+    assert 'run_kwargs["timeout"] = timeout' in diagnostics_source
