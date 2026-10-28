@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from centermanager.core.paths import get_paths
-from centermanager.database.wal_safety import copy_runtime_database_for_publish
+from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
 
 logger = logging.getLogger(__name__)
@@ -620,6 +620,9 @@ class WriteTransactionManager:
         if not self._publish_database_and_manifest():
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
+            if self._version_manager:
+                self._version_manager.clear_pending_version()
+            self._pending_version = None
             return False
         materialize_ms = (time.perf_counter() - materialize_started) * 1000
 
@@ -703,8 +706,10 @@ class WriteTransactionManager:
 
             # Capture checkpoint + source bytes under one maintenance fence, then
             # atomically install the immutable snapshot into the Git working tree.
-            copy_runtime_database_for_publish(dst_file)
-            logger.info(f"Database copied to repository from WAL-safe snapshot: {dst_file}")
+            published_db = materialize_runtime_database_to_repository()
+            if published_db != dst_file:
+                raise RuntimeError("Authoritative publication returned an unexpected destination")
+            logger.info("Database and signed identity published to repository from WAL-safe snapshot: %s", dst_file)
 
             if self._version_manager and self._pending_version:
                 manifest_path = repo_root / "manifest.json"

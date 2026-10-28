@@ -164,7 +164,22 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
             raise Exception("Simulated push failure")
         return original_do_publish()
 
-    with patch.object(tx, '_do_publish', side_effect=mock_do_publish):
+    # This test exercises push-failure semantics, not the artifact security
+    # subsystem (covered independently). Provide a valid staged test DB
+    # without opening an additional guarded runtime connection.
+    def stage_test_database():
+        from centermanager.database.artifact_security import authoritative_repository_database_path
+        destination = authoritative_repository_database_path()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA wal_checkpoint(PASSIVE)")
+        shutil.copy2(db_path, destination)
+        return destination
+
+    with patch(
+        "centermanager.services.write_transaction.materialize_runtime_database_to_repository",
+        side_effect=stage_test_database,
+    ), patch.object(tx, '_do_publish', side_effect=mock_do_publish):
         success = tx.finish_editing()
         # Theo logic hiện tại: khi publish thất bại, state = FAILED, pending version bị xóa
         assert not success
