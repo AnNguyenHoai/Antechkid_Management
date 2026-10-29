@@ -1,11 +1,11 @@
 """Regression: operational counts exclude withdrawn and historical contracts."""
-from types import SimpleNamespace
-
 from centermanager.models.class_ import Class
+from centermanager.models.enrollment import Enrollment
 
 
 def _enrollment(status, reconciled=None):
-    return SimpleNamespace(
+    return Enrollment(
+        student_id=1,
         status=status,
         reconciled_into_enrollment_id=reconciled,
     )
