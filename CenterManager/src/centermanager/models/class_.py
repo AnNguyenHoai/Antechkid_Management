@@ -90,7 +90,12 @@ class Class(Base, TimestampMixin):
 
     @property
     def student_count(self) -> int:
-        return len(self.enrollments)
+        """Current seats occupied by active, canonical enrollment contracts."""
+        return sum(
+            1 for enrollment in self.enrollments
+            if enrollment.status == "ACTIVE"
+            and enrollment.reconciled_into_enrollment_id is None
+        )
 
     @property
     def is_full(self) -> bool:

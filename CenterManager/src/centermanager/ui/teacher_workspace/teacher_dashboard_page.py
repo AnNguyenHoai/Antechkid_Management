@@ -91,7 +91,12 @@ class TeacherDashboardPage(QWidget):
             active = sum(1 for t in teachers if t.status == "ACTIVE")
             # TeacherService returns teachers with assigned_classes eagerly available.
             # Avoid one assignment-service query per teacher on every dashboard refresh.
-            total_assignments = sum(len(t.assigned_classes) for t in teachers)
+            total_assignments = sum(
+                1
+                for teacher in teachers
+                for assigned_class in teacher.assigned_classes
+                if assigned_class.deleted_at is None
+            )
 
             self.stats_grid.set_metrics([
                 {"icon": "teacher", "label": "Total Teachers", "value": str(total), "tone": "primary"},
