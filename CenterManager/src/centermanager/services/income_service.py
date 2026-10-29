@@ -497,7 +497,6 @@ class IncomeService:
                 as_of_date=as_of_date,
             )
 
-    @require_permission("finance.income.create")
     def _class_name_for_tuition(self, class_id: int) -> str:
         """Read class name for historical Tuition without reopening class mutations.
 
@@ -512,6 +511,7 @@ class IncomeService:
                 )
             return class_record.name
 
+    @require_permission("finance.income.create")
     def create_income(
         self,
         amount: float,
