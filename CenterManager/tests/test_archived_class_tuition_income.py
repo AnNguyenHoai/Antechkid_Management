@@ -53,3 +53,13 @@ def test_normal_income_and_credit_income_use_historical_class_name():
     assert 'class_name = self._class_name_for_tuition(class_id)' in credit
     assert "_resolve_tuition_enrollment(" in ordinary
     assert "_resolve_tuition_enrollment(" in credit
+
+
+def test_finance_income_create_permission_remains_on_write_entry_point():
+    from centermanager.services import income_service
+    import inspect
+
+    source = inspect.getsource(income_service.IncomeService)
+    assert '@require_permission("finance.income.create")\n    def create_income(' in source
+    assert '@require_permission("finance.income.create")\n    def create_tuition_payment_with_credit(' in source
+    assert '@require_permission("finance.income.create")\n    def _class_name_for_tuition(' not in source
