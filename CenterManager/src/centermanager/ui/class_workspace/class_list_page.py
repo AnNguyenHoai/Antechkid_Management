@@ -236,15 +236,50 @@ class ClassListPage(QWidget):
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify("You must be in WRITE mode to archive classes.", "warning")
             return
+        try:
+            summaries = [
+                self._class_service.preview_archive_class(cid)
+                for cid in self._selected_ids
+            ]
+        except Exception:
+            logger.exception("Bulk archive impact preview failed")
+            QMessageBox.critical(self, "Error", "Could not verify all class dependencies. Archive cancelled.")
+            return
+        active_count = sum(item["active_enrollments"] for item in summaries)
+        session_count = sum(item["sessions"] for item in summaries)
+        from decimal import Decimal
+        debt_before = sum(Decimal(item["outstanding_before"]) for item in summaries)
+        debt_after = sum(Decimal(item["outstanding_after"]) for item in summaries)
+        owed_before = sum(Decimal(item["owed_before"]) for item in summaries)
+        owed_after = sum(Decimal(item["owed_after"]) for item in summaries)
+        credit_before = sum(Decimal(item["credit_before"]) for item in summaries)
+        credit_after = sum(Decimal(item["credit_after"]) for item in summaries)
         reply = QMessageBox.question(
             self, "Confirm Archive",
-            f"Archive {len(self._selected_ids)} classes?",
+            f"Archive {len(self._selected_ids)} classes?\\n\\n"
+            f"Active enrollments affected: {active_count}\\n"
+            f"Class sessions preserved as read-only: {session_count}\\n"
+            f"Receivables before/after: {owed_before} / {owed_after} VND\\n"
+            f"Prepaid credit before/after: {credit_before} / {credit_after} VND\\n"
+            f"Net balance before/after: {debt_before} / {debt_after} VND\\n"
+            f"Difference: {debt_after - debt_before} VND\\n\\n"
+            "Active enrollments will be withdrawn; outstanding tuition remains collectible. "
+            "Restore each class before changing its enrollments.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                for cid in self._selected_ids:
-                    self._class_service.archive_class(cid)
+                for cid, impact in zip(self._selected_ids, summaries):
+                    self._class_service.archive_class(
+                        cid, expected_finance_impact={
+                            key: impact[key]
+                            for key in (
+                                "outstanding_before", "outstanding_after",
+                                "outstanding_change", "owed_before", "owed_after",
+                                "credit_before", "credit_after", "enrollment_finance_changes",
+                            )
+                        },
+                    )
                 self._clear_selection()
                 self.refresh()
             except Exception as e:
@@ -301,14 +336,64 @@ class ClassListPage(QWidget):
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify("You must be in WRITE mode to archive.", "warning")
             return
+        try:
+            impact = self._class_service.preview_archive_class(class_id)
+        except Exception:
+            logger.exception("Archive impact preview failed")
+            QMessageBox.critical(self, "Error", "Could not verify class dependencies. Archive cancelled.")
+            return
+        from decimal import Decimal
+        finance_changes = impact["enrollment_finance_changes"]
+        changed_rows = [
+            row for row in finance_changes if row["before"] != row["after"]
+        ]
+        credit_rows = [
+            row for row in finance_changes if Decimal(row["credit_after"]) > 0
+        ]
+        owed_rows = [
+            row for row in finance_changes if Decimal(row["owed_after"]) > 0
+        ]
+        detail_lines = [
+            f"{row['student_name']} (#{row['enrollment_id']}): "
+            f"debt {row['owed_after']} VND; credit {row['credit_after']} VND"
+            for row in owed_rows + credit_rows
+        ]
+        finance_message = (
+            f"Receivables before/after: {impact['owed_before']} / {impact['owed_after']} VND\\n"
+            f"Prepaid credit before/after: {impact['credit_before']} / {impact['credit_after']} VND\\n"
+            f"Net balance before/after: {impact['outstanding_before']} / {impact['outstanding_after']} VND\\n"
+            f"Difference: {impact['outstanding_change']} VND\\n"
+            f"Changed student balances: {len(changed_rows)}\\n"
+            f"Students still owing: {len(owed_rows)}; with credit: {len(credit_rows)}\\n"
+            + ("\\n".join(detail_lines) if detail_lines else "No debt or prepaid credit")
+            + "\\n\\n"
+            + "These figures are calculated from the existing tuition rules. "
+            "Please verify the impact before confirming.\\n\\n"
+        )
         reply = QMessageBox.question(
             self, "Confirm Archive",
-            "Archive this class?",
+            finance_message +
+            "Archiving this class will make its enrollment and class records "
+            "read-only until restored. Active enrollments WILL be withdrawn "
+            "automatically. Outstanding tuition remains collectible.\\n\\n"
+            f"Active enrollments: {impact['active_enrollments']}\\n"
+            f"Teacher assignments: {impact['teacher_assignments']}\\n"
+            f"Class sessions: {impact['sessions']}\\n\\n"
+            "Archive this class anyway?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self._class_service.archive_class(class_id)
+                self._class_service.archive_class(
+                    class_id, expected_finance_impact={
+                        key: impact[key]
+                        for key in (
+                            'outstanding_before', 'outstanding_after',
+                            'outstanding_change', 'owed_before', 'owed_after',
+                            'credit_before', 'credit_after', 'enrollment_finance_changes',
+                        )
+                    },
+                )
                 self.refresh()
             except Exception as e:
                 logger.exception("Archive failed")

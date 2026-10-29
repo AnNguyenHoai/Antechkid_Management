@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """ClassService - business logic for Class entity."""
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -484,7 +485,90 @@ class ClassService:
             ))
             return class_obj
 
-    def archive_class(self, class_id: int) -> None:
+    def _archive_finance_impact(self, session: Session, class_id: int) -> dict:
+        """Simulate withdrawal without modifying persistent Enrollment rows."""
+        from centermanager.services.enrollment_service import EnrollmentService
+        from centermanager.services.outstanding_service import OutstandingService
+
+        enrollments = self._repository_provider.enrollments(session).get_active_by_class(class_id)
+        if any(row.has_open_freeze for row in enrollments):
+            raise ClassValidationError(
+                "Open tuition freezes must be resolved before archive. No changes made."
+            )
+        sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+        outstanding = OutstandingService(
+            self._session_factory, repository_provider=self._repository_provider
+        )
+        today = get_clock().today()
+        before = Decimal("0")
+        after = Decimal("0")
+        owed_before = owed_after = Decimal("0")
+        credit_before = credit_after = Decimal("0")
+        changes = []
+        for row in enrollments:
+            current = outstanding._calculate_from_enrollment(session, row, as_of_date=today)
+            # Avoid attaching a dirty ORM instance to the live Session.
+            class WithdrawalProjection:
+                def __init__(self, source, boundary, withdrawal_date):
+                    self._source = source
+                    self.status = "WITHDRAWN"
+                    self.end_date = withdrawal_date
+                    self.withdrawn_from_session = boundary
+
+                def __getattr__(self, name):
+                    return getattr(self._source, name)
+
+            simulated = WithdrawalProjection(
+                row,
+                EnrollmentService._resolve_withdrawn_from_session(row, sessions),
+                today,
+            )
+            projected = outstanding._calculate_from_enrollment(
+                session, simulated, as_of_date=today
+            )
+            if current is None or projected is None:
+                raise ClassValidationError("Cannot verify tuition for every active enrollment.")
+            old_balance = Decimal(str(current.outstanding))
+            new_balance = Decimal(str(projected.outstanding))
+            before += old_balance
+            after += new_balance
+            owed_before += max(old_balance, Decimal("0"))
+            owed_after += max(new_balance, Decimal("0"))
+            credit_before += max(-old_balance, Decimal("0"))
+            credit_after += max(-new_balance, Decimal("0"))
+            changes.append({
+                "enrollment_id": row.id,
+                "student_name": current.student_name,
+                "before": str(old_balance),
+                "after": str(new_balance),
+                "owed_before": str(max(old_balance, Decimal("0"))),
+                "owed_after": str(max(new_balance, Decimal("0"))),
+                "credit_before": str(max(-old_balance, Decimal("0"))),
+                "credit_after": str(max(-new_balance, Decimal("0"))),
+                "boundary": simulated.withdrawn_from_session,
+            })
+        return {
+            "outstanding_before": str(before),
+            "outstanding_after": str(after),
+            "outstanding_change": str(after - before),
+            "owed_before": str(owed_before),
+            "owed_after": str(owed_after),
+            "credit_before": str(credit_before),
+            "credit_after": str(credit_after),
+            "enrollment_finance_changes": changes,
+        }
+
+    def preview_archive_class(self, class_id: int) -> dict:
+        """Read-only dependency summary used before a destructive lifecycle change."""
+        with self._session_factory() as session:
+            class_obj = self._repository_provider.classes(session).get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+            if class_obj.deleted_at is not None:
+                raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
+            return {**self._archive_snapshot(session, class_id), **self._archive_finance_impact(session, class_id)}
+
+    def archive_class(self, class_id: int, *, expected_finance_impact: Optional[dict] = None) -> None:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)
             class_obj = repo.get_by_id(class_id)
@@ -493,6 +577,30 @@ class ClassService:
             if class_obj.deleted_at is not None:
                 raise ClassAlreadyDeletedError(f"Class {class_id} already archived.")
             snapshot = self._archive_snapshot(session, class_id)
+            if expected_finance_impact is not None:
+                latest_impact = self._archive_finance_impact(session, class_id)
+                if latest_impact != expected_finance_impact:
+                    raise ClassValidationError(
+                        "Class tuition changed since the preview. Review the updated amounts before archiving."
+                    )
+            # One database transaction: all active enrollments become WITHDRAWN
+            # before the class is archived. Reject the entire archive if any
+            # active tuition freeze needs a separate operator decision.
+            from centermanager.services.enrollment_service import EnrollmentService
+            active_enrollments = self._repository_provider.enrollments(session).get_active_by_class(class_id)
+            if any(enrollment.has_open_freeze for enrollment in active_enrollments):
+                raise ClassValidationError(
+                    "Cannot archive a class with open tuition freezes. "
+                    "Resolve the freezes first; no class or enrollment was changed."
+                )
+            all_sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+            withdrawal_date = get_clock().today()
+            for enrollment in active_enrollments:
+                enrollment.withdrawn_from_session = EnrollmentService._resolve_withdrawn_from_session(
+                    enrollment, all_sessions
+                )
+                enrollment.status = "WITHDRAWN"
+                enrollment.end_date = withdrawal_date
             class_obj.deleted_at = self._utc_now()
             session.commit()
 
@@ -503,10 +611,10 @@ class ClassService:
                     title="Class Archived",
                     description=(
                         f"{class_obj.name} was archived. Historical teacher assignments, "
-                        "enrollments, sessions, and attendance remain preserved and read-only "
-                        "until the class is restored."
+                        "sessions and attendance remain preserved. All ACTIVE enrollments "
+                        "were withdrawn at the archive boundary; tuition balances remain payable."
                     ),
-                    metadata={"dependency_snapshot": snapshot},
+                    metadata={"dependency_snapshot": snapshot, "auto_withdrawn_count": len(active_enrollments), "withdrawal_reason": "CLASS_ARCHIVED"},
                 )
 
             self._publish(ClassArchived(
