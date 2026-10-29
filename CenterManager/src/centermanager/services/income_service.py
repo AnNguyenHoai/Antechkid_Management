@@ -498,6 +498,20 @@ class IncomeService:
             )
 
     @require_permission("finance.income.create")
+    def _class_name_for_tuition(self, class_id: int) -> str:
+        """Read class name for historical Tuition without reopening class mutations.
+
+        ClassService.get_class() intentionally excludes archived classes.
+        Tuition collection remains permitted for an existing Enrollment.
+        """
+        with self._session_factory() as session:
+            class_record = self._repository_provider.classes(session).get_by_id(class_id)
+            if class_record is None:
+                raise IncomeValidationError(
+                    f"Class #{class_id} was not found for the tuition enrollment."
+                )
+            return class_record.name
+
     def create_income(
         self,
         amount: float,
@@ -528,8 +542,11 @@ class IncomeService:
         if student_id is not None:
             self._student_service.get_student(student_id)
         if class_id is not None:
-            class_record = self._class_service.get_class(class_id)
-            class_name = class_record.name
+            if income_type == "Tuition":
+                class_name = self._class_name_for_tuition(class_id)
+            else:
+                class_record = self._class_service.get_class(class_id)
+                class_name = class_record.name
 
         with self._session_factory() as session:
             resolved_enrollment = None
@@ -641,8 +658,7 @@ class IncomeService:
         note = self._normalize_text(note)
 
         self._student_service.get_student(student_id)
-        class_record = self._class_service.get_class(class_id)
-        class_name = class_record.name
+        class_name = self._class_name_for_tuition(class_id)
 
         with self._session_factory() as session:
             enrollment = self._resolve_tuition_enrollment(
