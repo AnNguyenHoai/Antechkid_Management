@@ -29,7 +29,8 @@ def test_dashboard_assignment_kpi_avoids_one_service_call_per_teacher():
     start = DASHBOARD.index("def refresh")
     end = DASHBOARD.index("def _refresh_recent_activities", start)
     body = DASHBOARD[start:end]
-    assert "sum(len(t.assigned_classes) for t in teachers)" in body
+    assert "for assigned_class in teacher.assigned_classes" in body
+    assert "if assigned_class.deleted_at is None" in body
     assert "get_assigned_classes(t.id)" not in body
 
 
