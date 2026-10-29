@@ -72,7 +72,9 @@ def test_teacher_dashboard_uses_semantic_icons_without_new_metrics():
     assert '{"icon": "check", "label": "Active Teachers"' in source
     assert '{"icon": "assignment", "label": "Total Assignments"' in source
     assert '"TeacherAssigned": "assignment"' in source
-    assert "total_assignments = for assigned_class in teacher.assigned_classes" in source
+    assert "total_assignments = sum(" in source
+    assert "for assigned_class in teacher.assigned_classes" in source
+    assert "if assigned_class.deleted_at is None" in source
 
 
 def test_finance_dashboard_uses_shared_controls_and_balanced_chart_row():
