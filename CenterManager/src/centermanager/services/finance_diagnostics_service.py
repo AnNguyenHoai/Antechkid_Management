@@ -153,7 +153,7 @@ class FinanceDiagnosticsService:
     def export_findings_csv(
         self, *, as_of_date: date, rule_id: str | None = None, max_rows: int = 10000,
     ) -> FinanceFindingsExport:
-        """Export one bounded, consistent read snapshot; never return partial data."""
+        """Export bounded pages from one guarded session; never return a short page."""
         selected = self._validate_scope(as_of_date, rule_id)
         if isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10000:
             raise ValueError("max_rows must be between 1 and 10000.")
