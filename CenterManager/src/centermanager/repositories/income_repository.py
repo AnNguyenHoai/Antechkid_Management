@@ -5,12 +5,13 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import asc, desc, func, or_
+from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from centermanager.core.wallet import WalletMappingError, wallet_aliases
 from centermanager.models.class_ import Class
 from centermanager.models.enrollment_transfer import EnrollmentTransfer
+from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
 from centermanager.models.student import Student
 from centermanager.models.tuition_adjustment import TuitionAdjustment
@@ -61,6 +62,70 @@ class IncomeRepository(BaseRepository[Income]):
 
     def __init__(self, session: Session) -> None:
         super().__init__(session, Income)
+
+    def _tuition_attribution_query(self, rule_id: str, as_of_date: date):
+        """Return scalar evidence only; no student/family objects are loaded."""
+        if rule_id not in {"D01", "D02"}:
+            raise ValueError("Unsupported tuition attribution rule.")
+        query = self._session.query(
+            Income.id.label("income_id"),
+            Income.student_id.label("student_id"),
+            Income.class_id.label("class_id"),
+            Income.enrollment_id.label("enrollment_id"),
+            Income.amount.label("amount"),
+            Income.payment_date.label("payment_date"),
+        ).filter(
+            Income.income_type == "Tuition",
+            Income.status == Income.STATUS_ACTIVE,
+            Income.deleted_at.is_(None),
+            Income.payment_date <= as_of_date,
+        )
+        if rule_id == "D01":
+            candidates = (
+                select(func.count(Enrollment.id))
+                .where(
+                    Enrollment.student_id == Income.student_id,
+                    Enrollment.class_id == Income.class_id,
+                    Enrollment.reconciled_into_enrollment_id.is_(None),
+                )
+                .correlate(Income)
+                .scalar_subquery()
+            )
+            return query.add_columns(candidates.label("candidate_count")).filter(
+                Income.enrollment_id.is_(None)
+            )
+        return query.add_columns(
+            Enrollment.student_id.label("linked_student_id"),
+            Enrollment.class_id.label("linked_class_id"),
+            Enrollment.reconciled_into_enrollment_id.label("canonical_enrollment_id"),
+        ).outerjoin(Enrollment, Income.enrollment_id == Enrollment.id).filter(
+            Income.enrollment_id.is_not(None),
+            or_(
+                Enrollment.id.is_(None),
+                Income.student_id.is_(None),
+                Income.class_id.is_(None),
+                Enrollment.class_id.is_(None),
+                Enrollment.student_id != Income.student_id,
+                Enrollment.class_id != Income.class_id,
+                Enrollment.reconciled_into_enrollment_id.is_not(None),
+            ),
+        )
+
+    def count_tuition_attribution_cases(self, rule_id: str, as_of_date: date) -> int:
+        return self._tuition_attribution_query(rule_id, as_of_date).count()
+
+    def list_tuition_attribution_cases(
+        self, rule_id: str, as_of_date: date, *, offset: int, limit: int
+    ):
+        if offset < 0 or not 1 <= limit <= 100:
+            raise ValueError("Invalid diagnostics page bounds.")
+        return (
+            self._tuition_attribution_query(rule_id, as_of_date)
+            .order_by(Income.id.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
     def add(self, income: Income) -> Income:
         self._session.add(income)
