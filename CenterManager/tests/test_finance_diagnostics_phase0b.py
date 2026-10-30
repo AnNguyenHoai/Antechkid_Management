@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from centermanager.core.current_user import CurrentUserContext
 from centermanager.database.base import Base
 from centermanager.models import Class, Enrollment, Income, Student
+from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.services.finance_diagnostics_service import FinanceDiagnosticsService
 from centermanager.services.permission_service import PermissionDeniedError
 
@@ -176,10 +177,10 @@ def test_failed_repository_read_is_error_and_does_not_poison_pool(db):
 
     class BadProvider:
         def incomes(self, session):
-            class BadRepo:
+            class BadRepo(IncomeRepository):
                 def count_tuition_attribution_cases(self, *_):
-                    session.connection().exec_driver_sql("CREATE TABLE forbidden_write (id INTEGER)")
-            return BadRepo()
+                    self._session.connection().exec_driver_sql("CREATE TABLE forbidden_write (id INTEGER)")
+            return BadRepo(session)
 
     result = _read(FinanceDiagnosticsService(factory, BadProvider()))
     assert result.state == "ERROR" and result.error_code == "DIAGNOSTICS_READ_FAILED"

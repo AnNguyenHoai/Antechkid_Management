@@ -7,7 +7,7 @@
 - D01: ACTIVE, nondeleted Tuition Income up to an explicit as-of date with no Enrollment attribution. Candidate count includes canonical Enrollment contracts for the same student/class, including withdrawn/completed contracts; it is evidence, not an automatic match.
 - D02: ACTIVE, nondeleted Tuition Income linked to a missing Enrollment, a different student/class, or an Enrollment reconciled into another. The finding carries persisted and linked IDs for review. A legitimate late payment to the exact withdrawn/archived Enrollment is not flagged.
 - `FinanceDiagnosticsService.get_findings` requires `finance.view`, returns an explicit `OK` or `ERROR` state, stable D01-then-D02 and Income-ID ordering, counts per selected rule, at most 100 scalar rows per page, an as-of date and source version. Unknown rule/invalid paging is rejected before querying.
-- The service enables SQLite/SQLCipher `PRAGMA query_only` for its session and resets it before returning the connection to the pool. It uses `no_autoflush`, never commits, and returns a generic error code without SQL parameters or personal data when a read fails.
+- The Income repository enables SQLite/SQLCipher `PRAGMA query_only` for the diagnostics session and resets it before returning the connection to the pool. The service uses `no_autoflush`, never commits, and returns a generic error code without SQL parameters or personal data when a read fails. This keeps connection access within the repository boundary.
 
 ## Deferred deliberately
 

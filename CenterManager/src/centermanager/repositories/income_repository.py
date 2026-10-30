@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Income repository - data access for Income entity."""
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional, Tuple
@@ -62,6 +63,24 @@ class IncomeRepository(BaseRepository[Income]):
 
     def __init__(self, session: Session) -> None:
         super().__init__(session, Income)
+
+    @contextmanager
+    def query_only(self):
+        """Enforce read-only diagnostics at the connection boundary.
+
+        Restore the pooled connection even when a query fails; invalidate it
+        if SQLite cannot restore its original write capability.
+        """
+        connection = self._session.connection()
+        connection.exec_driver_sql("PRAGMA query_only = ON")
+        try:
+            yield
+        finally:
+            try:
+                connection.exec_driver_sql("PRAGMA query_only = OFF")
+            except Exception:
+                self._session.invalidate()
+                raise
 
     def _tuition_attribution_query(self, rule_id: str, as_of_date: date):
         """Return scalar evidence only; no student/family objects are loaded."""

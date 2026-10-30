@@ -80,14 +80,9 @@ class FinanceDiagnosticsService:
         selected = (rule_id,) if rule_id else _RULES
         try:
             with self._session_factory() as session:
-                # SQLite/SQLCipher query_only rejects accidental DML even when
-                # a repository is changed later. Reset before returning the
-                # connection to its pool; discard it if reset cannot succeed.
-                connection = session.connection()
-                connection.exec_driver_sql("PRAGMA query_only = ON")
-                try:
+                repo = self._repository_provider.incomes(session)
+                with repo.query_only():
                     with session.no_autoflush:
-                        repo = self._repository_provider.incomes(session)
                         counts = {
                             code: repo.count_tuition_attribution_cases(code, as_of_date)
                             for code in selected
@@ -110,13 +105,6 @@ class FinanceDiagnosticsService:
                             offset = 0
                             if len(findings) == per_page:
                                 break
-                finally:
-                    try:
-                        connection.exec_driver_sql("PRAGMA query_only = OFF")
-                    except Exception:
-                        session.invalidate()
-                        raise
-                    session.rollback()
             return FinanceFindingsPage(
                 state="OK", as_of_date=as_of_date, detected_at=detected_at,
                 source_version=_SOURCE_VERSION, page=page, per_page=per_page,
