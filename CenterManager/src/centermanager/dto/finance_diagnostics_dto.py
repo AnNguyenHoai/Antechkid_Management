@@ -8,6 +8,9 @@ from typing import Optional
 @dataclass(frozen=True)
 class FinanceFinding:
     rule_id: str
+    source_version: str
+    as_of_date: date
+    detected_at: datetime
     severity: str
     entity_type: str
     entity_id: int
@@ -17,6 +20,8 @@ class FinanceFinding:
     observed_amount: Decimal
     payment_date: date
     evidence: str
+    review_guidance: str
+    false_positive_note: str
     candidate_count: Optional[int] = None
     canonical_enrollment_id: Optional[int] = None
     linked_student_id: Optional[int] = None

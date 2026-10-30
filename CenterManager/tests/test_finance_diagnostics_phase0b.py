@@ -83,6 +83,8 @@ def test_legacy_attribution_is_evidence_not_automatic_repair(db):
     finding, = page.findings
     assert finding.rule_id == "D01" and finding.entity_id == legacy_id
     assert finding.candidate_count == 2 and finding.enrollment_id is None
+    assert finding.as_of_date == AS_OF and finding.source_version == page.source_version
+    assert finding.detected_at == page.detected_at and finding.false_positive_note
     assert "Synthetic Student" not in repr(page)
 
 

@@ -24,11 +24,13 @@ class FinanceDiagnosticsService:
         self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
-    def _finding(rule_id: str, row) -> FinanceFinding:
+    def _finding(rule_id: str, row, as_of_date: date, detected_at: datetime) -> FinanceFinding:
         if rule_id == "D01":
             count = int(row.candidate_count)
             evidence = f"Tuition Income has no Enrollment attribution; {count} canonical candidate(s)."
             canonical_id = None
+            guidance = "Review the existing Enrollment reconciliation workflow; never auto-assign."
+            false_positive = "A legitimate legacy payment may await explicit reconciliation."
         else:
             count = None
             canonical_id = row.canonical_enrollment_id
@@ -36,8 +38,13 @@ class FinanceDiagnosticsService:
                 "Linked Enrollment is missing, has different Student/Class identity, "
                 "or was reconciled into another Enrollment."
             )
+            guidance = "Inspect Income, linked Enrollment and reconciliation lineage before correction."
+            false_positive = "Historical lineage may explain an older link; verify before changing it."
         return FinanceFinding(
             rule_id=rule_id,
+            source_version=_SOURCE_VERSION,
+            as_of_date=as_of_date,
+            detected_at=detected_at,
             severity="REVIEW" if rule_id == "D01" else "HIGH",
             entity_type="Income",
             entity_id=int(row.income_id),
@@ -47,6 +54,8 @@ class FinanceDiagnosticsService:
             observed_amount=Decimal(str(row.amount)),
             payment_date=row.payment_date,
             evidence=evidence,
+            review_guidance=guidance,
+            false_positive_note=false_positive,
             candidate_count=count,
             canonical_enrollment_id=canonical_id,
             linked_student_id=None if rule_id == "D01" else row.linked_student_id,
@@ -94,7 +103,10 @@ class FinanceDiagnosticsService:
                                 code, as_of_date, offset=offset,
                                 limit=min(per_page - len(findings), count - offset),
                             )
-                            findings.extend(self._finding(code, row) for row in rows)
+                            findings.extend(
+                                self._finding(code, row, as_of_date, detected_at)
+                                for row in rows
+                            )
                             offset = 0
                             if len(findings) == per_page:
                                 break
