@@ -1,4 +1,7 @@
 """Phase 0B read-only attribution diagnostics against synthetic finance history."""
+import csv
+import io
+from dataclasses import replace
 from datetime import date, datetime
 from types import SimpleNamespace
 
@@ -217,3 +220,110 @@ def test_large_legacy_fixture_uses_bounded_sql_page(db):
     assert len(first.findings) == 100
     assert len(statements) <= 5  # No per-finding query or unbounded ORM materialization.
     assert sum("LIMIT" in sql.upper() for sql in statements) == 1
+
+
+def test_export_is_complete_ordered_and_bounded_without_pii_or_writes(db):
+    factory, engine = db
+    student_id, class_id = _identity(factory)
+    with factory.begin() as session:
+        session.add_all([
+            Income(student_id=student_id, class_id=class_id, amount=1000,
+                   income_type="Tuition", payment_method="CASH", payment_date=AS_OF,
+                   status="ACTIVE")
+            for _ in range(250)
+        ])
+    statements = []
+
+    def record(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with CurrentUserContext(VIEWER):
+            result = FinanceDiagnosticsService(factory).export_findings_csv(as_of_date=AS_OF)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert result.state == "OK" and result.total_count == 250
+    assert result.counts_by_rule == {"D01": 250, "D02": 0}
+    rows = list(csv.DictReader(io.StringIO(result.csv_text)))
+    assert len(rows) == 250 and [int(r["entity_id"]) for r in rows] == sorted(
+        int(r["entity_id"]) for r in rows
+    )
+    assert all(r["rule_id"] == "D01" and r["source_version"] == result.source_version for r in rows)
+    assert "Synthetic Student" not in result.csv_text
+    assert len(statements) <= 7  # PRAGMA ON/OFF, two counts, three bounded pages.
+    assert sum("LIMIT" in sql.upper() for sql in statements) == 3
+    with factory() as session:
+        assert session.query(Income).count() == 250
+        assert session.connection().exec_driver_sql("PRAGMA query_only").scalar() == 0
+
+
+def test_export_limit_empty_permission_and_invalid_scope(db):
+    factory, engine = db
+    service = FinanceDiagnosticsService(factory)
+    with CurrentUserContext(None), pytest.raises(PermissionDeniedError):
+        service.export_findings_csv(as_of_date=AS_OF)
+    with CurrentUserContext(VIEWER):
+        empty = service.export_findings_csv(as_of_date=AS_OF)
+        assert empty.state == "OK" and empty.total_count == 0
+        assert len(list(csv.reader(io.StringIO(empty.csv_text)))) == 1
+        for kwargs in ({"max_rows": 0}, {"max_rows": 10001}, {"rule_id": "D03"}):
+            with pytest.raises(ValueError):
+                service.export_findings_csv(as_of_date=AS_OF, **kwargs)
+    student_id, class_id = _identity(factory)
+    _income(factory, student_id, class_id)
+    _income(factory, student_id, class_id)
+    with CurrentUserContext(VIEWER):
+        limited = service.export_findings_csv(as_of_date=AS_OF, max_rows=1)
+    assert limited.state == "LIMIT_EXCEEDED" and limited.csv_text is None
+    assert limited.error_code == "EXPORT_ROW_LIMIT_EXCEEDED" and limited.total_count == 2
+
+
+def test_export_combines_rules_and_can_filter_one_rule(db):
+    factory, _ = db
+    student_id, class_id = _identity(factory)
+    legacy_id = _income(factory, student_id, class_id)
+    mismatched_id = _income(factory, student_id, class_id, enrollment_id=999)
+    with CurrentUserContext(VIEWER):
+        combined = FinanceDiagnosticsService(factory).export_findings_csv(as_of_date=AS_OF)
+        filtered = FinanceDiagnosticsService(factory).export_findings_csv(
+            as_of_date=AS_OF, rule_id="D02",
+        )
+    assert combined.state == filtered.state == "OK"
+    assert [(r["rule_id"], int(r["entity_id"])) for r in csv.DictReader(
+        io.StringIO(combined.csv_text)
+    )] == [("D01", legacy_id), ("D02", mismatched_id)]
+    assert filtered.counts_by_rule == {"D02": 1}
+    assert [(r["rule_id"], int(r["entity_id"])) for r in csv.DictReader(
+        io.StringIO(filtered.csv_text)
+    )] == [("D02", mismatched_id)]
+
+
+def test_export_sanitizes_formula_and_fails_closed_on_repository_error(db, monkeypatch):
+    factory, _ = db
+    student_id, class_id = _identity(factory)
+    _income(factory, student_id, class_id)
+    original = FinanceDiagnosticsService._finding
+    monkeypatch.setattr(FinanceDiagnosticsService, "_finding", staticmethod(
+        lambda rule, row, as_of, detected: replace(
+            original(rule, row, as_of, detected), evidence=" =HYPERLINK(\"bad\")",
+        )
+    ))
+    with CurrentUserContext(VIEWER):
+        result = FinanceDiagnosticsService(factory).export_findings_csv(as_of_date=AS_OF)
+    assert result.state == "OK"
+    assert list(csv.DictReader(io.StringIO(result.csv_text)))[0]["evidence"].startswith("' =")
+
+    class BadProvider:
+        def incomes(self, session):
+            class BadRepo(IncomeRepository):
+                def count_tuition_attribution_cases(self, *_):
+                    self._session.connection().exec_driver_sql("CREATE TABLE forbidden_export (id INTEGER)")
+            return BadRepo(session)
+
+    with CurrentUserContext(VIEWER):
+        failed = FinanceDiagnosticsService(factory, BadProvider()).export_findings_csv(as_of_date=AS_OF)
+    assert failed.state == "ERROR" and failed.csv_text is None
+    assert failed.error_code == "DIAGNOSTICS_EXPORT_FAILED"
+    with factory() as session:
+        assert session.connection().exec_driver_sql("PRAGMA query_only").scalar() == 0

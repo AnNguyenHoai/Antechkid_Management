@@ -40,3 +40,15 @@ class FinanceFindingsPage:
     counts_by_rule: dict[str, int]
     findings: tuple[FinanceFinding, ...]
     error_code: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class FinanceFindingsExport:
+    state: str  # OK, LIMIT_EXCEEDED, or ERROR; never a partial CSV.
+    as_of_date: date
+    detected_at: datetime
+    source_version: str
+    total_count: Optional[int]
+    counts_by_rule: dict[str, int]
+    csv_text: Optional[str]
+    error_code: Optional[str] = None
