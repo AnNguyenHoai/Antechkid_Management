@@ -36,6 +36,7 @@ This inventory is the committed architecture classification for application serv
 | `expense_service.py` | PASS | repository-owned | — |
 | `expense_timeline_service.py` | PASS | repository-owned | — |
 | `finance_dashboard_service.py` | NON_REPOSITORY | application-service aggregation | — |
+| `finance_diagnostics_service.py` | PASS | repository-owned attribution reads and query-only connection guard | — |
 | `finance_period_service.py` | PASS | repository-owned | — |
 | `financial_settlement_service.py` | PASS | `RepositoryProvider.financial_settlements/finance_periods/incomes/expenses` | — |
 | `git_config_service.py` | NON_REPOSITORY | encrypted filesystem config | — |
