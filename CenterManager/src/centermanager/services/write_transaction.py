@@ -283,18 +283,24 @@ class WriteTransactionManager:
         return False
 
     def _waiting_is_authoritative(self) -> bool:
-        """WAITING is valid only when another live remote lease actually exists."""
+        """A visible pending request is WAITING even in grace/ack uncertainty.
+
+        This verifies request intent, not permission to mutate or publish.
+        Only the manager's grant path may turn that intent into WRITE.
+        """
+        checker = self._explicit_method(self._collab_manager, "has_pending_waiting_request")
+        if checker is not None:
+            return checker()
         provider = getattr(self._collab_manager, "_sync_provider", None)
         if provider is None:
             return True
         try:
             remote = provider.remote_lock_status()
-            return bool(
+            return bool(remote.get("state") == "GRACE" or (
                 remote.get("locked", False)
                 and self._collab_manager._is_lease_valid(remote.get("lease_expires_at"))
-            )
+            ))
         except Exception:
-            logger.exception("Unable to verify remote writer after lock acquisition failure")
             return False
 
     def pause_editing_for_lost_authority(self, reason: str) -> bool:
@@ -529,7 +535,12 @@ class WriteTransactionManager:
             return True
         elif result.is_waiting:
             if not self._waiting_is_authoritative():
-                self._collab_manager.cancel_waiting_request()
+                if not self._collab_manager.cancel_waiting_request():
+                    self._transition_to(WriteTransactionState.WAITING, "cancellation acknowledgement pending")
+                    self._waiting_request_id = result.request_id
+                    self._waiting_started_at = datetime.now()
+                    self._last_start_error = "Git request cancellation is pending verification."
+                    return False
                 self._transition_to(WriteTransactionState.IDLE, "false waiting rejected")
                 self._last_start_error = (
                     "Unable to acquire the remote write lock even though no active writer owns it. "
@@ -663,7 +674,8 @@ class WriteTransactionManager:
                 return False
 
         if self._collab_manager.is_writing():
-            self._collab_manager.release_write()
+            if not self._collab_manager.release_write():
+                return False
         self._delete_snapshot()
         self._reset_to_idle()
         logger.info("Transaction: IDLE (cancelled)")

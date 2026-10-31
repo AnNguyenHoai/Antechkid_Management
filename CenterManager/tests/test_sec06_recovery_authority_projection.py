@@ -44,7 +44,7 @@ class _ProjectedSyncProvider:
         ).isoformat()
         return True
 
-    def release_lock(self, owner):
+    def release_lock(self, owner, session_id=None):
         if self.raw and self.raw.get("owner") == owner:
             self.raw = None
             self.released = True

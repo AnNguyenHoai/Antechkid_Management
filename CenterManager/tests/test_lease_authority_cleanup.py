@@ -496,7 +496,7 @@ class TestLeaseAuthorityCleanup:
         assert after_status == before_status, "MAIN working tree changed"
 
     # ---- Test I: Legacy lock without lease_expires_at is stale ----
-    def test_legacy_lock_without_lease_stale(self):
+    def test_legacy_lock_without_lease_blocks_unknown_authority(self):
         """
         Prove: Locks without lease_expires_at are treated as stale.
         This ensures backward compatibility does not become a second authority.
@@ -545,10 +545,7 @@ class TestLeaseAuthorityCleanup:
             "machine": "test_machine",
         }
         success_b = provider_b.acquire_lock(lock_data_b)
-        assert success_b is True, "Legacy lock without lease should be stale"
-
+        assert success_b is False, "Missing expiry is UNKNOWN, not available authority"
         status = provider_b.remote_lock_status()
-        assert status["owner"] == "user_b"
-        assert status["session_id"] == "sess_B_legacy"
-
-        provider_b.release_lock("user_b")
+        assert status["state"] == "UNKNOWN"
+        assert not provider_b.release_lock("user_b", session_id="sess_B_legacy")

@@ -1,8 +1,8 @@
 """E0 characterizations, not safety guarantees or takeover implementation.
 
-All Git remotes and encrypted data are synthetic and under tmp_path. Bad
-behavior is asserted deliberately so the audit is reproducible on its base.
-Replace these expectations with rejection tests when the approved fixes land.
+All Git remotes and encrypted data are synthetic and under tmp_path. E1A
+converts grace, release, FIFO and unreadable-lock cases into safety regressions.
+The remaining stale-publish/local-write tests still characterize E1B/E2 blockers.
 """
 from datetime import datetime, timedelta
 import importlib
@@ -44,7 +44,6 @@ def clock(monkeypatch):
         "platform.synchronization.lock_acquisition_diagnostics",
         "platform.synchronization.git_clock_skew_guard",
         "platform.collaboration.collaboration_manager",
-        "platform.collaboration.false_waiting_guard",
         "platform.collaboration.finishing_authority_compat",
         "platform.collaboration.write_queue",
         "services.write_transaction",
@@ -54,7 +53,7 @@ def clock(monkeypatch):
 
 
 @pytest.fixture
-def machines(tmp_path, monkeypatch, clock):
+def machines(tmp_path, monkeypatch, clock, temp_runtime):
     # Exercise the service/poller handlers deterministically; do not run real
     # heartbeat threads or long wall-clock sleeps in this characterization.
     heartbeat = importlib.import_module("centermanager.platform.collaboration.heartbeat")
@@ -132,25 +131,26 @@ def test_e0_killed_owner_queue_handoff_baseline(machines, clock, crash_at, poll_
     assert grant_at - crash_at in (660, 642, 623)
 
 
-def test_e0_start_during_grace_returns_error_but_leaves_live_queue_entry(machines, clock):
+def test_e1a_start_during_grace_waits_then_accepts_authorized_handoff(machines, clock):
     owner, _ = machines("owner")
     waiter, _ = machines("waiter")
     assert owner.request_write().is_granted
     clock.at(61)
     transaction = WriteTransactionManager(waiter)
     assert transaction.start_editing() is False
-    assert transaction.state == WriteTransactionState.IDLE
+    assert transaction.state == WriteTransactionState.WAITING
     assert "clock-skew safety window" in transaction.last_start_error
     assert waiter.has_pending_waiting_request()
-    # The still-live remote request may grant without the transaction in WAITING.
+    # The same visible request stays WAITING throughout grace.
     for second in range(81, 660, 20):
         clock.at(second)
         assert waiter.refresh_waiting_request()
     clock.at(660)
     handoff(waiter)
     assert waiter.is_writing()
+    assert transaction.begin_grant()
     transaction.on_write_granted()
-    assert transaction.state == WriteTransactionState.IDLE
+    assert transaction.state == WriteTransactionState.EDITING
 
 
 def test_e0_background_renewal_has_no_ui_progress_gate(machines, clock):
@@ -171,27 +171,29 @@ def test_e0_background_renewal_has_no_ui_progress_gate(machines, clock):
         poller._running = False
 
 
-def test_e0_same_username_old_session_can_release_new_session(machines):
+def test_e1a_same_username_old_session_cannot_release_new_session(machines):
     old, old_provider = machines("old", username="shared-user")
     new, new_provider = machines("new", username="shared-user")
     assert old.request_write().is_granted
     assert old_provider.release_lock("shared-user")
     assert new.request_write().is_granted
     assert new_provider.remote_lock_status()["session_id"] == new.get_session_id()
-    # Real remote CAS succeeds: release checks username, not the caller session.
-    assert old_provider.release_lock("shared-user")
-    assert not new_provider.remote_lock_status()["locked"]
+    assert not old_provider.release_lock("shared-user", session_id=old.get_session_id())
+    assert new_provider.remote_lock_status()["session_id"] == new.get_session_id()
 
 
-def test_e0_new_request_can_overtake_existing_queue_head(machines):
+def test_e1a_new_request_cannot_overtake_existing_queue_head(machines):
     owner, provider = machines("owner")
     first, _ = machines("first")
     newcomer, _ = machines("newcomer")
     assert owner.request_write().is_granted
     assert first.request_write().is_waiting
     assert provider.release_lock("owner")
-    assert newcomer.request_write().is_granted
+    assert newcomer.request_write().is_waiting
     assert first.get_queue()["next"]["session_id"] == first.get_session_id()
+    handoff(first)
+    assert first.is_writing()
+    assert not newcomer.is_writing()
 
 
 def test_e0_data_cas_accepts_old_writer_after_lock_handoff(machines):
@@ -278,8 +280,11 @@ def test_e0_atomic_two_ref_prototype_rejects_stale_publish(machines):
     assert provider._remote_lock_oid() == lock_after
 
 
-def test_e0_unreadable_lock_is_reported_as_absent(tmp_path, monkeypatch):
+def test_e1a_unreadable_lock_is_unknown_and_blocks_authority(tmp_path, monkeypatch):
     provider = GitSynchronizationProvider(repo_path=tmp_path / "repo")
     monkeypatch.setattr(provider, "_remote_lock_oid", lambda: "unreadable-oid")
     monkeypatch.setattr(provider, "_read_lock_from_oid", lambda oid: {})
-    assert provider.remote_lock_status() == {"locked": False, "owner": None, "session_id": None}
+    observation = provider.remote_lock_status()
+    assert observation["state"] == "UNKNOWN"
+    assert observation["locked"] is True
+    assert observation["verified"] is False

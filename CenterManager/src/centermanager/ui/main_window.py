@@ -449,6 +449,15 @@ class MainWindow(QMainWindow):
         )
 
         if own_request is None:
+            confirmed = getattr(type(self._collaboration_manager), "has_verified_waiting_grant", None)
+            if callable(confirmed) and self._collaboration_manager.has_verified_waiting_grant(expected_request_id):
+                self._transaction.begin_grant()
+                self._transaction.on_write_granted()
+                self._update_write_buttons()
+                return
+            reconcile = getattr(type(self._collaboration_manager), "reconcile_waiting_request", None)
+            if callable(reconcile) and not self._collaboration_manager.reconcile_waiting_request(expected_request_id):
+                return
             self._transaction.cancel_waiting(
                 "Authoritative WRITE queue no longer contains this request"
             )
@@ -690,7 +699,11 @@ class MainWindow(QMainWindow):
             lock_status = self._collaboration_manager.get_lock_status()
             owner = lock_status.get("owner", "Unknown")
             pos = self._transaction.get_waiting_position()
-            self.app_top_bar.set_transaction_text(f"Waiting (pos {pos}) - {owner}")
+            getter = getattr(type(self._collaboration_manager), "get_waiting_diagnostic", None)
+            detail = self._collaboration_manager.get_waiting_diagnostic() if callable(getter) else ""
+            self.app_top_bar.set_transaction_text(
+                detail or f"Waiting (pos {pos}) - {owner}"
+            )
             # WAITING is already fully projected in the top bar. Avoid a
             # duplicate bottom-row notification that consumes vertical space.
             self.statusBar().clearMessage()
@@ -765,7 +778,11 @@ class MainWindow(QMainWindow):
         owner = lock_status.get("owner") or lock_status.get("username")
         session_id = lock_status.get("session_id")
         current_session = self._collaboration_manager.get_session_id()
-        if is_locked and owner:
+        if lock_status.get("state") == "UNKNOWN":
+            owner_display = "WRITE authority cannot be verified. Check Git connectivity."
+        elif lock_status.get("state") == "GRACE":
+            owner_display = "WRITE lease is in the clock-skew safety window."
+        elif is_locked and owner:
             if session_id == current_session:
                 owner_display = f"You are editing as {owner}"
             else:
@@ -788,7 +805,15 @@ class MainWindow(QMainWindow):
         lock_session = lock_status.get("session_id")
         current_session = self._collaboration_manager.get_session_id()
 
-        if self._transaction.is_editing:
+        if lock_status.get("state") == "UNKNOWN":
+            self.waiting_indicator.setText("⚠ WRITE authority unknown")
+            self.app_top_bar.set_mode("READ", "warning")
+            self.app_top_bar.set_editor_state("Unable to verify WRITE authority", "warning")
+        elif lock_status.get("state") == "GRACE":
+            self.waiting_indicator.setText("⏳ Waiting for clock-skew safety window")
+            self.app_top_bar.set_mode("READ", "warning")
+            self.app_top_bar.set_editor_state("WRITE lease safety window", "warning")
+        elif self._transaction.is_editing:
             self.waiting_indicator.setText("✏️ You are editing")
             self.app_top_bar.set_mode("WRITE", "success")
             self.app_top_bar.set_editor_state("You are editing", "success")

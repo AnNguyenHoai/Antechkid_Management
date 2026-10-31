@@ -19,7 +19,7 @@ class FakeRemoteProvider:
         self.lock = dict(lock_data)
         return True
 
-    def release_lock(self, username):
+    def release_lock(self, username, session_id=None):
         self.released = True
         self.lock = {"locked": False, "session_id": None}
         return True

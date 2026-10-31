@@ -115,7 +115,7 @@ def create_machine(tmp_path: Path, remote_path: Path, name: str, branch: str = "
 
 # ---- Tests ----
 
-def test_stale_local_mirror_vs_new_remote_owner(seeded_center_manager_remote, tmp_path):
+def test_stale_local_mirror_vs_new_remote_owner(fresh_center_manager_remote, tmp_path):
     """
     Critical Test A & B:
     - Explicitly create A local mirror stale X.
@@ -123,7 +123,7 @@ def test_stale_local_mirror_vs_new_remote_owner(seeded_center_manager_remote, tm
     - A.request_write() must NOT force_release Y.
     - Remote Y survives, owner = B.
     """
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
 
     # Clean any stale lock from previous tests
     clean_remote_lock(remote_path)
@@ -232,9 +232,9 @@ def test_stale_local_mirror_vs_new_remote_owner(seeded_center_manager_remote, tm
     assert oid_after == oid_y
 
 
-def test_expired_remote_lease_acquisition(seeded_center_manager_remote, tmp_path):
+def test_expired_remote_lease_acquisition(fresh_center_manager_remote, tmp_path):
     """Critical Test C: Expired remote lease can be safely replaced via acquire_lock()."""
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
     clean_remote_lock(remote_path)
 
     cm_a, provider_a, _, _ = create_machine(tmp_path, remote_path, "A")
@@ -285,9 +285,9 @@ def test_expired_remote_lease_acquisition(seeded_center_manager_remote, tmp_path
     assert data_after.get("session_id") == cm_b._session.session_id
 
 
-def test_valid_other_owner(seeded_center_manager_remote, tmp_path):
+def test_valid_other_owner(fresh_center_manager_remote, tmp_path):
     """Critical Test D: Valid remote lock owned by another machine must remain untouched."""
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
     clean_remote_lock(remote_path)
 
     cm_a, provider_a, _, _ = create_machine(tmp_path, remote_path, "A")
@@ -324,9 +324,9 @@ def test_valid_other_owner(seeded_center_manager_remote, tmp_path):
     assert data.get("session_id") == cm_a._session.session_id
 
 
-def test_stale_heartbeat_valid_lease(seeded_center_manager_remote, tmp_path):
+def test_stale_heartbeat_valid_lease(fresh_center_manager_remote, tmp_path):
     """Critical Test E: Stale local heartbeat does NOT affect remote lock when lease valid."""
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
     clean_remote_lock(remote_path)
 
     cm_a, provider_a, _, _ = create_machine(tmp_path, remote_path, "A")
@@ -382,9 +382,9 @@ def test_stale_heartbeat_valid_lease(seeded_center_manager_remote, tmp_path):
     assert data_remote.get("session_id") == cm_a._session.session_id
 
 
-def test_release_cas_race(seeded_center_manager_remote, tmp_path):
+def test_release_cas_race(fresh_center_manager_remote, tmp_path):
     """Test F: Release CAS race – safe failure, Y survives."""
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
     clean_remote_lock(remote_path)
 
     cm_a, provider_a, _, _ = create_machine(tmp_path, remote_path, "A")
@@ -438,9 +438,9 @@ def test_release_cas_race(seeded_center_manager_remote, tmp_path):
     assert data.get("session_id") == cm_b._session.session_id
 
 
-def test_renewal_cas_race(seeded_center_manager_remote, tmp_path):
+def test_renewal_cas_race(fresh_center_manager_remote, tmp_path):
     """Test G: Renewal CAS race – safe failure, Y survives."""
-    remote_path = seeded_center_manager_remote
+    remote_path = fresh_center_manager_remote
     clean_remote_lock(remote_path)
 
     cm_a, provider_a, _, _ = create_machine(tmp_path, remote_path, "A")

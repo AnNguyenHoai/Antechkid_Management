@@ -85,7 +85,7 @@ def test_waiting_ui_uses_top_bar_without_duplicate_bottom_message():
     editing_start = buttons.index("elif is_editing:", waiting_start)
     waiting_block = buttons[waiting_start:editing_start]
 
-    assert 'set_transaction_text(f"Waiting (pos {pos}) - {owner}")' in waiting_block
+    assert 'f"Waiting (pos {pos}) - {owner}"' in waiting_block
     assert "statusBar().showMessage" not in waiting_block
     assert "statusBar().clearMessage()" in waiting_block
 

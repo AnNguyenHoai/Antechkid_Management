@@ -13,6 +13,8 @@ from pathlib import Path
 from centermanager.core.paths import get_paths
 from centermanager.events.event_bus import EventBus
 
+from centermanager.platform.synchronization.lock_observation import observe_lock, unknown_lock
+
 from .runtime_session import RuntimeSession
 from .runtime_lock import RuntimeLock
 from .write_queue import WriteQueue, WriteRequest
@@ -54,6 +56,7 @@ class WriteRequestInfo:
         self.request_id = request_id
         self.position = position
         self.message = message
+        self.diagnostic_state = None
 
     @property
     def is_granted(self) -> bool:
@@ -106,6 +109,12 @@ class CollaborationManager:
         self._initialized = False
         self._is_writing = False
         self._lock_acquired = False
+        self._last_granted_request_id = None
+        self._pending_request = None
+        self._cancel_pending = False
+        self._ungranted_lock = False
+        self._handoff_in_progress = False
+        self._waiting_diagnostic = ""
         self._lease_renewal_suspended = False
         self._state_mutex = threading.RLock()
         self._write_handoff_guard: Optional[Callable[[], bool]] = None
@@ -123,10 +132,13 @@ class CollaborationManager:
         if self._sync_provider is None:
             return {"locked": False, "owner": None, "session_id": None}
         try:
-            return self._sync_provider.remote_lock_status()
+            remote = self._sync_provider.remote_lock_status()
+            if remote.get("state") == "UNKNOWN":
+                return unknown_lock(remote.get("error") or "Remote authority is unverified.")
+            return observe_lock(remote, oid=remote.get("oid"), now=datetime.now())
         except Exception as e:
             logger.warning(f"Failed to get remote lock status: {e}")
-            return {"locked": False, "owner": None, "session_id": None}
+            return unknown_lock(e)
 
     def _remote_queue_supported(self) -> bool:
         return bool(
@@ -288,30 +300,25 @@ class CollaborationManager:
         return True
 
     def _force_release_lock(self) -> None:
-        """Force release the lock (admin/cleanup only)."""
-        try:
-            if self._sync_provider is not None:
-                self._sync_provider.force_release(self._session.username if self._session else "force_release")
-                self._lock._force_release()
-                self._lock_acquired = False
-                self._is_writing = False
-            else:
-                self._lock._force_release()
-                self._lock_acquired = False
-                self._is_writing = False
-            logger.info("Lock force-released")
-        except Exception as e:
-            logger.exception(f"Force release lock failed: {e}")
+        """Remote force revocation is deliberately unavailable in E1A."""
+        if self._sync_provider is not None:
+            raise RuntimeError("Unfenced remote force-release is disabled.")
+        self._lock._force_release()
+        self._lock_acquired = False
+        self._is_writing = False
 
     def _sync_local_lock(self) -> None:
         """Sync local lock file with remote state."""
         if self._sync_provider is None:
             return
         try:
-            lock_status = self._sync_provider.remote_lock_status()
+            lock_status = self._get_remote_lock_status()
+            if lock_status.get("state") == "UNKNOWN":
+                return False
             if lock_status.get("locked", False):
                 remote_session_id = lock_status.get("session_id")
-                if remote_session_id == self._session.session_id:
+                if (remote_session_id == self._session.session_id
+                        and self._is_lease_valid(lock_status.get("lease_expires_at"))):
                     lock_data = {
                         "locked": True,
                         "session_id": lock_status.get("session_id"),
@@ -344,134 +351,193 @@ class CollaborationManager:
         except Exception as e:
             logger.warning(f"Failed to sync local lock: {e}")
 
+    def _waiting_result(self, request, position=0, message="", state="QUEUED"):
+        if request is None:
+            return WriteRequestInfo(WriteRequestResult.ERROR, message=message or "Git request state is unknown.")
+        result = WriteRequestInfo(WriteRequestResult.WAITING, request.request_id, position,
+                                  message or f"Waiting (position {position})")
+        result.diagnostic_state = state
+        self._waiting_diagnostic = result.message if state == "UNKNOWN" else ""
+        return result
+
     def _enqueue_or_return_waiting(self, reason: str, request_id: str) -> WriteRequestInfo:
+        request = self._pending_request
+        if request is None:
+            request = WriteRequest(
+                request_id=request_id, session_id=self._session.session_id,
+                user_id=self._session.user_id, username=self._session.username,
+                role=self._session.role, priority=Priority.from_role(self._session.role),
+                timestamp=datetime.now(), reason=reason, status="pending",
+            )
+        # Retain intent BEFORE a remote mutation: a lost response can hide a
+        # successful enqueue. Such a request stays visible as WAITING/UNKNOWN.
+        self._pending_request = request
         try:
             existing = self._queue_get_by_session(self._session.session_id)
-            if existing:
-                position = self._queue_position(self._session.session_id)
-                logger.info(
-                    "Session %s already waiting (pos=%s)",
-                    self._session.username,
-                    position,
-                )
-                return WriteRequestInfo(
-                    WriteRequestResult.WAITING,
-                    existing.request_id,
-                    position,
-                    f"Already waiting (position {position})",
-                )
-
-            request = WriteRequest(
-                request_id=request_id,
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-                role=self._session.role,
-                priority=Priority.from_role(self._session.role),
-                timestamp=datetime.now(),
-                reason=reason,
-                status="pending",
-            )
-            if not self._queue_enqueue(request):
-                logger.error(
-                    "Shared WRITE queue rejected request %s for %s",
-                    request_id,
-                    self._session.username,
-                )
-                return WriteRequestInfo(
-                    WriteRequestResult.ERROR,
-                    request_id,
-                    0,
-                    "Unable to join the shared editing queue. Please check connectivity and try again.",
-                )
-
-            # Read-after-write acknowledgement: WAITING is only authoritative
-            # after this exact request can be observed in the shared queue.
-            confirmed = self._queue_get_by_session(self._session.session_id)
-            if confirmed is None or confirmed.request_id != request_id:
-                logger.error(
-                    "Shared WRITE queue could not confirm request %s for %s",
-                    request_id,
-                    self._session.username,
-                )
-                try:
-                    self._queue_cancel(request)
-                except Exception:
-                    logger.warning(
-                        "Unable to clean up unconfirmed WRITE request %s",
-                        request_id,
-                        exc_info=True,
-                    )
-                return WriteRequestInfo(
-                    WriteRequestResult.ERROR,
-                    request_id,
-                    0,
-                    "Editing request could not be confirmed in the shared queue. Please try again.",
-                )
-
-            position = self._queue_position(self._session.session_id)
-            if position <= 0:
-                logger.error(
-                    "Confirmed WRITE request %s has no valid queue position",
-                    request_id,
-                )
-                return WriteRequestInfo(
-                    WriteRequestResult.ERROR,
-                    request_id,
-                    0,
-                    "Editing request was not assigned a valid queue position. Please try again.",
-                )
-
-            self._event_bus.publish(WriteRequested(
-                request_id=request_id,
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-                priority=request.priority,
-                reason=reason,
-                queue_position=position,
-            ))
-            try:
-                queue_snapshot = self._queue_snapshot()
-                next_request = queue_snapshot.get("next") or {}
-                self._event_bus.publish(QueueUpdated(
-                    queue_length=int(queue_snapshot.get("length", 0) or 0),
-                    next_writer=next_request.get("username"),
-                ))
-            except Exception:
-                # The request itself is already authoritatively confirmed.
-                # A later observer refresh failure must not turn WAITING into
-                # an ERROR or orphan an otherwise valid request.
-                logger.debug(
-                    "QueueUpdated refresh failed after confirmed enqueue",
-                    exc_info=True,
-                )
-
-            logger.info(
-                "Write request enqueued and confirmed for %s (pos=%s)",
-                self._session.username,
-                position,
-            )
-            return WriteRequestInfo(
-                WriteRequestResult.WAITING,
-                request_id,
-                position,
-                f"Waiting (position {position})",
-            )
+            if existing is None:
+                self._queue_enqueue(request)
+            snapshot = self._queue_snapshot()
+            for position, item in enumerate(snapshot.get("requests") or [], 1):
+                if item.get("session_id") == self._session.session_id:
+                    confirmed = WriteRequest.from_dict(item)
+                    self._pending_request = confirmed
+                    self._event_bus.publish(QueueUpdated(
+                        queue_length=int(snapshot.get("length", 0) or 0),
+                        next_writer=(snapshot.get("next") or {}).get("username"),
+                    ))
+                    self._event_bus.publish(WriteRequested(
+                        request_id=confirmed.request_id, session_id=self._session.session_id,
+                        user_id=self._session.user_id, username=self._session.username,
+                        priority=confirmed.priority, reason=reason, queue_position=position,
+                    ))
+                    return self._waiting_result(confirmed, position)
+            if not self.cancel_waiting_request():
+                return self._waiting_result(request, message=
+                    "Queue acknowledgement/cancellation is pending; WRITE is unavailable.", state="UNKNOWN")
+            return WriteRequestInfo(WriteRequestResult.ERROR, request.request_id, 0,
+                                    "Shared editing queue did not confirm the request.")
         except Exception as exc:
-            logger.warning(
-                "Unable to enqueue/confirm shared WRITE request for %s: %s",
-                self._session.username,
-                exc,
-            )
-            return WriteRequestInfo(
-                WriteRequestResult.ERROR,
-                request_id,
-                0,
-                "Unable to read or update the shared editing queue. Please check connectivity and try again.",
-            )
+            logger.warning("WRITE request acknowledgement is unknown: %s", exc)
+            return self._waiting_result(request, message=(
+                "Git could not verify the editing request. Waiting for acknowledgement; "
+                "WRITE is not available. Cancel remains pending until confirmed."
+            ), state="UNKNOWN")
+
+    def _release_remote_session(self):
+        return self._sync_provider.release_lock(
+            self._session.username, session_id=self._session.session_id,
+        )
+
+    def _rollback_ungranted_lock(self):
+        if self._ungranted_lock:
+            remote = self._get_remote_lock_status()
+            if remote["state"] == "UNKNOWN":
+                return False
+            if remote["state"] != "ABSENT" and remote.get("session_id") != self._session.session_id:
+                self._ungranted_lock = False
+                self._lock_acquired = False
+                return True  # confirmed superseded; never release another session
+            if not self._release_remote_session():
+                self._lease_renewal_suspended = True
+                return False
+            self._ungranted_lock = False
+            self._lock_acquired = False
+            self._lock._force_release()
+        return True
+
+    def _request_remote_write(self, reason):
+        request_id = str(uuid.uuid4())
+        if self._is_writing:
+            remote = self._get_remote_lock_status()
+            if (remote["state"] == "ACTIVE" and remote.get("session_id") == self._session.session_id
+                    and (remote.get("owner") or remote.get("username")) == self._session.username):
+                return WriteRequestInfo(WriteRequestResult.GRANTED, message="Already in verified WRITE mode")
+            return WriteRequestInfo(WriteRequestResult.ERROR, request_id,
+                                    message="Current WRITE authority cannot be verified; recovery is required.")
+        if self._cancel_pending:
+            if not self.cancel_waiting_request():
+                return self._waiting_result(self._pending_request, message=
+                    "Cancellation is awaiting Git acknowledgement; WRITE is unavailable.", state="UNKNOWN")
+        remote = self._get_remote_lock_status()
+        if remote["state"] == "UNKNOWN":
+            if self._pending_request is not None:
+                return self._waiting_result(self._pending_request, message=remote["error"], state="UNKNOWN")
+            return WriteRequestInfo(WriteRequestResult.ERROR, request_id, message=remote["error"])
+        try:
+            result = self._enqueue_or_return_waiting(reason, request_id)
+            if not result.is_waiting or getattr(result, "diagnostic_state", None) == "UNKNOWN":
+                return result
+            if remote["state"] in ("ACTIVE", "GRACE") and remote.get("session_id") != self._session.session_id:
+                result.diagnostic_state = remote["state"]
+                if remote["state"] == "GRACE":
+                    result.message = "Waiting for the remote WRITE clock-skew safety window to end."
+                return result
+            if self._grant_remote_request(result.request_id, run_handoff=False):
+                return WriteRequestInfo(WriteRequestResult.GRANTED, result.request_id, message="Lock acquired")
+            # A confirmed queue head/contender is legitimate WAITING. Operational
+            # failure is ERROR only after our request has been removed and read back.
+            failure = getattr(self._sync_provider, "get_last_lock_error", lambda: "")()
+            contention = getattr(self._sync_provider, "last_lock_failure_was_contention", lambda: True)()
+            if failure and not contention:
+                if self.cancel_waiting_request():
+                    return WriteRequestInfo(WriteRequestResult.ERROR, result.request_id, message=failure)
+                result.diagnostic_state = "UNKNOWN"
+                result.message = f"{failure} Cancellation awaits acknowledgement; WRITE is unavailable."
+            return result
+        except Exception as exc:
+            if self._pending_request is not None:
+                return self._waiting_result(self._pending_request, message=f"Git queue verification failed: {exc}", state="UNKNOWN")
+            return WriteRequestInfo(WriteRequestResult.ERROR, request_id, message=f"Git queue verification failed: {exc}")
+
+    def _grant_remote_request(self, request_id, *, run_handoff):
+        if self._cancel_pending or not self._rollback_ungranted_lock():
+            return False
+        request = self._queue_get_by_session(self._session.session_id)
+        head = self._queue_peek()
+        if request is None or request.request_id != request_id or head is None or head.request_id != request_id:
+            return False
+        remote = self._get_remote_lock_status()
+        if remote["state"] == "UNKNOWN":
+            return False
+        owns = getattr(type(self._sync_provider), "owns_lock_observation", None)
+        already_acquired = bool(callable(owns) and self._sync_provider.owns_lock_observation(
+            remote, self._session.username, self._session.session_id,
+        ))
+        if remote["state"] == "ACTIVE" and not already_acquired:
+            return False
+        if remote["state"] == "GRACE" and remote.get("session_id") != self._session.session_id:
+            return False
+        if not already_acquired and not self._sync_provider.acquire_lock(self._build_lock_data()):
+            observed = self._get_remote_lock_status()
+            token = getattr(self._sync_provider, "_owned_lock_token", None)
+            if isinstance(token, dict) and token.get("session_id") == self._session.session_id:
+                self._ungranted_lock = (observed["state"] == "UNKNOWN" or
+                    observed.get("session_id") == self._session.session_id)
+            return False
+        self._ungranted_lock = True
+        self._lock_acquired = True
+        try:
+            # Queue and lock are distinct refs. Recheck after CAS, and consume
+            # only a still-live head with queue CAS, never a missing/cancelled request.
+            head = self._queue_peek()
+            if head is None or head.request_id != request_id:
+                return False
+            if run_handoff and self._write_handoff_guard is not None:
+                # The guard synchronously calls the Qt GUI thread. Never hold
+                # the state mutex while waiting for GUI work: cancel/UI callbacks
+                # must be able to record cancellation without a lock inversion.
+                self._handoff_in_progress = True
+                self._state_mutex.release()
+                try:
+                    synchronized = self._write_handoff_guard()
+                finally:
+                    self._state_mutex.acquire()
+                    self._handoff_in_progress = False
+                if not synchronized or self._cancel_pending:
+                    return False
+            consume = getattr(type(self._sync_provider), "consume_remote_write_request", None)
+            consumed = (self._sync_provider.consume_remote_write_request(request_id, self._session.session_id)
+                        if callable(consume) else self._queue_cancel(request))
+            if not consumed:
+                return False
+            remote = self._get_remote_lock_status()
+            if remote["state"] != "ACTIVE" or remote.get("session_id") != self._session.session_id:
+                return False
+            self._lease_renewal_suspended = False
+            self._sync_local_lock()
+            if not self._is_writing:
+                self._ungranted_lock = True
+                return False
+            self._ungranted_lock = False
+            self._pending_request = None
+            self._publish_write_granted(request_id, 0)
+            return True
+        finally:
+            if self._ungranted_lock:
+                self._rollback_ungranted_lock()
 
     def _publish_write_granted(self, request_id: str, queue_position: int) -> None:
+        self._last_granted_request_id = request_id
         self._event_bus.publish(WriteGranted(
             session_id=self._session.session_id,
             user_id=self._session.user_id,
@@ -496,12 +562,15 @@ class CollaborationManager:
     def shutdown(self) -> None:
         if not self._initialized:
             return
-        if self._is_writing:
-            self._release_write_internal()
-        elif self._session is not None:
-            request = self._queue_get_by_session(self._session.session_id)
-            if request is not None:
-                self._queue_cancel(request)
+        try:
+            if self._is_writing:
+                if not self._release_write_internal():
+                    logger.warning("Shutdown could not confirm remote WRITE release; lease remains protected.")
+            elif self._session is not None:
+                if not self.cancel_waiting_request():
+                    logger.warning("Shutdown could not confirm queue/lease cleanup.")
+        except Exception:
+            logger.warning("Remote shutdown cleanup is unconfirmed", exc_info=True)
         if self._heartbeat_manager:
             self._heartbeat_manager.stop()
         if self._session:
@@ -512,71 +581,25 @@ class CollaborationManager:
 
     def request_write(self, reason: str = "") -> WriteRequestInfo:
         self._ensure_initialized()
+        if self._sync_provider is not None:
+            with self._state_mutex:
+                if self._handoff_in_progress:
+                    return self._waiting_result(self._pending_request,
+                        message="WRITE handoff is in progress; waiting for verification.")
+                return self._request_remote_write(reason)
         if self._is_writing:
             return WriteRequestInfo(WriteRequestResult.GRANTED, message="Already in WRITE mode")
         request_id = str(uuid.uuid4())
-        try:
-            existing = self._queue_get_by_session(self._session.session_id)
-        except Exception as exc:
-            logger.warning(
-                "Unable to read authoritative WRITE queue before request: %s",
-                exc,
-            )
-            return WriteRequestInfo(
-                WriteRequestResult.ERROR,
-                request_id,
-                0,
-                "Unable to read the shared editing queue. Please check connectivity and try again.",
-            )
-        if existing:
-            if self._sync_provider is not None:
-                remote_lock = self._get_remote_lock_status()
-                locked = remote_lock.get("locked", False)
+        existing = self._queue_get_by_session(self._session.session_id)
+        if existing is not None:
+            if not self._lock.is_locked():
+                if self.grant_existing_waiting_request(existing.request_id):
+                    return WriteRequestInfo(WriteRequestResult.GRANTED, existing.request_id)
+                return self._waiting_result(existing, self._queue_position(self._session.session_id))
             else:
-                locked = self._lock.is_locked()
-            if not locked:
-                self._queue_cancel(existing)
-            else:
-                position = self._queue_position(self._session.session_id)
-                return WriteRequestInfo(WriteRequestResult.WAITING, existing.request_id, position, f"Waiting (position {position})")
-
-        if self._sync_provider is not None:
-            remote_lock = self._get_remote_lock_status()
-            locked = remote_lock.get("locked", False)
-            if locked:
-                remote_session_id = remote_lock.get("session_id")
-                lease_expires_at = remote_lock.get("lease_expires_at")
-                lease_valid = self._is_lease_valid(lease_expires_at)
-                if lease_valid:
-                    if remote_session_id == self._session.session_id:
-                        self._is_writing = True
-                        self._lock_acquired = True
-                        self._sync_local_lock()
-                        return WriteRequestInfo(WriteRequestResult.GRANTED, request_id, message="Lock already held by this session")
-                    return self._enqueue_or_return_waiting(reason, request_id)
-                lock_data = self._build_lock_data()
-                acquired = self._sync_provider.acquire_lock(lock_data)
-                if acquired:
-                    self._is_writing = True
-                    self._lock_acquired = True
-                    self._lease_renewal_suspended = False
-                    self._sync_local_lock()
-                    self._publish_write_granted(request_id, 0)
-                    logger.info(f"Write granted to {self._session.username} (expired lease replaced)")
-                    return WriteRequestInfo(WriteRequestResult.GRANTED, request_id, message="Lock acquired (expired lease replaced)")
-                return self._enqueue_or_return_waiting(reason, request_id)
-            lock_data = self._build_lock_data()
-            acquired = self._sync_provider.acquire_lock(lock_data)
-            if acquired:
-                self._is_writing = True
-                self._lock_acquired = True
-                self._lease_renewal_suspended = False
-                self._sync_local_lock()
-                self._publish_write_granted(request_id, 0)
-                logger.info(f"Write granted to {self._session.username}")
-                return WriteRequestInfo(WriteRequestResult.GRANTED, request_id, message="Lock acquired")
+                return self._waiting_result(existing, self._queue_position(self._session.session_id))
+        if not self._lock.is_locked() and self._queue_peek() is not None:
             return self._enqueue_or_return_waiting(reason, request_id)
-
         lock_data = self._lock.get_lock_info()
         if lock_data.get("locked", False):
             lock_session_id = lock_data.get("session_id")
@@ -609,7 +632,7 @@ class CollaborationManager:
             return False
         with self._state_mutex:
             if self._sync_provider is not None:
-                result = self._sync_provider.release_lock(self._session.username)
+                result = self._release_remote_session()
                 if not result:
                     # Keep the local WRITE projection and lease renewal alive.
                     # The transaction has not completed until the authoritative
@@ -644,8 +667,14 @@ class CollaborationManager:
         self._ensure_initialized()
         if self._session is None:
             return False
+        if self._cancel_pending:
+            return self.cancel_waiting_request()
+        if not self._rollback_ungranted_lock():
+            return False
         request = self._queue_get_by_session(self._session.session_id)
         if request is None:
+            if self._pending_request is not None:
+                return self.cancel_waiting_request()
             return False
         if request_id and request.request_id != request_id:
             return False
@@ -655,6 +684,8 @@ class CollaborationManager:
         self._ensure_initialized()
         if self._session is None:
             return False
+        if self._sync_provider is not None and self._pending_request is not None:
+            return not request_id or self._pending_request.request_id == request_id
         request = self._queue_get_by_session(self._session.session_id)
         if request is None:
             return False
@@ -673,73 +704,8 @@ class CollaborationManager:
             return False
 
         if self._sync_provider is not None:
-            remote_lock = self._get_remote_lock_status()
-            if remote_lock.get("locked", False) and self._is_lease_valid(remote_lock.get("lease_expires_at")):
-                return False
-            lock_data = self._build_lock_data()
-            if not self._sync_provider.acquire_lock(lock_data):
-                return False
-            self._is_writing = True
-            self._lock_acquired = True
-            self._sync_local_lock()
-            if self._write_handoff_guard is not None:
-                try:
-                    if not self._write_handoff_guard():
-                        self._sync_provider.release_lock(self._session.username)
-                        self._lock._force_release(); self._lock_acquired = False; self._is_writing = False
-                        return False
-                except Exception:
-                    logger.exception("Write handoff sync raised for %s", request_id)
-                    try: self._sync_provider.release_lock(self._session.username)
-                    finally:
-                        self._lock._force_release(); self._lock_acquired = False; self._is_writing = False
-                    return False
-            try:
-                consumed = self._queue_cancel(request)
-                if not consumed:
-                    # Absence is semantically consumed (for example an expired
-                    # request); only fail if the request is still authoritative.
-                    remaining = self._queue_get_by_session(self._session.session_id)
-                    consumed = remaining is None
-            except Exception:
-                consumed = False
-
-            if not consumed:
-                logger.error(
-                    "WRITE grant rollback: shared queue request %s could not be consumed",
-                    request_id,
-                )
-                try:
-                    self._sync_provider.release_lock(self._session.username)
-                finally:
-                    self._lock._force_release()
-                    self._lock_acquired = False
-                    self._is_writing = False
-                return False
-
-            self._event_bus.publish(WriteGranted(
-                session_id=self._session.session_id,
-                user_id=self._session.user_id,
-                username=self._session.username,
-                request_id=request_id,
-                queue_position=0,
-            ))
-            self._event_bus.publish(ModeChanged(mode="WRITE"))
-            try:
-                queue_snapshot = self._queue_snapshot()
-                next_request = queue_snapshot.get("next") or {}
-                self._event_bus.publish(QueueUpdated(
-                    queue_length=int(queue_snapshot.get("length", 0) or 0),
-                    next_writer=next_request.get("username"),
-                ))
-            except Exception:
-                # Lock ownership and queue consumption are already confirmed;
-                # this event is observational only.
-                logger.debug(
-                    "QueueUpdated refresh failed after confirmed grant",
-                    exc_info=True,
-                )
-            return True
+            with self._state_mutex:
+                return self._grant_remote_request(request_id, run_handoff=True)
 
         if self._lock.is_locked():
             if self._is_lock_stale(self._lock.get_lock_info()):
@@ -753,18 +719,24 @@ class CollaborationManager:
             self._event_bus.publish(WriteGranted(session_id=self._session.session_id, user_id=self._session.user_id, username=self._session.username, request_id=request_id, queue_position=0))
             self._event_bus.publish(ModeChanged(mode="WRITE"))
             self._queue_cancel(request)
+            self._pending_request = None
             self._event_bus.publish(QueueUpdated(queue_length=self._queue_count(), next_writer=self._queue_peek().username if self._queue_peek() else None))
             return True
         except LockTimeoutError:
             return False
 
     def _release_write_internal(self) -> bool:
-        if self._sync_provider:
-            result = self._sync_provider.release_lock(self._session.username)
-            self._lock._force_release(); self._lock_acquired = False
+        if self._sync_provider is not None:
+            if not self._release_remote_session():
+                return False
+            self._lock._force_release()
+            self._lock_acquired = False
             self._is_writing = False
-            return result
-        self._lock.release(self._session); self._lock_acquired = False; self._is_writing = False; return True
+            return True
+        self._lock.release(self._session)
+        self._lock_acquired = False
+        self._is_writing = False
+        return True
 
     def suspend_write_lease_renewal(self) -> None:
         """Stop automatic remote lease renewal without discarding local work.
@@ -874,10 +846,7 @@ class CollaborationManager:
 
     def get_lock_status(self) -> Dict[str, Any]:
         if self._sync_provider is not None:
-            try: return self._sync_provider.remote_lock_status()
-            except Exception as e:
-                logger.warning(f"Failed to get remote lock status: {e}")
-                return self._get_local_lock_status()
+            return self._get_remote_lock_status()
         return self._get_local_lock_status()
 
     def _get_local_lock_status(self) -> Dict[str, Any]:
@@ -894,14 +863,59 @@ class CollaborationManager:
         return [request.to_dict() for request in self._queue_requests()]
 
     def cancel_waiting_request(self) -> bool:
-        if not self._initialized or not self._session:
+        if not self._initialized or self._session is None:
             return False
-        request = self._queue_get_by_session(self._session.session_id)
-        if request is None:
-            # Idempotent cancel: an expired/removed request already means the
-            # caller is no longer in the queue, so UI can safely leave WAITING.
-            return True
-        return self._queue_cancel(request)
+        with self._state_mutex:
+            if self._is_writing:
+                return False  # a grant won; its event must complete the handoff
+            self._cancel_pending = True
+            self._waiting_diagnostic = "Cancellation is awaiting Git acknowledgement; WRITE is unavailable."
+            if self._handoff_in_progress:
+                return False
+            try:
+                request = self._pending_request or self._queue_get_by_session(self._session.session_id)
+                if request is not None:
+                    self._pending_request = request
+                    if not self._queue_cancel(request):
+                        return False
+                remaining = self._queue_get_by_session(self._session.session_id)
+                if remaining is not None or not self._rollback_ungranted_lock():
+                    return False
+                self._pending_request = None
+                self._cancel_pending = False
+                self._waiting_diagnostic = ""
+                return True
+            except Exception:
+                logger.warning("Cancellation acknowledgement is unknown", exc_info=True)
+                return False
+
+    def has_verified_waiting_grant(self, request_id) -> bool:
+        """Reconcile a deferred grant event by its exact request, never by username."""
+        with self._state_mutex:
+            if not request_id or request_id != self._last_granted_request_id or not self._is_writing:
+                return False
+            if self._sync_provider is None:
+                return self._lock.get_owner() == self._session.session_id
+            remote = self._get_remote_lock_status()
+            return bool(remote["state"] == "ACTIVE"
+                        and remote.get("session_id") == self._session.session_id
+                        and (remote.get("owner") or remote.get("username")) == self._session.username)
+
+    def reconcile_waiting_request(self, request_id):
+        """UI may leave WAITING only after this intent can no longer arrive late."""
+        with self._state_mutex:
+            if self._is_writing:
+                return False
+            if self._pending_request is not None and self._pending_request.request_id != request_id:
+                return False
+            return self.cancel_waiting_request()
+
+    def is_write_transition_pending(self) -> bool:
+        """A provisional lease/handoff blocks runtime replacement, not grants WRITE."""
+        return self._ungranted_lock or self._handoff_in_progress
+
+    def get_waiting_diagnostic(self) -> str:
+        return self._waiting_diagnostic
 
     def get_diagnostics(self) -> Dict[str, Any]:
         self._ensure_initialized()
@@ -963,7 +977,10 @@ class CollaborationManager:
         if self._sync_provider is not None:
             if not self.is_collaboration_available(): result["reason"]="Collaboration unavailable"; return result
             try:
-                remote_status=self._sync_provider.remote_lock_status()
+                remote_status=self._get_remote_lock_status()
+                if remote_status.get("state") == "UNKNOWN":
+                    result["reason"] = "Remote authority unknown: " + str(remote_status.get("error") or "unverified lock")
+                    return result
                 if not remote_status.get("locked",False):
                     result["reason"]="Remote lock not held"; self._lock._force_release(); self._lock_acquired=False; self._is_writing=False; return result
                 remote_session=remote_status.get("session_id")

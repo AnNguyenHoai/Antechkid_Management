@@ -312,6 +312,9 @@ class RuntimeSyncService:
         session_id = self._collab_manager.get_session().session_id if self._collab_manager.get_session() else "unknown"
 
         has_writer = self._collab_manager.is_writing()
+        transition_check = getattr(type(self._collab_manager), "is_write_transition_pending", None)
+        if callable(transition_check):
+            has_writer = has_writer or self._collab_manager.is_write_transition_pending()
         queue_length = len(self._collab_manager.get_queue().get("requests", []))
 
         context = self._context_manager.get_context()

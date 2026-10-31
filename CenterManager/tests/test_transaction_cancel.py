@@ -9,6 +9,13 @@ from centermanager.platform.collaboration import CollaborationManager
 from centermanager.events.event_bus import EventBus
 
 
+def _remote_authority(cm):
+    # MAIN tests still need a valid authority observation under E1A's strict
+    # diagnostics, rather than relying on MagicMock int/bool conversions.
+    return dict(cm._lock.get_lock_info(), owner=cm.get_session().username,
+                lease_expires_at="2999-01-01T00:00:00")
+
+
 @pytest.fixture
 def collab_manager(tmp_path):
     event_bus = EventBus()
@@ -27,10 +34,12 @@ def test_publish_succeeds_when_main_generation_unchanged(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = base_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -51,10 +60,12 @@ def test_publish_blocked_when_main_generation_changed(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -76,10 +87,12 @@ def test_main_conflict_independent_of_owner(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -103,10 +116,12 @@ def test_version_not_advanced_on_main_conflict(collab_manager):
     tx.set_version_manager(mock_version_manager)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -128,10 +143,12 @@ def test_remote_main_unavailable_blocks_publish(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None

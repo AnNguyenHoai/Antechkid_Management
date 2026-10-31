@@ -18,6 +18,12 @@ class _BaseFakeProvider:
     def _create_lock_commit_plumbing(self, lock_data, expected_oid=None):
         return "new-lock-commit"
 
+    def _remember_lock_token(self, data, oid):
+        self.token = (data["session_id"], oid)
+
+    def owns_lock_observation(self, remote, owner, session_id):
+        return False
+
     def _has_remote_origin(self):
         return True
 
@@ -78,7 +84,7 @@ def test_acquire_lock_classifies_real_remote_contention():
     provider = _ContendedProvider()
 
     acquired = provider.acquire_lock(
-        {"owner": "bob", "session_id": "current-session"}
+        {"locked": True, "owner": "bob", "session_id": "current-session"}
     )
 
     assert acquired is False
@@ -91,7 +97,7 @@ def test_acquire_lock_preserves_exact_push_failure_when_remote_is_free():
     provider = _PushRejectedProvider()
 
     acquired = provider.acquire_lock(
-        {"owner": "bob", "session_id": "current-session"}
+        {"locked": True, "owner": "bob", "session_id": "current-session"}
     )
 
     assert acquired is False
@@ -108,7 +114,7 @@ def test_acquire_lock_reports_missing_remote_origin():
     provider = _NoOriginProvider()
 
     acquired = provider.acquire_lock(
-        {"owner": "bob", "session_id": "current-session"}
+        {"locked": True, "owner": "bob", "session_id": "current-session"}
     )
 
     assert acquired is False

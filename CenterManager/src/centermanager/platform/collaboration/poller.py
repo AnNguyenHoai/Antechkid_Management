@@ -273,6 +273,8 @@ class CollaborationPoller(QObject):
         """
         if self._stop_requested or not self._running:
             return
+        if remote_lock.get("state") == "UNKNOWN":
+            return
         if (
             remote_lock.get("locked", False)
             and not self._cm._is_lock_stale(remote_lock)
@@ -326,6 +328,8 @@ class CollaborationPoller(QObject):
 
         try:
             remote_lock = self._cm.get_lock_status()
+            if remote_lock.get("state") == "UNKNOWN":
+                raise RuntimeError(remote_lock.get("error") or "Remote WRITE authority is unknown")
             queue = self._cm.get_queue()
             version = 0
             try:

@@ -35,3 +35,25 @@ def install_git_command_serialization(provider_cls: Any) -> None:
     provider_cls.__init__ = init_with_command_lock
     provider_cls._run_git_command = serialized_run_git_command
     provider_cls._git_command_serialization_installed = True
+
+
+def install_lock_operation_serialization(provider_cls: Any) -> None:
+    """Keep this instance's session/revision token coherent across whole operations."""
+    from functools import wraps
+    if getattr(provider_cls, "_lock_operation_serialization_installed", False):
+        return
+    provider_cls._lock_operation_serialization_installed = True
+
+    for name in ("acquire_lock", "renew_lock", "release_lock"):
+        original = getattr(provider_cls, name)
+
+        def wrap(operation):
+            @wraps(operation)
+            def serialized(self, *args, **kwargs):
+                if not hasattr(self, "_authority_mutex"):
+                    self._authority_mutex = threading.RLock()
+                with self._authority_mutex:
+                    return operation(self, *args, **kwargs)
+            return serialized
+
+        setattr(provider_cls, name, wrap(original))
