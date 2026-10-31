@@ -72,7 +72,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._askpass_env: dict = {}
         self._owned_lock_token = None
         self._released_lock_token = None
-        self._previous_lock_token = None
+        self._pending_lock_tokens = {}
         self._authority_mutex = threading.RLock()
         self._lease_duration_seconds = 60
         self._collaboration_git_timeout_seconds = 15
@@ -816,18 +816,27 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.exception(f"Lock acquisition failed: {e}")
             return False
 
-    def _remember_lock_token(self, data, oid):
-        current = self._owned_lock_token
-        if current and current.get("oid") != oid:
-            self._previous_lock_token = current
-        self._owned_lock_token = {
+    def _remember_lock_token(self, data, oid, *, verified=False):
+        token = {
             "owner": data.get("owner") or data.get("username"),
             "session_id": data.get("session_id"), "oid": oid,
             "lease_revision": data.get("lease_revision", 0),
         }
+        if verified:
+            self._owned_lock_token = token
+            # Older CAS candidates cannot cross this confirmed ref revision.
+            self._pending_lock_tokens.clear()
+        else:
+            self._pending_lock_tokens[oid] = token
+
+    def has_pending_lock_candidate(self, session_id):
+        return any(token["session_id"] == session_id for token in self._pending_lock_tokens.values())
+
+    def _known_lock_tokens(self):
+        return [self._owned_lock_token, *self._pending_lock_tokens.values()]
 
     def _matching_lock_token(self, remote, owner, session_id=None, expected_oid=None):
-        for token in (self._owned_lock_token, self._previous_lock_token):
+        for token in self._known_lock_tokens():
             if (token and token["owner"] == owner
                     and (session_id is None or session_id == token["session_id"])
                     and (expected_oid is None or expected_oid == token["oid"])
@@ -847,14 +856,13 @@ class GitSynchronizationProvider(SynchronizationProvider):
                      *, expected_oid: Optional[str] = None) -> bool:
         """Release an exact locally acquired/renewed session + revision + OID.
 
-        Preserve both known endpoints of an uncertain renewal. Neither an
+        Preserve the last verified token and every uncertain candidate. Neither an
         arbitrary same-username OID nor the magic 'force_release' is a permit.
         Legacy callers omitting session_id still require a bound capability.
         """
         with self._authority_mutex:
-            known = [token for token in (
-                self._owned_lock_token, self._previous_lock_token, self._released_lock_token,
-            ) if token and token["owner"] == owner
+            known = [token for token in [*self._known_lock_tokens(), self._released_lock_token]
+                if token and token["owner"] == owner
                 and (session_id is None or session_id == token["session_id"])
                 and (expected_oid is None or expected_oid == token["oid"])]
             if not known:
@@ -873,7 +881,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
                     return False
             self._released_lock_token = token
             self._owned_lock_token = None
-            self._previous_lock_token = None
+            self._pending_lock_tokens.clear()
             return True
 
     def force_release(self, owner: str) -> bool:
@@ -954,8 +962,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
             new_oid = self._remote_lock_oid()
             if new_oid is not None:
                 remote_verify = self._read_lock_from_oid(new_oid)
-                if remote_verify.get("session_id") == session_id:
-                    self._remember_lock_token(remote_verify, new_oid)
+                if (new_oid == commit_sha and remote_verify.get("session_id") == session_id
+                        and remote_verify.get("owner") == owner and self._is_lock_valid(remote_verify)):
+                    self._remember_lock_token(remote_verify, new_oid, verified=True)
                     logger.info(f"Lock renewed successfully: session={session_id}")
                     return True
                 else:

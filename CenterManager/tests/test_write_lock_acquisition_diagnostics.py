@@ -18,7 +18,7 @@ class _BaseFakeProvider:
     def _create_lock_commit_plumbing(self, lock_data, expected_oid=None):
         return "new-lock-commit"
 
-    def _remember_lock_token(self, data, oid):
+    def _remember_lock_token(self, data, oid, *, verified=False):
         self.token = (data["session_id"], oid)
 
     def owns_lock_observation(self, remote, owner, session_id):

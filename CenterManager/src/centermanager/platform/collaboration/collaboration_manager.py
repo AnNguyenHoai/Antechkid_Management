@@ -489,8 +489,8 @@ class CollaborationManager:
             return False
         if not already_acquired and not self._sync_provider.acquire_lock(self._build_lock_data()):
             observed = self._get_remote_lock_status()
-            token = getattr(self._sync_provider, "_owned_lock_token", None)
-            if isinstance(token, dict) and token.get("session_id") == self._session.session_id:
+            candidate_check = getattr(type(self._sync_provider), "has_pending_lock_candidate", None)
+            if callable(candidate_check) and self._sync_provider.has_pending_lock_candidate(self._session.session_id):
                 self._ungranted_lock = (observed["state"] == "UNKNOWN" or
                     observed.get("session_id") == self._session.session_id)
             return False

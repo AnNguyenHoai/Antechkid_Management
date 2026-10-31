@@ -157,6 +157,7 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                             and self.owns_lock_observation(
                                 observe_lock(current_lock, oid=current_oid, now=datetime.now()),
                                 lock_data.get("owner"), lock_data.get("session_id"))):
+                        self._remember_lock_token(current_lock, current_oid, verified=True)
                         return True  # push response lost; authoritative read-back confirms it
                     current_session = current_lock.get("session_id")
                     requested_session = lock_data.get("session_id")
@@ -207,6 +208,7 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                     and remote_verify.get("session_id") == lock_data.get("session_id")
                     and remote_verify.get("owner") == lock_data.get("owner")
                     and self._is_lock_valid(remote_verify)):
+                self._remember_lock_token(remote_verify, new_oid, verified=True)
                 logger.info(
                     "Atomic lock acquired successfully: session=%s",
                     lock_data.get("session_id"),

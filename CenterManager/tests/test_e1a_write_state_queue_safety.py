@@ -302,6 +302,21 @@ def test_uncertain_renewal_keeps_exact_capability_for_safe_release_retry(machine
     assert provider.remote_lock_status()["state"] == "ABSENT"
 
 
+def test_repeated_rejected_renewals_do_not_forget_last_verified_release_token(machines, monkeypatch, clock):
+    owner, provider = machines("owner")
+    assert owner.request_write().is_granted
+    original_oid = provider._remote_lock_oid()
+    original_push = provider._push_lock_branch
+    monkeypatch.setattr(provider, "_push_lock_branch", lambda *args, **kwargs: False)
+    for second in (1, 2, 3):
+        clock.at(second)
+        assert not provider.renew_lock("owner", owner.get_session_id())
+    assert provider._remote_lock_oid() == original_oid
+    monkeypatch.setattr(provider, "_push_lock_branch", original_push)
+    assert owner.release_write()
+    assert provider.remote_lock_status()["state"] == "ABSENT"
+
+
 def test_deferred_grant_event_is_reconciled_through_authorized_transaction_flow(machines):
     from centermanager.ui.main_window import MainWindow
     from centermanager.platform.collaboration.poller import CollaborationSnapshot

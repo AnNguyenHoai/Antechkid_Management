@@ -67,8 +67,10 @@ becomes a successful release. The magic `force_release` owner has no bypass.
 
 For compatibility, low-level callers omitting the session parameter still need
 a capability captured by that provider instance; an unbound username cannot
-delete anything. The known current/previous endpoints of an uncertain renewal
-are retained: either endpoint can be identified exactly after reconnection.
+delete anything. The last verified capability is retained independently of all uncertain renewal
+candidates, so repeated rejected pushes cannot erase the valid release token.
+Only an exact known OID/revision is accepted after reconnection; a confirmed
+renewal compacts the pending candidates.
 An explicitly supplied stale OID cannot be silently replaced by the newer one.
 An already completed release can be acknowledged again only after verified
 absence; a successor remains protected. No arbitrary latest-OID adoption is used.
@@ -144,8 +146,9 @@ remains proposed, not implemented.
 
 Durable WRITE-session journaling before first mutation, WAL-safe quarantine,
 restart-before-sync preservation, unsaved form drafts and explicit reconciliation
-are E1B prerequisites. E1A neither discards nor automatically publishes stale
-work, and does not promise to recover RAM lost in a hard crash.
+are E1B prerequisites. E1A adds no automatic discard/republication operation;
+existing preservation gaps remain. Preserve a recovered dirty workspace before
+normal synchronization. RAM recovery after a hard crash is not promised.
 
 ## Two-machine Windows UAT — not executed by CI
 
