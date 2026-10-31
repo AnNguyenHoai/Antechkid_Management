@@ -41,6 +41,12 @@ class FakeIncomeService:
             ], 2)
         return ([SimpleNamespace(amount=25, payment_method="Cash")], 1)
 
+    def aggregate_by_payment_method(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("finance_period_start") == date(2026, 4, 1):
+            return [("Cash", 100), ("Bank Transfer", 200)]
+        return [("Cash", 25)]
+
 
 class FakeExpenseService:
     def __init__(self):
@@ -55,6 +61,12 @@ class FakeExpenseService:
             return ([SimpleNamespace(amount=40, payment_method="Cash"),
                      SimpleNamespace(amount=60, payment_method="Bank")], 2)
         return ([SimpleNamespace(amount=10, payment_method="Cash")], 1)
+
+    def aggregate_by_payment_method(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("date_from") == date(2026, 4, 1) and kwargs.get("date_to") == date(2026, 6, 30):
+            return [("Cash", 40), ("Bank", 60)]
+        return [("Cash", 10)]
 
 
 class FakeOutstandingService:

@@ -873,6 +873,20 @@ class IncomeService:
                 status=normalized_status,
             )
 
+    @require_permission("finance.view")
+    def aggregate_by_payment_method(
+        self, *, date_from: date, date_to: date,
+        finance_period_start: Optional[date] = None,
+    ):
+        """Complete active Income totals; wallet mapping stays with the reader."""
+        with self._session_factory() as session:
+            return self._repository_provider.incomes(
+                session
+            ).aggregate_active_amounts_by_payment_method(
+                date_from=date_from, date_to=date_to,
+                finance_period_start=finance_period_start,
+            )
+
     @require_permission("finance.income.update")
     def reconcile_tuition_enrollment(self, income_id: int, enrollment_id: int) -> Income:
         """Explicitly link one legacy Tuition row; never infer/backfill silently."""

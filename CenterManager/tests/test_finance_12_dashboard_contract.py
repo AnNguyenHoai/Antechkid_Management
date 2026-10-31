@@ -6,15 +6,20 @@ from centermanager.services.finance_dashboard_service import FinanceDashboardSer
 
 
 class FakeIncomeService:
+    def aggregate_by_payment_method(self, **kwargs):
+        return [("Cash", 100), ("Bank Transfer", 200)]
+
     def list_incomes(self, **kwargs):
         return ([
             SimpleNamespace(amount=100, payment_method="Cash"),
             SimpleNamespace(amount=200, payment_method="Bank Transfer"),
-            SimpleNamespace(amount=50, payment_method="Other"),
-        ], 3)
+        ], 2)
 
 
 class FakeExpenseService:
+    def aggregate_by_payment_method(self, **kwargs):
+        return [("Cash", 30), ("Bank", 70)]
+
     def list_expenses(self, **kwargs):
         return ([
             SimpleNamespace(amount=30, payment_method="Cash"),
@@ -52,7 +57,7 @@ def test_dashboard_payment_methods_are_normalized():
     data = service.get_revenue_by_payment_method(date.today(), date.today())
     assert data["Cash"] == 100
     assert data["Bank"] == 200
-    assert data["Other"] == 50
+    assert data["Other"] == 0
 
 
 def test_dashboard_data_exposes_outstanding_metrics():

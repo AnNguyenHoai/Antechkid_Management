@@ -2,6 +2,10 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from centermanager.core.wallet import WalletMappingError
+
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
 
 
@@ -36,8 +40,13 @@ def test_dashboard_explicit_shared_period_drives_all_live_aggregations():
     outstanding_calls = []
 
     class IncomeService:
-        def list_incomes(self, **kwargs):
+        def aggregate_by_payment_method(self, **kwargs):
             income_calls.append(kwargs)
+            if kwargs.get("date_from") == period_start:
+                return [("Cash", 100), ("Bank Transfer", 300)]
+            return []
+
+        def list_incomes(self, **kwargs):
             if kwargs.get("date_from") == period_start:
                 return [
                     SimpleNamespace(amount=100, payment_method="Cash"),
@@ -46,8 +55,13 @@ def test_dashboard_explicit_shared_period_drives_all_live_aggregations():
             return [], 0
 
     class ExpenseService:
-        def list_expenses(self, **kwargs):
+        def aggregate_by_payment_method(self, **kwargs):
             expense_calls.append(kwargs)
+            if kwargs.get("date_from") == period_start:
+                return [("Cash", 40), ("Bank", 80)]
+            return []
+
+        def list_expenses(self, **kwargs):
             if kwargs.get("date_from") == period_start:
                 return [
                     SimpleNamespace(amount=40, payment_method="Cash"),
@@ -162,10 +176,16 @@ def test_dashboard_service_stays_read_only_and_settlement_independent():
 
 def test_unconfigured_shared_period_returns_zero_period_kpis():
     class IncomeService:
+        def aggregate_by_payment_method(self, **kwargs):
+            return []
+
         def list_incomes(self, **kwargs):
             return [], 0
 
     class ExpenseService:
+        def aggregate_by_payment_method(self, **kwargs):
+            return []
+
         def list_expenses(self, **kwargs):
             return [], 0
 
@@ -197,7 +217,8 @@ def test_dashboard_payment_method_normalization_uses_canonical_wallet_resolver()
     assert FinanceDashboardService._normalize_payment_method("BANK") == "Bank"
     assert FinanceDashboardService._normalize_payment_method("Bank Transfer") == "Bank"
     assert FinanceDashboardService._normalize_payment_method("TÀI KHOẢN CÔNG TY") == "Bank"
-    assert FinanceDashboardService._normalize_payment_method("Legacy Mystery") == "Other"
+    with pytest.raises(WalletMappingError):
+        FinanceDashboardService._normalize_payment_method("Legacy Mystery")
 
 
 def test_dashboard_canonical_cash_and_bank_values_do_not_fall_into_other():
@@ -205,6 +226,11 @@ def test_dashboard_canonical_cash_and_bank_values_do_not_fall_into_other():
     period_end = date(2026, 10, 31)
 
     class IncomeService:
+        def aggregate_by_payment_method(self, **kwargs):
+            if kwargs.get("date_from") == period_start:
+                return [("CASH", 100), ("BANK", 300)]
+            return []
+
         def list_incomes(self, **kwargs):
             if kwargs.get("date_from") == period_start:
                 return [
@@ -214,6 +240,11 @@ def test_dashboard_canonical_cash_and_bank_values_do_not_fall_into_other():
             return [], 0
 
     class ExpenseService:
+        def aggregate_by_payment_method(self, **kwargs):
+            if kwargs.get("date_from") == period_start:
+                return [("CASH", 40), ("BANK", 80)]
+            return []
+
         def list_expenses(self, **kwargs):
             if kwargs.get("date_from") == period_start:
                 return [

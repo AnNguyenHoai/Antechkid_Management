@@ -21,13 +21,19 @@ def test_dashboard_snapshot_uses_month_start_not_today_for_month_kpis():
     calls = []
 
     class IncomeService:
-        def list_incomes(self, **kwargs):
+        def aggregate_by_payment_method(self, **kwargs):
             calls.append(("income", kwargs["date_from"], kwargs["date_to"]))
+            return [("Cash", 100)]
+
+        def list_incomes(self, **kwargs):
             return [SimpleNamespace(amount=100, payment_method="Cash")], 1
 
     class ExpenseService:
-        def list_expenses(self, **kwargs):
+        def aggregate_by_payment_method(self, **kwargs):
             calls.append(("expense", kwargs["date_from"], kwargs["date_to"]))
+            return [("Cash", 40)]
+
+        def list_expenses(self, **kwargs):
             return [SimpleNamespace(amount=40, payment_method="Cash")], 1
 
     class OutstandingServiceStub:

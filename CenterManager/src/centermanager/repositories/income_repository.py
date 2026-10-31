@@ -507,15 +507,17 @@ class IncomeRepository(BaseRepository[Income]):
             query = query.filter(Income.class_id == class_id)
         return query.group_by(Income.student_id, Income.class_id).all()
 
-    def aggregate_active_amounts_by_payment_method(self, *, finance_period_start: date,
+    def aggregate_active_amounts_by_payment_method(self, *, finance_period_start: Optional[date] = None,
                                                    date_from: date, date_to: date):
-        return self._session.query(
+        query = self._session.query(
             Income.payment_method, func.coalesce(func.sum(Income.amount), 0)
         ).filter(
             Income.deleted_at.is_(None), Income.status == Income.STATUS_ACTIVE,
-            Income.finance_period_start == finance_period_start,
             Income.payment_date >= date_from, Income.payment_date <= date_to,
-        ).group_by(Income.payment_method).all()
+        )
+        if finance_period_start is not None:
+            query = query.filter(Income.finance_period_start == finance_period_start)
+        return query.group_by(Income.payment_method).all()
 
     def delete(self, income: Income) -> None:
         income.deleted_at = datetime.now()

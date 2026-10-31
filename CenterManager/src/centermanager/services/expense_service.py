@@ -253,6 +253,21 @@ class ExpenseService:
             )
 
     @require_permission("finance.view")
+    def aggregate_by_payment_method(
+        self, *, date_from: date, date_to: date,
+        finance_period_start: Optional[date] = None,
+    ):
+        """Complete realized Expense totals for an exact reporting range."""
+        with self._session_factory() as session:
+            return self._repository_provider.expenses(
+                session
+            ).aggregate_realized_amounts_by_payment_method(
+                date_from=date_from, date_to=date_to,
+                finance_period_start=finance_period_start,
+                realized_only=True,
+            )
+
+    @require_permission("finance.view")
     def export_expenses_csv(self, destination: str, category: Optional[str] = None,
                             payment_method: Optional[str] = None, status: Optional[str] = None,
                             date_from: Optional[date] = None, date_to: Optional[date] = None,
