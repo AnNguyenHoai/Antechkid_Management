@@ -54,7 +54,7 @@ class FakeRemoteProvider:
                 and (session_id is None or item.get("session_id") == session_id)
             )
         ]
-        return len(self.queue) != before
+        return True  # idempotent, acknowledged cancellation barrier
 
     def remote_lock_status(self):
         return dict(self.lock)
@@ -67,7 +67,7 @@ class FakeRemoteProvider:
         ).isoformat()
         return True
 
-    def release_lock(self, owner):
+    def release_lock(self, owner, session_id=None):
         self.release_calls += 1
         if not self.release_ok:
             return False

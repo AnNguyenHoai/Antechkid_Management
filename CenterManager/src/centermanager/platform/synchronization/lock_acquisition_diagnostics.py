@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from functools import wraps
+from .lock_observation import observe_lock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,10 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
             if expected_oid is not None:
                 self._fetch_lock_branch()
                 remote_lock = self._read_lock_from_oid(expected_oid)
+                observation = observe_lock(remote_lock, oid=expected_oid, now=datetime.now())
+                if observation["state"] == "UNKNOWN":
+                    self._last_lock_error = observation["error"]
+                    return False
                 if self._is_lock_valid(remote_lock):
                     owner = remote_lock.get("owner") or remote_lock.get("username") or "unknown"
                     self._last_lock_contention = True
@@ -127,6 +132,10 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 datetime.now() + timedelta(seconds=self._lease_duration_seconds)
             ).isoformat()
 
+            requested = observe_lock(lock_data, now=datetime.now())
+            if requested["state"] != "ACTIVE":
+                self._last_lock_error = requested.get("error") or "Invalid WRITE session identity."
+                return False
             commit_sha = self._create_lock_commit_plumbing(lock_data, expected_oid)
             if not commit_sha:
                 self._last_lock_error = (
@@ -136,6 +145,7 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 logger.error(self._last_lock_error)
                 return False
 
+            self._remember_lock_token(lock_data, commit_sha)
             if not self._push_lock_branch(commit_sha, expected_oid):
                 # A failed CAS may still be a legitimate race. Re-read the
                 # authoritative lock before classifying it as an operational
@@ -143,6 +153,12 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 current_oid = self._remote_lock_oid()
                 if current_oid is not None:
                     current_lock = self._read_lock_from_oid(current_oid)
+                    if (current_oid == commit_sha
+                            and self.owns_lock_observation(
+                                observe_lock(current_lock, oid=current_oid, now=datetime.now()),
+                                lock_data.get("owner"), lock_data.get("session_id"))):
+                        self._remember_lock_token(current_lock, current_oid, verified=True)
+                        return True  # push response lost; authoritative read-back confirms it
                     current_session = current_lock.get("session_id")
                     requested_session = lock_data.get("session_id")
                     current_blocks_takeover = self._is_lock_valid(current_lock)
@@ -188,7 +204,11 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
                 return False
 
             remote_verify = self._read_lock_from_oid(new_oid)
-            if remote_verify.get("session_id") == lock_data.get("session_id"):
+            if (new_oid == commit_sha
+                    and remote_verify.get("session_id") == lock_data.get("session_id")
+                    and remote_verify.get("owner") == lock_data.get("owner")
+                    and self._is_lock_valid(remote_verify)):
+                self._remember_lock_token(remote_verify, new_oid, verified=True)
                 logger.info(
                     "Atomic lock acquired successfully: session=%s",
                     lock_data.get("session_id"),

@@ -107,7 +107,7 @@ def test_unlocked_remote_state_is_reclaimable_without_skew_delay():
     assert is_remote_write_lock_reclaimable(remote_lock, _contender(), now=now) is True
 
 
-def test_malformed_lease_keeps_historical_stale_lock_behavior():
+def test_malformed_lease_is_not_reclaimable():
     remote_lock = {
         "locked": True,
         "owner": "machine-a",
@@ -115,7 +115,7 @@ def test_malformed_lease_keeps_historical_stale_lock_behavior():
         "lease_expires_at": "not-a-timestamp",
     }
 
-    assert is_remote_write_lock_reclaimable(remote_lock, _contender()) is True
+    assert is_remote_write_lock_reclaimable(remote_lock, _contender()) is False
 
 
 def test_acquire_denies_other_runtime_inside_skew_window_without_creating_commit(

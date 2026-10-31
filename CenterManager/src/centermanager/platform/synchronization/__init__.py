@@ -10,7 +10,7 @@ from .git_windows_auth import install_windows_http_auth
 from .git_clock_skew_guard import install_lock_clock_skew_guard
 from .git_commit_identity import install_portable_git_commit_identity
 from .git_origin_reconciliation import install_origin_reconciliation
-from .git_provider_safety import install_git_command_serialization
+from .git_provider_safety import install_git_command_serialization, install_lock_operation_serialization
 from .lock_acquisition_diagnostics import install_lock_acquisition_diagnostics
 from .synchronization_policy import SynchronizationPolicy, SyncPolicy
 from .version_resolver import VersionResolver, VersionStatus
@@ -78,6 +78,7 @@ install_git_command_serialization(GitSynchronizationProvider)
 # wrapper runs after the Git safety wrappers so any subprocess diagnostics have
 # already passed through credential/output sanitization.
 install_lock_acquisition_diagnostics(GitSynchronizationProvider)
+install_lock_operation_serialization(GitSynchronizationProvider)
 
 __all__ = [
     "SynchronizationManager",

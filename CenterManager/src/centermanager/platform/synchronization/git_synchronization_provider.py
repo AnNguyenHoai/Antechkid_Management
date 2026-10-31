@@ -70,6 +70,10 @@ class GitSynchronizationProvider(SynchronizationProvider):
         self._name = "git"
         self._credential_helper: Optional[GitCredentialHelper] = None
         self._askpass_env: dict = {}
+        self._owned_lock_token = None
+        self._released_lock_token = None
+        self._pending_lock_tokens = {}
+        self._authority_mutex = threading.RLock()
         self._lease_duration_seconds = 60
         self._collaboration_git_timeout_seconds = 15
         self._git_executable = git_executable or str(locate_git() or "")
@@ -241,58 +245,31 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
     def _remote_lock_oid(self) -> Optional[str]:
         if not self._has_remote_origin():
+            raise RemoteUnavailableError("Remote WRITE authority has no configured origin.")
+        output = self._run_git_command(
+            ["ls-remote", "origin", f"refs/heads/{self._lock_branch}"],
+            check=True, timeout=self._collaboration_git_timeout_seconds,
+        )
+        if not output:
             return None
-        try:
-            output = self._run_git_command(
-                ["ls-remote", "origin", f"refs/heads/{self._lock_branch}"],
-                check=False,
-                timeout=self._collaboration_git_timeout_seconds,
-            )
-            if not output:
-                return None
-            parts = output.split()
-            if len(parts) >= 1:
-                return parts[0]
-        except Exception as e:
-            logger.warning(f"Failed to get remote lock OID: {e}")
-        return None
+        parts = output.split()
+        if len(parts) != 2 or parts[1] != f"refs/heads/{self._lock_branch}":
+            raise RemoteUnavailableError("Remote WRITE authority returned an invalid ref.")
+        return parts[0]
 
     def _read_lock_from_oid(self, oid: str) -> Dict[str, Any]:
-        """
-        Read lock.json from a remote lock commit.
-
-        A remote OID returned by `ls-remote` is not necessarily present in this
-        client's local object database. This is especially important for a
-        second machine observing a lock created by another machine.
-
-        First try the already-local object. If it is missing, fetch only the
-        collaboration lock branch and retry. Fetching the lock branch does not
-        checkout it and does not modify MAIN HEAD, index, or working tree.
-        """
+        content = self._run_git_command(["show", f"{oid}:lock.json"], check=False)
+        if not content:
+            if not self._fetch_lock_branch():
+                raise RemoteUnavailableError("Unable to fetch remote WRITE authority.")
+            content = self._run_git_command(["show", f"{oid}:lock.json"], check=True)
         try:
-            content = self._run_git_command(
-                ["show", f"{oid}:lock.json"], check=False
-            )
-            if content:
-                return json.loads(content)
-        except Exception as e:
-            logger.debug(f"Lock OID {oid} not local yet: {e}")
-
-        # The OID came from the remote, but the commit may not exist locally.
-        # Fetch the collaboration-only lock branch once, then retry.
-        try:
-            if self._fetch_lock_branch():
-                content = self._run_git_command(
-                    ["show", f"{oid}:lock.json"], check=False
-                )
-                if content:
-                    return json.loads(content)
-        except Exception as e:
-            logger.warning(
-                f"Failed to fetch/read remote lock OID {oid}: {e}"
-            )
-
-        return {}
+            record = json.loads(content)
+        except (TypeError, ValueError) as exc:
+            raise RemoteUnavailableError("Remote WRITE authority contains unreadable lock.json.") from exc
+        if not isinstance(record, dict):
+            raise RemoteUnavailableError("Remote WRITE authority contains invalid lock.json.")
+        return record
 
     def _has_remote_origin(self) -> bool:
         if not self._repo:
@@ -308,7 +285,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         try:
             self._run_git_command(
                 ["fetch", "origin", self._lock_branch],
-                check=False,
+                check=True,
                 timeout=self._collaboration_git_timeout_seconds,
             )
             return True
@@ -529,7 +506,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             payload = {"requests": payload}
         requests = payload.get("requests")
         if not isinstance(requests, list):
-            requests = []
+            raise RemoteUnavailableError("Shared WRITE queue contains invalid requests.")
         return {"requests": requests}
 
     def _filter_live_queue_requests(self, requests: list) -> list:
@@ -772,11 +749,23 @@ class GitSynchronizationProvider(SynchronizationProvider):
                     removed["found"] = True
                     continue
                 kept.append(item)
-            return removed["found"], kept
+            # Always advance the ref, even if absent. This CAS barrier rejects
+            # a delayed enqueue push prepared before cancellation completed.
+            return True, kept
 
-        if not self._mutate_remote_queue(mutate):
-            return False
-        return removed["found"]
+        return bool(self._mutate_remote_queue(mutate))
+
+    def consume_remote_write_request(self, request_id: str, session_id: str) -> bool:
+        consumed = {"ok": False}
+
+        def mutate(requests):
+            consumed["ok"] = bool(
+                requests and requests[0].get("request_id") == request_id
+                and requests[0].get("session_id") == session_id
+            )
+            return consumed["ok"], requests[1:] if consumed["ok"] else requests
+
+        return bool(self._mutate_remote_queue(mutate) and consumed["ok"])
 
     # ===== Atomic lock operations =====
 
@@ -827,41 +816,73 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.exception(f"Lock acquisition failed: {e}")
             return False
 
-    def release_lock(self, owner: str) -> bool:
-        logger.info(f"Atomic lock release requested: owner={owner}")
+    def _remember_lock_token(self, data, oid, *, verified=False):
+        token = {
+            "owner": data.get("owner") or data.get("username"),
+            "session_id": data.get("session_id"), "oid": oid,
+            "lease_revision": data.get("lease_revision", 0),
+        }
+        if verified:
+            self._owned_lock_token = token
+            # Older CAS candidates cannot cross this confirmed ref revision.
+            self._pending_lock_tokens.clear()
+        else:
+            self._pending_lock_tokens[oid] = token
 
-        try:
-            expected_oid = self._remote_lock_oid()
-            if expected_oid is None:
-                logger.info("No remote lock to release")
-                return True
+    def has_pending_lock_candidate(self, session_id):
+        return any(token["session_id"] == session_id for token in self._pending_lock_tokens.values())
 
-            remote_lock = self._read_lock_from_oid(expected_oid)
-            if not remote_lock.get("locked", False):
-                remote_owner = remote_lock.get("owner") or remote_lock.get("username")
-                if remote_owner == owner or owner == "force_release":
-                    pass
-                else:
-                    return False
+    def _known_lock_tokens(self):
+        return [self._owned_lock_token, *self._pending_lock_tokens.values()]
 
-            remote_owner = remote_lock.get("owner") or remote_lock.get("username")
-            if remote_owner != owner and owner != "force_release":
-                logger.warning(f"Lock owner mismatch: remote={remote_owner}, caller={owner}")
+    def _matching_lock_token(self, remote, owner, session_id=None, expected_oid=None):
+        for token in self._known_lock_tokens():
+            if (token and token["owner"] == owner
+                    and (session_id is None or session_id == token["session_id"])
+                    and (expected_oid is None or expected_oid == token["oid"])
+                    and remote.get("oid") == token["oid"]
+                    and remote.get("session_id") == token["session_id"]
+                    and (remote.get("owner") or remote.get("username")) == token["owner"]
+                    and remote.get("lease_revision", 0) == token["lease_revision"]):
+                return token
+        return None
+
+    def owns_lock_observation(self, remote, owner, session_id):
+        return bool(remote.get("state") == "ACTIVE"
+                    and remote.get("authority_mode") in (None, "", "WRITE")
+                    and self._matching_lock_token(remote, owner, session_id))
+
+    def release_lock(self, owner: str, session_id: Optional[str] = None,
+                     *, expected_oid: Optional[str] = None) -> bool:
+        """Release an exact locally acquired/renewed session + revision + OID.
+
+        Preserve the last verified token and every uncertain candidate. Neither an
+        arbitrary same-username OID nor the magic 'force_release' is a permit.
+        Legacy callers omitting session_id still require a bound capability.
+        """
+        with self._authority_mutex:
+            known = [token for token in [*self._known_lock_tokens(), self._released_lock_token]
+                if token and token["owner"] == owner
+                and (session_id is None or session_id == token["session_id"])
+                and (expected_oid is None or expected_oid == token["oid"])]
+            if not known:
                 return False
-
-            # Always use deletion (no checkout)
-            # First try atomic delete with lease
-            if self._delete_lock_branch(expected_oid=expected_oid):
-                logger.info(f"Lock released by {owner}")
-                return True
-
-            # CAS failed — lock state changed → safe failure
-            logger.warning("Atomic delete failed, lock state changed. Not force-deleting.")
-            return False
-
-        except Exception as e:
-            logger.exception(f"Lock release failed: {e}")
-            return False
+            remote = self.remote_lock_status()
+            if remote["state"] == "UNKNOWN":
+                return False
+            if remote["state"] == "ABSENT":
+                token = known[0]
+            else:
+                token = self._matching_lock_token(remote, owner, session_id, expected_oid)
+                if token is None:
+                    return False
+                self._delete_lock_branch(expected_oid=token["oid"])
+                if self.remote_lock_status()["state"] != "ABSENT":
+                    return False
+            self._released_lock_token = token
+            self._owned_lock_token = None
+            self._pending_lock_tokens.clear()
+            return True
 
     def force_release(self, owner: str) -> bool:
         """Administrative force-release of a lock (use with caution)."""
@@ -930,6 +951,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 logger.error("Failed to create renewal commit")
                 return False
 
+            # Keep the exact renewal candidate as well as its prior token.
+            self._remember_lock_token(renewed_lock, commit_sha)
             # Push atomically with lease
             if not self._push_lock_branch(commit_sha, expected_oid):
                 logger.warning("Renewal push failed: lock state changed")
@@ -939,7 +962,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
             new_oid = self._remote_lock_oid()
             if new_oid is not None:
                 remote_verify = self._read_lock_from_oid(new_oid)
-                if remote_verify.get("session_id") == session_id:
+                if (new_oid == commit_sha and remote_verify.get("session_id") == session_id
+                        and remote_verify.get("owner") == owner and self._is_lock_valid(remote_verify)):
+                    self._remember_lock_token(remote_verify, new_oid, verified=True)
                     logger.info(f"Lock renewed successfully: session={session_id}")
                     return True
                 else:
@@ -954,37 +979,18 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return False
 
     def remote_lock_status(self) -> Dict[str, Any]:
-        """
-        Get remote lock status including all fields.
-        Used for diagnostics, UI, and tests.
-        """
+        from .lock_observation import observe_lock, unknown_lock
         try:
             oid = self._remote_lock_oid()
             if oid is None:
-                return {"locked": False, "owner": None, "session_id": None}
-
-            lock_data = self._read_lock_from_oid(oid)
-            if not lock_data:
-                return {"locked": False, "owner": None, "session_id": None}
-
-            return {
-                "locked": lock_data.get("locked", False),
-                "owner": lock_data.get("username") or lock_data.get("owner"),
-                "session_id": lock_data.get("session_id"),
-                "user_id": lock_data.get("user_id"),
-                "acquired_at": lock_data.get("acquired_at"),
-                "last_heartbeat": lock_data.get("last_heartbeat"),
-                "lease_expires_at": lock_data.get("lease_expires_at"),
-                "machine": lock_data.get("machine"),
-                "finishing_started_at": lock_data.get("finishing_started_at"),
-                "finishing_deadline": lock_data.get("finishing_deadline"),
-                "publish_intent": lock_data.get("publish_intent", False),
-                "lock_generation": lock_data.get("lock_generation", 0),
-                "lease_revision": lock_data.get("lease_revision", 0),
-            }
-        except Exception as e:
-            logger.debug(f"Failed to get remote lock status: {e}")
-        return {"locked": False, "owner": None, "session_id": None}
+                return observe_lock({"locked": False, "owner": None, "session_id": None})
+            return observe_lock(
+                self._read_lock_from_oid(oid), oid=oid,
+                now=datetime.now(),
+                tolerance_seconds=self._clock_skew_tolerance_seconds,
+            )
+        except Exception as exc:
+            return unknown_lock(exc)
 
     # ===== Other synchronization methods =====
 

@@ -19,7 +19,7 @@ class _RemoteLockProvider:
     def remote_lock_status(self):
         return dict(self.status)
 
-    def release_lock(self, username):
+    def release_lock(self, username, session_id=None):
         """Release the test-owned remote lock, matching the manager contract."""
         if self.status.get("owner") == username or self.status.get("username") == username:
             self.status = {}

@@ -99,6 +99,8 @@ def test_remote_generation_is_authoritative_for_transaction_fencing():
                 "locked": True,
                 "lock_generation": 9,
                 "session_id": "remote-session",
+                "owner": "remote-owner",
+                "lease_expires_at": "2999-01-01T00:00:00",
             }
 
     cm = CollaborationManager(sync_provider=Remote())

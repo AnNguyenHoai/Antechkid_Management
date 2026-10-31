@@ -164,12 +164,17 @@ class RecoveryAuthority:
         try:
             with manager._state_mutex:
                 if manager._sync_provider is not None:
-                    if session is not None:
-                        manager._sync_provider.release_lock(session.username)
+                    if not manager._sync_provider.release_lock(
+                        self._username, session_id=self._session_id,
+                    ):
+                        raise RecoveryAuthorityError("Recovery authority release is not confirmed; retry is required.")
                     manager._lock._force_release()
                 elif session is not None:
                     manager._lock.release(session)
-        finally:
+        except Exception:
+            logger.warning("Recovery authority release remains pending", exc_info=True)
+            raise
+        else:
             self._acquired = False
             self._session_id = None
             self._username = None

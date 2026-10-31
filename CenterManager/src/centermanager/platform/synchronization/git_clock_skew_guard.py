@@ -28,25 +28,28 @@ def is_remote_write_lock_reclaimable(
 
     A matching non-empty ``session_id`` identifies the same runtime/session and
     can reclaim its own expired lease immediately. Missing/mismatched session IDs
-    fail closed inside the grace window. Malformed/missing expiry keeps the
-    provider's historical stale-lock behavior and is reclaimable.
+    fail closed inside the grace window. Malformed/missing expiry is UNKNOWN
+    and cannot authorize reclamation.
     """
     if not remote_lock.get("locked", False):
         return True
 
     lease_expires_at = remote_lock.get("lease_expires_at")
     if not lease_expires_at:
-        return True
+        return False
 
     try:
         expires = datetime.fromisoformat(str(lease_expires_at))
     except (TypeError, ValueError, OverflowError):
-        return True
+        return False
 
     current_time = now or datetime.now()
 
     # A genuinely live lease is never reclaimable here, regardless of session.
-    if current_time < expires:
+    try:
+        if current_time < expires:
+            return False
+    except TypeError:
         return False
 
     remote_session = remote_lock.get("session_id")

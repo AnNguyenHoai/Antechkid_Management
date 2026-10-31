@@ -9,6 +9,13 @@ from centermanager.platform.collaboration import CollaborationManager
 from centermanager.events.event_bus import EventBus
 
 
+def _remote_authority(cm):
+    # MAIN tests still need a valid authority observation under E1A's strict
+    # diagnostics, rather than relying on MagicMock int/bool conversions.
+    return dict(cm._lock.get_lock_info(), owner=cm.get_session().username,
+                lease_expires_at="2999-01-01T00:00:00")
+
+
 @pytest.fixture
 def collab_manager(tmp_path):
     event_bus = EventBus()
@@ -27,10 +34,12 @@ def test_publish_succeeds_when_main_generation_unchanged(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = base_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -51,10 +60,12 @@ def test_publish_blocked_when_main_generation_changed(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -76,10 +87,12 @@ def test_main_conflict_independent_of_owner(collab_manager):
     tx._base_main_commit = base_commit
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -103,10 +116,12 @@ def test_version_not_advanced_on_main_conflict(collab_manager):
     tx.set_version_manager(mock_version_manager)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -135,13 +150,15 @@ def test_finish_editing_blocks_on_main_conflict(collab_manager):
     current_commit = "def456"
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = base_commit
 
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -175,11 +192,13 @@ def test_publish_only_no_fetch_pull(collab_manager):
     tx.set_sync_service(mock_sync)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = "abc123"
 
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -209,13 +228,15 @@ def test_main_unavailable_blocks_publish(collab_manager):
     tx.set_sync_service(mock_sync)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
         assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = None
 
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -243,13 +264,15 @@ def test_push_rejected_after_validation(collab_manager):
     tx.set_sync_service(mock_sync)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = current_commit
         tx.start_editing(lambda: True)
         tx._base_main_commit = base_commit
 
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -280,13 +303,15 @@ def test_base_main_commit_none_blocks_publish(collab_manager):
     tx.set_sync_service(mock_sync)
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.get_remote_main_commit.return_value = "def456"
         assert tx.start_editing(lambda: True) is True
         tx._base_main_commit = None
 
         with patch.object(cm, 'validate_write_authority', return_value={
             "valid": True,
-            "generation": 0,
+            "generation": tx._expected_generation,
+            "generation_authoritative": True,
             "owner": cm.get_session().session_id,
             "lease_valid": True,
             "finishing_deadline": None
@@ -309,6 +334,7 @@ def test_refresh_finishing_authority_main_failure(collab_manager):
     session_id = cm._session.session_id
 
     with patch.object(cm, '_sync_provider') as mock_provider:
+        mock_provider.remote_lock_status.return_value = _remote_authority(cm)
         mock_provider.remote_lock_status.return_value = {
             "locked": True,
             "session_id": session_id,
@@ -316,10 +342,12 @@ def test_refresh_finishing_authority_main_failure(collab_manager):
             "username": cm._session.username,
             "last_heartbeat": datetime.now().isoformat(),
             "lock_generation": current_gen,
+            "owner": cm.get_session().username,
+            "lease_expires_at": "2999-01-01T00:00:00",
         }
         mock_provider.get_remote_main_commit.side_effect = Exception("Network error")
 
-        with patch.object(cm, '_sync_local_lock', return_value=None):
+        with patch.object(cm, '_sync_local_lock', wraps=cm._sync_local_lock):
             result = tx.refresh_finishing_authority()
             assert result["success"] is False
             assert tx.state == WriteTransactionState.PUBLISH_CONFLICT
@@ -342,9 +370,11 @@ def test_refresh_finishing_authority_main_unavailable_keeps_blocked(collab_manag
     tx._base_main_commit = "abc123"
 
     with patch.object(cm, 'validate_write_authority') as mock_auth:
-        mock_auth.return_value = {"valid": True, "generation": 0, "owner": cm.get_session().session_id}
+        mock_auth.return_value = {"valid": True, "generation": tx._expected_generation,
+            "generation_authoritative": True, "owner": cm.get_session().session_id}
 
         with patch.object(cm, '_sync_provider') as mock_provider:
+            mock_provider.remote_lock_status.return_value = _remote_authority(cm)
             # MAIN verification thất bại (exception)
             mock_provider.get_remote_main_commit.side_effect = Exception("Simulated MAIN fetch error")
 
