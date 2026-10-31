@@ -23,6 +23,8 @@ from centermanager.ui.workspace_navigation import WorkspaceNavigation
 from centermanager.ui.workspace_header import WorkspaceHeader
 from centermanager.ui.finance_workspace.action_state import has_capability
 from centermanager.ui.finance_workspace.finance_dashboard_page import FinanceDashboardPage
+from centermanager.ui.finance_workspace.finance_diagnostics_page import FinanceDiagnosticsPage
+from centermanager.services.finance_diagnostics_service import FinanceDiagnosticsService
 from centermanager.ui.finance_workspace.income_list_page import IncomeListPage
 from centermanager.ui.finance_workspace.expense_list_page import ExpenseListPage
 from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
@@ -51,6 +53,7 @@ class FinanceWorkspaceShell(QWidget):
         parent: Optional[QWidget] = None,
         settlement_service=None,
         finance_period_service=None,
+        diagnostics_service=None,
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
@@ -60,6 +63,7 @@ class FinanceWorkspaceShell(QWidget):
         self._dashboard_service = dashboard_service
         self._outstanding_service = outstanding_service
         self._settlement_service = settlement_service
+        self._diagnostics_service = diagnostics_service
         self._platform_context = platform_context
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
@@ -92,6 +96,11 @@ class FinanceWorkspaceShell(QWidget):
                 from centermanager.services.financial_settlement_service import FinancialSettlementService
 
                 self._settlement_service = FinancialSettlementService(session_factory)
+
+        if self._diagnostics_service is None:
+            session_factory = getattr(self._income_service, "_session_factory", None)
+            if session_factory is not None:
+                self._diagnostics_service = FinanceDiagnosticsService(session_factory)
 
         self._income_service._event_bus = self._event_bus
         if hasattr(self._expense_service, "set_event_bus"):
@@ -171,6 +180,7 @@ class FinanceWorkspaceShell(QWidget):
             {"id": "expense", "icon": "📉", "label": "Expense"},
             {"id": "outstanding", "icon": "📋", "label": "Outstanding"},
             {"id": "settlement", "icon": "🧾", "label": "Settlement"},
+            {"id": "diagnostics", "icon": "🔎", "label": "Diagnostics"},
         ]
         self.nav = WorkspaceNavigation("Finance Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -205,6 +215,8 @@ class FinanceWorkspaceShell(QWidget):
             self._notification_service,
         )
         self.content_stack.addWidget(self.settlement_page)
+        self.diagnostics_page = FinanceDiagnosticsPage(self._diagnostics_service)
+        self.content_stack.addWidget(self.diagnostics_page)
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
 
@@ -385,6 +397,7 @@ class FinanceWorkspaceShell(QWidget):
             "expense": (self.expense_page, "Expense"),
             "outstanding": (self.outstanding_page, "Outstanding"),
             "settlement": (self.settlement_page, "Settlement"),
+            "diagnostics": (self.diagnostics_page, "Finance Diagnostics"),
         }
         target = pages.get(page_id)
         if target is None:
