@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -48,6 +49,10 @@ class IncomeFormDialog(QDialog):
         self._income_id = income_id
         self._is_edit = income_id is not None
         self._initial_payment_date = initial_payment_date or get_clock().today()
+        self._persisted_identity = None
+        self._persisted_refs = None
+        self._identity_unresolved = False
+        self._initial_edit_values = None
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(620)
@@ -87,6 +92,12 @@ class IncomeFormDialog(QDialog):
             "Ngày thu chỉ quyết định kỳ kế toán, không quyết định Enrollment."
         )
         form.addRow("Enrollment học phí *", self.enrollment_combo)
+
+        self.identity_label = QLabel()
+        self.identity_label.setWordWrap(True)
+        self.identity_label.setVisible(self._is_edit)
+        form.addRow("Identity đã lưu", self.identity_label)
+        form.labelForField(self.identity_label).setVisible(self._is_edit)
 
         self.tuition_picker = TuitionEnrollmentPicker(self._income_service, self)
         form.addRow("Học phí cho *", self.tuition_picker)
@@ -262,20 +273,38 @@ class IncomeFormDialog(QDialog):
                 if self._is_edit
                 else self._student_service.list_active_non_archived_students()
             )
-            self.student_combo.clear()
-            for student in students:
-                self.student_combo.addItem(
-                    f"{student.full_name} ({student.student_code})", student.id
-                )
+            previous = self.student_combo.blockSignals(True)
+            try:
+                self.student_combo.clear()
+                for student in students:
+                    self.student_combo.addItem(
+                        f"{student.full_name} ({student.student_code})", student.id
+                    )
+                if self._persisted_identity is not None and self._persisted_identity[0] is not None:
+                    self._select_persisted_identity(
+                        self.student_combo, self._persisted_identity[0],
+                        self._persisted_refs[0], "Student",
+                    )
+            finally:
+                self.student_combo.blockSignals(previous)
         except Exception:
             logger.exception("Error loading students")
 
     def _load_classes(self) -> None:
         try:
             classes = self._class_service.list_classes()
-            self.class_combo.clear()
-            for class_obj in classes:
-                self.class_combo.addItem(class_obj.name, class_obj.id)
+            previous = self.class_combo.blockSignals(True)
+            try:
+                self.class_combo.clear()
+                for class_obj in classes:
+                    self.class_combo.addItem(class_obj.name, class_obj.id)
+                if self._persisted_identity is not None and self._persisted_identity[1] is not None:
+                    self._select_persisted_identity(
+                        self.class_combo, self._persisted_identity[1],
+                        self._persisted_refs[1], "Class",
+                    )
+            finally:
+                self.class_combo.blockSignals(previous)
         except Exception:
             logger.exception("Error loading classes")
 
@@ -310,6 +339,7 @@ class IncomeFormDialog(QDialog):
         self.enrollment_combo.clear()
         if not student_id or not class_id:
             self.enrollment_combo.addItem("Chọn học sinh và lớp trước", None)
+            self._restore_enrollment_identity()
             return
         try:
             enrollments = self._income_service.list_tuition_enrollments(
@@ -317,6 +347,7 @@ class IncomeFormDialog(QDialog):
             )
             if not enrollments:
                 self.enrollment_combo.addItem("Không có Enrollment phù hợp", None)
+                self._restore_enrollment_identity()
                 return
             if len(enrollments) > 1:
                 self.enrollment_combo.addItem("— Chọn đúng Enrollment —", None)
@@ -326,9 +357,70 @@ class IncomeFormDialog(QDialog):
                 )
             if len(enrollments) == 1:
                 self.enrollment_combo.setCurrentIndex(0)
+            self._restore_enrollment_identity()
         except Exception:
             logger.exception("Error loading Tuition enrollment choices")
             self.enrollment_combo.addItem("Không thể tải Enrollment", None)
+            self._restore_enrollment_identity()
+
+    def _restore_enrollment_identity(self) -> None:
+        if self._persisted_identity is None:
+            return
+        enrollment_id = self._persisted_identity[2]
+        if enrollment_id is None:
+            self.enrollment_combo.insertItem(0, "Legacy — chưa đối soát Enrollment", None)
+            self.enrollment_combo.setCurrentIndex(0)
+            return
+        index = self.enrollment_combo.findData(enrollment_id)
+        if index < 0:
+            linked = self._persisted_refs[2]
+            if linked is not None and linked.id == enrollment_id:
+                label = self._enrollment_label(linked)
+            else:
+                label = f"UNRESOLVED Enrollment #{enrollment_id} — không tìm thấy"
+            self.enrollment_combo.addItem(label, enrollment_id)
+            index = self.enrollment_combo.count() - 1
+        self.enrollment_combo.setCurrentIndex(index)
+
+    @staticmethod
+    def _identity_text(value) -> str:
+        return "—" if value is None else f"#{value}"
+
+    def _select_persisted_identity(self, combo, identity_id, linked, label) -> bool:
+        """Append only the exact historical row; never select an unrelated first item."""
+        if identity_id is None:
+            return False
+        index = combo.findData(identity_id)
+        if index < 0:
+            if linked is not None and linked.id == identity_id:
+                status = getattr(linked, "status", "")
+                name = (f"{linked.full_name} ({linked.student_code})"
+                        if label == "Student" else linked.name)
+                suffix = f" [{status}]" if status else ""
+                if getattr(linked, "deleted_at", None) is not None:
+                    suffix += " [archived]"
+                combo.addItem(f"{name} · {label} #{identity_id}{suffix}", identity_id)
+            else:
+                combo.addItem(f"UNRESOLVED {label} #{identity_id} — không tìm thấy", identity_id)
+            index = combo.count() - 1
+        combo.setCurrentIndex(index)
+        return linked is not None and linked.id == identity_id
+
+    def _check_identity_display(self) -> bool:
+        if self._persisted_identity is None:
+            return False
+        student_id, class_id, enrollment_id, income_type = self._persisted_identity
+        if self.type_combo.currentText() != income_type:
+            return False
+        if student_id is None:
+            return self.source_combo.currentIndex() == 1 and class_id is None and enrollment_id is None
+        if self.source_combo.currentIndex() != 0:
+            return False
+        if self.student_combo.currentData() != student_id or self.class_combo.currentData() != class_id:
+            return False
+        if income_type == "Tuition":
+            return self.enrollment_combo.currentData() == enrollment_id
+        return enrollment_id is None
 
     def _lock_identity_fields(self) -> None:
         self.source_combo.setEnabled(False)
@@ -343,32 +435,33 @@ class IncomeFormDialog(QDialog):
     def _load_income(self) -> None:
         try:
             income = self._income_service.get_income(self._income_id)
+            self._persisted_identity = (
+                income.student_id, income.class_id,
+                getattr(income, "enrollment_id", None), income.income_type,
+            )
+            self._persisted_refs = (
+                getattr(income, "student", None), getattr(income, "class_", None),
+                getattr(income, "enrollment", None),
+            )
             if income.student_id is not None:
                 self.source_combo.setCurrentIndex(0)
-                student_index = self.student_combo.findData(income.student_id)
-                if student_index >= 0:
-                    self.student_combo.setCurrentIndex(student_index)
-                class_index = self.class_combo.findData(income.class_id)
-                if class_index >= 0:
-                    self.class_combo.setCurrentIndex(class_index)
+                student_resolved = self._select_persisted_identity(
+                    self.student_combo, income.student_id, self._persisted_refs[0], "Student"
+                )
+                class_resolved = self._select_persisted_identity(
+                    self.class_combo, income.class_id, self._persisted_refs[1], "Class"
+                )
             else:
                 self.source_combo.setCurrentIndex(1)
                 self.other_source_edit.setText(income.note or "")
+                student_resolved = class_resolved = True
 
             type_index = self.type_combo.findText(income.income_type)
-            if type_index >= 0:
-                self.type_combo.setCurrentIndex(type_index)
+            if type_index < 0:
+                self.type_combo.addItem(income.income_type)
+                type_index = self.type_combo.count() - 1
+            self.type_combo.setCurrentIndex(type_index)
             self._reload_enrollments()
-            if income.income_type == "Tuition":
-                if income.enrollment_id is not None:
-                    enrollment_index = self.enrollment_combo.findData(income.enrollment_id)
-                    if enrollment_index >= 0:
-                        self.enrollment_combo.setCurrentIndex(enrollment_index)
-                else:
-                    self.enrollment_combo.insertItem(
-                        0, "Legacy — chưa đối soát Enrollment", None
-                    )
-                    self.enrollment_combo.setCurrentIndex(0)
 
             self.amount_spin.setValue(income.amount)
             try:
@@ -396,6 +489,43 @@ class IncomeFormDialog(QDialog):
             self.note_edit.setText(income.note or "")
             self._on_source_changed(self.source_combo.currentIndex())
             self._lock_identity_fields()
+            enrollment_id = self._persisted_identity[2]
+            enrollment_resolved = (
+                enrollment_id is None or
+                (self._persisted_refs[2] is not None
+                 and self._persisted_refs[2].id == enrollment_id)
+            )
+            self._identity_unresolved = not (
+                student_resolved and class_resolved and enrollment_resolved
+                and self._check_identity_display()
+            )
+            editable = (
+                getattr(income, "status", "ACTIVE") == "ACTIVE"
+                and getattr(income, "deleted_at", None) is None
+            )
+            self.save_btn.setEnabled(not self._identity_unresolved and editable)
+            identity = (
+                f"Student {self._identity_text(income.student_id)} · "
+                f"Class {self._identity_text(income.class_id)} · "
+                f"Enrollment {self._identity_text(enrollment_id)}"
+            )
+            if self._identity_unresolved:
+                identity += " — UNRESOLVED; không thể lưu. Xem lịch sử/đối soát trước."
+            elif not editable:
+                identity += " — Income không ACTIVE; chỉ xem."
+            elif income.income_type == "Tuition" and enrollment_id is None:
+                identity += " — Legacy chưa đối soát; không tự gán Enrollment."
+            else:
+                identity += " — Chỉ sửa nội dung giao dịch; đối soát identity qua quy trình riêng."
+            self.identity_label.setText(identity)
+            self._initial_edit_values = {
+                "amount": self.amount_spin.value(),
+                "payment_method": self.method_combo.currentData(),
+                "payment_date": self.date_edit.date().toPython(),
+                "payment_period": self.period_combo.currentData(),
+                "received_by": self.received_by_edit.text().strip(),
+                "note": self.note_edit.text().strip(),
+            }
         except Exception as exc:
             logger.exception("Error loading income %s for edit", self._income_id)
             QMessageBox.critical(self, "Lỗi", f"Không thể tải dữ liệu thu nhập: {exc}")
@@ -441,6 +571,16 @@ class IncomeFormDialog(QDialog):
         return None, None, None, "Other", note
 
     def _save(self) -> None:
+        if self._is_edit and (
+            self._identity_unresolved or not self.save_btn.isEnabled()
+            or not self._check_identity_display()
+        ):
+            QMessageBox.warning(
+                self, "Identity chưa an toàn",
+                "Identity đã lưu không được giải quyết hoặc hiển thị không khớp. "
+                "Mở lại khoản thu hoặc dùng quy trình đối soát được cấp quyền."
+            )
+            return
         amount = self.amount_spin.value()
         if amount <= 0:
             QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
@@ -459,15 +599,20 @@ class IncomeFormDialog(QDialog):
 
         try:
             if self._is_edit:
-                self._income_service.update_income(
-                    income_id=self._income_id,
-                    amount=amount,
-                    payment_method=payment_method,
-                    payment_date=payment_date,
-                    payment_period=payment_period,
-                    received_by=received_by,
-                    note=note,
-                )
+                current = {
+                    "amount": amount,
+                    "payment_method": payment_method,
+                    "payment_date": payment_date,
+                    "payment_period": payment_period,
+                    "received_by": received_by,
+                    "note": note,
+                }
+                changed = {
+                    key: value for key, value in current.items()
+                    if value != self._initial_edit_values[key]
+                }
+                if changed:
+                    self._income_service.update_income(income_id=self._income_id, **changed)
             else:
                 student_id, class_id, enrollment_id, income_type, create_note = (
                     self._create_identity_payload()
