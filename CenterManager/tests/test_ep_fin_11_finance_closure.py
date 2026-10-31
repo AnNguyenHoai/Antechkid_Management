@@ -55,8 +55,11 @@ def test_expense_workspace_no_longer_loads_first_1000_and_slices_locally():
 
 def test_pending_expense_is_not_realized_in_dashboard_or_settlement():
     dashboard = _source("services/finance_dashboard_service.py")
+    expense_service = _source("services/expense_service.py")
     settlement = _source("services/financial_settlement_service.py")
-    assert dashboard.count("realized_only=True") >= 3
+    assert "self._expense_service.aggregate_by_payment_method(" in dashboard
+    assert 'def aggregate_by_payment_method(' in expense_service
+    assert "realized_only=True" in expense_service
     assert "finance_period_start=resolved_period_start" in dashboard
     assert "realized_only=True" in settlement
 

@@ -10,7 +10,8 @@ from centermanager.services.income_service import IncomeService
 from centermanager.services.expense_service import ExpenseService
 from centermanager.models.income import Income
 from centermanager.models.expense import Expense
-from centermanager.core.wallet import Wallet, WalletMappingError, resolve_wallet
+from centermanager.core.wallet import Wallet, resolve_wallet
+from centermanager.services.wallet_service import WalletService
 
 logger = logging.getLogger(__name__)
 
@@ -140,43 +141,23 @@ class FinanceDashboardService:
 
     def get_revenue_today(self) -> float:
         today = self._get_today_date()
-        incomes, _ = self._income_service.list_incomes(
-            date_from=today, date_to=today, page=1, per_page=10000
-        )
-        return sum(i.amount for i in incomes)
+        return sum(self.get_revenue_by_payment_method(today, today).values())
 
     def get_revenue_this_month(self) -> float:
         start = self._get_first_day_of_month()
         end = self._get_today_date()
-        incomes, _ = self._income_service.list_incomes(
-            date_from=start, date_to=end, page=1, per_page=10000
-        )
-        return sum(i.amount for i in incomes)
+        return sum(self.get_revenue_by_payment_method(start, end).values())
 
     # ---- Expense ----
 
     def get_expense_today(self) -> float:
         today = self._get_today_date()
-        expenses, _ = self._expense_service.list_expenses(
-            date_from=today,
-            date_to=today,
-            page=1,
-            per_page=10000,
-            realized_only=True,
-        )
-        return sum(e.amount for e in expenses)
+        return sum(self.get_expense_by_payment_method(today, today).values())
 
     def get_expense_this_month(self) -> float:
         start = self._get_first_day_of_month()
         end = self._get_today_date()
-        expenses, _ = self._expense_service.list_expenses(
-            date_from=start,
-            date_to=end,
-            page=1,
-            per_page=10000,
-            realized_only=True,
-        )
-        return sum(e.amount for e in expenses)
+        return sum(self.get_expense_by_payment_method(start, end).values())
 
     # ---- Cash Flow ----
 
@@ -225,23 +206,15 @@ class FinanceDashboardService:
         date_to: date,
         finance_period_start: Optional[date] = None,
     ) -> Dict[str, float]:
-        kwargs = dict(
-            date_from=date_from,
-            date_to=date_to,
-            page=1,
-            per_page=10000,
+        rows = self._income_service.aggregate_by_payment_method(
+            date_from=date_from, date_to=date_to,
+            finance_period_start=finance_period_start,
         )
-        if finance_period_start is not None:
-            kwargs["finance_period_start"] = finance_period_start
-        incomes, _ = self._income_service.list_incomes(**kwargs)
-        result: Dict[str, float] = {}
-        for inc in incomes:
-            method = self._normalize_payment_method(inc.payment_method)
-            result[method] = result.get(method, 0.0) + inc.amount
+        result = WalletService.aggregate_wallet_rows(rows, source="Income ledger")
         return {
-            "Cash": result.get("Cash", 0.0),
-            "Bank": result.get("Bank", 0.0),
-            "Other": result.get("Other", 0.0),
+            "Cash": float(result[Wallet.CASH]),
+            "Bank": float(result[Wallet.BANK]),
+            "Other": 0.0,
         }
 
     def get_expense_by_payment_method(
@@ -250,22 +223,16 @@ class FinanceDashboardService:
         date_to: date,
         finance_period_start: Optional[date] = None,
     ) -> Dict[str, float]:
-        expenses, _ = self._expense_service.list_expenses(
+        rows = self._expense_service.aggregate_by_payment_method(
             finance_period_start=finance_period_start,
             date_from=date_from,
             date_to=date_to,
-            page=1,
-            per_page=10000,
-            realized_only=True,
         )
-        result: Dict[str, float] = {}
-        for exp in expenses:
-            method = self._normalize_payment_method(exp.payment_method)
-            result[method] = result.get(method, 0.0) + exp.amount
+        result = WalletService.aggregate_wallet_rows(rows, source="Expense ledger")
         return {
-            "Cash": result.get("Cash", 0.0),
-            "Bank": result.get("Bank", 0.0),
-            "Other": result.get("Other", 0.0),
+            "Cash": float(result[Wallet.CASH]),
+            "Bank": float(result[Wallet.BANK]),
+            "Other": 0.0,
         }
 
     def get_dashboard_data(
@@ -374,10 +341,7 @@ class FinanceDashboardService:
 
     @staticmethod
     def _normalize_payment_method(value):
-        try:
-            wallet = resolve_wallet(value)
-        except WalletMappingError:
-            return "Other"
+        wallet = resolve_wallet(value)
         return "Cash" if wallet is Wallet.CASH else "Bank"
 
     def get_dashboard_snapshot(self, target_date: Optional[date] = None):

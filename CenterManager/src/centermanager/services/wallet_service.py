@@ -43,12 +43,14 @@ class WalletService:
             return Decimal("0.00")
         return Decimal(str(value)).quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
-    def _sum_rows(
-        self,
+    @classmethod
+    def aggregate_wallet_rows(
+        cls,
         rows: Iterable[Tuple[Optional[str], Any]],
         *,
         source: str,
     ) -> dict[Wallet, Decimal]:
+        """Map complete grouped SQL rows for Wallet, Settlement and Dashboard."""
         totals = {
             Wallet.CASH: Decimal("0.00"),
             Wallet.BANK: Decimal("0.00"),
@@ -59,10 +61,13 @@ class WalletService:
             except ValueError as exc:
                 raise ValueError(
                     f"{source} contains an unknown wallet alias {payment_method!r}; "
-                    "reconciliation cannot continue safely."
+                    "financial totals cannot continue safely."
                 ) from exc
-            totals[wallet] += self._money(amount)
-        return {wallet: self._money(amount) for wallet, amount in totals.items()}
+            totals[wallet] += cls._money(amount)
+        return {wallet: cls._money(amount) for wallet, amount in totals.items()}
+
+    def _sum_rows(self, rows, *, source: str) -> dict[Wallet, Decimal]:
+        return self.aggregate_wallet_rows(rows, source=source)
 
     def _calculate_in_session(
         self,

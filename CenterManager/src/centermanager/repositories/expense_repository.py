@@ -178,6 +178,7 @@ class ExpenseRepository(BaseRepository[Expense]):
         date_from: date,
         date_to: date,
         realized_only: bool = True,
+        finance_period_start: Optional[date] = None,
     ):
         """Return complete Expense totals grouped by payment method in SQL.
 
@@ -195,6 +196,8 @@ class ExpenseRepository(BaseRepository[Expense]):
         )
         if realized_only:
             query = query.filter(Expense.status.in_(self.REALIZED_STATUSES))
+        if finance_period_start is not None:
+            query = query.filter(Expense.payment_date >= finance_period_start)
         return query.group_by(Expense.payment_method).all()
 
     def soft_delete(self, expense: Expense) -> None:
