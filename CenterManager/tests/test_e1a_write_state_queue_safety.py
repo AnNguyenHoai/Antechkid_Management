@@ -26,6 +26,7 @@ def test_typed_lease_boundaries_keep_original_time_policy(offset, state):
 @pytest.mark.parametrize("bad", [
     {"lease_expires_at": "bad"}, {"lease_expires_at": None},
     {"session_id": ""}, {"lease_revision": -1}, {"locked": "false"},
+    {"owner": 123}, {"owner": "owner", "username": "different-owner"},
 ])
 def test_invalid_lock_never_grants_or_releases(machines, bad):
     owner, provider = machines("owner")

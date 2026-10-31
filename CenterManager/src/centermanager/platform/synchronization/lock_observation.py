@@ -34,8 +34,15 @@ def observe_lock(data, *, oid=None, now=None, tolerance_seconds=600):
     try:
         if not isinstance(data.get("session_id"), str) or not data["session_id"].strip():
             raise ValueError("missing session identity")
-        if not (data.get("owner") or data.get("username")):
+        for field in ("owner", "username"):
+            value = data.get(field)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"invalid {field}")
+        owner = data.get("owner") or data.get("username")
+        if not owner or not owner.strip():
             raise ValueError("missing owner")
+        if data.get("username") and data["username"] != owner:
+            raise ValueError("owner identity mismatch")
         for field in ("lease_revision", "lock_generation"):
             value = data.get(field, 0)
             if type(value) is not int or value < 0:
