@@ -107,6 +107,12 @@ def encrypt_plaintext_database_in_place(database_path: Path, key: bytes) -> Path
     no application process is concurrently writing the source database.
     """
     database_path = Path(database_path).resolve()
+    from centermanager.database.mutation_authority import gate_for, is_runtime_path
+    if is_runtime_path(database_path):
+        if gate_for(database_path).transaction is not None:
+            raise DatabaseEncryptionMigrationError('Close CenterManager before offline runtime conversion.')
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
     if not database_path.is_file():
         raise DatabaseEncryptionMigrationError(
             f"Database does not exist: {database_path}"

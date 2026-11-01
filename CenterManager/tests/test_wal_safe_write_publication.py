@@ -13,12 +13,13 @@ def _install_direct_runtime_fence(monkeypatch, *, on_refresh=None):
     """Exercise WAL publication without touching the process-global test fence."""
     import centermanager.database.session as session_module
 
-    monkeypatch.setattr(session_module, "quiesce_runtime_db", lambda: None)
-    monkeypatch.setattr(
-        session_module,
-        "refresh_runtime_db",
-        on_refresh if on_refresh is not None else (lambda: None),
-    )
+    from centermanager.database.engine import begin_runtime_db_maintenance, end_runtime_db_maintenance
+    monkeypatch.setattr(session_module, "quiesce_runtime_db", begin_runtime_db_maintenance)
+    def refresh():
+        end_runtime_db_maintenance()
+        if on_refresh is not None:
+            on_refresh()
+    monkeypatch.setattr(session_module, "refresh_runtime_db", refresh)
 
     @contextlib.contextmanager
     def direct_connection(opener, **_kwargs):

@@ -9,6 +9,12 @@ from centermanager.platform.backup import backup_service
 
 
 class _Row:
+    def execute(self, statement, parameters=()):
+        return self
+
+    def close(self):
+        pass
+
     def __init__(self, value="ok"):
         self._value = value
 
@@ -17,6 +23,17 @@ class _Row:
 
 
 class _FakeConnection:
+    in_transaction = False
+
+    def set_authorizer(self, callback):
+        pass  # Read-only ownership instrumentation; real driver coverage is separate.
+
+    def set_progress_handler(self, callback, count):
+        pass
+
+    def cursor(self):
+        return _Row()
+
     def __init__(self):
         self.closed = False
         self.backup_target = None
@@ -41,7 +58,7 @@ def test_runtime_db_boundary_tracks_owner_and_unregisters_after_native_close():
         lambda: raw,
         owner="unit-test-owner",
     ) as connection:
-        assert connection is raw
+        assert connection._raw is raw
         assert database_engine.runtime_dbapi_connection_count() == baseline + 1
         details = dict(database_engine.runtime_dbapi_connection_details())
         assert details[id(raw)].owner == "unit-test-owner"
@@ -163,7 +180,7 @@ def test_sqlalchemy_registry_remains_visible_until_native_driver_close(tmp_path,
     )
 
     connection = engine.connect()
-    raw = connection.connection.driver_connection
+    raw = connection.connection.driver_connection._raw
     assert id(raw) in database_engine._runtime_dbapi_connections
 
     connection.close()

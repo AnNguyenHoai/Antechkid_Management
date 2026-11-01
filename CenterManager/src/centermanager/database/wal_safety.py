@@ -48,7 +48,8 @@ def _checkpoint_runtime_database(db_path: Path, *, encrypted: bool, key: bytes |
             check_same_thread=False,
         )
 
-    with runtime_dbapi_connection(
+    from centermanager.database.mutation_authority import system_mutation_permit
+    with system_mutation_permit("checkpoint"), runtime_dbapi_connection(
         open_connection,
         owner="write-publication-wal-checkpoint",
         maintenance_owned=True,

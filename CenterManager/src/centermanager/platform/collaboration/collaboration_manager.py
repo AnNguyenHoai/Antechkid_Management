@@ -2,6 +2,7 @@
 """CollaborationManager - Main collaboration coordination service."""
 
 import logging
+import time
 import uuid
 import threading
 import json
@@ -128,17 +129,22 @@ class CollaborationManager:
     # ===================== Helper methods =====================
 
     def _get_remote_lock_status(self) -> Dict[str, Any]:
-        """Get authoritative remote lock status."""
+        """Observe existing authority and feed the local persistence consumer."""
+        started = time.monotonic()
         if self._sync_provider is None:
             return {"locked": False, "owner": None, "session_id": None}
         try:
             remote = self._sync_provider.remote_lock_status()
-            if remote.get("state") == "UNKNOWN":
-                return unknown_lock(remote.get("error") or "Remote authority is unverified.")
-            return observe_lock(remote, oid=remote.get("oid"), now=datetime.now())
+            result = (unknown_lock(remote.get("error") or "Remote authority is unverified.")
+                      if remote.get("state") == "UNKNOWN"
+                      else observe_lock(remote, oid=remote.get("oid"), now=datetime.now()))
         except Exception as e:
             logger.warning(f"Failed to get remote lock status: {e}")
-            return unknown_lock(e)
+            result = unknown_lock(e)
+        gate = getattr(self, '_mutation_gate', None)
+        if gate is not None:
+            gate.observe(result, started)
+        return result
 
     def _remote_queue_supported(self) -> bool:
         return bool(
@@ -626,6 +632,9 @@ class CollaborationManager:
             return self._enqueue_or_return_waiting(reason, request_id)
 
     def release_write(self) -> bool:
+        gate = getattr(self, "_mutation_gate", None)
+        if gate is not None:
+            gate.close()
         self._ensure_initialized()
         if not self._is_writing:
             logger.warning("Not in write mode")
@@ -746,6 +755,9 @@ class CollaborationManager:
         Existing remote ownership is left untouched so the user has one lease
         window to recover; after expiry another writer may acquire normally.
         """
+        gate = getattr(self, "_mutation_gate", None)
+        if gate is not None:
+            gate.close()
         with self._state_mutex:
             self._lease_renewal_suspended = True
             logger.warning("Automatic WRITE lease renewal suspended")
@@ -781,6 +793,13 @@ class CollaborationManager:
             logger.info("Cleared stale local WRITE projection for recovery")
 
     def renew_remote_lease(self, force: bool = False) -> bool:
+        result = self._renew_remote_lease(force)
+        gate = getattr(self, '_mutation_gate', None)
+        if not result and gate is not None:
+            gate.invalidate("WRITE lease renewal failed; authority is uncertain")
+        return result
+
+    def _renew_remote_lease(self, force: bool = False) -> bool:
         self._ensure_initialized()
         with self._state_mutex:
             if self._sync_provider is None or not self._is_writing or self._session is None:
@@ -789,7 +808,7 @@ class CollaborationManager:
                 logger.debug("Skipping automatic WRITE lease renewal while suspended")
                 return True
             try:
-                remote = self._sync_provider.remote_lock_status()
+                remote = self._get_remote_lock_status()
                 if not remote.get("locked", False) or remote.get("session_id") != self._session.session_id:
                     return False
                 lease_expires_at = remote.get("lease_expires_at")

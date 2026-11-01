@@ -28,10 +28,10 @@ from centermanager.events.event_bus import EventBus
 
 
 @pytest.fixture
-def reporting(workspace, monkeypatch):
+def reporting(workspace, monkeypatch, tmp_path):
     w = workspace
-    engine = create_engine_for_path(w.journal.database, encrypted=True, encryption_key=KEY,
-                                    runtime_guarded=True, allow_create=False)
+    seed_path = tmp_path / "reporting-seed.db"
+    engine = create_engine_for_path(seed_path, encrypted=True, encryption_key=KEY)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     with factory() as db:
@@ -46,6 +46,12 @@ def reporting(workspace, monkeypatch):
                       report_type="legacy", generated_by="synthetic", metadata_json="{}"))
         db.add(Attendance(id=1, session_id=1, student_id=1, status='Absent'))
         db.commit()
+    engine.dispose()
+    import shutil
+    shutil.copy2(seed_path, w.journal.database)
+    engine = create_engine_for_path(w.journal.database, encrypted=True, encryption_key=KEY,
+                                    runtime_guarded=True, allow_create=False)
+    factory = sessionmaker(bind=engine)
     materialize_runtime_database_to_repository()
     git(w.journal.repository, 'add', '.')
     git(w.journal.repository, 'commit', '-m', 'synthetic reporting schema and fixtures')
@@ -53,8 +59,15 @@ def reporting(workspace, monkeypatch):
     w.base = git(w.journal.repository, 'rev-parse', 'HEAD')
     monkeypatch.setattr(HeartbeatManager, 'start', lambda self: None)
     cm = CollaborationManager(runtime_root=w.paths.runtime_root, event_bus=EventBus(), sync_provider=w.provider)
-    cm.initialize('synthetic', 'synthetic', 'admin')
+    cm.initialize('1', 'synthetic', 'admin')
     tx = WriteTransactionManager(cm)
+    tx.enable_local_mutation_gate()
+    from types import SimpleNamespace
+    from centermanager.core.current_user import get_current_user, set_current_user
+    from centermanager.core.capabilities import Capability
+    old_actor = get_current_user()
+    set_current_user(SimpleNamespace(id=1, full_name='Synthetic', username='synthetic', role=SimpleNamespace(name='admin'),
+                                    is_active=True, permissions=set(Capability.values())))
     students = StudentService(factory)
     service = ReportService(students, None, None, None, None, None, None, factory,
                             write_guard=WriteGuard(cm))
@@ -94,6 +107,7 @@ def reporting(workspace, monkeypatch):
     w.accepted, w.post_accept_writes = accepted, post_accept_writes
     yield w
     cm.shutdown()
+    set_current_user(old_actor)
     engine.dispose()
 
 
@@ -268,10 +282,13 @@ def test_unaccepted_or_unknown_publish_keeps_existing_artifacts_and_recovery_pro
 def test_active_sqlcipher_wal_during_reports_is_preserved_in_publication(reporting):
     w = reporting
     assert w.tx.start_editing()
+    # Prepare WAL through an unmodified external-client simulation. Live
+    # application handles cannot change persistence PRAGMAs without maintenance.
+    raw = connect(w.journal.database)
+    raw.execute('PRAGMA journal_mode=WAL')
+    raw.execute('PRAGMA wal_autocheckpoint=0')
+    raw.close()
     with w.factory() as db:
-        from sqlalchemy import text
-        db.execute(text('PRAGMA journal_mode=WAL'))
-        db.execute(text('PRAGMA wal_autocheckpoint=0'))
         db.get(Student, 1).full_name = 'WAL SYNTHETIC'
         db.commit()
     w.reports.generate_student_report(1)  # READ projection while WRITE/WAL is active.
@@ -371,9 +388,14 @@ def test_true_post_publish_sql_mutation_still_preserves_recovery(reporting):
     assert w.tx.start_editing()
     mutate(w)
     def unexpected_authoritative_side_effect():
-        with w.factory() as db:
-            db.get(Student, 1).full_name = 'UNACCEPTED CALLBACK'
-            db.commit()
+        # Unmodified/third-party writer outside the application gate remains an
+        # E1C blocker; E1B-1 must still detect and preserve its actual mutation.
+        raw = connect(w.journal.database)
+        try:
+            raw.execute("UPDATE students SET full_name='UNACCEPTED CALLBACK' WHERE id=1")
+            raw.commit()
+        finally:
+            raw.close()
     assert w.tx.finish_editing(on_publish_success=unexpected_authoritative_side_effect)
     assert w.tx.state == WriteTransactionState.RECOVERY_REQUIRED
     assert w.journal.inspect()['status'] == 'POST_PUBLISH_PENDING'
@@ -424,7 +446,7 @@ def test_production_renderer_respects_permissions_without_blocking_core_publish(
         StudentNoteService(w.factory), OutstandingService(w.factory),
         IncomeService(w.factory, None, None, None, None))
     permissions = {c.value for c in Capability} if role == 'admin' else {'student.view', 'student.update'}
-    principal = SimpleNamespace(role=SimpleNamespace(name=role), is_active=True,
+    principal = SimpleNamespace(id=1, role=SimpleNamespace(name=role), is_active=True,
                                 permissions=permissions, full_name='Synthetic Renderer')
     with CurrentUserContext(principal):
         assert w.tx.start_editing(), w.tx.last_start_error

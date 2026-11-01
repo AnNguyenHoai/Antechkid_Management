@@ -128,7 +128,9 @@ def test_active_wal_repeated_captures_never_lose_commits(workspace):
     begin(workspace)
     j = workspace.journal
     from centermanager.database.engine import acquire_runtime_dbapi_connection
-    writer = acquire_runtime_dbapi_connection(lambda: connect(j.database), owner='synthetic-wal-writer')
+    # Unmodified legacy-client simulation: E1B-1 must still protect its WAL.
+    # E1B-2B separately verifies that application-owned raw handles deny READ DML.
+    writer = connect(j.database)
     try:
         writer.execute('PRAGMA journal_mode=WAL')
         writer.execute('PRAGMA wal_autocheckpoint=0')

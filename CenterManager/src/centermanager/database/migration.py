@@ -156,24 +156,28 @@ def _upgrade_database_with_engine(database_path: Path, engine) -> None:
     successful migration lifecycle.
     """
     database_path = Path(database_path).resolve()
-    with engine.begin() as connection:
-        inspector = inspect(connection)
-        tables = set(inspector.get_table_names())
+    from contextlib import nullcontext
+    from centermanager.database.mutation_authority import is_runtime_path, system_mutation_permit
+    permit = system_mutation_permit("migration") if is_runtime_path(database_path) else nullcontext()
+    with permit:
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            tables = set(inspector.get_table_names())
 
-        config = get_alembic_config(database_path)
-        config.attributes["connection"] = connection
+            config = get_alembic_config(database_path)
+            config.attributes["connection"] = connection
 
-        if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
-            logger.info(
-                "Legacy database detected without Alembic version; stamping baseline %s",
-                "5ce9314feb37",
-            )
-            command.stamp(config, "5ce9314feb37")
+            if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
+                logger.info(
+                    "Legacy database detected without Alembic version; stamping baseline %s",
+                    "5ce9314feb37",
+                )
+                command.stamp(config, "5ce9314feb37")
 
-        logger.info("Upgrading database schema to Alembic head: %s", database_path)
-        command.upgrade(config, "head")
-        _validate_post_upgrade_schema(connection, config)
-        logger.info("Database schema migration completed successfully: %s", database_path)
+            logger.info("Upgrading database schema to Alembic head: %s", database_path)
+            command.upgrade(config, "head")
+            _validate_post_upgrade_schema(connection, config)
+            logger.info("Database schema migration completed successfully: %s", database_path)
 
 
 def upgrade_database_path_to_head(database_path: Path) -> None:

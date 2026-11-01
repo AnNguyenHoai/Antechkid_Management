@@ -54,7 +54,7 @@ def test_guarded_encrypted_connection_is_registered_until_native_close(monkeypat
         runtime_guarded=True,
     )
     try:
-        assert connection is raw
+        assert connection._raw is raw
         assert database_engine.runtime_dbapi_connection_count() >= 1
     finally:
         raw.close()

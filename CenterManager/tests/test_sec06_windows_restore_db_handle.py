@@ -159,7 +159,8 @@ def test_retained_runtime_engine_cannot_reopen_database_while_restore_fenced(tmp
         runtime_guarded=True,
     )
     try:
-        with engine.begin() as connection:
+        from centermanager.database.mutation_authority import system_mutation_permit
+        with system_mutation_permit("migration", path=db_path), engine.begin() as connection:
             connection.execute(text("CREATE TABLE probe (id INTEGER PRIMARY KEY)"))
 
         db_engine.begin_runtime_db_maintenance()

@@ -71,6 +71,9 @@ class BackupService:
         runtime_guarded: bool = False,
     ) -> None:
         """Create a transactionally consistent plaintext SQLite snapshot."""
+        from centermanager.database.mutation_authority import is_runtime_path
+        if is_runtime_path(destination_path):
+            raise RuntimeError("Snapshot destination cannot be the live runtime database; use authorized restore")
         source_uri = source_path.resolve().as_uri() + "?mode=ro"
 
         def open_source():
@@ -117,6 +120,9 @@ class BackupService:
         destination pager writes ciphertext with the workspace key.
         """
         sqlcipher = load_sqlcipher_driver()
+        from centermanager.database.mutation_authority import is_runtime_path
+        if is_runtime_path(destination_path):
+            raise RuntimeError("Snapshot destination cannot be the live runtime database; use authorized restore")
         source_uri = source_path.resolve().as_uri() + "?mode=ro"
 
         def open_source():
