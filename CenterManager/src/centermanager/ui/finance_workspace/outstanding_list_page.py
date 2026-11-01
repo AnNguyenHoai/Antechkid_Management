@@ -101,6 +101,12 @@ class OutstandingListPage(QWidget):
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(SPACING["sm"])
+        self.view_combo = QComboBox()
+        self.view_combo.addItem("Công nợ còn mở (tất cả kỳ)", OutstandingService.VIEW_OPEN_RECEIVABLES)
+        self.view_combo.addItem("Phát sinh trong kỳ", OutstandingService.VIEW_PERIOD_ACTIVITY)
+        self.view_combo.currentIndexChanged.connect(self._view_changed)
+        filter_row.addWidget(QLabel("Chế độ:"))
+        filter_row.addWidget(self.view_combo)
         self.status_combo = QComboBox()
         self.status_combo.addItem("Tất cả trạng thái", None)
         self.status_combo.addItem("Còn nợ", BALANCE_STATE_OWED)
@@ -176,6 +182,13 @@ class OutstandingListPage(QWidget):
         else:
             logger.info("Outstanding notification: %s", message)
 
+    def _view(self) -> str:
+        return self.view_combo.currentData()
+
+    def _view_changed(self, *_args) -> None:
+        self._current_page = 1
+        self.refresh()
+
     def refresh(
         self,
         *_args,
@@ -201,7 +214,7 @@ class OutstandingListPage(QWidget):
 
         self.loading.setVisible(True)
         try:
-            if self._period_configured is False:
+            if self._period_configured is False and self._view() == OutstandingService.VIEW_PERIOD_ACTIVITY:
                 self._items = []
                 self._total_rows = 0
                 self._populate_table()
@@ -212,6 +225,7 @@ class OutstandingListPage(QWidget):
                 self._service.list_outstanding_classes(
                     period_start=self._period_start,
                     on_date=self._target_date,
+                    view=self._view(),
                 )
             )
             self._load_page()
@@ -244,7 +258,7 @@ class OutstandingListPage(QWidget):
         self._load_page()
 
     def _load_page(self) -> None:
-        if self._period_configured is False:
+        if self._period_configured is False and self._view() == OutstandingService.VIEW_PERIOD_ACTIVITY:
             self._items = []
             self._total_rows = 0
             self._populate_table()
@@ -260,6 +274,7 @@ class OutstandingListPage(QWidget):
             sort_by=self._sort_by,
             ascending=self._sort_ascending,
             hide_settled_inactive=True,
+            view=self._view(),
         )
         max_page = max(1, (total + self._page_size - 1) // self._page_size)
         if self._current_page > max_page:
@@ -273,6 +288,7 @@ class OutstandingListPage(QWidget):
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
                 hide_settled_inactive=True,
+                view=self._view(),
             )
 
         self._items = items
@@ -387,7 +403,7 @@ class OutstandingListPage(QWidget):
         self._load_page()
 
     def _export_csv(self) -> None:
-        if self._period_configured is False:
+        if self._period_configured is False and self._view() == OutstandingService.VIEW_PERIOD_ACTIVITY:
             self._notify("Finance period is not configured.", "warning")
             return
         filename, _ = QFileDialog.getSaveFileName(
@@ -408,6 +424,7 @@ class OutstandingListPage(QWidget):
                 sort_by=self._sort_by,
                 ascending=self._sort_ascending,
                 hide_settled_inactive=True,
+                view=self._view(),
             )
             Path(filename).write_text(csv_text, encoding="utf-8-sig")
             self._notify("Xuất công nợ CSV thành công.")
