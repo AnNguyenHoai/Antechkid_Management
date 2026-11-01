@@ -46,6 +46,9 @@ class OutstandingService:
     TUITION_INCOME_TYPE = "Tuition"
     NO_TUITION_CONFIGURED_STATUS = OUTSTANDING_STATUS_NO_TUITION_CONFIGURED
 
+    VIEW_PERIOD_ACTIVITY = "PERIOD_ACTIVITY"
+    VIEW_OPEN_RECEIVABLES = "OPEN_RECEIVABLES"
+
     _SORT_GETTERS = {
         "student_code": lambda dto: dto.student_code or "",
         "student_name": lambda dto: (dto.student_name or "").casefold(),
@@ -282,14 +285,18 @@ class OutstandingService:
         sort_by: str,
         ascending: bool,
         hide_settled_inactive: bool = False,
+        view: str = VIEW_PERIOD_ACTIVITY,
     ) -> List[OutstandingDTO]:
+        if view not in (self.VIEW_PERIOD_ACTIVITY, self.VIEW_OPEN_RECEIVABLES):
+            raise ValueError(f"Unsupported outstanding view: {view}")
+        open_receivables = view == self.VIEW_OPEN_RECEIVABLES
         enrollment_repo = self._repository_provider.enrollments(session)
         enrollments, _ = enrollment_repo.list_for_outstanding(
             class_id=class_id,
             course_name=course_name,
             student_id=student_id,
-            period_start=resolved_period_start,
-            period_end=resolved_period_end,
+            period_start=None if open_receivables else resolved_period_start,
+            period_end=None if open_receivables else resolved_period_end,
             search_text=search_text,
             offset=0,
             limit=None,
@@ -298,17 +305,21 @@ class OutstandingService:
         results: List[OutstandingDTO] = []
         seen_enrollment_ids = set()
         for enrollment in enrollments:
+            if open_receivables and enrollment.start_date and enrollment.start_date > as_of_date:
+                continue
             if enrollment.id is None or enrollment.id in seen_enrollment_ids:
                 continue
             seen_enrollment_ids.add(enrollment.id)
             dto = self._calculate_from_enrollment(
                 session,
                 enrollment,
-                resolved_period_start,
-                resolved_period_end,
+                None if open_receivables else resolved_period_start,
+                None if open_receivables else resolved_period_end,
                 as_of_date=as_of_date,
             )
             if dto is None:
+                continue
+            if open_receivables and dto.balance_state != BALANCE_STATE_OWED:
                 continue
             if status_filter and status_filter not in (dto.status, dto.balance_state):
                 continue
@@ -376,15 +387,21 @@ class OutstandingService:
         ascending: bool = False,
         as_of_date: Optional[date] = None,
         hide_settled_inactive: bool = False,
+        view: str = VIEW_PERIOD_ACTIVITY,
     ) -> Tuple[List[OutstandingDTO], int, Dict[str, int]]:
         target_date = on_date or get_clock().today()
         cutoff = as_of_date or target_date
+        if view not in (self.VIEW_PERIOD_ACTIVITY, self.VIEW_OPEN_RECEIVABLES):
+            raise ValueError(f"Unsupported outstanding view: {view}")
         with self._session_factory() as session:
-            report_start, report_end, report_valid = self._report_period_for_request(
-                session,
-                target_date=target_date,
-                period_start=period_start,
-            )
+            if view == self.VIEW_OPEN_RECEIVABLES:
+                report_start, report_end, report_valid = None, None, True
+            else:
+                report_start, report_end, report_valid = self._report_period_for_request(
+                    session,
+                    target_date=target_date,
+                    period_start=period_start,
+                )
             if not report_valid:
                 return [], 0, self._stats_for_rows([])
 
@@ -401,6 +418,7 @@ class OutstandingService:
                 sort_by=sort_by,
                 ascending=ascending,
                 hide_settled_inactive=hide_settled_inactive,
+                view=view,
             )
             total = len(rows)
             stats = self._stats_for_rows(rows)
@@ -447,9 +465,20 @@ class OutstandingService:
         self,
         period_start: Optional[date] = None,
         on_date: Optional[date] = None,
+        view: str = VIEW_PERIOD_ACTIVITY,
     ) -> List[Tuple[int, str]]:
         target_date = on_date or get_clock().today()
+        if view not in (self.VIEW_PERIOD_ACTIVITY, self.VIEW_OPEN_RECEIVABLES):
+            raise ValueError(f"Unsupported outstanding view: {view}")
         with self._session_factory() as session:
+            if view == self.VIEW_OPEN_RECEIVABLES:
+                rows = self._collect_outstanding(
+                    session, class_id=None, status_filter=None, search_text=None,
+                    course_name=None, student_id=None, resolved_period_start=None,
+                    resolved_period_end=None, as_of_date=target_date,
+                    sort_by="class_name", ascending=True, view=view,
+                )
+                return sorted({(row.class_id, row.class_name) for row in rows}, key=lambda item: item[1].casefold())
             report_start, report_end, report_valid = self._report_period_for_request(
                 session,
                 target_date=target_date,
@@ -585,6 +614,7 @@ class OutstandingService:
         ascending: bool = False,
         as_of_date: Optional[date] = None,
         hide_settled_inactive: bool = False,
+        view: str = VIEW_PERIOD_ACTIVITY,
     ) -> str:
         rows, _, _ = self.get_outstanding_page(
             class_id=class_id,
@@ -599,6 +629,8 @@ class OutstandingService:
             limit=None,
             sort_by=sort_by,
             ascending=ascending,
+            hide_settled_inactive=hide_settled_inactive,
+            view=view,
         )
         output = io.StringIO(newline="")
         writer = csv.writer(output)
