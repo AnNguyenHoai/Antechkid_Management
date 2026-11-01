@@ -1,5 +1,6 @@
 from pathlib import Path
 
+TX = Path("src/centermanager/services/write_transaction.py").read_text(encoding="utf-8")
 MAIN = Path("src/centermanager/ui/main_window.py").read_text(encoding="utf-8")
 DETAIL = Path("src/centermanager/ui/student_workspace/student_detail_page.py").read_text(encoding="utf-8")
 AUTO = Path("src/centermanager/services/auto_report_service.py").read_text(encoding="utf-8")
@@ -18,10 +19,10 @@ def test_26_audit_records_all_current_report_trigger_sources():
     ):
         assert source in DOC
 
-def test_26_publish_is_post_success_and_uses_dirty_student_ids():
-    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in MAIN
-    assert "def on_publish_success():" in MAIN
-    assert 'report_type="latest"' in MAIN
+def test_26_publish_prepares_dirty_student_reports_before_snapshot():
+    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
+    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in SERVICE
 
 def test_26_manual_export_is_an_explicit_report_trigger():
     assert "def _export_pdf(self)" in DETAIL

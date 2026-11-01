@@ -26,13 +26,11 @@ def test_write_transaction_has_explicit_lifecycle_states():
         assert state in TX
 
 
-def test_publish_success_is_the_only_report_generation_gate():
-    start = MAIN.index("def on_publish_success()")
-    end = MAIN.index("def on_publish_failure", start)
-    section = MAIN[start:end]
-    assert "generate_student_report(" in section
-    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in section
-
+def test_report_preparation_precedes_publication():
+    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
+    section = _section(MAIN, 'def on_publish_success()', 'def on_publish_failure')
+    assert 'generate_student_report' not in section
 
 def test_profile_image_change_marks_student_aggregate_dirty():
     section = _section(STUDENT, "def set_profile_image", "def update_student")
@@ -72,9 +70,8 @@ def test_forced_cancel_restores_before_cleanup():
 
 
 def test_latest_report_policy_is_preserved():
-    assert 'report_type="latest"' in MAIN
-    assert "latest" in REPORT.lower()
-
+    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in REPORT
+    assert "for existing in repo.get_by_student(student_id):" in REPORT
 
 def test_filter_search_sort_share_one_filtered_base_without_parent_n_plus_one():
     section = _section(LIST, "def _filter_students", "def _populate_table")

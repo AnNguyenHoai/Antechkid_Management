@@ -16,19 +16,12 @@ STUDENT_REPOSITORY = (ROOT / "repositories/student_repository.py").read_text(enc
 
 
 def test_finish_flow_generates_reports_only_from_dirty_student_aggregates():
-    # Audit the actual post-publish callback instead of coupling this
-    # integration test to one exact trigger_event literal. The contract is:
-    # dirty student aggregates are captured and each dirty student receives
-    # the latest report only after publish succeeds.
-    start = MAIN.index("def on_publish_success()")
-    end = MAIN.index("def on_publish_failure", start)
-    section = MAIN[start:end]
-
-    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in section
-    assert "for student_id in dirty_student_ids:" in section
-    assert "generate_student_report(" in section
-    assert 'report_type="latest"' in section
-
+    # E1B-2A supersedes post-publish SQL generation: prepare before snapshot.
+    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
+    assert 'for student_id in sorted(set(student_ids)):' in REPORT_SERVICE
+    section = MAIN[MAIN.index('def on_publish_success():'):MAIN.index('def on_publish_failure')]
+    assert 'generate_student_report' not in section
 
 def test_parent_changes_dirty_the_owning_student_aggregate():
     start = MAIN.index("def _on_parent_event")
@@ -87,5 +80,5 @@ def test_archive_filter_is_explicitly_supported():
 
 
 def test_latest_report_policy_is_not_historical_accumulation():
-    assert 'report_type="latest"' in MAIN
-    assert "latest" in REPORT_SERVICE.lower()
+    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in REPORT_SERVICE
+    assert "for existing in repo.get_by_student(student_id):" in REPORT_SERVICE

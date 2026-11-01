@@ -152,6 +152,56 @@ class WriteRecoveryJournal:
                     or self._git('rev-parse', 'HEAD') != self._git('rev-parse', '@{upstream}')):
                 raise RecoveryRequired('Legacy workspace has no recovery receipt and may contain local work. Preserve it and reconcile explicitly before synchronization.')
 
+    def begin_report_artifact_update(self):
+        """Admit a rebuildable report operation, without resolving pending work."""
+        document = self.inspect()
+        if document is None or document['status'] == 'OPEN':
+            return None
+        if document['status'] == 'PUBLISHED':
+            if self._wal_pending() or _hash(self.database) != document['published_runtime_sha256']:
+                raise RecoveryRequired('Unaccepted local DB changes must be preserved before report regeneration.')
+            return None  # Existing verified-release boundary still owns finalization.
+        if document['status'] != 'CLEAN':
+            raise RecoveryRequired('Pending recovery artifacts are protected; inspect and reconcile before regenerating reports.')
+        self.assert_replaceable()
+        return document
+
+    def finish_report_artifact_update(self, before, report_paths):
+        """Refresh only proven derived report bytes in an already CLEAN receipt.
+
+        Never changes status, publication, base, authority or recovery captures.
+        All DB/WAL, repository and unrelated-file checks remain fail-closed.
+        """
+        if before is None:
+            return
+        if self.inspect() != before:
+            raise RecoveryRequired('Recovery state changed while rendering; report receipt was not accepted.')
+        report_paths = tuple(Path(p).resolve() for p in report_paths)
+        if (len(report_paths) != 2 or report_paths[0].suffix.lower() != '.pdf'
+                or report_paths[1] != report_paths[0].with_suffix('.report.json')):
+            raise RecoveryRequired('A derived update must identify one PDF and its matching report receipt.')
+        allowed = set()
+        for path in report_paths:
+            path = Path(path).resolve()
+            for name, folder in (('reports', self.runtime / 'Reports'), ('exports', self.runtime / 'Export')):
+                if path.is_relative_to(folder.resolve()) and path.suffix.lower() in {'.pdf', '.json'}:
+                    allowed.add(name + '/' + path.relative_to(folder.resolve()).as_posix())
+                    break
+            else:
+                raise RecoveryRequired('Only derived report paths can refresh a clean local receipt.')
+        current = self._local_files()
+        previous = before['accepted_local_files']
+        if ({k: v for k, v in current.items() if k not in allowed} !=
+                {k: v for k, v in previous.items() if k not in allowed}
+                or self._wal_pending()
+                or _hash(self.database) != before['published_runtime_sha256']
+                or self._repository_id() != before['repository_id']
+                or self._git('rev-parse', 'HEAD') != before['published_oid']
+                or self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired('Unaccepted workspace changes remain protected; report rendering cannot clean them.')
+        self.update(accepted_local_files=current)
+        self.assert_replaceable()
+
     def begin(self, session_id, base_oid, authority):
         if not isinstance(session_id, str) or not session_id or not isinstance(base_oid, str) or not base_oid:
             raise RecoveryRequired('A verified session and accepted MAIN base are required before local editing.')

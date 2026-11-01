@@ -938,29 +938,11 @@ class MainWindow(QMainWindow):
             return True
 
         def on_publish_success():
-            dirty_student_ids = list(self._transaction.dirty_student_ids)
-            logger.info(
-                "Post-publish Student Workspace artifact generation started: %d dirty student(s)",
-                len(dirty_student_ids),
+            report_warning = self._transaction.report_warning
+            self.statusBar().showMessage(
+                report_warning or "Changes and report metadata published successfully.",
+                0 if report_warning else 3000,
             )
-            for student_id in dirty_student_ids:
-                try:
-                    self._report_service.generate_student_report(
-                        student_id,
-                        report_type="latest",
-                        trigger_event="student_updated",
-                        generated_by="system",
-                    )
-                    logger.info(
-                        "Latest student report generated after publish: student_id=%s",
-                        student_id,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Latest student report generation failed for %s",
-                        student_id,
-                    )
-            self.statusBar().showMessage("Changes published successfully.", 3000)
             logger.info("Publish success - updating UI")
             self._update_write_buttons()
             if hasattr(self.student_workspace, "dashboard_page"):
@@ -969,7 +951,8 @@ class MainWindow(QMainWindow):
                 self.student_workspace.list_page.refresh()
             if self._closing_requested:
                 self._closing_requested = False
-                QTimer.singleShot(500, self.close)
+                if not report_warning:
+                    QTimer.singleShot(500, self.close)
 
         def on_publish_failure(error: str):
             logger.error(f"Publish failure: {error}")
@@ -1001,6 +984,11 @@ class MainWindow(QMainWindow):
             self._update_waiting_status()
 
         self._update_write_buttons()
+        if not success and self._transaction.last_finish_error:
+            self._closing_requested = False
+            QMessageBox.warning(self, "Finish Editing Incomplete", self._transaction.last_finish_error)
+        elif success and self._transaction.report_warning:
+            QMessageBox.warning(self, "Reports Incomplete", self._transaction.report_warning)
 
         if not success and self._transaction.state == WriteTransactionState.FAILED:
             self._show_publish_failure_dialog()
