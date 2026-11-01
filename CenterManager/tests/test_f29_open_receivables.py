@@ -114,3 +114,26 @@ def test_repaid_old_debt_drops_out_at_as_of_but_is_not_deleted():
         on_date=date(2026, 11, 30),
     )
     assert count == 0
+
+
+def test_open_receivables_works_without_finance_period_configuration():
+    service, _, _ = _historical_debt()
+    # An absent FinancePeriod must not hide historical debts in the open view.
+    service._report_period_for_request = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("Open receivables must not resolve a finance period")
+    )
+    rows, total, _ = service.get_outstanding_page(
+        view=OutstandingService.VIEW_OPEN_RECEIVABLES,
+        on_date=date(2026, 10, 31), limit=None,
+    )
+    assert total == 1
+    assert rows[0].balance_state == "OWED"
+
+
+def test_workspace_defaults_open_receivables_and_passes_view_to_csv():
+    from pathlib import Path
+    ui = (Path(__file__).resolve().parents[1] / "src" / "centermanager"
+          / "ui" / "finance_workspace" / "outstanding_list_page.py").read_text(encoding="utf-8")
+    assert 'self.view_combo.addItem("Công nợ còn mở (tất cả kỳ)", OutstandingService.VIEW_OPEN_RECEIVABLES)' in ui
+    assert "view=self._view()" in ui
+    assert ui.count("view=self._view()") >= 4
