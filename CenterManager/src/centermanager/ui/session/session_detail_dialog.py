@@ -117,6 +117,18 @@ class SessionDetailDialog(QDialog):
         # Set default tab
         self.tab_widget.setCurrentIndex(0)  # Attendance first
 
+    def set_historical_read_only(self, enabled: bool = True) -> None:
+        """Archive history is inspectable, never editable from session detail."""
+        self.edit_btn.setEnabled(not enabled)
+        # These composite widgets contain note/highlight and Attendance write
+        # controls. Disabling them leaves their loaded historical content visible
+        # while preventing UI-origin mutations and accidental Save actions.
+        self.attendance_widget.setEnabled(not enabled)
+        self.note_widget.setEnabled(not enabled)
+        self.highlight_widget.setEnabled(not enabled)
+        if enabled:
+            self.setWindowTitle("Teaching History — Read Only")
+
     def _create_overview_tab(self) -> QWidget:
         """Create the Overview tab containing session info, attendance summary, note and highlights."""
         tab = QWidget()
