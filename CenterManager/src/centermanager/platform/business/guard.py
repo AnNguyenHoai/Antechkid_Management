@@ -26,7 +26,19 @@ class WriteGuard:
         """Check if write is allowed."""
         if not self._collab_manager.is_initialized():
             return False
-        return self._collab_manager.is_writing()
+        if not self._collab_manager.is_writing():
+            return False
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.database.encryption import database_encryption_required
+        journal = WriteRecoveryJournal()
+        if database_encryption_required() or (journal.database.exists() and (journal.repository / ".git").exists()):
+            try:
+                document = journal.inspect()
+                return bool(document and document['status'] == 'OPEN'
+                            and document['session_id'] == self._collab_manager.get_session_id())
+            except Exception:
+                return False
+        return True
 
     def require_write(self) -> None:
         """Require write permission. Raises PermissionDeniedError if not allowed."""

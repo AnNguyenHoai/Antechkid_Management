@@ -194,6 +194,9 @@ def activate(
 ) -> tuple[Path, Path]:
     source = source.expanduser().resolve()
     clean_copy = clean_copy.expanduser().resolve()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from centermanager.platform.write_recovery import require_database_replaceable
+    require_database_replaceable(source)
 
     if source == clean_copy:
         raise ValueError("Clean-copy path must differ from the runtime database.")

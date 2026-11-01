@@ -123,6 +123,8 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
     original_clone = provider_cls.clone
 
     def clone_idempotent(self, progress_callback=None):
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
         self._repository_url = sanitize_repository_url(getattr(self, "_repository_url", "") or "")
         repo_path = getattr(self, "_repo_path", None)
         if getattr(self, "_repo", None) is not None and repo_path is not None and (repo_path / ".git").exists():

@@ -378,6 +378,8 @@ class BackupService:
         # cannot bypass the application destructive-operation contract.
         try:
             validate_restore_authorization(authorization)
+            from centermanager.platform.write_recovery import require_replaceable
+            require_replaceable()
         except Exception as exc:
             return BackupResult(False, error=str(exc))
 

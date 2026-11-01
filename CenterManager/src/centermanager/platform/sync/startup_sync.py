@@ -39,6 +39,14 @@ class StartupSynchronization:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
 
+        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        try:
+            require_replaceable(legacy=True)
+        except RecoveryRequired as exc:
+            self.recovery_error = str(exc)
+            logger.error("%s", exc)
+            return False
+
         # 1. Ensure repository exists
         if not self._repo_path.exists() or not (self._repo_path / ".git").exists():
             logger.info("Repository not found, cloning...")
@@ -96,6 +104,8 @@ class StartupSynchronization:
         if not self._refresh_database_sessions():
             return False
 
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        WriteRecoveryJournal().record_synchronized()
         logger.info("Startup synchronization completed successfully")
         return True
 
@@ -140,6 +150,8 @@ class StartupSynchronization:
 
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
         repo_db = self._repo_path / "database" / "center.db"
         if not repo_db.exists():
             logger.error(f"Repository database not found: {repo_db}")

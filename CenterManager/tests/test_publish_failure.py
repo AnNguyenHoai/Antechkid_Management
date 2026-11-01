@@ -128,6 +128,16 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
     if not repo_path.exists():
         provider.clone()
 
+    # E1B-1 requires the actual collaboration provider and accepted DB base.
+    # Seed only this disposable remote; the test never uses production data.
+    repo_db = repo_path / "database" / "center.db"
+    repo_db.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(db_path, repo_db)
+    provider._run_git_command(["add", "--force", "database/center.db"])
+    provider._run_git_command(["commit", "-m", "synthetic accepted database base"])
+    provider._run_git_command(["push", "origin", "main"])
+    cm._sync_provider = provider
+
     # Setup sync service and transaction
     sync_manager = SynchronizationManager(provider, event_bus=event_bus)
     sync_service = RuntimeSyncService(
@@ -150,7 +160,10 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
             sess.commit()
         return True
 
-    tx.start_editing(save_local)
+    # Fixture already materializes the exact accepted synthetic base.
+    # This test isolates push-failure semantics, not the handoff/schema barrier.
+    with patch.object(sync_service, "execute_write_handoff_sync", return_value=True):
+        assert tx.start_editing(save_local), tx.last_start_error
     tx.mark_dirty()
 
     # Mock _do_publish: first call fails, second call calls original
@@ -181,9 +194,10 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         side_effect=stage_test_database,
     ), patch.object(tx, '_do_publish', side_effect=mock_do_publish):
         success = tx.finish_editing()
-        # Theo logic hiện tại: khi publish thất bại, state = FAILED, pending version bị xóa
+        # An uncertain publication remains protected; pending version is rolled back.
         assert not success
-        assert tx.state == WriteTransactionState.FAILED
+        assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+        assert tx._recovery_journal.inspect()["status"] == "PUBLISHING"
 
         # Check lock retained
         assert cm.is_writing()
@@ -196,7 +210,7 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         # Retry publish: retry_publish sẽ thất bại vì không có pending version
         retry_success = tx.retry_publish()
         assert retry_success is False
-        assert tx.state == WriteTransactionState.FAILED
+        assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
 
         # Kiểm tra lock vẫn được giữ
         assert cm.is_writing()

@@ -18,10 +18,18 @@ from centermanager.database.engine import (
     runtime_dbapi_connection_count,
     runtime_dbapi_connection_details,
 )
-from centermanager.platform.backup.windows_lock_diagnostics import (
-    format_lock_owners,
-    windows_lock_owners,
-)
+
+def windows_lock_owners(path):
+    # Defer the backup package import until session initialization is complete.
+    # Recovery CLI imports session before backup; eager import forms a cycle.
+    from centermanager.platform.backup.windows_lock_diagnostics import windows_lock_owners as inspect_owners
+    return inspect_owners(path)
+
+
+def format_lock_owners(owners):
+    from centermanager.platform.backup.windows_lock_diagnostics import format_lock_owners as format_owners
+    return format_owners(owners)
+
 
 _session_factory = None
 

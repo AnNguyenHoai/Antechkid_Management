@@ -1,3 +1,12 @@
+import pytest
+
+@pytest.fixture(autouse=True)
+def isolated_mock_runtime(temp_runtime, monkeypatch):
+    # These state-machine doubles have neither a physical DB nor remote MAIN.
+    monkeypatch.setenv("ANTECHKIDS_DEPLOYMENT_PROFILE", "development")
+    monkeypatch.delenv("ANTECHKIDS_FORCE_DATABASE_ENCRYPTION", raising=False)
+
+
 from unittest.mock import Mock
 
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState

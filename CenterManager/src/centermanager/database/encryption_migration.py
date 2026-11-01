@@ -55,6 +55,8 @@ def _promote_encrypted_database(temp_path: Path, database_path: Path, key: bytes
     boundary.  Preserved artifacts are removed only after the installed
     encrypted database has itself passed validation.
     """
+    from centermanager.platform.write_recovery import require_replaceable
+    require_replaceable()
     previous_db = database_path.with_name(
         f".{database_path.name}.previous-{uuid.uuid4().hex}"
     )

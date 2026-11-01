@@ -426,6 +426,8 @@ class RuntimeSyncService:
 
     def _apply_runtime_update(self) -> bool:
         try:
+            from centermanager.platform.write_recovery import require_replaceable
+            require_replaceable()
             paths = get_paths()
             repo_db = paths.runtime_root / "repository" / "database" / "center.db"
             runtime_db = paths.database_dir / "center.db"

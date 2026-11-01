@@ -151,6 +151,8 @@ class RepositoryManager:
 
     def _sync_repository_to_runtime(self) -> None:
         """Copy database and metadata from repository to runtime."""
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
         repo_db = self._repo_path / "database" / "center.db"
         runtime_db = get_paths().database_dir / "center.db"
         if repo_db.exists():
