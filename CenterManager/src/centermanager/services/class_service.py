@@ -269,6 +269,30 @@ class ClassService:
                 raise ClassNotFoundError(f"Class {class_id} not found or deleted.")
             return class_obj
 
+    def get_archived_class_with_details(self, class_id: int) -> Class:
+        """Read-only historical detail access; mutation APIs still reject archived classes."""
+        with self._session_factory() as session:
+            class_obj = self._repository_provider.classes(session).get_by_id_with_relations(class_id)
+            if class_obj is None or class_obj.deleted_at is None:
+                raise ClassNotFoundError(f"Archived class {class_id} not found.")
+            return class_obj
+
+    def get_historical_enrolled_students(self, class_id: int) -> List[Student]:
+        """Show historical students even though class archive withdrew ACTIVE enrollments."""
+        with self._session_factory() as session:
+            repo = self._repository_provider.classes(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None:
+                raise ClassNotFoundError(f"Class {class_id} not found.")
+            if class_obj.deleted_at is None:
+                return self.get_enrolled_students(class_id)
+            enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(class_id)
+            students = {}
+            for enrollment in enrollments:
+                if enrollment.student is not None:
+                    students[enrollment.student.id] = enrollment.student
+            return sorted(students.values(), key=lambda student: (student.full_name or "").casefold())
+
     def list_classes(self, include_archived: bool = False) -> List[Class]:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)

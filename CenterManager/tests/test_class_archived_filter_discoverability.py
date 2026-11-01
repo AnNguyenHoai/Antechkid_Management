@@ -28,7 +28,9 @@ def test_archived_class_rows_render_archived_status_and_offer_restore():
     assert 'self._class_service.restore_class(class_id)' in source
     assert '"You must be in WRITE mode to restore a class."' in source
     assert 'if class_obj.deleted_at is None:' in source
-    assert '"Archived class is read-only. Restore it before opening the class workspace."' in source
+    assert "self.class_selected.emit(class_obj.id)" in source
+    # Opening historical detail must not require restoring the class.
+    assert "Restore it before opening the class workspace" not in source
 
 
 def test_active_filter_remains_default_after_archived_support():

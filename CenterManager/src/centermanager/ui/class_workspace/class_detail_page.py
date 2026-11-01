@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from centermanager.models.class_ import Class
 from centermanager.models.teacher import Teacher
 from centermanager.models.student import Student
-from centermanager.services.class_service import ClassService
+from centermanager.services.class_service import ClassService, ClassNotFoundError
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.session_service import SessionService
@@ -74,6 +74,7 @@ class ClassDetailPage(QWidget):
         self._current_class_id: Optional[int] = None
         self._current_class: Optional[Class] = None
         self._write_enabled = False
+        self._archived_read_only = False
 
         self._setup_ui()
         self._show_empty()
@@ -236,10 +237,15 @@ class ClassDetailPage(QWidget):
 
     def load_class(self, class_id: int) -> None:
         try:
-            class_obj = self._class_service.get_class_with_details(class_id)
+            try:
+                class_obj = self._class_service.get_class_with_details(class_id)
+            except ClassNotFoundError:
+                class_obj = self._class_service.get_archived_class_with_details(class_id)
+            self._archived_read_only = class_obj.deleted_at is not None
             self._current_class_id = class_obj.id
             self._current_class = class_obj
             self._populate(class_obj)
+            self.set_write_enabled(self._write_enabled)
             self._show_detail()
         except Exception as e:
             logger.exception(f"Error loading class {class_id}")
@@ -249,10 +255,13 @@ class ClassDetailPage(QWidget):
         self.entity_header.set_identity(
             title=class_obj.name,
             identifier=class_obj.name,
-            status=class_obj.status or "",
+            status="ARCHIVED · READ ONLY" if self._archived_read_only else (class_obj.status or ""),
             subtitle=f"Course: {class_obj.course or '-'}",
         )
-        self.students_label.setText(f"{class_obj.student_count} students")
+        self.students_label.setText(
+            "Historical enrollment roster" if self._archived_read_only
+            else f"{class_obj.student_count} students"
+        )
         self.capacity_label.setText(f"Capacity: {class_obj.capacity if class_obj.capacity else 'Unlimited'}")
 
         # Teachers
@@ -276,11 +285,12 @@ class ClassDetailPage(QWidget):
         return role_name in {RoleDefinitions.ADMIN, RoleDefinitions.MANAGER}
 
     def _apply_dynamic_write_state(self) -> None:
-        teacher_enabled = self._write_enabled and self._can_manage_teacher_assignments()
+        can_mutate = self._write_enabled and not self._archived_read_only
+        teacher_enabled = can_mutate and self._can_manage_teacher_assignments()
         for button in self.teacher_container.findChildren(QPushButton):
             button.setEnabled(teacher_enabled)
         for button in self.student_container.findChildren(QPushButton):
-            button.setEnabled(self._write_enabled)
+            button.setEnabled(can_mutate)
 
     def _update_teachers(self, teachers: List[Teacher]) -> None:
         self._clear_layout(self.teacher_layout)
@@ -319,7 +329,9 @@ class ClassDetailPage(QWidget):
             return
 
         try:
-            students = self._class_service.get_enrolled_students(self._current_class_id)
+            students = (self._class_service.get_historical_enrolled_students(self._current_class_id)
+                        if self._archived_read_only
+                        else self._class_service.get_enrolled_students(self._current_class_id))
         except Exception as e:
             logger.exception("Error loading students")
             students = []
@@ -580,7 +592,8 @@ class ClassDetailPage(QWidget):
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = enabled
-        self.edit_btn.setEnabled(enabled)
-        self.add_session_btn.setEnabled(enabled)
+        allowed = enabled and not self._archived_read_only
+        self.edit_btn.setEnabled(allowed)
+        self.add_session_btn.setEnabled(allowed)
         self._apply_dynamic_write_state()
-        # We'll handle this by checking write mode in the slots themselves, so no need to disable buttons here.
+        self.schedule_widget.set_write_enabled(allowed)

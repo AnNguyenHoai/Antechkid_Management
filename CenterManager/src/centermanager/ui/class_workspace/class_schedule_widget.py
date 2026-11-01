@@ -58,6 +58,7 @@ class ClassScheduleWidget(QWidget):
             session_service, note_service, attendance_service, class_service, highlight_service
         )
 
+        self._historical_read_only = False
         self._class_id: Optional[int] = None
         self._sessions: List[Session] = []
 
@@ -105,9 +106,10 @@ class ClassScheduleWidget(QWidget):
             self._show_empty()
 
     def set_write_enabled(self, enabled: bool) -> None:
-        # Session detail resolves live WRITE authority from CollaborationManager.
-        # This surface itself has no direct mutation controls.
-        pass
+        # WRITE mode alone never authorizes edits within an archived class.
+        # The owning class detail page passes False for archived history.
+        self._historical_read_only = not enabled
+
     
     def _update_table(self) -> None:
         self.table.setRowCount(len(self._sessions))
@@ -225,6 +227,8 @@ class ClassScheduleWidget(QWidget):
                 session_id,
                 parent=self
             )
+            if self._historical_read_only:
+                dialog.set_historical_read_only(True)
             # Attendance mutations use the same live collaboration authority as
             # the owning Class workspace. Missing/invalid WRITE authority fails closed.
             dialog.attendance_widget.set_write_guard(

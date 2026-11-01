@@ -290,12 +290,7 @@ class ClassListPage(QWidget):
         if row >= len(self._filtered):
             return
         class_obj = self._filtered[row]
-        if class_obj.deleted_at is not None:
-            self._notification_service.notify(
-                "Archived class is read-only. Restore it before opening the class workspace.",
-                "info",
-            )
-            return
+        # Archived classes have a dedicated historical READ-only detail projection.
         self.class_selected.emit(class_obj.id)
 
     def _on_context_menu(self, pos, row: int) -> None:
