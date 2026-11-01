@@ -30,6 +30,8 @@ visual-regression-artifacts/
 *.swo
 
 # Runtime generated / secrets
+# Encrypted recovery captures and protected key references must stay local.
+*.write-recovery/
 runtime/Config/
 runtime/Logs/
 runtime/Database/*.db
