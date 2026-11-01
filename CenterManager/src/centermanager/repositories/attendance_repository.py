@@ -12,6 +12,13 @@ class AttendanceRepository(BaseRepository[Attendance]):
     def __init__(self, session: Session):
         super().__init__(session, Attendance)
 
+    def list_for_session_ids(self, session_ids: list[int]) -> List[Attendance]:
+        if not session_ids:
+            return []
+        return self._session.query(Attendance).filter(
+            Attendance.session_id.in_(session_ids)
+        ).all()
+
     def get_by_session(self, session_id: int) -> List[Attendance]:
         return (
             self._session.query(Attendance)
