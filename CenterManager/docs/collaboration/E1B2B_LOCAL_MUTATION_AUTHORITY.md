@@ -71,7 +71,9 @@ not a second ownership authority. `is_writing=True` alone is never sufficient.
 The gate mutex serializes native statement/commit execution with loss
 notification. The commit path never acquires the collaboration state mutex;
 renewal can hold that mutex while delivering an observation without a lock
-inversion. SQLite itself still serializes concurrent writers. Native authorizer
+inversion. Recovery mode projection is queued through the existing EventBus so
+UI handlers run after the database hook unwinds, including when storage of the
+protection marker fails. SQLite itself still serializes concurrent writers. Native authorizer
 installation is repeated per execution to invalidate cached prepared statements.
 
 Canonical capabilities in `mutation_permissions.py` are a persistence **floor**,

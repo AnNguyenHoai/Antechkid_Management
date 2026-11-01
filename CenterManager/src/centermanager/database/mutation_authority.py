@@ -179,8 +179,14 @@ class MutationAuthorityGate:
             # Do not acquire the collaboration mutex here (renewal owns it).
             # This flag only stops renewal; it never releases remote ownership.
             tx._collab_manager._lease_renewal_suspended = True
-            if tx._recovery_journal is not None:
-                tx._recovery_journal.update(mutation_authority_lost=True, mutation_failure=reason)
+            try:
+                if tx._recovery_journal is not None:
+                    tx._recovery_journal.update(mutation_authority_lost=True, mutation_failure=reason)
+            finally:
+                # Existing UI mode projection, queued after the DB hook unwinds.
+                # This neither changes nor releases the remote lock.
+                from centermanager.platform.collaboration.events import ModeChanged
+                tx._collab_manager._event_bus.publish_deferred(ModeChanged(mode='READ'))
 
     def close(self):
         with self.lock:

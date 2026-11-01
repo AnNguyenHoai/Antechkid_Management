@@ -511,6 +511,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(message, 8000)
 
     def _on_lease_renewal_failed(self, payload) -> None:
+        if self._transaction.state == WriteTransactionState.RECOVERY_REQUIRED:
+            self._update_write_buttons()
+            return
         if not self._transaction.is_editing:
             return
         detail = ""

@@ -513,3 +513,27 @@ def test_existing_employee_self_link_repair_still_requires_write(reporting):
         repaired = EmployeeService(w.factory).get_current_employee()
         assert repaired.user_id == 1
     assert w.tx.finish_editing()
+
+
+def test_loss_projection_is_queued_after_db_hook_unwinds(reporting, qapp):
+    from centermanager.platform.collaboration.events import ModeChanged
+    w = reporting
+    assert w.tx.start_editing()
+    qapp.processEvents()
+    states = []
+    w.cm._event_bus.register(ModeChanged, lambda event: states.append((event.mode, w.tx.state)))
+    with gate_for().lock:
+        gate_for().invalidate('Synthetic loss inside a DB boundary')
+        assert states == []
+    qapp.processEvents()
+    assert states == [('READ', WriteTransactionState.RECOVERY_REQUIRED)]
+
+
+def test_ui_projects_already_latched_recovery_instead_of_ignoring_lease_failure():
+    from centermanager.ui.main_window import MainWindow
+    projected = []
+    window = SimpleNamespace(_transaction=SimpleNamespace(state=WriteTransactionState.RECOVERY_REQUIRED,
+                                                         is_editing=False),
+                             _update_write_buttons=lambda: projected.append(True))
+    MainWindow._on_lease_renewal_failed(window, {'error': 'synthetic'})
+    assert projected == [True]
