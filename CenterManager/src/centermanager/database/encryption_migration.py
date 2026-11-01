@@ -30,7 +30,7 @@ def _escape_sql_literal(value: str) -> str:
 
 def _validate_encrypted_database(path: Path, key: bytes) -> None:
     sqlcipher = load_sqlcipher_driver()
-    connection = sqlcipher.connect(str(path))
+    connection = sqlcipher.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         apply_sqlcipher_key(connection, key)
         row = connection.execute("PRAGMA integrity_check").fetchone()

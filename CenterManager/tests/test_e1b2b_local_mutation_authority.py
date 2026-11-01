@@ -281,9 +281,11 @@ def test_pending_journal_blocks_migration_restore_and_preserves_wal(reporting):
     external = connect(w.journal.database)
     external.execute('PRAGMA journal_mode=WAL')
     external.execute('PRAGMA wal_autocheckpoint=0')
-    external.execute('SELECT count(*) FROM students').fetchone()
-    external.execute('UPDATE students SET full_name=full_name WHERE id=1')
-    external.commit()
+    external.close()
+    # A managed read handle keeps WAL live and is drained by the real Windows
+    # maintenance proof before preservation. No untracked native handle remains.
+    keeper = raw(w)
+    keeper.execute('SELECT count(*) FROM students').fetchone()
     try:
         StudentService(w.factory).update_student(1, full_name='Committed WAL')
         wal = Path(str(w.journal.database) + '-wal')
@@ -312,7 +314,7 @@ def test_pending_journal_blocks_migration_restore_and_preserves_wal(reporting):
         finally:
             snapshot.close()
     finally:
-        external.close()
+        release_runtime_dbapi_connection(keeper)
 
 
 def test_finance_service_runs_under_same_gate(reporting):
