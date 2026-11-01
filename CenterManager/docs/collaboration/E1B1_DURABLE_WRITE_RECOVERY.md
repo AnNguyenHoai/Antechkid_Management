@@ -1,6 +1,6 @@
 # E1B-1 — Durable local WRITE recovery journal
 
-Status: CURRENT — implementation and validation in progress; human review required.
+Status: CURRENT — safety implementation under validation; human review and post-publish report rollout blocker remain.
 Base: `main_repos` `7cd8943703603a340e0d9dd4ac2102a908d81834`, including merged E1A #524.
 Task contract: founder's E1B-1 R01–R05 prompt (no Issue number supplied).
 
@@ -29,7 +29,7 @@ Task contract: founder's E1B-1 R01–R05 prompt (no Issue number supplied).
 | In-memory forms/dialog drafts | Not committed SQL data. This journal does not serialize arbitrary widget state and cannot restore drafts after process termination. UI draft persistence remains an explicit blocker. |
 | `Config/database_key.dpapi` | Existing user/machine-protected key bundle copied verbatim to local capture, with reference/hash. Raw key never serialized or logged. DPAPI remains bound to originating Windows profile; a capture is not portable key provisioning. |
 | `Config/authoritative_database_identity.json` | Existing signed local identity pin retained as evidence; recovery never repins a local unaccepted snapshot. |
-| `runtime.write-recovery/journal.json`, `captures/<unique>/manifest.json` | Sibling of runtime, outside Git and metadata restoration. PREPARING/OPEN/PUBLISHING/PUBLISHED/CLEAN/CANCELLED/RECONCILED statuses. HMAC-authenticated SHA-256 manifest installed last, verified after copy; partial captures retained, never substituted for verified ones. |
+| `runtime.write-recovery/journal.json`, `captures/<unique>/manifest.json` | Sibling of runtime, outside Git and metadata restoration. PREPARING/OPEN/PUBLISHING/PUBLISHED/POST_PUBLISH_PENDING/CLEAN/CANCELLED/RECONCILED statuses. HMAC-authenticated SHA-256 manifest installed last, verified after copy; partial captures retained, never substituted for verified ones. |
 
 Replacement paths inspected: canonical `platform/sync/startup_sync.py` (pre-clone/fetch/reset; DB and attachment materialization), `authoritative_runtime_sync_service.py` (handoff/background pull), hardened `write_handoff_runtime_sync_service.py::_apply_runtime_update`, provider hard reset/diverged pull/merge/checkout/clean, clone-failure repository deletion, deployment `_sync_repository_to_runtime`, `BackupService.restore_backup`, transaction `_restore_snapshot`, legacy base runtime materialization and offline `activate_clean_database.py`. Each supported destructive boundary checks the same journal. Bootstrap checks before default-runtime creation/provisioning. Legacy `platform/synchronization/startup_sync.py` delegates Git operations to the guarded provider; it is not canonical app startup.
 
@@ -67,6 +67,7 @@ flowchart TD
   D --> E{"Remote + commit + DB verified?"}
   E -->|Yes| F["PUBLISHED; exact-session release"]
   F --> G["CLEAN; retain captures"]
+  F -->|"Callback adds local data"| H
   B --> H["Protected recovery"]
   C --> H
   E -->|Unknown / failure| H
@@ -101,7 +102,7 @@ Legacy no-journal workspaces are admitted only when runtime DB exactly equals re
 
 `tests/test_e1b1_durable_write_recovery.py` exercises real SQLCipher, isolated bare Git, WAL, repeated captures, journal/snapshot/disk failure, destructive boundaries, Cancel without dirty notification, UNKNOWN acknowledgement, clean startup, legacy clients, explicit reconciliation preserving unaccepted commits, read-only inspection and real subprocess kills at explicit handshakes (before/after journal, committed live WAL, local publication commit before push, remote acceptance before receipt).
 
-Synthetic key handling is injected for cross-platform deterministic tests; no production key/DB/lock is accessed. Mock-only lifecycle tests now explicitly use isolated runtime paths. Existing physical version/push-failure fixtures now seed an accepted synthetic DB base and wire the actual provider into collaboration; the version-success case performs a real isolated push instead of treating a mocked True return as acknowledgement. All existing conflict/version/authority assertions remain. Existing SQLCipher/DPAPI/security suites remain integration gates. Local focused before final integration gate: **36/36 recovery cases PASS**. Broader recovery/collaboration/security/activation integration: **100/100 PASS**. Full local suite and Windows CI remain in progress; no PASS is assumed for pending gates.
+Synthetic key handling is injected for cross-platform deterministic tests; no production key/DB/lock is accessed. Mock-only lifecycle tests now explicitly use isolated runtime paths. Existing physical version/push-failure fixtures now seed an accepted synthetic DB base and wire the actual provider into collaboration; the version-success case performs a real isolated push instead of treating a mocked True return as acknowledgement. All existing conflict/version/authority assertions remain. Existing SQLCipher/DPAPI/security suites remain integration gates. Local focused before final integration gate: **39/39 recovery cases PASS**. Broader recovery/collaboration/security/activation integration: **100/100 PASS**. Windows handle diagnostics plus recovery/version/publish-failure focused suite: **54/54 PASS**. Full local suite and Windows CI remain in progress; no PASS is assumed for pending gates.
 
 ## Unresolved E1B-2 / E1C blockers
 
@@ -113,6 +114,7 @@ Synthetic key handling is injected for cross-platform deterministic tests; no pr
 6. **Concurrent local processes / external writers:** preservation requires a stopped app for operator actions; existing app/runtime maintenance handles in-process DB ownership. A cross-process operation lock and protection against an older simultaneously running client/external tools require E1C. This PR cannot enforce policy on an old executable.
 7. **Retention / disk capacity / recovery media:** captures are intentionally never automatically pruned. Define reviewed retention, disk reserve, key escrow/provisioning and disaster recovery before large deployments.
 8. **Power loss/filesystem durability UAT:** process-kill integration tests are not physical power-cut proof. Exercise supported Windows/cloud-sync filesystems and DPAPI-profile recovery operationally.
-9. **Controlled Emergency Revocation:** remains disabled until fencing, mutation guards, recovery/operator contracts and multi-client UAT pass.
+9. **Post-publish report metadata (rollout blocker):** `MainWindow.on_publish_success` calls `ReportService.generate_student_report`, which commits report metadata after the accepted push. That is additional unaccepted local DB work. E1B-1 preserves it as POST_PUBLISH_PENDING, verifies normal release, shows read-only RECOVERY_REQUIRED and blocks sync/Start until explicit reconciliation. Student/attendance changes that generate reports can therefore require recovery review after an otherwise successful publish. Resolve the report finalization contract in E1B-2 before routine production rollout; this PR deliberately does not move the established post-success report trigger, implicitly push a second DB, or label those rows accepted.
+10. **Controlled Emergency Revocation:** remains disabled until fencing, mutation guards, recovery/operator contracts and multi-client UAT pass.
 
 No production database/lock modifications, schema migration, time-policy changes, force revoke, auto-merge or new WRITE authority.

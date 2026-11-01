@@ -653,6 +653,18 @@ class MainWindow(QMainWindow):
         state = self._transaction.state
         is_editing = self._transaction.is_editing
 
+        if state == WriteTransactionState.RECOVERY_REQUIRED:
+            self.start_edit_btn.setVisible(False)
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            self.app_top_bar.set_transaction_text("Local data protected - recovery required")
+            self.app_top_bar.set_mode("RECOVERY", "warning")
+            self.app_top_bar.set_editor_state("Inspect preserved local work before synchronization", "warning")
+            self.statusBar().showMessage(self._transaction.last_start_error)
+            self._update_write_actions(False)
+            self._editing_idle_timer.stop()
+            return
+
         if state in (
             WriteTransactionState.FINISHING,
             WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
@@ -794,6 +806,8 @@ class MainWindow(QMainWindow):
 
     def _update_waiting_status(self) -> None:
         """Project writer ownership to both the V2 shell and legacy observer."""
+        if self._transaction.state == WriteTransactionState.RECOVERY_REQUIRED:
+            return
         try:
             lock_status = self._collaboration_manager.get_lock_status()
         except Exception:

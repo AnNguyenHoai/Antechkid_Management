@@ -100,6 +100,8 @@ def test_bootstrap_retains_authoritative_sync_provider_slot():
 
 
 def test_first_writer_runs_consistency_barrier_before_editing(monkeypatch, temp_runtime):
+    monkeypatch.setenv("ANTECHKIDS_DEPLOYMENT_PROFILE", "development")
+    monkeypatch.delenv("ANTECHKIDS_FORCE_DATABASE_ENCRYPTION", raising=False)
     provider = _Provider()
     collab = _Collab(_Result(WriteRequestResult.GRANTED, "Lock acquired"), provider)
     sync = _Sync(True)

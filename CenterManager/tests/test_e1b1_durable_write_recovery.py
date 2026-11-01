@@ -425,7 +425,8 @@ def test_release_alone_cannot_mark_unpublished_session_clean(workspace):
         workspace.journal.assert_replaceable()
 
 
-def test_real_transaction_sqlcipher_publish_release_and_second_session(workspace, monkeypatch):
+@pytest.mark.parametrize('callback_mutates', [False, True])
+def test_real_transaction_sqlcipher_publish_release_and_second_session(workspace, monkeypatch, callback_mutates):
     from centermanager.events.event_bus import EventBus
     from centermanager.platform.collaboration import CollaborationManager
     from centermanager.platform.collaboration.heartbeat import HeartbeatManager
@@ -448,7 +449,15 @@ def test_real_transaction_sqlcipher_publish_release_and_second_session(workspace
         assert workspace.journal.inspect()['status'] == 'OPEN'
         mutate(workspace)
         tx.mark_dirty()
-        assert tx.finish_editing()
+        assert tx.finish_editing(on_publish_success=(lambda: mutate(workspace)) if callback_mutates else None)
+        if callback_mutates:
+            assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+            document = workspace.journal.inspect()
+            assert document['status'] == 'POST_PUBLISH_PENDING'
+            assert document['release'] == 'VERIFIED'
+            assert values(Path(document['last_capture']) / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED', 'LOCAL_UNACCEPTED']
+            assert values(workspace.journal.repository / 'database' / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED']
+            return
         assert tx.state == WriteTransactionState.IDLE
         assert workspace.journal.inspect()['status'] == 'CLEAN'
         workspace.journal.assert_replaceable()
@@ -495,3 +504,39 @@ def test_mutation_after_snapshot_prevents_reconciliation_receipt(workspace, monk
                                     observe_main=workspace.provider.observe_remote_main_commit)
     assert workspace.journal.inspect()['status'] == 'OPEN'
     assert values(workspace.journal.database) == ['BASE', 'LOCAL_UNACCEPTED']
+
+
+def test_post_publish_callback_commit_is_preserved_never_clean(workspace):
+    begin(workspace)
+    workspace.journal.update(status='PUBLISHING')
+    workspace.journal.published(workspace.provider)
+    # Reproduce ReportService's existing post-success metadata commit boundary.
+    mutate(workspace)
+    assert workspace.journal.preserve_post_publish_changes()
+    workspace.journal.released()
+    document = workspace.journal.inspect()
+    assert document['status'] == 'POST_PUBLISH_PENDING'
+    assert document['publication'] == 'VERIFIED' and document['release'] == 'VERIFIED'
+    assert values(Path(document['last_capture']) / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED']
+    assert values(workspace.journal.repository / 'database' / 'center.db') == ['BASE']
+    with pytest.raises(RecoveryRequired):
+        workspace.journal.assert_replaceable()
+
+
+def test_recovery_state_projects_readonly_actionable_ui():
+    from unittest.mock import Mock
+    from centermanager.ui.main_window import MainWindow
+    from centermanager.services.write_transaction import WriteTransactionState
+    status = Mock()
+    view = SimpleNamespace(
+        _transaction=SimpleNamespace(state=WriteTransactionState.RECOVERY_REQUIRED,
+                                     is_editing=False, last_start_error='Preservation failed; free disk space and inspect recovery.'),
+        start_edit_btn=Mock(), finish_edit_btn=Mock(), cancel_btn=Mock(),
+        app_top_bar=Mock(), statusBar=lambda: status,
+        _update_write_actions=Mock(), _editing_idle_timer=Mock())
+    MainWindow._update_write_buttons(view)
+    view._update_write_actions.assert_called_once_with(False)
+    view.start_edit_btn.setVisible.assert_called_once_with(False)
+    view.finish_edit_btn.setVisible.assert_called_once_with(False)
+    status.showMessage.assert_called_once_with(view._transaction.last_start_error)
+    view._editing_idle_timer.stop.assert_called_once()

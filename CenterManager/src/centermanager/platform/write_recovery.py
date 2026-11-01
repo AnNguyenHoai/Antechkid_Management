@@ -101,7 +101,7 @@ class WriteRecoveryJournal:
             document = json.loads(self.journal.read_text(encoding='utf-8'))
             if (document['format'] != 1 or document['runtime'] != str(self.runtime)
                     or document['status'] not in {'PREPARING', 'OPEN', 'PUBLISHING',
-                    'PUBLISHED', 'CLEAN', 'CANCELLED', 'RECONCILED'}):
+                    'PUBLISHED', 'POST_PUBLISH_PENDING', 'CLEAN', 'CANCELLED', 'RECONCILED'}):
                 raise ValueError()
             return document
         except Exception as exc:
@@ -180,7 +180,8 @@ class WriteRecoveryJournal:
             'PREPARING': {'OPEN', 'RECONCILED'},
             'OPEN': {'PUBLISHING', 'CANCELLED', 'RECONCILED'},
             'PUBLISHING': {'PUBLISHED', 'CANCELLED', 'RECONCILED'},
-            'PUBLISHED': {'CLEAN', 'RECONCILED'},
+            'PUBLISHED': {'CLEAN', 'POST_PUBLISH_PENDING', 'RECONCILED'},
+            'POST_PUBLISH_PENDING': {'RECONCILED'},
             'CLEAN': {'RECONCILED'},
             'CANCELLED': {'RECONCILED'},
             'RECONCILED': {'CLEAN', 'RECONCILED'},
@@ -321,6 +322,20 @@ class WriteRecoveryJournal:
         self.update(status='PUBLISHED', publication='VERIFIED', published_oid=local,
                     published_runtime_sha256=_hash(capture / 'center.db'),
                     accepted_local_files=self._local_files())
+
+    def preserve_post_publish_changes(self):
+        """A success callback may commit local report metadata after the push.
+
+        It is unaccepted work even though the earlier publication was verified.
+        Preserve it and require explicit review; never call it clean or push a
+        second binary snapshot implicitly.
+        """
+        document = self.inspect()
+        if not self._wal_pending() and _hash(self.database) == document['published_runtime_sha256']:
+            return False
+        self.preserve('post-publish-local-changes')
+        self.update(status='POST_PUBLISH_PENDING')
+        return True
 
     def released(self):
         document = self.inspect()

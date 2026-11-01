@@ -194,9 +194,10 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         side_effect=stage_test_database,
     ), patch.object(tx, '_do_publish', side_effect=mock_do_publish):
         success = tx.finish_editing()
-        # Theo logic hiện tại: khi publish thất bại, state = FAILED, pending version bị xóa
+        # An uncertain publication remains protected; pending version is rolled back.
         assert not success
-        assert tx.state == WriteTransactionState.FAILED
+        assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+        assert tx._recovery_journal.inspect()["status"] == "PUBLISHING"
 
         # Check lock retained
         assert cm.is_writing()
@@ -209,7 +210,7 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         # Retry publish: retry_publish sẽ thất bại vì không có pending version
         retry_success = tx.retry_publish()
         assert retry_success is False
-        assert tx.state == WriteTransactionState.FAILED
+        assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
 
         # Kiểm tra lock vẫn được giữ
         assert cm.is_writing()

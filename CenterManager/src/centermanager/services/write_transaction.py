@@ -823,6 +823,8 @@ class WriteTransactionManager:
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
                     self._on_publish_success()
+                post_publish_pending = bool(self._recovery_journal is not None and
+                    self._recovery_journal.preserve_post_publish_changes())
                 self._collab_manager._lock.clear_finishing_data()
                 self._finishing_deadline = None
                 self._finishing_started_at = None
@@ -835,6 +837,11 @@ class WriteTransactionManager:
                     )
                     return True
 
+                if post_publish_pending:
+                    self._state = WriteTransactionState.RECOVERY_REQUIRED
+                    self._is_editing = False
+                    self._last_start_error = "MAIN was published, but a post-publish callback saved additional local data. Recovery copies are retained; inspect and explicitly reconcile before further editing or synchronization."
+                    return True
                 self._delete_snapshot()
                 self._reset_to_idle()
                 return True
@@ -848,7 +855,9 @@ class WriteTransactionManager:
                     self._on_publish_failure("Publish operation failed (push failed)")
                 return False
         except Exception as e:
-            self._state = WriteTransactionState.FAILED
+            self._state = WriteTransactionState.RECOVERY_REQUIRED if self._recovery_journal is not None else WriteTransactionState.FAILED
+            self._is_editing = False
+            self._last_start_error = f"Local recovery remains protected: {e}. Keep the workspace and inspect recovery before synchronization."
             if self._version_manager:
                 self._version_manager.clear_pending_version()
             self._pending_version = None
@@ -899,6 +908,11 @@ class WriteTransactionManager:
             return False
         if not self._release_lock():
             return False
+        if self._recovery_journal is not None and self._recovery_journal.inspect()['status'] == 'POST_PUBLISH_PENDING':
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            self._is_editing = False
+            self._last_start_error = "Published MAIN and released WRITE; additional local data is preserved for explicit recovery reconciliation."
+            return True
         self._delete_snapshot()
         self._reset_to_idle()
         return True

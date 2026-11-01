@@ -17,7 +17,9 @@ def _remote_authority(cm):
 
 
 @pytest.fixture
-def collab_manager(tmp_path, temp_runtime):
+def collab_manager(tmp_path, temp_runtime, monkeypatch):
+    monkeypatch.setenv("ANTECHKIDS_DEPLOYMENT_PROFILE", "development")
+    monkeypatch.delenv("ANTECHKIDS_FORCE_DATABASE_ENCRYPTION", raising=False)
     event_bus = EventBus()
     cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
     cm.initialize("test_user", "test_user", "admin")
