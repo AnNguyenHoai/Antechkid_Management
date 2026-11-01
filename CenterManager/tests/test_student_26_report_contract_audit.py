@@ -19,10 +19,10 @@ def test_26_audit_records_all_current_report_trigger_sources():
     ):
         assert source in DOC
 
-def test_26_publish_prepares_dirty_student_reports_before_snapshot():
-    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
-    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
-    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in SERVICE
+def test_26_publish_delivers_dirty_student_reports_without_sql():
+    assert "self._generate_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._generate_reports(set(self._dirty_student_ids))") > TX.index("self._recovery_journal.published(")
+    assert 'self.generate_student_report(student_id, report_type="latest",' in SERVICE
 
 def test_26_manual_export_is_an_explicit_report_trigger():
     assert "def _export_pdf(self)" in DETAIL
@@ -39,7 +39,7 @@ def test_26_daily_auto_report_is_a_separate_current_trigger():
 
 def test_26_report_is_singleton_latest_artifact():
     assert 'output_path = reports_root / "StudentProfile.pdf"' in SERVICE
-    assert "for existing in repo.get_by_student(student_id):" in SERVICE
+    assert "return [local]" in SERVICE
 
 def test_26_current_report_data_sections_are_explicitly_audited():
     for section in (

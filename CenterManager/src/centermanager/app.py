@@ -365,10 +365,7 @@ def main() -> int:
         else:
             logger.warning("[STARTUP] WriteTransactionManager: sync service disabled")
         transaction_manager.set_version_manager(version_manager)
-        transaction_manager.set_report_callbacks(
-            report_service.prepare_for_publication,
-            report_service.verify_publication_reports,
-        )
+        transaction_manager.set_report_callback(report_service.generate_published_reports)
 
         window = MainWindow(
             student_service=student_service,

@@ -31,24 +31,24 @@ def test_24_enrollment_event_tracks_owning_student_aggregate():
     assert "self._transaction.is_editing" in section
     assert "self._transaction.mark_student_dirty(event.student_id)" in section
 
-def test_24_report_preparation_captures_dirty_ids_before_transaction_reset():
+def test_24_report_delivery_captures_dirty_ids_before_transaction_reset():
     publish = TX.index("if self._on_publish_success:")
     reset = TX.index("self._reset_to_idle()", publish)
     assert publish < reset
-    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
-    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
+    assert "self._generate_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._generate_reports(set(self._dirty_student_ids))") > TX.index("self._recovery_journal.published(")
 
-def test_24_report_generation_is_pre_publish_and_one_per_dirty_student():
+def test_24_report_generation_is_derived_and_one_per_dirty_student():
     assert 'for student_id in sorted(set(student_ids)):' in REPORT
-    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in REPORT
-    assert 'persist_metadata=True' in REPORT
+    assert 'self.generate_student_report(student_id, report_type="latest",' in REPORT
+    assert 'new presentation' in REPORT
 
-def test_24_failed_publish_keeps_prepared_reports_unaccepted():
+def test_24_failed_publish_does_not_deliver_reports():
     publish = TX[TX.index('def _publish(self)'):TX.index('def _do_publish')]
     success = publish[publish.index('if success:'):publish.index('else:')]
-    assert 'self._verify_reports()' in success
+    assert 'self._generate_reports(set(self._dirty_student_ids))' in success
     failure = publish[publish.index('else:'):]
-    assert '_verify_reports()' not in failure
+    assert 'self._generate_reports(set(self._dirty_student_ids))' not in failure
     assert '_delete_snapshot()' not in failure
 
 def test_24_synced_runtime_reloads_current_student_and_enrollment_surface():

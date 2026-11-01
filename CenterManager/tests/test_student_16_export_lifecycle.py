@@ -18,8 +18,8 @@ def test_latest_report_singleton_and_atomic():
     assert 'os.fsync(stream.fileno())' in R
 
 def test_dirty_students_track_transaction(): assert 'mark_student_dirty' in T and 'dirty_student_ids' in T
-def test_reports_prepared_before_publish_without_post_publish_sql():
-    assert 'self._prepare_reports(set(self._dirty_student_ids))' in T
+def test_reports_delivered_without_post_publish_sql():
+    assert 'self._generate_reports(set(self._dirty_student_ids))' in T
     section = M[M.index('def on_publish_success():'):M.index('def on_publish_failure')]
     assert 'generate_student_report' not in section
 

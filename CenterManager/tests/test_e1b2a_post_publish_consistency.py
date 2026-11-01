@@ -17,8 +17,9 @@ from centermanager.models.class_ import Class
 from centermanager.models.session import Session as LessonSession
 from centermanager.models.attendance import Attendance
 from centermanager.models.enrollment import Enrollment
+from centermanager.models.report import Report
 from centermanager.services.student_service import StudentService
-from centermanager.services.report_service import ReportService, ReportPreparationError
+from centermanager.services.report_service import ReportService, ReportGenerationError
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.collaboration.heartbeat import HeartbeatManager
@@ -41,6 +42,8 @@ def reporting(workspace, monkeypatch):
         db.add(LessonSession(id=1, class_id=1, session_number=1, title='Synthetic Lesson', scheduled_date=date.today()))
         db.add(Enrollment(id=1, student_id=1, class_id=1, start_date=date.today(), status='ACTIVE'))
         db.commit()
+        db.add(Report(id=1, student_id=1, file_path="Reports/Student/SYN001/StudentProfile.pdf",
+                      report_type="legacy", generated_by="synthetic", metadata_json="{}"))
         db.add(Attendance(id=1, session_id=1, student_id=1, status='Absent'))
         db.commit()
     materialize_runtime_database_to_repository()
@@ -86,7 +89,7 @@ def reporting(workspace, monkeypatch):
             accepted['value'] = result
             return result
     tx.set_sync_service(Sync())
-    tx.set_report_callbacks(service.prepare_for_publication, service.verify_publication_reports)
+    tx.set_report_callback(service.generate_published_reports)
     w.tx, w.cm, w.reports, w.factory, w.rendered = tx, cm, service, factory, rendered
     w.accepted, w.post_accept_writes = accepted, post_accept_writes
     yield w
@@ -115,14 +118,14 @@ def remote_rows(w, sql):
 
 
 @pytest.mark.parametrize('kind', ['student', 'attendance', 'enrollment'])
-def test_modified_aggregate_finish_publishes_report_metadata_once_and_restarts_clean(reporting, kind):
+def test_modified_aggregate_finish_generates_current_report_without_post_publish_sql_and_restarts_clean(reporting, kind):
     w = reporting
     assert w.tx.start_editing(), w.tx.last_start_error
     mutate(w, kind)
-    assert w.tx.finish_editing(), w.tx.last_finish_error
+    assert w.tx.finish_editing(), w.tx.last_start_error
     assert w.tx.state == WriteTransactionState.IDLE
     assert w.journal.inspect()['status'] == 'CLEAN'
-    assert remote_rows(w, 'SELECT student_id, report_type FROM reports') == [(1, 'latest')]
+    assert remote_rows(w, 'SELECT student_id, report_type FROM reports') == [(1, 'legacy')]
     assert len(w.rendered) == 1
     if kind == 'student':
         assert 'UPDATED SYNTHETIC' in w.rendered[0][1]
@@ -133,18 +136,20 @@ def test_modified_aggregate_finish_publishes_report_metadata_once_and_restarts_c
     assert not w.post_accept_writes
     from centermanager.platform.sync.startup_sync import StartupSynchronization
     assert StartupSynchronization(w.provider).run()
-    assert w.reports.get_student_reports(1)[0].file_path.endswith('StudentProfile.pdf')
+    local = w.reports.get_student_reports(1)[0]
+    assert local.id == -1 and local.report_type == 'latest'
     w.journal.assert_replaceable()
 
 
-def test_multiple_dirty_students_deduplicated_before_one_publication(reporting):
+def test_multiple_dirty_students_deduplicated_after_one_verified_publication(reporting):
     w = reporting
     assert w.tx.start_editing()
     for sid in (2, 1, 2, 1):
         w.tx.mark_student_dirty(sid)
     assert w.tx.finish_editing()
     assert [sid for sid, text in w.rendered] == [1, 2]
-    assert remote_rows(w, 'SELECT student_id FROM reports ORDER BY student_id') == [(1,), (2,)]
+    assert [w.reports.get_student_reports(sid)[0].id for sid in (1, 2)] == [-1, -2]
+    assert remote_rows(w, 'SELECT student_id FROM reports') == [(1,)]
     assert not w.post_accept_writes
 
 
@@ -155,7 +160,6 @@ def test_readonly_regeneration_and_daily_export_leave_sqlcipher_and_clean_receip
     mutate(w)
     assert w.tx.finish_editing()
     before_db = w.journal.database.read_bytes()
-    count = len(remote_rows(w, 'SELECT id FROM reports'))
     pdf = w.reports.generate_student_report(1)
     local = w.reports.get_student_reports(1)[0]
     assert local.id == -1 and w.reports.get_report_file_path(-1) == pdf
@@ -164,81 +168,104 @@ def test_readonly_regeneration_and_daily_export_leave_sqlcipher_and_clean_receip
     daily.run_daily_check()
     assert daily._state_file.exists()
     assert w.journal.database.read_bytes() == before_db
-    assert len(remote_rows(w, 'SELECT id FROM reports')) == count
+    assert remote_rows(w, 'SELECT report_type FROM reports') == [('legacy',)]
     assert not w.post_accept_writes
     assert w.journal.inspect()['status'] == 'CLEAN'
     w.journal.assert_replaceable()
 
 
-def test_generation_failure_before_publish_keeps_open_journal_and_can_retry(reporting, monkeypatch):
+def test_generation_with_changed_database_report_metadata_never_hides_or_rewrites_it(reporting):
+    w = reporting
+    assert w.tx.start_editing()
+    with w.factory() as db:
+        db.get(Report, 1).report_type = 'legitimate-metadata-change'
+        db.commit()
+    w.tx.mark_student_dirty(1)
+    before = w.journal.database.read_bytes()
+    w.reports.generate_student_report(1)
+    assert w.journal.database.read_bytes() == before
+    assert w.journal.inspect()['status'] == 'OPEN'
+    assert w.tx.finish_editing()
+    assert remote_rows(w, 'SELECT report_type FROM reports') == [('legitimate-metadata-change',)]
+    assert not w.post_accept_writes
+    assert w.journal.inspect()['status'] == 'CLEAN'
+
+
+def test_generation_failure_before_publish_keeps_open_journal_and_business_changes(reporting, monkeypatch):
     w = reporting
     assert w.tx.start_editing()
     mutate(w)
-    before = w.provider.observe_remote_main_commit()
     original = w.reports._generator.generate
     def fail(*args):
         raise OSError('synthetic report disk failure')
     monkeypatch.setattr(w.reports._generator, 'generate', fail)
-    assert not w.tx.finish_editing()
-    assert 'MAIN was not published' in w.tx.last_finish_error
+    with pytest.raises(OSError):
+        w.reports.generate_student_report(1)
     assert w.tx.state == WriteTransactionState.EDITING
     assert w.journal.inspect()['status'] == 'OPEN'
-    assert w.provider.observe_remote_main_commit() == before
+    assert w.provider.observe_remote_main_commit() == w.base
     from centermanager.platform.sync.startup_sync import StartupSynchronization
     assert not StartupSynchronization(w.provider).run()
     monkeypatch.setattr(w.reports._generator, 'generate', original)
-    assert w.tx.finish_editing(), w.tx.last_finish_error
+    assert w.tx.finish_editing()
     assert w.journal.inspect()['status'] == 'CLEAN'
 
 
-def test_report_file_failure_after_core_publish_is_distinct_and_does_not_dirty_db(reporting, monkeypatch):
+def test_report_failure_after_core_publish_is_distinct_and_restart_is_safe(reporting, monkeypatch):
+    from centermanager.platform.sync.startup_sync import StartupSynchronization
     w = reporting
     assert w.tx.start_editing()
     mutate(w)
-    original = w.tx._sync_service.publish_only
-    @wraps(original)
-    def accepted_then_file_lost(**kwargs):
-        result = original(**kwargs)
-        w.reports._default_report_path(1).unlink()
-        return result
-    monkeypatch.setattr(w.tx._sync_service, 'publish_only', accepted_then_file_lost)
+    original = w.reports._generator.generate
+    def fail(*args):
+        assert w.accepted['value']  # Reports never gate an otherwise authorized core publish.
+        raise OSError('synthetic report file failure')
+    monkeypatch.setattr(w.reports._generator, 'generate', fail)
     assert w.tx.finish_editing()
     assert w.tx.state == WriteTransactionState.IDLE
     assert 'Core data was published' in w.tx.report_warning
     assert w.journal.inspect()['status'] == 'CLEAN'
+    assert remote_rows(w, 'SELECT full_name FROM students WHERE id=1') == [('UPDATED SYNTHETIC',)]
     assert not w.post_accept_writes
-    # READ-mode regeneration restores delivery without a second SQL/Git push.
+    assert StartupSynchronization(w.provider).run()
+    monkeypatch.setattr(w.reports._generator, 'generate', original)
     w.reports.generate_student_report(1)
     w.journal.assert_replaceable()
     assert not w.post_accept_writes
 
 
 @pytest.mark.parametrize('outcome', ['rejected', 'lost-ack'])
-def test_unaccepted_or_unknown_publish_keeps_report_metadata_and_artifacts_protected(reporting, monkeypatch, outcome):
+def test_unaccepted_or_unknown_publish_keeps_existing_artifacts_and_recovery_protected(reporting, monkeypatch, outcome):
     w = reporting
     assert w.tx.start_editing()
+    pdf = w.reports.generate_student_report(1)
+    previous = pdf.read_bytes()
+    w.rendered.clear()
     mutate(w)
     original = w.tx._sync_service.publish_only
     @wraps(original)
     def publish(**kwargs):
         if outcome == 'lost-ack':
             original(**kwargs)
-        else:
-            return False
-        raise RuntimeError('synthetic unknown publication response')
+            raise RuntimeError('synthetic unknown publication response')
+        return False
     monkeypatch.setattr(w.tx._sync_service, 'publish_only', publish)
     assert not w.tx.finish_editing()
     assert w.journal.inspect()['status'] == 'PUBLISHING'
     assert w.accepted['value'] == (outcome == 'lost-ack')
-    assert w.reports._default_report_path(1).exists()
+    assert not w.rendered  # No report success callback on rejection or unknown response.
+    assert pdf.read_bytes() == previous
     from centermanager.platform.write_recovery import RecoveryRequired
-    with pytest.raises(RecoveryRequired):
-        w.reports.generate_student_report(1)  # Cannot overwrite pending artifacts.
-    with pytest.raises(RecoveryRequired):
-        w.journal.assert_replaceable()
+    for _ in range(2):
+        with pytest.raises(RecoveryRequired):
+            w.reports.generate_student_report(1)
+        with pytest.raises(RecoveryRequired):
+            w.journal.assert_replaceable()
+        assert pdf.read_bytes() == previous
+        w.journal.verify_capture(w.journal.inspect()['last_capture'])
 
 
-def test_active_sqlcipher_wal_during_reports_is_included_in_publication(reporting):
+def test_active_sqlcipher_wal_during_reports_is_preserved_in_publication(reporting):
     w = reporting
     assert w.tx.start_editing()
     with w.factory() as db:
@@ -247,11 +274,12 @@ def test_active_sqlcipher_wal_during_reports_is_included_in_publication(reportin
         db.execute(text('PRAGMA wal_autocheckpoint=0'))
         db.get(Student, 1).full_name = 'WAL SYNTHETIC'
         db.commit()
+    w.reports.generate_student_report(1)  # READ projection while WRITE/WAL is active.
     w.tx.mark_student_dirty(1)
     assert w.tx.finish_editing()
     assert remote_rows(w, 'SELECT full_name FROM students WHERE id=1') == [('WAL SYNTHETIC',)]
-    assert remote_rows(w, 'SELECT student_id FROM reports') == [(1,)]
     assert w.journal.inspect()['status'] == 'CLEAN'
+    assert not w.post_accept_writes
 
 
 def test_derived_update_cannot_hide_unrelated_unaccepted_file_change(reporting, monkeypatch):
@@ -273,8 +301,9 @@ def test_derived_update_cannot_hide_unrelated_unaccepted_file_change(reporting, 
     assert w.paths.attachment_dir.joinpath('unaccepted.txt').exists()
 
 
-@pytest.mark.parametrize('failure', ['metadata', 'file-install'])
-def test_pre_publish_persistence_failure_restores_previous_report_pair_and_keeps_recovery(reporting, monkeypatch, failure):
+@pytest.mark.parametrize('failure', ['pdf-install', 'receipt-install'])
+def test_pre_publish_disk_failure_restores_previous_pair_and_keeps_recovery(reporting, monkeypatch, failure):
+    import centermanager.platform.write_recovery as recovery
     w = reporting
     assert w.tx.start_editing()
     pdf = w.reports.generate_student_report(1)
@@ -282,27 +311,19 @@ def test_pre_publish_persistence_failure_restores_previous_report_pair_and_keeps
     previous = (pdf.read_bytes(), receipt.read_bytes())
     capture = w.journal.inspect()['last_capture']
     mutate(w)
-    if failure == 'metadata':
-        @event.listens_for(w.factory.kw['bind'], 'before_cursor_execute')
-        def fail_metadata(conn, cursor, statement, parameters, context, executemany):
-            if statement.lstrip().upper().startswith('INSERT INTO REPORTS'):
-                raise OSError('synthetic metadata persistence failure')
-    else:
-        import centermanager.platform.write_recovery as recovery
-        original = recovery._install
-        def fail_receipt(source, destination):
-            if Path(destination) == receipt:
-                raise OSError(28, 'synthetic insufficient disk space')
-            return original(source, destination)
-        monkeypatch.setattr(recovery, '_install', fail_receipt)
-    assert not w.tx.finish_editing()
+    original = recovery._install
+    def fail_install(source, destination):
+        if Path(destination) == (pdf if failure == 'pdf-install' else receipt):
+            raise OSError(28, 'synthetic insufficient disk space')
+        return original(source, destination)
+    monkeypatch.setattr(recovery, '_install', fail_install)
+    with pytest.raises(OSError):
+        w.reports.generate_student_report(1)
     assert w.tx.state == WriteTransactionState.EDITING
     assert w.provider.observe_remote_main_commit() == w.base
     assert (pdf.read_bytes(), receipt.read_bytes()) == previous
     assert w.journal.inspect()['status'] == 'OPEN'
-    assert Path(capture).exists()
     w.journal.verify_capture(capture)
-    assert remote_rows(w, 'SELECT student_id FROM reports') == []
 
 
 def test_receipt_failure_after_verified_publish_is_report_warning_without_sql_or_recovery_loss(reporting, monkeypatch):
@@ -310,38 +331,39 @@ def test_receipt_failure_after_verified_publish_is_report_warning_without_sql_or
     w = reporting
     assert w.tx.start_editing()
     mutate(w)
-    original = recovery._json
-    def fail_receipt(path, document):
-        if Path(path).suffix == '.json' and Path(path).name.endswith('.report.json'):
+    original = recovery._install
+    def fail_receipt(source, destination):
+        if Path(destination).name.endswith('.report.json'):
             raise OSError('synthetic local receipt write failure')
-        return original(path, document)
-    monkeypatch.setattr(recovery, '_json', fail_receipt)
+        return original(source, destination)
+    monkeypatch.setattr(recovery, '_install', fail_receipt)
     assert w.tx.finish_editing()
-    assert w.accepted['value']
-    assert w.tx.report_warning
+    assert w.accepted['value'] and w.tx.report_warning
     assert not w.post_accept_writes
     assert w.journal.inspect()['status'] == 'CLEAN'
     assert w.reports.get_report_file_path(-1) is None
-    assert Path(w.journal.inspect()['last_capture']).exists()
+    w.journal.verify_capture(w.journal.inspect()['last_capture'])
     w.journal.assert_replaceable()
 
 
-def test_report_preparation_does_not_extend_finishing_deadline(reporting, monkeypatch):
-    from datetime import datetime, timedelta
+def test_render_runs_only_after_verification_without_extending_deadline(reporting, monkeypatch):
     w = reporting
     assert w.tx.start_editing()
     mutate(w)
     original = w.reports._generator.generate
-    def slow_renderer(*args):
+    deadlines = []
+    def render(*args):
+        assert w.accepted['value']
+        assert w.tx.state == WriteTransactionState.PUBLISHED
+        assert w.journal.inspect()['status'] == 'PUBLISHED'
+        deadline = w.tx._finishing_deadline
         result = original(*args)
-        w.tx._finishing_deadline = datetime.now() - timedelta(seconds=1)
+        assert w.tx._finishing_deadline == deadline
+        deadlines.append(deadline)
         return result
-    monkeypatch.setattr(w.reports._generator, 'generate', slow_renderer)
-    assert not w.tx.finish_editing()
-    assert w.tx.state == WriteTransactionState.FINISHING_STALE
-    assert w.provider.observe_remote_main_commit() == w.base
-    assert w.journal.inspect()['status'] == 'OPEN'
-    assert 'Nothing was published' in w.tx.last_finish_error
+    monkeypatch.setattr(w.reports._generator, 'generate', render)
+    assert w.tx.finish_editing()
+    assert len(deadlines) == 1 and deadlines[0] is not None
 
 
 def test_true_post_publish_sql_mutation_still_preserves_recovery(reporting):
@@ -375,11 +397,65 @@ def test_new_accepted_main_invalidates_old_local_report_receipt(reporting):
     assert w.reports.get_report_file_path(-1)
     git(w.journal.repository, 'commit', '--allow-empty', '-m', 'synthetic next accepted MAIN')
     git(w.journal.repository, 'push', 'origin', 'main')
-    # Simulate an accepted no-DB-change synchronization, keeping the old PDF.
     assert StartupSynchronization(w.provider).run()
     assert w.reports.get_report_file_path(-1) is None
-    legacy = remote_rows(w, 'SELECT id FROM reports')[0][0]
-    assert w.reports.get_report_file_path(legacy) is None
+    assert w.reports.get_report_file_path(1) is None
     w.reports.generate_student_report(1)
     assert w.reports.get_report_file_path(-1)
     w.journal.assert_replaceable()
+
+
+@pytest.mark.parametrize('role', ['admin', 'reception'])
+def test_production_renderer_respects_permissions_without_blocking_core_publish(reporting, role):
+    from types import SimpleNamespace
+    from centermanager.services.parent_service import ParentService
+    from centermanager.services.attendance_service import AttendanceService
+    from centermanager.services.session_service import SessionService
+    from centermanager.services.student_note_service import StudentNoteService
+    from centermanager.services.outstanding_service import OutstandingService
+    from centermanager.services.income_service import IncomeService
+    from centermanager.export.pdf.student_report_generator import StudentReportGenerator
+    from centermanager.core.current_user import CurrentUserContext
+    from centermanager.core.capabilities import Capability
+    w = reporting
+    w.reports._generator = StudentReportGenerator(
+        w.reports._student_service, ParentService(w.factory),
+        AttendanceService(w.factory, None, None), SessionService(w.factory),
+        StudentNoteService(w.factory), OutstandingService(w.factory),
+        IncomeService(w.factory, None, None, None, None))
+    permissions = {c.value for c in Capability} if role == 'admin' else {'student.view', 'student.update'}
+    principal = SimpleNamespace(role=SimpleNamespace(name=role), is_active=True,
+                                permissions=permissions, full_name='Synthetic Renderer')
+    with CurrentUserContext(principal):
+        assert w.tx.start_editing(), w.tx.last_start_error
+        mutate(w)
+        assert w.tx.finish_editing()
+        assert w.journal.inspect()['status'] == 'CLEAN'
+        assert remote_rows(w, 'SELECT full_name FROM students WHERE id=1') == [('UPDATED SYNTHETIC',)]
+        if role == 'admin':
+            assert not w.tx.report_warning
+            assert w.reports.get_report_file_path(-1).read_bytes().startswith(b'%PDF-')
+            w.reports.generate_student_report(1)
+        else:
+            assert w.tx.report_warning  # Existing lesson.view denial remains enforced.
+            assert w.reports.get_report_file_path(-1) is None
+        assert not w.post_accept_writes
+        w.journal.assert_replaceable()
+
+
+def test_one_report_failure_does_not_skip_other_dirty_students(reporting, monkeypatch):
+    w = reporting
+    assert w.tx.start_editing()
+    w.tx.mark_student_dirty(1)
+    w.tx.mark_student_dirty(2)
+    original = w.reports._generator.generate
+    def render(student_id, path):
+        if student_id == 1:
+            raise OSError('synthetic first report failure')
+        return original(student_id, path)
+    monkeypatch.setattr(w.reports._generator, 'generate', render)
+    assert w.tx.finish_editing()
+    assert w.tx.report_warning
+    assert w.reports.get_report_file_path(-2)
+    assert w.journal.inspect()['status'] == 'CLEAN'
+    assert not w.post_accept_writes

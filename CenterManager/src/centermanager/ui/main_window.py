@@ -940,7 +940,7 @@ class MainWindow(QMainWindow):
         def on_publish_success():
             report_warning = self._transaction.report_warning
             self.statusBar().showMessage(
-                report_warning or "Changes and report metadata published successfully.",
+                report_warning or "Changes published; local reports generated.",
                 0 if report_warning else 3000,
             )
             logger.info("Publish success - updating UI")
@@ -984,10 +984,7 @@ class MainWindow(QMainWindow):
             self._update_waiting_status()
 
         self._update_write_buttons()
-        if not success and self._transaction.last_finish_error:
-            self._closing_requested = False
-            QMessageBox.warning(self, "Finish Editing Incomplete", self._transaction.last_finish_error)
-        elif success and self._transaction.report_warning:
+        if success and self._transaction.report_warning:
             QMessageBox.warning(self, "Reports Incomplete", self._transaction.report_warning)
 
         if not success and self._transaction.state == WriteTransactionState.FAILED:

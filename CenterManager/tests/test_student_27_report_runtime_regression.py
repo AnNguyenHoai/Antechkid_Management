@@ -18,9 +18,9 @@ def test_student_27_report_query_eager_loads_assessments():
     body = REPOSITORY[start:]
     assert "selectinload(Student.assessments)" in body
 
-def test_student_27_pre_publish_uses_dirty_student_ids():
+def test_student_27_derived_reports_use_dirty_student_ids():
     tx = Path("src/centermanager/services/write_transaction.py").read_text(encoding="utf-8")
-    assert "self._prepare_reports(set(self._dirty_student_ids))" in tx
+    assert "self._generate_reports(set(self._dirty_student_ids))" in tx
     callback = MAIN[MAIN.index('def on_publish_success():'):MAIN.index('def on_publish_failure')]
     assert 'generate_student_report' not in callback
 

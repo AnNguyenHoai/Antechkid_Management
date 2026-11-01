@@ -16,9 +16,9 @@ STUDENT_REPOSITORY = (ROOT / "repositories/student_repository.py").read_text(enc
 
 
 def test_finish_flow_generates_reports_only_from_dirty_student_aggregates():
-    # E1B-2A supersedes post-publish SQL generation: prepare before snapshot.
-    assert "self._prepare_reports(set(self._dirty_student_ids))" in TX
-    assert TX.index("self._prepare_reports(set(self._dirty_student_ids))") < TX.index("if not self._publish_database_and_manifest():")
+    # E1B-2A keeps post-publish delivery SQL-read-only.
+    assert "self._generate_reports(set(self._dirty_student_ids))" in TX
+    assert TX.index("self._generate_reports(set(self._dirty_student_ids))") > TX.index("self._recovery_journal.published(")
     assert 'for student_id in sorted(set(student_ids)):' in REPORT_SERVICE
     section = MAIN[MAIN.index('def on_publish_success():'):MAIN.index('def on_publish_failure')]
     assert 'generate_student_report' not in section
@@ -80,5 +80,5 @@ def test_archive_filter_is_explicitly_supported():
 
 
 def test_latest_report_policy_is_not_historical_accumulation():
-    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in REPORT_SERVICE
-    assert "for existing in repo.get_by_student(student_id):" in REPORT_SERVICE
+    assert 'self.generate_student_report(student_id, report_type="latest",' in REPORT_SERVICE
+    assert "return [local]" in REPORT_SERVICE

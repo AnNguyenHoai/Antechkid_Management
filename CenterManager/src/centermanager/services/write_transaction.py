@@ -83,10 +83,8 @@ class WriteTransactionManager:
         # Internal editing flag
         self._is_editing = False
         self._recovery_journal = None
-        self._prepare_reports = None
-        self._verify_reports = None
+        self._generate_reports = None
         self._report_warning = ""
-        self._last_finish_error = ""
 
     @property
     def state(self) -> WriteTransactionState:
@@ -125,18 +123,13 @@ class WriteTransactionManager:
     def set_version_manager(self, version_manager) -> None:
         self._version_manager = version_manager
 
-    def set_report_callbacks(self, prepare, verify) -> None:
-        """Bind service-owned preparation and read-only delivery verification."""
-        self._prepare_reports = prepare
-        self._verify_reports = verify
+    def set_report_callback(self, generate) -> None:
+        """Bind SQL-read-only derived report delivery after verified MAIN."""
+        self._generate_reports = generate
 
     @property
     def report_warning(self) -> str:
         return self._report_warning
-
-    @property
-    def last_finish_error(self) -> str:
-        return self._last_finish_error
 
     def mark_dirty(self) -> None:
         self._has_changes = True
@@ -619,7 +612,6 @@ class WriteTransactionManager:
                        on_publish_success: Optional[Callable[[], None]] = None,
                        on_publish_failure: Optional[Callable[[str], None]] = None) -> bool:
         finish_total = time.perf_counter()
-        self._last_finish_error = ""
         if self._state == WriteTransactionState.IDLE:
             logger.warning("Finish editing called in IDLE state")
             return False
@@ -670,34 +662,6 @@ class WriteTransactionManager:
             except Exception:
                 logger.exception("Local save exception")
                 self._state = WriteTransactionState.FAILED
-                return False
-
-        if self._prepare_reports is not None:
-            report_started = time.perf_counter()
-            try:
-                self._prepare_reports(set(self._dirty_student_ids))
-            except Exception as exc:
-                # No materialization, version advance or MAIN push has occurred.
-                # Keep the same authorized session and journal for explicit retry.
-                self.reset_finishing()
-                self._state = WriteTransactionState.EDITING
-                self._finishing_started_at = None
-                self._finishing_deadline = None
-                self._publish_intent = False
-                self._last_finish_error = (
-                    f"Reports incomplete; MAIN was not published. Local data remains protected. {exc}"
-                )
-                logger.exception("Report preparation stopped publication")
-                return False
-            logger.info("PERF report_prepare total_ms=%.1f students=%d",
-                        (time.perf_counter() - report_started) * 1000, len(self._dirty_student_ids))
-            authority = self.refresh_finishing_authority()
-            if not authority.get("success"):
-                self._last_finish_error = (
-                    "Report preparation completed locally, but WRITE/MAIN authority could not be "
-                    "reverified. Nothing was published; local data remains protected. "
-                    + str(authority.get("reason", "Unknown authority"))
-                )
                 return False
 
         save_ms = (time.perf_counter() - save_started) * 1000
@@ -867,14 +831,14 @@ class WriteTransactionManager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
                 self._state = WriteTransactionState.PUBLISHED
-                if self._verify_reports is not None:
+                if self._generate_reports is not None:
                     try:
-                        self._verify_reports()
+                        self._generate_reports(set(self._dirty_student_ids))
                     except Exception as exc:
                         self._report_warning = (
                             f"Core data was published; local reports are incomplete. {exc}"
                         )
-                        logger.exception("Published core data; report delivery verification failed")
+                        logger.exception("Published core data; derived report delivery failed")
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
                     self._on_publish_success()

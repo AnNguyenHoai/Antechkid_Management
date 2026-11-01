@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-ReportService - derived local reports and pre-publication canonical metadata.
+ReportService - derived local reports with read compatibility for persisted metadata.
 """
 import json
 import logging
@@ -29,8 +29,8 @@ from centermanager.export.pdf.student_report_generator import StudentReportGener
 logger = logging.getLogger(__name__)
 
 
-class ReportPreparationError(RuntimeError):
-    """Required reports are incomplete; authoritative publication must wait."""
+class ReportGenerationError(RuntimeError):
+    """Derived report delivery is incomplete."""
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,6 @@ class ReportService:
         self._session_factory = session_factory
         self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
         self._write_guard = write_guard
-        self._prepared_student_ids = set()
 
         self._generator = StudentReportGenerator(
             student_service,
@@ -108,7 +107,7 @@ class ReportService:
             return journal._git('rev-parse', 'HEAD')
         return None
 
-    def _local_report(self, student_id: int, *, prepared=False) -> Optional[LocalReportArtifact]:
+    def _local_report(self, student_id: int) -> Optional[LocalReportArtifact]:
         if self._student_service is None:
             return None
         try:
@@ -118,7 +117,7 @@ class ReportService:
             created = student.created_at.isoformat() if student.created_at else None
             if (receipt["student_id"] != student_id or receipt["sha256"] != self._digest(pdf)
                     or receipt.get("student_created_at") != created
-                    or (not prepared and receipt.get("source_main_oid") != self._source_main_oid())):
+                    or receipt.get("source_main_oid") != self._source_main_oid()):
                 return None
             relative = str(pdf.relative_to(get_paths().runtime_root))
             if receipt["file_path"] != relative:
@@ -140,56 +139,38 @@ class ReportService:
     ) -> Path:
         """Render a rebuildable local PDF/receipt without mutating SQLCipher.
 
-        Manual READ-mode exports and daily reports use this API. Canonical SQL
-        metadata is prepared separately under WRITE before the one MAIN push.
+        Manual READ-mode, daily and post-publish reports use the same API.
+        Persisted legacy SQL report rows remain read-compatible; new presentation
+        metadata lives only in the local receipt.
         """
-        return self._generate(student_id, report_type, trigger_event, generated_by,
-                              output_path, persist_metadata=False)
+        return self._generate(student_id, report_type, trigger_event, generated_by, output_path)
 
-    def prepare_for_publication(self, student_ids) -> None:
-        """Prepare each dirty aggregate once before snapshot/materialization."""
-        self._prepared_student_ids = set()
+    def generate_published_reports(self, student_ids) -> None:
+        """Deliver each dirty report after verified MAIN, without SQL writes.
+
+        Attempt every student, preserving the previous good pair on each failure.
+        Publication/release and recovery proofs remain owned by the transaction.
+        """
+        failures = []
         for student_id in sorted(set(student_ids)):
             try:
-                self._generate(student_id, "latest", "student_updated", "system", None,
-                               persist_metadata=True)
-                self._prepared_student_ids.add(student_id)
+                self.generate_student_report(student_id, report_type="latest",
+                                             trigger_event="student_updated", generated_by="system")
             except StudentNotFoundError:
-                # An aggregate edited then deleted has no required report.
-                continue
-            except Exception as exc:
-                raise ReportPreparationError(
-                    f"Report preparation failed for student ID {student_id}. "
-                    "MAIN has not been published; local changes remain protected. Retry Finish Editing."
-                ) from exc
+                continue  # Edited then deleted: never recreate the aggregate.
+            except Exception:
+                failures.append(student_id)
+                logger.exception("Derived report delivery failed for student ID %s", student_id)
+        if failures:
+            raise ReportGenerationError(
+                f"Local reports incomplete for student IDs {failures}. "
+                "Regenerate reports with an authorized account; core publication is unchanged."
+            )
 
-    def verify_publication_reports(self) -> None:
-        """Read-only delivery check after accepted core publication."""
-        for student_id in self._prepared_student_ids:
-            if self._local_report(student_id, prepared=True) is None:
-                raise ReportPreparationError(
-                    f"Core data was published, but report file for student ID {student_id} "
-                    "is unavailable or changed. Regenerate the local report."
-                )
-            # Bind the derived receipt to the verified MAIN without writing SQL.
-            from centermanager.platform.write_recovery import _json
-            receipt_path = self._default_report_path(student_id).with_suffix(".report.json")
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            receipt['source_main_oid'] = self._source_main_oid()
-            _json(receipt_path, receipt)
-
-    def _generate(self, student_id, report_type, trigger_event, generated_by,
-                  output_path, *, persist_metadata):
+    def _generate(self, student_id, report_type, trigger_event, generated_by, output_path):
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-        from centermanager.database.encryption import database_encryption_required
         journal = WriteRecoveryJournal()
         before = journal.begin_report_artifact_update()
-        if persist_metadata:
-            if self._write_guard is not None:
-                self._write_guard.require_write()
-            elif database_encryption_required() or before is not None:
-                # A deployed metadata writer must be bound to the canonical guard.
-                raise ReportPreparationError("Canonical WRITE guard is required for report metadata.")
         output_path = Path(output_path) if output_path is not None else self._default_report_path(student_id)
         runtime = Path(get_paths().runtime_root).resolve()
         output_path = output_path.resolve()
@@ -208,7 +189,7 @@ class ReportService:
             self._generator.generate(student_id, candidate)
             with candidate.open("r+b") as stream:
                 if stream.read(5) != b"%PDF-":
-                    raise ReportPreparationError("Report generator did not produce a valid PDF.")
+                    raise ReportGenerationError("Report generator did not produce a valid PDF.")
                 stream.flush()
                 os.fsync(stream.fileno())
             generated_at = datetime.now()
@@ -236,25 +217,10 @@ class ReportService:
                 from centermanager.platform.write_recovery import _install
                 _install(temporary, destination)
                 installed.append(destination)
-            if persist_metadata:
-                # Rendering may be slow; recheck the canonical local WRITE gate
-                # immediately before opening the metadata transaction as well.
-                if self._write_guard is not None:
-                    self._write_guard.require_write()
-                with self._session_factory() as session:
-                    repo = self._repository_provider.reports(session)
-                    for existing in repo.get_by_student(student_id):
-                        repo.delete(existing)
-                    report = Report(student_id=student_id, file_path=receipt["file_path"],
-                                    report_type=report_type, trigger_event=trigger_event,
-                                    generated_by=actor, generated_at=generated_at,
-                                    metadata_json=json.dumps(metadata, ensure_ascii=False))
-                    repo.add(report)
-                    session.commit()
             journal.finish_report_artifact_update(before, (output_path, receipt_path))
             return output_path
         except Exception:
-            # Preserve the previous good derived pair on render/file/SQL failure.
+            # Preserve the previous good derived pair on render/file failure.
             # E1B-1 recovery captures and authoritative data are never removed.
             for destination in reversed(installed):
                 if destination in backups:

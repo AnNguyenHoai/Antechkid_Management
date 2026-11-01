@@ -94,8 +94,8 @@ def test_mainwindow_marks_assessment_student_dirty():
     assert "self._transaction.mark_student_dirty(event.student_id)" in body
 
 
-def test_report_preparation_uses_dirty_student_set():
+def test_derived_report_delivery_uses_dirty_student_set():
     tx = Path("src/centermanager/services/write_transaction.py").read_text(encoding="utf-8")
     report = Path("src/centermanager/services/report_service.py").read_text(encoding="utf-8")
-    assert "self._prepare_reports(set(self._dirty_student_ids))" in tx
-    assert 'self._generate(student_id, "latest", "student_updated", "system", None,' in report
+    assert "self._generate_reports(set(self._dirty_student_ids))" in tx
+    assert 'self.generate_student_report(student_id, report_type="latest",' in report
