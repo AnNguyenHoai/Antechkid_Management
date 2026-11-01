@@ -48,6 +48,15 @@ class BootstrapManager:
             config = get_config().raw
             paths = get_paths()
 
+            from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+            try:
+                require_replaceable(legacy=True)
+            except RecoveryRequired as exc:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(None, "WRITE recovery required", str(exc) +
+                    "\nWith CenterManager stopped, run: python -m centermanager.platform.write_recovery inspect")
+                return False
+
             repo_state = self._repo_manager.detect()
             logger.info(f"[BOOTSTRAP] Repository state: {repo_state.value}")
 

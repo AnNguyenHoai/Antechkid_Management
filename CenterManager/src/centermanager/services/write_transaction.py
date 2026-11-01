@@ -33,6 +33,7 @@ class WriteTransactionState(Enum):
     OFFLINE_PENDING_PUBLISH = auto()
     WAITING = auto()
     GRANTING = auto()
+    RECOVERY_REQUIRED = auto()
     # Finishing states
     FINISHING = auto()
     FINISHING_WAITING_FOR_COLLABORATION = auto()
@@ -81,6 +82,7 @@ class WriteTransactionManager:
 
         # Internal editing flag
         self._is_editing = False
+        self._recovery_journal = None
 
     @property
     def state(self) -> WriteTransactionState:
@@ -176,24 +178,48 @@ class WriteTransactionManager:
         self._base_main_commit = None
         self._is_editing = False
         self._stale_editing_reason = ""
+        self._recovery_journal = None
         resume_lease = getattr(self._collab_manager, "resume_write_lease_renewal", None)
         if callable(resume_lease):
             resume_lease()
         logger.info("Transaction reset to IDLE")
 
     # ---- Snapshot ----
+    def _begin_recovery_journal(self) -> bool:
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.database.encryption import database_encryption_required
+        journal = WriteRecoveryJournal()
+        # Non-deployed, DB-less custom providers have no persistent workspace.
+        # Encrypted production always requires durable metadata.
+        if not database_encryption_required() and not (
+            journal.database.exists() and (journal.repository / ".git").exists()
+        ):
+            return True
+        try:
+            provider = self._collab_manager._sync_provider
+            token = getattr(provider, "_owned_lock_token", None)
+            authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
+            journal.begin(self._collab_manager.get_session_id(), self._base_main_commit, authority)
+            self._recovery_journal = journal
+            return True
+        except Exception as exc:
+            self._last_start_error = f"Local recovery protection failed: {exc}. Keep the workspace; inspect recovery before retrying."
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            self._is_editing = False
+            logger.error(self._last_start_error)
+            return False
+
     def _create_snapshot(self) -> None:
+        from centermanager.database.wal_safety import copy_runtime_database_for_publish
         try:
             paths = get_paths()
-            db_path = paths.database_dir / "center.db"
-            if db_path.exists():
+            if (paths.database_dir / "center.db").exists():
                 snapshot_dir = paths.runtime_root / "snapshots"
                 snapshot_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                snapshot_path = snapshot_dir / f"pre_edit_{timestamp}.db"
-                shutil.copy2(db_path, snapshot_path)
+                import uuid
+                snapshot_path = snapshot_dir / f"pre_edit_{uuid.uuid4().hex}.db"
+                copy_runtime_database_for_publish(snapshot_path)
                 self._snapshot_path = snapshot_path
-                logger.info(f"Snapshot created at {snapshot_path}")
         except Exception:
             logger.exception("Failed to create snapshot")
 
@@ -211,6 +237,8 @@ class WriteTransactionManager:
             logger.exception("Failed to delete snapshot: %s", snapshot_path)
 
     def _restore_snapshot(self) -> bool:
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
         if self._snapshot_path and self._snapshot_path.exists():
             try:
                 paths = get_paths()
@@ -450,6 +478,13 @@ class WriteTransactionManager:
     # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
         start_total = time.perf_counter()
+        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        try:
+            require_replaceable()
+        except RecoveryRequired as exc:
+            self._last_start_error = str(exc)
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            return False
         self._last_start_error = ""
         self.reset_finishing()
         logger.info("Start Editing requested; transaction_state=%s", self._state.name)
@@ -495,14 +530,9 @@ class WriteTransactionManager:
                 return False
             handoff_ms = (time.perf_counter() - handoff_started) * 1000
 
-            if not self._transition_to(WriteTransactionState.EDITING, "write granted"):
-                self._release_grant_after_failed_consistency_check()
-                self._last_start_error = "Write lock was acquired but the transaction could not enter EDITING."
-                return False
             self._save_callback = save_callback
             self._has_changes = False
             self._session = self._collab_manager.get_session()
-            self._is_editing = True
 
             self._expected_generation = self._collab_manager.get_lock_generation()
             logger.info(f"Expected generation captured: {self._expected_generation}")
@@ -521,6 +551,12 @@ class WriteTransactionManager:
                 self._base_main_commit[:8] if self._base_main_commit else None,
             )
 
+            if not self._begin_recovery_journal():
+                self._release_grant_after_failed_consistency_check()
+                return False
+            if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
+                return False
+            self._is_editing = True
             snapshot_started = time.perf_counter()
             self._create_snapshot()
             snapshot_ms = (time.perf_counter() - snapshot_started) * 1000
@@ -667,6 +703,24 @@ class WriteTransactionManager:
             logger.warning("Cancel called with pending changes, force=False")
             return False
 
+        if self._recovery_journal is not None:
+            try:
+                self._recovery_journal.preserve("cancel-editing")
+                self._recovery_journal.update(status="CANCELLED")
+                if self._collab_manager.is_writing():
+                    if not self._collab_manager.release_write():
+                        return False
+                    self._recovery_journal.released()
+                self._state = WriteTransactionState.RECOVERY_REQUIRED
+                self._is_editing = False
+                self._last_start_error = "Cancelled data is preserved. Inspect recovery and explicitly reconcile before synchronizing."
+                return True
+            except Exception as exc:
+                self._state = WriteTransactionState.RECOVERY_REQUIRED
+                self._is_editing = False
+                self._last_start_error = f"Recovery preservation failed: {exc}. Free disk space and retry; keep the workspace."
+                return False
+
         if force and self._has_changes:
             if not self._restore_snapshot():
                 logger.error("Snapshot restore failed, lock retained")
@@ -752,8 +806,13 @@ class WriteTransactionManager:
         self._state = WriteTransactionState.PUBLISHING
 
         try:
+            if self._recovery_journal is not None:
+                self._recovery_journal.preserve("before-publish")
+                self._recovery_journal.update(status="PUBLISHING")
             success = self._do_publish()
             if success:
+                if self._recovery_journal is not None:
+                    self._recovery_journal.published(self._collab_manager._sync_provider)
                 if self._version_manager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
@@ -825,6 +884,8 @@ class WriteTransactionManager:
         if not self._collab_manager.release_write():
             logger.warning("Remote WRITE lock release is not yet confirmed")
             return False
+        if self._recovery_journal is not None:
+            self._recovery_journal.released()
         self._state = WriteTransactionState.COMPLETED
         logger.info("Transaction: COMPLETED (lock released)")
         return True
@@ -906,13 +967,7 @@ class WriteTransactionManager:
             ):
                 return
 
-        if not self._transition_to(
-            WriteTransactionState.EDITING,
-            "remote grant confirmed",
-        ):
-            return
-
-        self._is_editing = True
+        self._is_editing = False
         self._session = self._collab_manager.get_session()
         self._expected_generation = self._collab_manager.get_lock_generation()
 
@@ -925,6 +980,12 @@ class WriteTransactionManager:
             except Exception:
                 pass
 
+        if not self._begin_recovery_journal():
+            self._release_grant_after_failed_consistency_check()
+            return
+        if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
+            return
+        self._is_editing = True
         self._waiting_position = 0
         self._waiting_request_id = ""
         self._waiting_started_at = None

@@ -107,6 +107,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def _run_git_command(self, args: list, cwd: Optional[Path] = None, check: bool = True, env: Optional[dict] = None, timeout: Optional[float] = None) -> str:
         if cwd is None:
             cwd = self._repo_path
+        if args and args[0] in {"reset", "merge", "pull", "checkout", "clean"} and Path(cwd).resolve() == self._repo_path.resolve():
+            from centermanager.platform.write_recovery import require_replaceable
+            require_replaceable()
         if env is None:
             env = self._get_env()
 
@@ -210,6 +213,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
         logger.info(f"Cloning repository from {self._repository_url} to {self._repo_path}")
 
+        from centermanager.platform.write_recovery import require_replaceable
+        require_replaceable()
         try:
             if progress_callback:
                 progress_callback("clone", f"Cloning from {self._repository_url}", 10)
@@ -1013,6 +1018,12 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return False
 
     def pull(self) -> bool:
+        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        try:
+            require_replaceable()
+        except RecoveryRequired as exc:
+            logger.error("Pull blocked: %s", exc)
+            return False
         self._ensure_repo()
         if not self._has_remote_origin():
             logger.debug("No remote origin, pull skipped")

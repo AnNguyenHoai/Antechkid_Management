@@ -165,6 +165,12 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         """
         from centermanager.database import session as session_module
 
+        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        try:
+            require_replaceable()
+        except RecoveryRequired as exc:
+            logger.error("Runtime replacement blocked: %s", exc)
+            return False
         paths = get_paths()
         repo_db = paths.runtime_root / "repository" / "database" / "center.db"
         runtime_db = paths.database_dir / "center.db"
@@ -374,6 +380,8 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         if not sessions_refreshed:
             logger.error("Runtime materialization finished without refreshed DB sessions")
             return False
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        WriteRecoveryJournal().record_synchronized()
         return True
 
     def execute_write_handoff_sync(self) -> bool:

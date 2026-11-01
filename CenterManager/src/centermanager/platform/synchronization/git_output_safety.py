@@ -61,6 +61,11 @@ def install_git_output_safety(provider_cls: Any) -> None:
     def safe_run_git_command(self, args, cwd=None, check=True, env=None, timeout=None):
         if cwd is None:
             cwd = self._repo_path
+        if args and args[0] in {"reset", "merge", "pull", "checkout", "clean", "rebase"}:
+            from pathlib import Path
+            if Path(cwd).resolve() == self._repo_path.resolve():
+                from centermanager.platform.write_recovery import require_replaceable
+                require_replaceable()
         if env is None:
             env = self._get_env()
 
