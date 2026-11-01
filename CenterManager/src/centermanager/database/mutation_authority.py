@@ -92,6 +92,7 @@ class MutationAuthorityGate:
     def __init__(self, database: Path):
         self.database = database
         self.lock = threading.RLock()
+        self._observation_lock = threading.Lock()
         self.transaction = None
         self.incarnation = uuid.uuid4().hex
         self.deadline = 0.0
@@ -101,6 +102,9 @@ class MutationAuthorityGate:
         self.closed = True
         self.lost = False
         self.finishing_thread = None
+        self._pending_observation = None
+        self._pending_failure = None
+        self._latest_observation_started = 0.0
 
     def bind(self, transaction):
         with self.lock:
@@ -133,6 +137,9 @@ class MutationAuthorityGate:
                 raise MutationAuthorityError("Repository identity mismatch")
             self.repository_config_hash = self._config_hash()
             self.incarnation = uuid.uuid4().hex
+            self._pending_observation = None
+            self._pending_failure = None
+            self._latest_observation_started = 0.0
             self.lost = False
             self.closed = False
             self.deadline = 0.0
@@ -144,27 +151,58 @@ class MutationAuthorityGate:
                 self.invalidate("No current remote lease observation")
                 raise MutationAuthorityError("No current remote lease observation")
 
-    def observe(self, observation, started):
-        with self.lock:
-            if self.closed or self.lost:
-                return
-            cm = self.transaction._collab_manager
-            try:
-                remaining = (datetime.fromisoformat(observation['lease_expires_at']) - datetime.now()).total_seconds()
-                valid = (observation.get('state') == 'ACTIVE' and observation.get('verified') is True
-                         and observation.get('session_id') == self.session_id
-                         and observation.get('owner') == cm.get_session().username
-                         and bool(observation.get('oid')) and remaining > 0)
-            except (KeyError, TypeError, ValueError, AttributeError):
-                valid = False
-            if not valid:
-                self.invalidate("Remote WRITE is lost, expired or unverified")
-                return
-            # The unchanged 60-second lease is the maximum validity boundary.
-            # Use request START, so network latency cannot extend the lease.
-            self.deadline = min(started + cm._lock_timeout, time.monotonic() + remaining)
+    def _verified_remaining(self, observation):
+        cm = self.transaction._collab_manager
+        try:
+            remaining = (datetime.fromisoformat(observation['lease_expires_at']) - datetime.now()).total_seconds()
+            valid = (observation.get('state') == 'ACTIVE' and observation.get('verified') is True
+                     and observation.get('session_id') == self.session_id
+                     and observation.get('owner') == cm.get_session().username
+                     and bool(observation.get('oid')) and remaining > 0)
+            return remaining if valid else 0.0
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return 0.0
+
+    def _accept_observation(self, observation, started):
+        if self.closed or self.lost or started < self._latest_observation_started:
+            return
+        remaining = self._verified_remaining(observation)
+        if remaining <= 0:
+            self.invalidate("Remote WRITE is lost, expired or unverified")
+            return
+        self._latest_observation_started = started
+        # Request START and the unchanged TTL cap exclude network/DB wait time.
+        self.deadline = min(started + self.transaction._collab_manager._lock_timeout,
+                            time.monotonic() + remaining)
+
+    def observe(self, observation, started, *, source=None):
+        if self.closed or self.lost or self.transaction is None:
+            return
+        if source is not None and source is not self.transaction._collab_manager:
+            return
+        if self._verified_remaining(observation) <= 0:
+            self.invalidate("Remote WRITE is lost, expired or unverified")
+            return
+        # Healthy lease renewal must not wait for a long native DB statement.
+        # Only verified exact-owner evidence may be queued; it is consumed under
+        # the mutation mutex before the next admission/commit, never as a grant.
+        if not self.lock.acquire(blocking=False):
+            with self._observation_lock:
+                pending = self._pending_observation
+                if pending is None or started >= pending[1]:
+                    self._pending_observation = (self.incarnation, started, dict(observation))
+            return
+        try:
+            self._accept_observation(observation, started)
+        finally:
+            self.lock.release()
 
     def invalidate(self, reason):
+        if not self.closed and not self.lost:
+            # Publish a fail-closed latch before waiting for an in-flight SQL
+            # statement. Its next commit cannot overtake this loss notification.
+            with self._observation_lock:
+                self._pending_failure = reason
         with self.lock:
             if self.closed or self.lost:
                 return
@@ -206,6 +244,14 @@ class MutationAuthorityGate:
                 raise MutationAuthorityError("Transaction belongs to another maintenance permit")
             return permit
         tx = self.transaction
+        with self._observation_lock:
+            pending_failure = self._pending_failure
+            pending = self._pending_observation
+            self._pending_observation = None
+        if pending_failure is not None and not self.closed and not self.lost:
+            self.invalidate(pending_failure)
+        if pending is not None and pending[0] == self.incarnation:
+            self._accept_observation(pending[2], pending[1])
         if self.closed or self.lost or tx is None:
             raise MutationAuthorityError("Active verified WRITE is required")
         cm = tx._collab_manager

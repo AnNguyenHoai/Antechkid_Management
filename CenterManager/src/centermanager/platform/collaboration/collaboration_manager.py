@@ -143,7 +143,7 @@ class CollaborationManager:
             result = unknown_lock(e)
         gate = getattr(self, '_mutation_gate', None)
         if gate is not None:
-            gate.observe(result, started)
+            gate.observe(result, started, source=self)
         return result
 
     def _remote_queue_supported(self) -> bool:

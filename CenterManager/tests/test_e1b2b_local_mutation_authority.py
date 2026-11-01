@@ -539,3 +539,54 @@ def test_ui_projects_already_latched_recovery_instead_of_ignoring_lease_failure(
                              _update_write_buttons=lambda: projected.append(True))
     MainWindow._on_lease_renewal_failed(window, {'error': 'synthetic'})
     assert projected == [True]
+
+
+def test_healthy_renewal_does_not_wait_for_long_native_statement(reporting):
+    w = reporting
+    assert w.tx.start_editing()
+    actor = get_current_user()
+    entered, release, renewed = threading.Event(), threading.Event(), threading.Event()
+    results = []
+    def slow_floor(value):
+        entered.set()
+        assert release.wait(20)
+        return value
+    def writer():
+        connection = None
+        try:
+            with CurrentUserContext(actor):
+                connection = raw(w)
+                connection.create_function('floor', 1, slow_floor)
+                connection.execute('UPDATE students SET full_name=CAST(floor(id) AS TEXT) WHERE id=1')
+                # Simulate the old observation having aged out during UI/native
+                # work. Fresh worker evidence must be consumed at commit.
+                gate_for().deadline = 0
+                connection.commit()
+                results.append('committed')
+        except BaseException as exc:
+            results.append(exc)
+        finally:
+            if connection is not None:
+                release_runtime_dbapi_connection(connection)
+    def renew():
+        try:
+            assert w.cm.renew_remote_lease(force=True)
+            renewed.set()
+        except BaseException as exc:
+            results.append(exc)
+    worker = threading.Thread(target=writer)
+    lease_worker = threading.Thread(target=renew)
+    worker.start()
+    try:
+        assert entered.wait(10)
+        lease_worker.start()
+        assert renewed.wait(15), 'Healthy renewal blocked on the native DB mutation mutex'
+        assert not release.is_set()
+    finally:
+        release.set()
+        worker.join(20)
+        if lease_worker.ident is not None:
+            lease_worker.join(20)
+    assert not worker.is_alive() and not lease_worker.is_alive()
+    assert results == ['committed']
+    assert w.tx.state == WriteTransactionState.EDITING

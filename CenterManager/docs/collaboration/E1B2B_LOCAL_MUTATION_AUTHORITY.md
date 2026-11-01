@@ -71,7 +71,11 @@ not a second ownership authority. `is_writing=True` alone is never sufficient.
 The gate mutex serializes native statement/commit execution with loss
 notification. The commit path never acquires the collaboration state mutex;
 renewal can hold that mutex while delivering an observation without a lock
-inversion. Recovery mode projection is queued through the existing EventBus so
+inversion. Verified own-lease observations use a separate short queue when a
+native statement holds the mutation mutex, so healthy renewal never waits for
+UI/DB work. The next admission/commit consumes that evidence under the unchanged
+lease deadline; UNKNOWN/loss publishes a fail-closed latch before waiting for an
+in-flight statement. Queued evidence cannot reopen a lost session. Recovery mode projection is queued through the existing EventBus so
 UI handlers run after the database hook unwinds, including when storage of the
 protection marker fails. SQLite itself still serializes concurrent writers. Native authorizer
 installation is repeated per execution to invalidate cached prepared statements.
