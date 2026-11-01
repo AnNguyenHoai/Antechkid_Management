@@ -438,8 +438,59 @@ class AttendanceService:
         }
         return self._save_session_attendance_atomic(session_id, attendance_rows)
 
+    @classmethod
+    def _roster_students_for_session(cls, enrollments: List[Any], session_obj: Any) -> List[Student]:
+        """Canonical per-session roster; never use the current class headcount.
+
+        COMPLETED sessions preserve historical enrollment eligibility even if a
+        student was archived later. For not-yet-completed sessions, an archived
+        student is no longer an operational attendance obligation. The schema
+        does not record a student archive effective date; this intentionally
+        avoids rewriting historical completed attendance.
+        """
+        completed = getattr(session_obj, "status", None) == SessionStatus.COMPLETED.value
+        students = []
+        seen = set()
+        for enrollment in enrollments:
+            student = getattr(enrollment, "student", None)
+            if student is None or getattr(student, "id", None) is None:
+                continue
+            if student.id in seen or not cls._enrollment_covers_session(enrollment, session_obj):
+                continue
+            if not completed and getattr(student, "status", None) == "ARCHIVED":
+                continue
+            seen.add(student.id)
+            students.append(student)
+        return students
+
+    @staticmethod
+    def _summary_for_roster(roster: List[Student], attendances: List[Attendance]) -> Dict[str, Any]:
+        """Numerator, recorded and denominator all use the exact same roster IDs."""
+        ids = {student.id for student in roster}
+        summary: Dict[str, int] = {}
+        counted = set()
+        excluded = 0
+        for attendance in attendances:
+            student_id = getattr(attendance, "student_id", None)
+            if student_id not in ids or student_id in counted:
+                excluded += 1
+                continue
+            counted.add(student_id)
+            status = attendance.status
+            summary[status] = summary.get(status, 0) + 1
+        roster_total = len(ids)
+        present = summary.get(AttendanceStatus.PRESENT.value, 0)
+        return {
+            **summary,
+            "RosterTotal": roster_total,
+            "Recorded": len(counted),
+            "Unmarked": roster_total - len(counted),
+            "AttendanceRate": (present / roster_total * 100) if roster_total else 0.0,
+            "ExcludedRecords": excluded,
+        }
+
     def _get_roster_for_session(self, session_id: int) -> List[Student]:
-        """Resolve the canonical historical roster without adding another permission boundary."""
+        """Resolve canonical attendance obligation for this session."""
         with self._session_factory() as session:
             session_obj = self._repository_provider.sessions(session).get_by_id(session_id)
             if not session_obj:
@@ -447,12 +498,7 @@ class AttendanceService:
             enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(
                 session_obj.class_id
             )
-            return [
-                enrollment.student
-                for enrollment in enrollments
-                if enrollment.student is not None
-                and self._enrollment_covers_session(enrollment, session_obj)
-            ]
+            return self._roster_students_for_session(enrollments, session_obj)
 
     @require_permission("attendance.view")
     def get_roster_for_session(self, session_id: int) -> List[Student]:
@@ -480,27 +526,30 @@ class AttendanceService:
 
     @require_permission("attendance.view")
     def get_summary_for_session(self, session_id: int) -> Dict[str, int]:
+        """Legacy status summary with the same eligibility as the detailed view."""
+        overview = self._attendance_overview(session_id)
+        return {
+            status.value: overview.get(status.value, 0)
+            for status in AttendanceStatus
+            if overview.get(status.value, 0)
+        }
+
+    def _attendance_overview(self, session_id: int) -> Dict[str, Any]:
         with self._session_factory() as session:
-            return self._repository_provider.attendance(session).get_summary_by_session(session_id)
+            session_obj = self._repository_provider.sessions(session).get_by_id(session_id)
+            if session_obj is None:
+                raise ValueError("Session not found.")
+            enrollments = self._repository_provider.enrollments(session).get_by_class_with_student(
+                session_obj.class_id
+            )
+            roster = self._roster_students_for_session(enrollments, session_obj)
+            attendances = self._repository_provider.attendance(session).get_by_session(session_id)
+            return self._summary_for_roster(roster, attendances)
 
     @require_permission("attendance.view")
     def get_session_attendance_overview(self, session_id: int) -> Dict[str, Any]:
-        """Return one roster-aware Session summary used by all Attendance surfaces."""
-        roster = self._get_roster_for_session(session_id)
-        with self._session_factory() as session:
-            summary = self._repository_provider.attendance(session).get_summary_by_session(session_id)
-        roster_total = len(roster)
-        recorded = sum(summary.values())
-        unmarked = max(roster_total - recorded, 0)
-        present = summary.get(AttendanceStatus.PRESENT.value, 0)
-        attendance_rate = (present / roster_total * 100) if roster_total > 0 else 0.0
-        return {
-            **summary,
-            "RosterTotal": roster_total,
-            "Recorded": recorded,
-            "Unmarked": unmarked,
-            "AttendanceRate": attendance_rate,
-        }
+        """One canonical, roster-scoped numerator/denominator for every status."""
+        return self._attendance_overview(session_id)
 
     @require_permission("attendance.view")
     def get_attendance_rate_for_student(self, student_id: int) -> float:
