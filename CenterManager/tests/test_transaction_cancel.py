@@ -17,7 +17,7 @@ def _remote_authority(cm):
 
 
 @pytest.fixture
-def collab_manager(tmp_path):
+def collab_manager(tmp_path, temp_runtime):
     event_bus = EventBus()
     cm = CollaborationManager(runtime_root=tmp_path, event_bus=event_bus)
     cm.initialize("test_user", "test_user", "admin")

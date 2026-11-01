@@ -31,6 +31,8 @@ class TestRuntimeVersion:
         subprocess.run(["git", "init", "--initial-branch=main"], cwd=repo_path, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_path, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, capture_output=True)
+        # This disposable non-bare remote intentionally accepts real pushes.
+        subprocess.run(["git", "config", "receive.denyCurrentBranch", "updateInstead"], cwd=repo_path, check=True)
         (repo_path / "README.md").write_text("# Test repo")
         subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True)
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, capture_output=True)
@@ -162,6 +164,16 @@ class TestRuntimeVersion:
         )
         provider.connect()
 
+        # E1B-1 requires the actual collaboration provider and accepted DB base.
+        # Seed only this disposable remote; the test never uses production data.
+        repo_db = repo_path / "database" / "center.db"
+        repo_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(db_path, repo_db)
+        provider._run_git_command(["add", "--force", "database/center.db", "manifest.json"])
+        provider._run_git_command(["commit", "-m", "synthetic accepted database base"])
+        provider._run_git_command(["push", "-u", "origin", "main"])
+        cm._sync_provider = provider
+
         # Setup sync manager and service
         sync_manager = SynchronizationManager(provider, event_bus=event_bus)
         sync_service = RuntimeSyncService(
@@ -190,11 +202,14 @@ class TestRuntimeVersion:
                     sess.commit()
             return True
 
-        tx.start_editing(save_local)
+        # Fixture already materializes the exact accepted synthetic base.
+        # Handoff/schema barriers are covered by their own integration suites.
+        with patch.object(sync_service, "execute_write_handoff_sync", return_value=True):
+            assert tx.start_editing(save_local), tx.last_start_error
         tx.mark_dirty()
 
         # Mock _do_publish to simulate successful push
-        with patch.object(tx, '_do_publish', return_value=True):
+        with patch.object(tx, '_do_publish', wraps=tx._do_publish):
             # Also mock _publish_database_and_manifest to update manifest
             def mock_publish_db():
                 # Copy DB

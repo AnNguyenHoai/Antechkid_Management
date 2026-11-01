@@ -99,7 +99,7 @@ def test_bootstrap_retains_authoritative_sync_provider_slot():
     assert bootstrap.get_sync_provider() is provider
 
 
-def test_first_writer_runs_consistency_barrier_before_editing(monkeypatch):
+def test_first_writer_runs_consistency_barrier_before_editing(monkeypatch, temp_runtime):
     provider = _Provider()
     collab = _Collab(_Result(WriteRequestResult.GRANTED, "Lock acquired"), provider)
     sync = _Sync(True)

@@ -265,6 +265,8 @@ class WriteRecoveryJournal:
                 with path.open('r+b') as stream:
                     os.fsync(stream.fileno())
                 hashes[path.relative_to(capture).as_posix()] = _hash(path)
+        if self._wal_pending() or _hash(self.database) != hashes['center.db']:
+            raise RecoveryRequired('Runtime changed after the recovery snapshot. Keep all copies and retry with CenterManager stopped.')
         manifest = dict(format=1, reason=reason, files=hashes, encrypted=encrypted,
                         key_reference=str(store.bundle_path) if encrypted else None,
                         journal=self.inspect())
@@ -285,6 +287,9 @@ class WriteRecoveryJournal:
         if capture.parent != (self.root / 'captures').resolve():
             raise RecoveryRequired('Recovery capture must belong to this workspace.')
         manifest = json.loads((capture / 'manifest.json').read_text(encoding='utf-8'))
+        from centermanager.database.encryption import database_encryption_required
+        if database_encryption_required() and not manifest.get('encrypted'):
+            raise RecoveryRequired('An encrypted recovery manifest is required in production.')
         if manifest.get('encrypted'):
             from centermanager.database.encryption import DatabaseKeyStore
             key = DatabaseKeyStore(capture / 'database_key.dpapi').load()
@@ -364,8 +369,12 @@ class WriteRecoveryJournal:
             document = dict(format=1, runtime=str(self.runtime), base_main_oid=base_oid,
                             repository_id=self._repository_id(), status='CANCELLED')
             _json(self.journal, document)
+        fingerprint = self.fingerprint()
+        captured = self.verify_capture(capture)['files']['center.db']
+        if self._wal_pending() or _hash(self.database) != captured:
+            raise RecoveryRequired('Runtime changed during reconciliation; no replacement was authorized.')
         self.update(status='RECONCILED', accepted_main_oid=accepted_main,
-                    last_capture=str(capture), reconciled_fingerprint=self.fingerprint())
+                    last_capture=str(capture), reconciled_fingerprint=fingerprint)
 
 
 def require_replaceable(*, legacy=False):

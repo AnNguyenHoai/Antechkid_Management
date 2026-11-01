@@ -127,7 +127,8 @@ def test_preparation_failure_never_allows_writes_or_replaces_db(workspace, monke
 def test_active_wal_repeated_captures_never_lose_commits(workspace):
     begin(workspace)
     j = workspace.journal
-    writer = connect(j.database)
+    from centermanager.database.engine import acquire_runtime_dbapi_connection
+    writer = acquire_runtime_dbapi_connection(lambda: connect(j.database), owner='synthetic-wal-writer')
     try:
         writer.execute('PRAGMA journal_mode=WAL')
         writer.execute('PRAGMA wal_autocheckpoint=0')
@@ -457,3 +458,40 @@ def test_real_transaction_sqlcipher_publish_release_and_second_session(workspace
         assert len(list((workspace.journal.root / 'history').iterdir())) == 1
     finally:
         collab.shutdown()
+
+
+def test_cancel_release_failure_remains_blocked(workspace):
+    from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
+    begin(workspace)
+    tx = WriteTransactionManager(SimpleNamespace(is_writing=lambda: True, release_write=lambda: False))
+    tx._state = WriteTransactionState.EDITING
+    tx._recovery_journal = workspace.journal
+    assert not tx.cancel_editing(force=True)
+    assert not tx.is_editing
+    assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+    assert workspace.journal.inspect()['release'] == 'UNVERIFIED'
+
+
+def test_duplicate_start_does_not_reclassify_active_journal(workspace):
+    from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState
+    begin(workspace)
+    tx = WriteTransactionManager(SimpleNamespace())
+    tx._state = WriteTransactionState.EDITING
+    assert not tx.start_editing()
+    assert tx.state == WriteTransactionState.EDITING
+    assert workspace.journal.inspect()['status'] == 'OPEN'
+
+
+def test_mutation_after_snapshot_prevents_reconciliation_receipt(workspace, monkeypatch):
+    from centermanager.database import session
+    begin(workspace)
+    original = session.refresh_runtime_db
+    def write_on_resume():
+        original()
+        mutate(workspace)
+    monkeypatch.setattr(session, 'refresh_runtime_db', write_on_resume)
+    with pytest.raises(RecoveryRequired, match='changed after'):
+        workspace.journal.reconcile(base_oid=workspace.base, accepted_main=workspace.base,
+                                    observe_main=workspace.provider.observe_remote_main_commit)
+    assert workspace.journal.inspect()['status'] == 'OPEN'
+    assert values(workspace.journal.database) == ['BASE', 'LOCAL_UNACCEPTED']

@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.usefixtures("temp_runtime")
+
 from unittest.mock import Mock
 
 from centermanager.services.write_transaction import WriteTransactionManager, WriteTransactionState

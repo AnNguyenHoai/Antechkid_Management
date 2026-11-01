@@ -19,6 +19,18 @@ from centermanager.database.engine import (
     runtime_dbapi_connection_details,
 )
 
+def windows_lock_owners(path):
+    # Defer the backup package import until session initialization is complete.
+    # Recovery CLI imports session before backup; eager import forms a cycle.
+    from centermanager.platform.backup.windows_lock_diagnostics import windows_lock_owners as inspect_owners
+    return inspect_owners(path)
+
+
+def format_lock_owners(owners):
+    from centermanager.platform.backup.windows_lock_diagnostics import format_lock_owners as format_owners
+    return format_owners(owners)
+
+
 _session_factory = None
 
 
@@ -48,7 +60,6 @@ def _windows_lock_owners_after_finalization(logger):
     is empty do we force cyclic-GC finalization, then ask Windows once more. The
     restore may proceed only if Windows confirms the lock is actually gone.
     """
-    from centermanager.platform.backup.windows_lock_diagnostics import format_lock_owners, windows_lock_owners
     db_path = get_database_path()
     owners = windows_lock_owners(db_path)
     if not owners or runtime_dbapi_connection_count() != 0:
@@ -89,7 +100,6 @@ def quiesce_runtime_db(*, release_fence_on_failure: bool = True) -> None:
     """
     global _session_factory
     import logging
-    from centermanager.platform.backup.windows_lock_diagnostics import format_lock_owners
 
     logger = logging.getLogger(__name__)
     begin_runtime_db_maintenance()

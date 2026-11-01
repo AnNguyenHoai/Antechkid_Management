@@ -128,6 +128,16 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
     if not repo_path.exists():
         provider.clone()
 
+    # E1B-1 requires the actual collaboration provider and accepted DB base.
+    # Seed only this disposable remote; the test never uses production data.
+    repo_db = repo_path / "database" / "center.db"
+    repo_db.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(db_path, repo_db)
+    provider._run_git_command(["add", "--force", "database/center.db"])
+    provider._run_git_command(["commit", "-m", "synthetic accepted database base"])
+    provider._run_git_command(["push", "origin", "main"])
+    cm._sync_provider = provider
+
     # Setup sync service and transaction
     sync_manager = SynchronizationManager(provider, event_bus=event_bus)
     sync_service = RuntimeSyncService(
@@ -150,7 +160,10 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
             sess.commit()
         return True
 
-    tx.start_editing(save_local)
+    # Fixture already materializes the exact accepted synthetic base.
+    # This test isolates push-failure semantics, not the handoff/schema barrier.
+    with patch.object(sync_service, "execute_write_handoff_sync", return_value=True):
+        assert tx.start_editing(save_local), tx.last_start_error
     tx.mark_dirty()
 
     # Mock _do_publish: first call fails, second call calls original

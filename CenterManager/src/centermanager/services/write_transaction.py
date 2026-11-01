@@ -478,13 +478,6 @@ class WriteTransactionManager:
     # ---- Start / Finish / Cancel ----
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
         start_total = time.perf_counter()
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
-        try:
-            require_replaceable()
-        except RecoveryRequired as exc:
-            self._last_start_error = str(exc)
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            return False
         self._last_start_error = ""
         self.reset_finishing()
         logger.info("Start Editing requested; transaction_state=%s", self._state.name)
@@ -499,6 +492,13 @@ class WriteTransactionManager:
             logger.warning(self._last_start_error)
             return False
 
+        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        try:
+            require_replaceable()
+        except RecoveryRequired as exc:
+            self._last_start_error = str(exc)
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            return False
         if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
             self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
@@ -707,8 +707,11 @@ class WriteTransactionManager:
             try:
                 self._recovery_journal.preserve("cancel-editing")
                 self._recovery_journal.update(status="CANCELLED")
+                self._state = WriteTransactionState.RECOVERY_REQUIRED
+                self._is_editing = False
                 if self._collab_manager.is_writing():
                     if not self._collab_manager.release_write():
+                        self._last_start_error = "Cancelled data is preserved, but WRITE release is unverified. Keep recovery data and close CenterManager before reconciliation."
                         return False
                     self._recovery_journal.released()
                 self._state = WriteTransactionState.RECOVERY_REQUIRED
