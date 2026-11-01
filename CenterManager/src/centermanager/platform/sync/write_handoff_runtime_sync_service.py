@@ -150,6 +150,15 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         logger.info("Database sessions refreshed after runtime update")
 
     def _apply_runtime_update(self) -> bool:
+        from centermanager.database.mutation_authority import runtime_install_permit
+        try:
+            with runtime_install_permit():
+                return self._apply_runtime_update_with_permit()
+        except Exception:
+            logger.exception("Runtime replacement permit denied")
+            return False
+
+    def _apply_runtime_update_with_permit(self) -> bool:
         """Install the Git-authoritative DB into the live runtime atomically.
 
         The old implementation truncated/re-wrote live ``center.db`` before

@@ -83,6 +83,13 @@ class EventBus:
             return
         self._dispatch(event)
 
+    def publish_deferred(self, event: Event) -> None:
+        """Queue UI projection even when publication occurs inside a GUI DB hook."""
+        if self._bridge is not None:
+            self._bridge.event_ready.emit(event)
+        else:
+            self._dispatch(event)
+
     def _dispatch(self, event: Event) -> None:
         event_class = type(event)
         with self._handlers_lock:

@@ -276,6 +276,26 @@ class PermissionService:
                 raise AuthenticationError("Account is locked. Please try again later.")
 
             password_valid, needs_upgrade = verify_password(password, user.password_hash)
+            # Login precedes WRITE identity. Runtime authentication must be SQL
+            # read-only; a local encrypted throttle preserves the operational
+            # lockout without producing unaccepted shared account edits.
+            from centermanager.database.mutation_authority import authentication_activity_policy
+            protected, login_key = authentication_activity_policy(session)
+            if protected:
+                from centermanager.security.local_login_state import LocalLoginState
+                local = LocalLoginState(user, key=login_key)
+                try:
+                    local.assert_unlocked()
+                except ValueError as exc:
+                    raise AuthenticationError(str(exc)) from exc
+                attempts = local.record(password_valid)
+                if not password_valid:
+                    remaining = 5 - attempts
+                    raise AuthenticationError(f"Invalid username or password. {remaining} attempts remaining."
+                                              if remaining > 0 else "Account locked due to too many failed attempts.")
+                # Password hash upgrades are deferred to an authorized password
+                # change; login never changes shared credentials or journal state.
+                return user
             if not password_valid:
                 user.increment_login_attempts()
                 session.commit()
@@ -315,11 +335,13 @@ class PermissionService:
                 raise AuthenticationError("New password must be at least 6 characters.")
             if new_password == current_password:
                 raise AuthenticationError("New password must be different from current password.")
-            user.password_hash = hash_password(new_password)
-            user.force_password_change = False
-            user.login_attempts = 0
-            user.locked_until = None
-            session.commit()
+            from centermanager.database.mutation_authority import verified_self_password_change
+            with verified_self_password_change(user_id):
+                user.password_hash = hash_password(new_password)
+                user.force_password_change = False
+                user.login_attempts = 0
+                user.locked_until = None
+                session.commit()
             user_id = user.id
 
         updated_user = self.get_user(user_id)

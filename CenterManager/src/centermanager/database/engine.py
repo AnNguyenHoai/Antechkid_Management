@@ -72,8 +72,12 @@ def runtime_dbapi_connection_details() -> list[tuple[int, RuntimeDatabaseHandleI
         ]
 
 
+def _runtime_connection_id(connection):
+    return getattr(connection, "_native_registry_id", id(connection))
+
+
 def _register_runtime_dbapi_connection(connection: object, *, owner: str = "unknown") -> None:
-    ident = id(connection)
+    ident = _runtime_connection_id(connection)
     with _runtime_db_gate:
         _runtime_dbapi_connections[ident] = connection
         _runtime_dbapi_connection_info[ident] = RuntimeDatabaseHandleInfo(
@@ -85,7 +89,7 @@ def _register_runtime_dbapi_connection(connection: object, *, owner: str = "unkn
 
 
 def _unregister_runtime_dbapi_connection(connection: object) -> None:
-    ident = id(connection)
+    ident = _runtime_connection_id(connection)
     with _runtime_db_gate:
         _runtime_dbapi_connections.pop(ident, None)
         _runtime_dbapi_connection_info.pop(ident, None)
@@ -96,6 +100,7 @@ def acquire_runtime_dbapi_connection(
     *,
     owner: str,
     maintenance_owned: bool = False,
+    database_path: Path | None = None,
 ) -> object:
     """Atomically open and register a handle to the live runtime database.
 
@@ -120,6 +125,9 @@ def acquire_runtime_dbapi_connection(
                 "Maintenance-owned runtime database access requires an active maintenance fence"
             )
         connection = opener()
+        from centermanager.database.guarded_dbapi import GuardedConnection
+        if not isinstance(connection, GuardedConnection):
+            connection = GuardedConnection(connection, database_path or get_database_path())
         _register_runtime_dbapi_connection(connection, owner=owner)
         return connection
 
@@ -132,7 +140,7 @@ def release_runtime_dbapi_connection(connection: object) -> None:
     owner must not issue a second driver ``close()`` against an invalid object.
     """
     with _runtime_db_gate:
-        if id(connection) not in _runtime_dbapi_connections:
+        if _runtime_connection_id(connection) not in _runtime_dbapi_connections:
             return
     connection.close()  # type: ignore[attr-defined]
     _unregister_runtime_dbapi_connection(connection)
@@ -261,7 +269,7 @@ def _connect_encrypted(
 
     if not runtime_guarded:
         return open_connection()
-    return acquire_runtime_dbapi_connection(open_connection, owner=owner)
+    return acquire_runtime_dbapi_connection(open_connection, owner=owner, database_path=db_path)
 
 
 class _TrackedLifecycleConnection:
@@ -269,7 +277,7 @@ class _TrackedLifecycleConnection:
 
     def __init__(self, raw, *, owner: str):
         self._raw = raw
-        ident = id(raw)
+        ident = _runtime_connection_id(raw)
         with _runtime_db_gate:
             if ident in _runtime_dbapi_connections:
                 return
@@ -344,8 +352,12 @@ def create_engine_for_path(
     encrypted: bool = False,
     encryption_key: bytes | None = None,
     runtime_guarded: bool = False,
+    mutation_guarded: bool = False,
 ) -> Engine:
     db_path = Path(db_path)
+    from centermanager.database.mutation_authority import is_runtime_path
+    runtime_owned = runtime_guarded or is_runtime_path(db_path)
+    protect_mutations = runtime_owned or mutation_guarded
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if encrypted and encryption_key is None:
         raise ValueError("encryption_key is required for an encrypted database")
@@ -368,11 +380,27 @@ def create_engine_for_path(
         return _connect_plain(db_path, allow_create=allow_create)
 
     def connect_database():
-        if not runtime_guarded:
-            return open_connection()
-        return acquire_runtime_dbapi_connection(open_connection, owner="sqlalchemy-runtime-engine")
+        from centermanager.database.mutation_authority import is_runtime_path, _local
+        if not runtime_owned:
+            connection = open_connection()
+            if mutation_guarded:
+                from centermanager.database.guarded_dbapi import GuardedConnection
+                connection = GuardedConnection(connection, db_path)
+            return connection
+        maintenance = getattr(_local, 'maintenance', None)
+        maintenance_owned = bool(runtime_db_maintenance_active() and maintenance is not None
+                                 and maintenance[0] == db_path.resolve())
+        return acquire_runtime_dbapi_connection(open_connection, owner="sqlalchemy-runtime-engine",
+                                               maintenance_owned=maintenance_owned, database_path=db_path)
 
     engine = create_engine("sqlite://", echo=echo, creator=connect_database, poolclass=NullPool)
+    from centermanager.database.mutation_authority import is_runtime_path
+    engine._cm_mutation_protected = protect_mutations
+    if mutation_guarded and not is_runtime_path(db_path):
+        engine._cm_login_key = encryption_key
+    if engine._cm_mutation_protected:
+        with _runtime_db_gate:
+            _runtime_engines.add(engine)
 
     @event.listens_for(engine, "connect")
     def set_foreign_keys(dbapi_connection, connection_record):
@@ -408,16 +436,20 @@ def initialize_runtime_database() -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
         return db_path
-    if database_encryption_required():
-        key = DatabaseKeyStore().load_or_create(allow_create=True)
-        connection = _connect_encrypted(db_path, key, allow_create=True)
-    else:
-        connection = sqlite3.connect(db_path)
-    try:
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.commit()
-    finally:
-        connection.close()
+    from centermanager.database.mutation_authority import system_mutation_permit
+    from centermanager.database.guarded_dbapi import GuardedConnection
+    with system_mutation_permit("initialize"):
+        if database_encryption_required():
+            key = DatabaseKeyStore().load_or_create(allow_create=True)
+            connection = _connect_encrypted(db_path, key, allow_create=True)
+        else:
+            connection = sqlite3.connect(db_path)
+        connection = GuardedConnection(connection, db_path)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.commit()
+        finally:
+            connection.close()
     logger.info("Initialized new runtime database container (encrypted=%s)", database_encryption_required())
     return db_path
 

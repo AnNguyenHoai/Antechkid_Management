@@ -148,6 +148,8 @@ def runtime_env(tmp_path):
 
     yield test_paths
 
+    from centermanager.core.current_user import clear_current_user
+    clear_current_user()
     paths_mod._paths = None
 
 
@@ -158,13 +160,18 @@ def test_remote_detection_after_publish(runtime_env, tmp_path):
 
     # Create database with student
     db_path = runtime_env.database_dir / "center.db"
-    engine = create_engine_for_path(db_path)
+    engine = create_engine_for_path(db_path.with_name("seed.db"))
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
         student = Student(student_code="HS001", full_name="Student A")
         session.add(student)
         session.commit()
+
+    engine.dispose()
+    shutil.copy2(db_path.with_name("seed.db"), db_path)
+    engine = create_engine_for_path(db_path)
+    Session = sessionmaker(bind=engine)
 
     # Setup provider - clone from freshly created remote
     repo_path = runtime_env.runtime_root / "repository"

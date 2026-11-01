@@ -360,6 +360,7 @@ def main() -> int:
         version_manager = VersionManager(metadata_repo, event_bus)
 
         transaction_manager = WriteTransactionManager(collaboration_manager)
+        transaction_manager.enable_local_mutation_gate()
         if sync_service is not None:
             transaction_manager.set_sync_service(sync_service)
         else:

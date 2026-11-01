@@ -128,7 +128,12 @@ def test_active_wal_repeated_captures_never_lose_commits(workspace):
     begin(workspace)
     j = workspace.journal
     from centermanager.database.engine import acquire_runtime_dbapi_connection
-    writer = acquire_runtime_dbapi_connection(lambda: connect(j.database), owner='synthetic-wal-writer')
+    # Model an already-committed legacy writer, registered only for native
+    # quiesce/close ordering. E1B-2B separately denies new READ DML at acquisition.
+    # Windows must see this handle drain before the recovery checkpoint.
+    from centermanager.database.engine import _register_runtime_dbapi_connection
+    writer = connect(j.database)
+    _register_runtime_dbapi_connection(writer, owner='legacy-wal-recovery-fixture')
     try:
         writer.execute('PRAGMA journal_mode=WAL')
         writer.execute('PRAGMA wal_autocheckpoint=0')

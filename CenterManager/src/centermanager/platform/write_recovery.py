@@ -114,6 +114,8 @@ class WriteRecoveryJournal:
     def assert_replaceable(self, *, legacy=False):
         document = self.inspect()
         if document is not None:
+            if document.get('mutation_authority_lost') and document['status'] != 'RECONCILED':
+                raise RecoveryRequired('WRITE authority was lost. Preserve local work and explicitly reconcile before synchronization.')
             if document['status'] == 'RECONCILED':
                 # Explicit reconciliation permits only the exact preserved
                 # workspace, not later mutations or an unrelated repository.
@@ -155,6 +157,8 @@ class WriteRecoveryJournal:
     def begin_report_artifact_update(self):
         """Admit a rebuildable report operation, without resolving pending work."""
         document = self.inspect()
+        if document is not None and document.get('mutation_authority_lost'):
+            raise RecoveryRequired('Lost WRITE authority protects pending report artifacts until reconciliation.')
         if document is None or document['status'] == 'OPEN':
             return None
         if document['status'] == 'PUBLISHED':
@@ -357,6 +361,8 @@ class WriteRecoveryJournal:
         return manifest
 
     def published(self, provider):
+        if self.inspect().get('mutation_authority_lost'):
+            raise RecoveryRequired('Lost WRITE authority requires explicit reconciliation, not publication cleanup.')
         # A True return value alone is not publish acknowledgement. Require a
         # fresh remote observation equal to the actual local commit.
         local = provider.get_local_main_commit()
@@ -389,6 +395,9 @@ class WriteRecoveryJournal:
 
     def released(self):
         document = self.inspect()
+        if document.get('mutation_authority_lost'):
+            self.update(release='VERIFIED')
+            return
         fields = dict(release='VERIFIED', status='CLEAN' if document['status'] == 'PUBLISHED' else document['status'])
         if document['status'] == 'PUBLISHED':
             # Pending-version metadata may have been finalized after publish verification.
@@ -438,7 +447,7 @@ class WriteRecoveryJournal:
         captured = self.verify_capture(capture)['files']['center.db']
         if self._wal_pending() or _hash(self.database) != captured:
             raise RecoveryRequired('Runtime changed during reconciliation; no replacement was authorized.')
-        self.update(status='RECONCILED', accepted_main_oid=accepted_main,
+        self.update(status='RECONCILED', mutation_authority_lost=False, accepted_main_oid=accepted_main,
                     last_capture=str(capture), reconciled_fingerprint=fingerprint)
 
 

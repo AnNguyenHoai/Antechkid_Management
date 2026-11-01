@@ -139,8 +139,10 @@ class EmployeeService:
                 phone=user.phone, email=user.email,
                 employment_status=Employee.STATUS_ACTIVE, user_id=user.id,
             )
-            employee_repo.add(employee)
-            session.commit(); employee_repo.refresh(employee)
+            from centermanager.database.mutation_authority import verified_employee_identity_repair
+            with verified_employee_identity_repair(user.id):
+                employee_repo.add(employee)
+                session.commit(); employee_repo.refresh(employee)
             logger.info(
                 "Repaired legacy user-to-employee link: user_id=%s employee_id=%s",
                 user.id, employee.id,

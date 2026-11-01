@@ -129,13 +129,15 @@ class TestRuntimeVersion:
 
         yield test_paths
 
+        from centermanager.core.current_user import clear_current_user
+        clear_current_user()
         paths_mod._paths = None
 
     def test_version_increment_on_publish(self, runtime_env, temp_repo):
         """Test that runtime version increments after successful publish."""
         # Tạo database
         db_path = runtime_env.database_dir / "center.db"
-        engine = create_engine_for_path(db_path)
+        engine = create_engine_for_path(db_path.with_name("seed.db"))
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
 
@@ -143,6 +145,11 @@ class TestRuntimeVersion:
             student = Student(student_code="HS001", full_name="Test Student")
             session.add(student)
             session.commit()
+
+        engine.dispose()
+        shutil.copy2(db_path.with_name("seed.db"), db_path)
+        engine = create_engine_for_path(db_path)
+        Session = sessionmaker(bind=engine)
 
         # Setup collaboration
         event_bus = EventBus()
@@ -186,6 +193,13 @@ class TestRuntimeVersion:
 
         # Setup transaction
         tx = WriteTransactionManager(cm)
+        tx.enable_local_mutation_gate()
+        from centermanager.core.current_user import set_current_user
+        from centermanager.core.capabilities import Capability
+        from types import SimpleNamespace
+        set_current_user(SimpleNamespace(id="test_user", username="test_user", full_name="Test",
+                                        is_active=True, role=SimpleNamespace(name="admin"),
+                                        permissions=set(Capability.values())))
         tx.set_sync_service(sync_service)
         tx.set_version_manager(version_manager)
 
@@ -249,7 +263,7 @@ class TestRuntimeVersion:
         """Test that database and manifest are committed together."""
         # Tạo database
         db_path = runtime_env.database_dir / "center.db"
-        engine = create_engine_for_path(db_path)
+        engine = create_engine_for_path(db_path.with_name("seed.db"))
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
 
@@ -257,6 +271,11 @@ class TestRuntimeVersion:
             student = Student(student_code="HS001", full_name="Test Student")
             session.add(student)
             session.commit()
+
+        engine.dispose()
+        shutil.copy2(db_path.with_name("seed.db"), db_path)
+        engine = create_engine_for_path(db_path)
+        Session = sessionmaker(bind=engine)
 
         # Setup collaboration
         event_bus = EventBus()
@@ -280,6 +299,13 @@ class TestRuntimeVersion:
 
         # Setup transaction
         tx = WriteTransactionManager(cm)
+        tx.enable_local_mutation_gate()
+        from centermanager.core.current_user import set_current_user
+        from centermanager.core.capabilities import Capability
+        from types import SimpleNamespace
+        set_current_user(SimpleNamespace(id="test_user", username="test_user", full_name="Test",
+                                        is_active=True, role=SimpleNamespace(name="admin"),
+                                        permissions=set(Capability.values())))
         tx.set_version_manager(version_manager)
 
         # Create pending version

@@ -91,6 +91,8 @@ def runtime_env(seeded_center_manager_remote, tmp_path):
 
     yield test_paths
 
+    from centermanager.core.current_user import clear_current_user
+    clear_current_user()
     paths_mod._paths = None
 
 
@@ -98,13 +100,18 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
     """Test that publish failure keeps lock and pending version, and retry succeeds."""
     # Create database with a student
     db_path = runtime_env.database_dir / "center.db"
-    engine = create_engine_for_path(db_path)
+    engine = create_engine_for_path(db_path.with_name("seed.db"))
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
         student = Student(student_code="HS001", full_name="Test Student")
         session.add(student)
         session.commit()
+
+    engine.dispose()
+    shutil.copy2(db_path.with_name("seed.db"), db_path)
+    engine = create_engine_for_path(db_path)
+    Session = sessionmaker(bind=engine)
 
     # Setup collaboration
     event_bus = EventBus()
@@ -149,6 +156,13 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
     )
 
     tx = WriteTransactionManager(cm)
+    tx.enable_local_mutation_gate()
+    from centermanager.core.current_user import set_current_user
+    from centermanager.core.capabilities import Capability
+    from types import SimpleNamespace
+    set_current_user(SimpleNamespace(id="test_user", username="test_user", full_name="Test",
+                                    is_active=True, role=SimpleNamespace(name="admin"),
+                                    permissions=set(Capability.values())))
     tx.set_sync_service(sync_service)
     tx.set_version_manager(version_manager)
 
@@ -184,9 +198,8 @@ def test_publish_failure_retry(runtime_env, seeded_center_manager_remote):
         from centermanager.database.artifact_security import authoritative_repository_database_path
         destination = authoritative_repository_database_path()
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with engine.connect() as conn:
-            conn.exec_driver_sql("PRAGMA wal_checkpoint(PASSIVE)")
-        shutil.copy2(db_path, destination)
+        from centermanager.database.wal_safety import copy_runtime_database_for_publish
+        copy_runtime_database_for_publish(destination)
         return destination
 
     with patch(

@@ -6,6 +6,7 @@ import json
 import inspect
 import os
 import time
+import threading
 from enum import Enum, auto
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
@@ -85,6 +86,23 @@ class WriteTransactionManager:
         self._recovery_journal = None
         self._generate_reports = None
         self._report_warning = ""
+        self._mutation_gate = None
+
+    def enable_local_mutation_gate(self):
+        from centermanager.database.mutation_authority import gate_for
+        gate_for().bind(self)
+
+    def _open_local_mutations(self):
+        if self._mutation_gate is None:
+            return True
+        try:
+            self._mutation_gate.open()
+            return True
+        except Exception as exc:
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            self._is_editing = False
+            self._last_start_error = f"Local mutation admission failed: {exc}. Inspect recovery before synchronization."
+            return False
 
     @property
     def state(self) -> WriteTransactionState:
@@ -168,6 +186,8 @@ class WriteTransactionManager:
 
     def _reset_to_idle(self) -> None:
         """Reset transaction state to IDLE after completion."""
+        if self._mutation_gate is not None:
+            self._mutation_gate.close()
         self._state = WriteTransactionState.IDLE
         self._session = None
         self._save_callback = None
@@ -343,6 +363,9 @@ class WriteTransactionManager:
 
     def pause_editing_for_lost_authority(self, reason: str) -> bool:
         """Fail closed when an active editing lease can no longer be trusted."""
+        if self._mutation_gate is not None and not self._mutation_gate.closed:
+            self._mutation_gate.invalidate(reason or "WRITE authority is stale")
+            return True
         if self._state not in (
             WriteTransactionState.EDITING,
             WriteTransactionState.LOCAL_SAVED,
@@ -479,6 +502,8 @@ class WriteTransactionManager:
         self._is_editing = True
         self._stale_editing_reason = ""
         self._last_start_error = ""
+        if not self._open_local_mutations():
+            return False
         logger.info(
             "Stale editing transaction recovered; expected_generation=%s",
             self._expected_generation,
@@ -567,6 +592,8 @@ class WriteTransactionManager:
             if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
                 return False
             self._is_editing = True
+            if not self._open_local_mutations():
+                return False
             snapshot_started = time.perf_counter()
             self._create_snapshot()
             snapshot_ms = (time.perf_counter() - snapshot_started) * 1000
@@ -636,7 +663,12 @@ class WriteTransactionManager:
             self._reset_to_idle()
             return True
 
+        if self._mutation_gate is not None and self._mutation_gate.lost:
+            return False
         self._report_warning = ""
+        if self._mutation_gate is not None:
+            with self._mutation_gate.lock:
+                self._mutation_gate.finishing_thread = threading.get_ident()
         authority_started = time.perf_counter()
         result = self.enter_finishing()
         authority_ms = (time.perf_counter() - authority_started) * 1000
@@ -657,15 +689,28 @@ class WriteTransactionManager:
                 save_success = save_fn()
                 if not save_success:
                     logger.error("Local save failed")
-                    self._state = WriteTransactionState.FAILED
+                    if self._state != WriteTransactionState.RECOVERY_REQUIRED:
+                        self._state = WriteTransactionState.FAILED
+                    if self._mutation_gate is not None:
+                        self._mutation_gate.close()
                     return False
             except Exception:
                 logger.exception("Local save exception")
-                self._state = WriteTransactionState.FAILED
+                if self._state != WriteTransactionState.RECOVERY_REQUIRED:
+                    self._state = WriteTransactionState.FAILED
+                if self._mutation_gate is not None:
+                    self._mutation_gate.close()
                 return False
 
+        if self._mutation_gate is not None:
+            with self._mutation_gate.lock:
+                if self._mutation_gate.lost:
+                    return False
+                self._mutation_gate.close()
+                self._state = WriteTransactionState.LOCAL_SAVED
+        else:
+            self._state = WriteTransactionState.LOCAL_SAVED
         save_ms = (time.perf_counter() - save_started) * 1000
-        self._state = WriteTransactionState.LOCAL_SAVED
         self._on_publish_success = on_publish_success
         self._on_publish_failure = on_publish_failure
 
@@ -714,6 +759,8 @@ class WriteTransactionManager:
             logger.warning("Cancel called with pending changes, force=False")
             return False
 
+        if self._mutation_gate is not None:
+            self._mutation_gate.close()
         if self._recovery_journal is not None:
             try:
                 self._recovery_journal.preserve("cancel-editing")
@@ -1022,6 +1069,8 @@ class WriteTransactionManager:
         if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
             return
         self._is_editing = True
+        if not self._open_local_mutations():
+            return
         self._waiting_position = 0
         self._waiting_request_id = ""
         self._waiting_started_at = None
@@ -1053,6 +1102,8 @@ class WriteTransactionManager:
             return {"success": False, "reason": reason, "state": "WAITING_FOR_COLLABORATION"}
 
         auth = self._collab_manager.validate_write_authority(session)
+        if self._mutation_gate is not None and self._mutation_gate.lost:
+            return {"success": False, "reason": self._last_start_error}
 
         if not auth.get("valid", False):
             reason = auth.get("reason", "Unknown authority failure")
@@ -1173,6 +1224,8 @@ class WriteTransactionManager:
             return {"success": False, "reason": "No session", "state": "STALE"}
 
         auth = self._collab_manager.validate_write_authority(session)
+        if self._mutation_gate is not None and self._mutation_gate.lost:
+            return {"success": False, "reason": self._last_start_error}
 
         if auth.get("valid", False):
             current_gen = self._collab_manager.get_lock_generation()

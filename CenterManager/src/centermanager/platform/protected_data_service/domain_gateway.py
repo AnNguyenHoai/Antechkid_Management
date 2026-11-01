@@ -113,6 +113,7 @@ class ProtectedDomainGateway:
                 allow_create=False,
                 encrypted=True,
                 encryption_key=key,
+                mutation_guarded=True,
             )
             self._session_factory = sessionmaker(bind=engine, expire_on_commit=False)
         if self._permission_service is None:

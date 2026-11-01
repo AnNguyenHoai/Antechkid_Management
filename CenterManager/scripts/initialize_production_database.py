@@ -80,7 +80,8 @@ def initialize_blank_production_database() -> Path:
         engine = create_production_engine(echo=False)
         try:
             SessionLocal = sessionmaker(bind=engine)
-            with SessionLocal() as session:
+            from centermanager.database.mutation_authority import system_mutation_permit
+            with system_mutation_permit("bootstrap"), SessionLocal() as session:
                 seed_roles_and_permissions(session)
         finally:
             engine.dispose()

@@ -25,7 +25,7 @@ class SystemOperationsService:
 
     def _database(self, path):
         try:
-            with sqlite3.connect(str(path)) as conn:
+            with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
                 conn.execute("SELECT 1").fetchone()
             return {"name":"Database","status":"HEALTHY","summary":f"SQLite available ({path.stat().st_size:,} bytes)","details":str(path)}
         except Exception as e:
