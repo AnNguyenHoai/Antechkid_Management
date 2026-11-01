@@ -15,7 +15,10 @@ def test_report_service_is_provider_backed():
 def test_report_service_does_not_refresh_entities_directly():
     source = SERVICE.read_text(encoding="utf-8")
     assert "session.refresh(" not in source
-    assert "repo.refresh(" in source
+    # E1B-2A no longer returns an ORM entity requiring refresh. Persistence stays repository-owned.
+    assert "session.add(" not in source
+    assert "session.delete(" not in source
+    assert "session.query(" not in source
 
 
 def test_report_service_keeps_transaction_completion_in_service():

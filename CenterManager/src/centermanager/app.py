@@ -323,6 +323,7 @@ def main() -> int:
             event_bus=event_bus,
         )
 
+        from centermanager.platform.business.guard import WriteGuard
         report_service = ReportService(
             student_service=student_service,
             parent_service=parent_service,
@@ -332,6 +333,7 @@ def main() -> int:
             outstanding_service=outstanding_service,
             income_service=income_service,
             session_factory=session_factory,
+            write_guard=WriteGuard(collaboration_manager),
         )
 
         report_policy = ReportPolicy(
@@ -363,6 +365,7 @@ def main() -> int:
         else:
             logger.warning("[STARTUP] WriteTransactionManager: sync service disabled")
         transaction_manager.set_version_manager(version_manager)
+        transaction_manager.set_report_callback(report_service.generate_published_reports)
 
         window = MainWindow(
             student_service=student_service,

@@ -45,4 +45,5 @@ def test_27_report_removes_fake_student_contact_fields():
 
 def test_27_report_preserves_single_latest_artifact():
     assert 'output_path = reports_root / "StudentProfile.pdf"' in REPORT
-    assert "for existing in repo.get_by_student(student_id):" in REPORT
+    assert "return [local]" in REPORT
+    assert "id=-student_id" in REPORT

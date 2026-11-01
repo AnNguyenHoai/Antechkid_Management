@@ -83,6 +83,8 @@ class WriteTransactionManager:
         # Internal editing flag
         self._is_editing = False
         self._recovery_journal = None
+        self._generate_reports = None
+        self._report_warning = ""
 
     @property
     def state(self) -> WriteTransactionState:
@@ -120,6 +122,14 @@ class WriteTransactionManager:
 
     def set_version_manager(self, version_manager) -> None:
         self._version_manager = version_manager
+
+    def set_report_callback(self, generate) -> None:
+        """Bind SQL-read-only derived report delivery after verified MAIN."""
+        self._generate_reports = generate
+
+    @property
+    def report_warning(self) -> str:
+        return self._report_warning
 
     def mark_dirty(self) -> None:
         self._has_changes = True
@@ -626,6 +636,7 @@ class WriteTransactionManager:
             self._reset_to_idle()
             return True
 
+        self._report_warning = ""
         authority_started = time.perf_counter()
         result = self.enter_finishing()
         authority_ms = (time.perf_counter() - authority_started) * 1000
@@ -820,6 +831,14 @@ class WriteTransactionManager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
                 self._state = WriteTransactionState.PUBLISHED
+                if self._generate_reports is not None:
+                    try:
+                        self._generate_reports(set(self._dirty_student_ids))
+                    except Exception as exc:
+                        self._report_warning = (
+                            f"Core data was published; local reports are incomplete. {exc}"
+                        )
+                        logger.exception("Published core data; derived report delivery failed")
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
                     self._on_publish_success()

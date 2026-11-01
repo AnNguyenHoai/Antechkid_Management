@@ -18,9 +18,11 @@ def test_student_27_report_query_eager_loads_assessments():
     body = REPOSITORY[start:]
     assert "selectinload(Student.assessments)" in body
 
-def test_student_27_post_publish_uses_dirty_student_ids():
-    assert "dirty_student_ids = list(self._transaction.dirty_student_ids)" in MAIN
-    assert "self._report_service.generate_student_report(" in MAIN
+def test_student_27_derived_reports_use_dirty_student_ids():
+    tx = Path("src/centermanager/services/write_transaction.py").read_text(encoding="utf-8")
+    assert "self._generate_reports(set(self._dirty_student_ids))" in tx
+    callback = MAIN[MAIN.index('def on_publish_success():'):MAIN.index('def on_publish_failure')]
+    assert 'generate_student_report' not in callback
 
 def test_student_27_generator_reads_loaded_assessments():
     assert 'getattr(student, "assessments", None)' in GENERATOR
