@@ -1,7 +1,7 @@
 """Session repository - data access for Session entity."""
 from datetime import date
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 from centermanager.models.session import Session
 from centermanager.repositories.base import BaseRepository
@@ -10,6 +10,15 @@ from centermanager.repositories.base import BaseRepository
 class SessionRepository(BaseRepository[Session]):
     def __init__(self, session: Session) -> None:
         super().__init__(session, Session)
+
+    def list_monthly_for_attendance(self, start: date, end: date, class_id: Optional[int] = None) -> List[Session]:
+        query = self._session.query(Session).options(joinedload(Session.class_)).filter(
+            Session.scheduled_date >= start,
+            Session.scheduled_date <= end,
+        )
+        if class_id is not None:
+            query = query.filter(Session.class_id == class_id)
+        return query.order_by(Session.scheduled_date, Session.class_id, Session.session_number).all()
 
     def get_by_class(self, class_id: int) -> List[Session]:
         return self._session.query(Session).filter(Session.class_id == class_id).order_by(asc(Session.session_number)).all()
