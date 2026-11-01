@@ -258,7 +258,10 @@ class ClassDetailPage(QWidget):
             status="ARCHIVED · READ ONLY" if self._archived_read_only else (class_obj.status or ""),
             subtitle=f"Course: {class_obj.course or '-'}",
         )
-        self.students_label.setText(f"{class_obj.student_count} students")
+        self.students_label.setText(
+            "Historical enrollment roster" if self._archived_read_only
+            else f"{class_obj.student_count} students"
+        )
         self.capacity_label.setText(f"Capacity: {class_obj.capacity if class_obj.capacity else 'Unlimited'}")
 
         # Teachers
