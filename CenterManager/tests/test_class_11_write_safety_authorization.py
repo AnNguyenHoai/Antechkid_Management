@@ -27,4 +27,6 @@ def test_class_dialogs_do_not_create_production_engines():
 def test_class_detail_disables_dynamic_actions_in_read_mode():
     assert "def _apply_dynamic_write_state" in DETAIL
     assert "button.setEnabled(teacher_enabled)" in DETAIL
-    assert "button.setEnabled(self._write_enabled)" in DETAIL
+    assert "can_mutate = self._write_enabled and not self._archived_read_only" in DETAIL
+    assert "button.setEnabled(can_mutate)" in DETAIL
+    assert "teacher_enabled = can_mutate and self._can_manage_teacher_assignments()" in DETAIL
