@@ -13,18 +13,18 @@ from datetime import date
 from typing import Optional
 
 from centermanager.core.clock import get_clock
-from centermanager.models.session import Session, SessionStatus
-from centermanager.models.attendance import Attendance, AttendanceStatus
-from centermanager.models.class_ import Class
-from centermanager.models.enrollment import Enrollment
+from centermanager.models.session import SessionStatus
+from centermanager.models.attendance import AttendanceStatus
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.attendance_service import AttendanceService
 
 
 class MonthlyAttendanceExceptionService:
     """Read-only view; never creates attendance or changes historical records."""
 
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, repository_provider: RepositoryProvider | None = None):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
 
     @staticmethod
     def _is_due(session_obj, cutoff: date) -> bool:
@@ -51,25 +51,18 @@ class MonthlyAttendanceExceptionService:
             return []
 
         with self._session_factory() as db:
-            q = db.query(Session).join(Class, Class.id == Session.class_id).filter(
-                Session.scheduled_date >= first,
-                Session.scheduled_date <= last,
+            sessions = self._repository_provider.sessions(db).list_monthly_for_attendance(
+                first, last, class_id=class_id
             )
-            if class_id is not None:
-                q = q.filter(Session.class_id == class_id)
-            sessions = q.order_by(Session.scheduled_date, Session.class_id, Session.session_number).all()
             class_ids = {item.class_id for item in sessions}
             if not class_ids:
                 return []
-            enrollments = db.query(Enrollment).filter(
-                Enrollment.class_id.in_(class_ids),
-                Enrollment.reconciled_into_enrollment_id.is_(None),
-            ).all()
+            enrollments = self._repository_provider.enrollments(db).list_monthly_roster_candidates(class_ids)
             by_class = defaultdict(list)
             for item in enrollments:
                 by_class[item.class_id].append(item)
             session_ids = [item.id for item in sessions]
-            attendances = db.query(Attendance).filter(Attendance.session_id.in_(session_ids)).all()
+            attendances = self._repository_provider.attendance(db).list_for_session_ids(session_ids)
             recorded = defaultdict(dict)
             for entry in attendances:
                 recorded[entry.session_id][entry.student_id] = entry.status
