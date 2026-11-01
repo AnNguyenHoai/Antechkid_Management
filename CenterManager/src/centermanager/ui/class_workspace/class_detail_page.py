@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from centermanager.models.class_ import Class
 from centermanager.models.teacher import Teacher
 from centermanager.models.student import Student
-from centermanager.services.class_service import ClassService
+from centermanager.services.class_service import ClassService, ClassNotFoundError
 from centermanager.services.class_timeline_service import ClassTimelineService
 from centermanager.services.teacher_assignment_service import TeacherAssignmentService
 from centermanager.services.session_service import SessionService
