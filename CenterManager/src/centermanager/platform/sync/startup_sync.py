@@ -315,9 +315,15 @@ class StartupSynchronization:
         dest = self._runtime_db_path
         token = uuid.uuid4().hex
         stage = dest.with_name(f".{dest.name}.startup-{token}.tmp")
-        previous = dest.with_name(f".{dest.name}.previous-{token}")
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        # Backups are intentionally OUTSIDE runtime. record_synchronized()
+        # fingerprints runtime files, so temporary rollback DB/WAL must not
+        # pollute the authoritative acceptance receipt before final cleanup.
+        rollback_root = WriteRecoveryJournal().root / "startup-rollbacks" / token
+        rollback_root.mkdir(parents=True, exist_ok=False)
+        previous = rollback_root / dest.name
         sidecars = [dest.with_name(dest.name + suffix) for suffix in ("-wal", "-shm", "-journal")]
-        backups = [(p, p.with_name(f".{p.name}.previous-{token}")) for p in sidecars]
+        backups = [(p, rollback_root / p.name) for p in sidecars]
         moved_sidecars = []
         moved_db = installed = fenced = succeeded = False
         try:
