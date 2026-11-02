@@ -58,12 +58,12 @@ def test_remote_accepted_but_ack_unknown_requires_exact_reobservation(workspace)
     assert restarted.inspect()["publication"] == "UNVERIFIED"
 
     # Once exact accepted OID and bytes are independently observable, the
-    # published receipt may be verified, but cannot become CLEAN before release.
+    # published receipt can permit replacement after verified acceptance, but\n    # must not become CLEAN before exact-session release confirmation.
     restarted.published(w.provider)
     assert restarted.inspect()["status"] == "PUBLISHED"
     assert restarted.inspect()["publication"] == "VERIFIED"
-    with pytest.raises(RecoveryRequired):
-        restarted.assert_replaceable()
+    assert restarted.inspect()["release"] == "UNVERIFIED"
+    restarted.assert_replaceable()  # Safe accepted bytes, despite pending release.
     for path in (restarted.database, restarted.repository / "database" / "center.db"):
         _validate_cipher(path)
         assert values(path) == ["BASE", "LOCAL_UNACCEPTED"]
