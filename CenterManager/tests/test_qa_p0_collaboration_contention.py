@@ -9,8 +9,9 @@ import threading
 import pytest
 from sqlalchemy import update
 
-from tests.test_e0_write_recovery_audit import machines  # noqa: F401
+from tests.test_e0_write_recovery_audit import machines, clock  # noqa: F401
 from tests.test_e1b2a_post_publish_consistency import reporting  # noqa: F401
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401
 from tests.test_e1b2b_local_mutation_authority import (
     raw, assert_original, replace_remote_owner,
 )
