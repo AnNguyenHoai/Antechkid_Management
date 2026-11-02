@@ -71,6 +71,21 @@ class CoordinatorClientAdapter:
     def state(self):
         return self._call("GET", "/state")
 
+    def authority_command(self, *, request_id, action, params):
+        if action not in ("acquire", "renew", "release"):
+            raise CoordinatorTransportError("UNSUPPORTED_SESSION_COMMAND")
+        if not request_id or not isinstance(params, dict):
+            raise CoordinatorTransportError("INVALID_SESSION_COMMAND")
+        return self._call("POST", "/commands", {
+            "request_id": request_id, "action": action, "params": params
+        })
+
+    def reconcile_command(self, request_id, action):
+        result = self._call("GET", "/requests/" + parse.quote(request_id, safe=""))
+        if result.get("status") != "ACCEPTED" or result.get("action") != action:
+            raise CoordinatorTransportError("RECEIPT_MISMATCH")
+        return result
+
     def reconcile(self, request_id: str, *, expected_sha: str) -> AcceptedReceipt:
         if not request_id or not expected_sha:
             raise CoordinatorTransportError("INVALID_RECEIPT_QUERY")
