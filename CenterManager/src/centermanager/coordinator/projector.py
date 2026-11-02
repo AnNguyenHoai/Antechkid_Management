@@ -77,6 +77,24 @@ class GitProjector:
                     _git(root, "checkout", "-B", self.branch, "FETCH_HEAD")
                 else:
                     _git(root, "checkout", "-B", self.branch)
+                marker = root / "e1c-projection.txt"
+                if marker.is_file():
+                    existing = marker.read_text(encoding="utf-8")
+                    expected_marker = (
+                        f"repository={repository_id}\\nrevision={event.revision}\\ncandidate={candidate.sha}\\n"
+                    )
+                    if existing == expected_marker:
+                        event.projected = True
+                        return {"revision": event.revision, "git_oid": prior, "reconciled": True}
+                    old_revision = None
+                    for line in existing.splitlines():
+                        if line.startswith("revision="):
+                            try:
+                                old_revision = int(line.split("=", 1)[1])
+                            except ValueError:
+                                pass
+                    if old_revision is not None and old_revision >= event.revision:
+                        raise CoordinatorError("PROJECTION_OUT_OF_ORDER")
                 path = root / "database"
                 path.mkdir(exist_ok=True)
                 (path / "center.db").write_bytes(payload)
