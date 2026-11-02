@@ -215,7 +215,7 @@ class StartupSynchronization:
         sidecars = [dest.with_name(dest.name + suffix) for suffix in ("-wal", "-shm", "-journal")]
         backups = [(p, p.with_name(f".{p.name}.previous-{token}")) for p in sidecars]
         moved_sidecars = []
-        moved_db = installed = fenced = False
+        moved_db = installed = fenced = succeeded = False
         try:
             with repo_db.open("rb") as source, stage.open("xb") as target:
                 shutil.copyfileobj(source, target, 1024 * 1024)
@@ -241,6 +241,7 @@ class StartupSynchronization:
             installed = True
             if hashlib.sha256(dest.read_bytes()).digest() != expected:
                 raise RuntimeError("Installed Git MAIN database checksum mismatch")
+            succeeded = True
             logger.info("Authoritative database atomically installed; stale WAL detached")
             # Caller refreshes sessions after finishing manifest and metadata.
             return True
@@ -262,7 +263,7 @@ class StartupSynchronization:
             stage.unlink(missing_ok=True)
             # Preserve old copies until the replacement is completed.  Once
             # installed and validated, the discarded generation must not replay.
-            if installed:
+            if succeeded:
                 previous.unlink(missing_ok=True)
                 for _, backup in moved_sidecars:
                     backup.unlink(missing_ok=True)
