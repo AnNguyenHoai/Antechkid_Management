@@ -160,3 +160,41 @@ def test_failed_install_rolls_back_local_git_head():
     startup._rollback_startup_git_repository()
     assert calls == [["reset", "--hard", old_sha]]
     assert startup._startup_previous_local_oid is None
+
+
+def test_missing_repository_preclone_preserves_legacy_database(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    database = runtime / "Database" / "center.db"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"legacy-opaque-ciphertext")
+    class Journal:
+        root = tmp_path / "runtime.write-recovery"
+        def inspect(self):
+            return None
+        def _workspace_roots(self):
+            return {"database": database.parent, "repository": runtime / "repository"}
+    monkeypatch.setattr("centermanager.platform.write_recovery.WriteRecoveryJournal", Journal)
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._runtime_db_path = database
+    startup._repo_path = runtime / "repository"
+    assert startup._preserve_missing_repository_runtime()
+    capture = startup._startup_preclone_capture
+    assert (capture / "database" / "center.db").read_bytes() == database.read_bytes()
+    import json
+    metadata = json.loads((capture / "manifest.json").read_text(encoding="utf-8"))
+    assert "database/center.db" in metadata["files"]
+
+
+def test_clone_passes_scoped_preclone_evidence():
+    capture = Path("fake-recovery-copy")
+    seen = {}
+    class Provider:
+        def clone(self, **kwargs):
+            seen.update(kwargs)
+            return True
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._repo_path = Path("fake-repo")
+    startup._startup_preclone_capture = capture
+    startup._provider = Provider()
+    assert startup._clone_repository()
+    assert seen["preclone_capture"] == capture
