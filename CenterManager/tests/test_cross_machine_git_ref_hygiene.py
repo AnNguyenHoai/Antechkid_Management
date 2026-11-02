@@ -104,6 +104,8 @@ def test_startup_removes_git_ref_contamination_before_fetch(tmp_path, monkeypatc
     sync._preflight_authoritative_database = lambda: True
     sync._apply_runtime_database = lambda: True
     sync._refresh_database_sessions = lambda: True
+    sync._prepare_authoritative_startup_replacement = lambda: setattr(sync, "_accepted_startup_main_oid", "a" * 40) or True
+    sync._reset_to_remote = lambda: provider.calls.append("reset") or True
 
     assert sync.run() is True
     assert provider.calls == ["connect", "fetch", "reset"]
