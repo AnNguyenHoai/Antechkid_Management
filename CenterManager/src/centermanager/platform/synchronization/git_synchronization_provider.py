@@ -200,7 +200,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
     # ===== Clone =====
 
-    def clone(self, progress_callback: Optional[Callable] = None) -> bool:
+    def clone(self, progress_callback: Optional[Callable] = None, *, preclone_capture=None) -> bool:
         if not GIT_AVAILABLE:
             raise GitNotInstalledError("GitPython is not installed")
 
@@ -214,7 +214,37 @@ class GitSynchronizationProvider(SynchronizationProvider):
         logger.info(f"Cloning repository from {self._repository_url} to {self._repo_path}")
 
         from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+        if preclone_capture is None:
+            require_replaceable()
+        else:
+            # Narrow migration exception: allow clone only when the existing
+            # runtime is identically preserved outside the repository.
+            from pathlib import Path
+            import hashlib
+            import json
+            from centermanager.platform.write_recovery import WriteRecoveryJournal, RecoveryRequired
+            journal = WriteRecoveryJournal()
+            capture = Path(preclone_capture).resolve()
+            if (capture.parent != (journal.root / "preclone").resolve()
+                    or (journal.repository / ".git").exists()
+                    or journal.inspect() is not None):
+                raise RecoveryRequired("Preclone authorization does not match this legacy workspace")
+            record = json.loads((capture / "manifest.json").read_text(encoding="utf-8"))
+            if not record.get("files"):
+                raise RecoveryRequired("Missing preclone workspace hashes")
+            for relative, digest in record["files"].items():
+                relative_path = Path(relative)
+                if relative_path.is_absolute() or ".." in relative_path.parts:
+                    raise RecoveryRequired("Invalid preclone path")
+                saved = (capture / relative_path).resolve()
+                if not saved.is_relative_to(capture) or not saved.is_file():
+                    raise RecoveryRequired("Preclone capture is incomplete")
+                source = (journal.runtime / relative_path).resolve()
+                if not source.is_file():
+                    raise RecoveryRequired("Preclone source disappeared")
+                if (hashlib.sha256(saved.read_bytes()).hexdigest() != digest
+                        or hashlib.sha256(source.read_bytes()).hexdigest() != digest):
+                    raise RecoveryRequired("Preclone snapshot changed before clone")
         try:
             if progress_callback:
                 progress_callback("clone", f"Cloning from {self._repository_url}", 10)
