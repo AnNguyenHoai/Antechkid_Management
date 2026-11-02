@@ -19,6 +19,12 @@ On Windows PowerShell use `$env:ANTECHKIDS_QA_FENCING_GATE='1'` before the secon
 
 Added `tests/test_qa_p0_recovery_fault_injection.py`: three capture failure stages (ciphertext copy, manifest write, capture verification), two ambiguous publication outcomes, one real SQLCipher integrity/foreign-key check on a verified capture, and one mismatched-remote reconciliation denial. These **7 parameterized cases are committed but have not been executed in this conversation**. They reuse E1B-1 synthetic encrypted workspace fixtures. No product fixes.
 
+## QA continuation — Collaboration contention and mutation paths
+
+Added `tests/test_qa_p0_collaboration_contention.py` with **8 parameterized test cases**: simultaneous 2/3/4-client acquisition using real isolated Git refs; stale same-username exact-session release rejection; and four post-loss SQLCipher mutation paths (service, ORM, bulk DML and raw guarded DBAPI). These are committed, **not yet executed** at the new head. Existing E1A/E1B2B tests cover related paths; these cases widen concurrency participant count and denial entry-point matrix. Every failing case must preserve full CI logs and remote ref evidence.
+
+GitHub workflow **run #824** for commit `e747fdafa0cd6a5a6584543119191cd3f51d1570` completed with success. This does **not** establish PASS for the newly added cases at a later SHA.
+
 ## Counts
 Automated fault-injection scenarios executed in this QA campaign: **0**.
 PASS: **0**; FAIL: **0**; BLOCKED: **0**; NOT RUN: **24 designed scenarios**.
