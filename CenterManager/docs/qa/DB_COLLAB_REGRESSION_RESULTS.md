@@ -15,6 +15,10 @@ ANTECHKIDS_QA_FENCING_GATE=1 python -m pytest tests/test_qa_p0_git_publication_f
 
 On Windows PowerShell use `$env:ANTECHKIDS_QA_FENCING_GATE='1'` before the second invocation. These tests were **committed but NOT EXECUTED** in this session, so results are still NOT RUN.
 
+## Additional recovery fault-injection coverage
+
+Added `tests/test_qa_p0_recovery_fault_injection.py`: three capture failure stages (ciphertext copy, manifest write, capture verification), two ambiguous publication outcomes, one real SQLCipher integrity/foreign-key check on a verified capture, and one mismatched-remote reconciliation denial. These **7 parameterized cases are committed but have not been executed in this conversation**. They reuse E1B-1 synthetic encrypted workspace fixtures. No product fixes.
+
 ## Counts
 Automated fault-injection scenarios executed in this QA campaign: **0**.
 PASS: **0**; FAIL: **0**; BLOCKED: **0**; NOT RUN: **24 designed scenarios**.
