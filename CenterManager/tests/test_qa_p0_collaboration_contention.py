@@ -22,6 +22,37 @@ from centermanager.services.student_service import StudentService
 from centermanager.services.write_transaction import WriteTransactionState
 
 
+@pytest.fixture(autouse=True)
+def isolate_qa_runtime_maintenance(temp_runtime):
+    """Reset leaked process-global maintenance state between synthetic QA cases.
+
+    Never clear a fence with open DBAPI handles: that indicates a genuine
+    lifecycle issue, which should fail loudly instead of being hidden.
+    This fixture is limited to the isolated QA test module, not production.
+    """
+    from centermanager.database import session as database_session
+    from centermanager.database.engine import (
+        runtime_db_maintenance_active, runtime_dbapi_connection_count,
+        end_runtime_db_maintenance,
+    )
+
+    if runtime_db_maintenance_active():
+        assert runtime_dbapi_connection_count() == 0, (
+            "A prior test left runtime DBAPI handles behind in maintenance"
+        )
+        database_session.quiesce_runtime_db()
+        end_runtime_db_maintenance()
+    try:
+        yield
+    finally:
+        database_session.quiesce_runtime_db()
+        if runtime_db_maintenance_active():
+            assert runtime_dbapi_connection_count() == 0, (
+                "QA test left live DBAPI handles during maintenance"
+            )
+            end_runtime_db_maintenance()
+
+
 @pytest.mark.parametrize("client_count", [2, 3, 4])
 def test_simultaneous_requests_never_grant_multiple_remote_owners(machines, client_count):
     """Real isolated Git refs, concurrent CAS; not an in-memory fake lease."""
