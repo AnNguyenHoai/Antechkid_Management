@@ -141,3 +141,22 @@ def test_post_install_failure_restores_previous_db_and_sidecar(tmp_path, monkeyp
     assert old.read_bytes() == original
     assert sidecar.read_bytes() == b"synthetic legacy sidecar"
     assert getattr(startup, "_startup_db_install_backup", None) is None
+
+
+
+def test_failed_install_rolls_back_local_git_head():
+    calls = []
+    old_sha = "1" * 40
+    new_sha = "2" * 40
+    class Provider:
+        def _run_git_command(self, args):
+            calls.append(args)
+        def get_local_main_commit(self):
+            return old_sha
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._provider = Provider()
+    startup._startup_previous_local_oid = old_sha
+    startup._accepted_startup_main_oid = new_sha
+    startup._rollback_startup_git_repository()
+    assert calls == [["reset", "--hard", old_sha]]
+    assert startup._startup_previous_local_oid is None
