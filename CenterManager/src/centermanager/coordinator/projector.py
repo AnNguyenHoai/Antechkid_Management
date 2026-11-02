@@ -83,7 +83,7 @@ class GitProjector:
                 if marker.is_file():
                     existing = marker.read_text(encoding="utf-8")
                     expected_marker = (
-                        f"repository={repository_id}\\nrevision={event.revision}\\ncandidate={candidate.sha}\\n"
+                        f"repository={repository_id}\nrevision={event.revision}\ncandidate={candidate.sha}\n"
                     )
                     if existing == expected_marker:
                         event.projected = True
