@@ -99,5 +99,5 @@ def test_source_of_truth_paths_are_explicit():
 def test_restart_startup_path_remains_repository_to_runtime():
     source = _read("src/centermanager/platform/sync/startup_sync.py")
     apply_pos = source.index("if not self._apply_runtime_database():")
-    copy_pos = source.index("with open(repo_db, 'rb')", source.index("def _apply_runtime_database"))
+    copy_pos = source.index("self._install_authoritative_database_atomically(repo_db)", source.index("def _apply_runtime_database"))
     assert apply_pos < copy_pos
