@@ -39,14 +39,6 @@ class StartupSynchronization:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
 
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
-        try:
-            require_replaceable(legacy=True)
-        except RecoveryRequired as exc:
-            self.recovery_error = str(exc)
-            logger.error("%s", exc)
-            return False
-
         # 1. Ensure repository exists
         if not self._repo_path.exists() or not (self._repo_path / ".git").exists():
             logger.info("Repository not found, cloning...")
@@ -80,6 +72,11 @@ class StartupSynchronization:
             logger.error("Fetch failed, remote unavailable. Cannot proceed.")
             return False
 
+        # A local WRITE receipt may be absent or unresolved after an EXE upgrade.
+        # Remote MAIN wins only after fresh Git proof and a durable local capture.
+        if not self._prepare_authoritative_startup_replacement():
+            return False
+
         # 3. Always reset local to remote (source of truth)
         logger.info("Resetting local repository to remote (source of truth)")
         if not self._reset_to_remote():
@@ -108,6 +105,59 @@ class StartupSynchronization:
         WriteRecoveryJournal().record_synchronized()
         logger.info("Startup synchronization completed successfully")
         return True
+
+    def _prepare_authoritative_startup_replacement(self) -> bool:
+        """Approve Git-MAIN-wins startup without silently discarding local work.
+
+        Fetch and independently observe exact accepted MAIN before touching the
+        local repository or DB.  When legacy/unaccepted data exist, preserve a
+        verified recovery capture and issue the existing RECONCILED receipt.
+        This never pushes local data or changes remote WRITE ownership.
+        """
+        from centermanager.platform.write_recovery import (
+            WriteRecoveryJournal, RecoveryRequired,
+        )
+        journal = WriteRecoveryJournal()
+        try:
+            # A clean local receipt is allowed to proceed without new captures.
+            try:
+                journal.assert_replaceable(legacy=True)
+                return True
+            except RecoveryRequired:
+                pass
+
+            accepted = self._provider.get_fetched_remote_main_commit()
+            observed = self._provider.observe_remote_main_commit()
+            if not accepted or not observed or accepted != observed:
+                raise RecoveryRequired(
+                    "Git MAIN cannot be independently verified; local work was not replaced."
+                )
+            existing = journal.inspect()
+            if existing is not None:
+                base = existing.get("base_main_oid")
+                if not base:
+                    raise RecoveryRequired("Recovery base is missing; preserve local data.")
+            else:
+                # For a legacy workspace, its current local commit is the
+                # only defensible base for a newly created recovery receipt.
+                base = self._provider.get_local_main_commit()
+                if not base:
+                    raise RecoveryRequired("Legacy local Git base is unavailable.")
+            journal.reconcile(
+                base_oid=base,
+                accepted_main=accepted,
+                observe_main=self._provider.observe_remote_main_commit,
+            )
+            journal.assert_replaceable()
+            logger.warning(
+                "Startup: captured unaccepted local workspace; Git MAIN %s will replace it",
+                accepted,
+            )
+            return True
+        except Exception as exc:
+            self.recovery_error = str(exc)
+            logger.exception("Git-authoritative startup preflight blocked safely")
+            return False
 
     def _clone_repository(self) -> bool:
         try:
