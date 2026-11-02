@@ -16,3 +16,6 @@ Both tests newly submitted, **PASS 0 / FAIL 0 / NOT RUN 2** at authoring. The 'A
 
 ## Gate
 Record workflow run, exact SHA, counts and any test harness defects before merge. No production bug is asserted without reproduction. SQLCipher/runtime DB preservation is P0; do not bypass journal/mutation gates to force green. Two independent Windows EXEs and remote staging remain BLOCKED/NOT RUN. No Coordinator or remote rights changes.
+
+## CI #870 audit and correction
+At head `124e220c7c9168fbc216b8dfbc1f2678be20cfa8`, CI https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41429877044 failed only `test_remote_accepted_but_ack_unknown_requires_exact_reobservation` on Windows shard 1 (1188 passed, 1 failed, 2 skipped). Failure was at the test's `pytest.raises(RecoveryRequired)` **after** successful `published()` verification. Source `WriteRecoveryJournal.assert_replaceable()` expressly admits a verified PUBLISHED receipt when exact runtime hash, local accepted files, repo identity/OID and clean Git state match; `released()` separately marks CLEAN. **QA assertion defect** rather than proven product failure. Commit `ae685148108a6211f0f6ed2f20715163107af489` updates the test to check `release=UNVERIFIED`, permitted replacement for already accepted data and later CLEAN after release. Fresh CI still required; do not mark PASS until confirmed.
