@@ -4,6 +4,17 @@ Status: **NOT VERIFIED — RELEASE HOLD**.
 Baseline: `ca73218fc0c57dcd2e8c0a47a04e7b828bfcb312`.
 Target: `main_repos` at initial comparison, 77 commits ahead. **Exact target SHA must be pinned before formal execution.**
 
+## New automated tests added
+
+`tests/test_qa_p0_git_publication_fencing.py` contains two default real Git repository tests (independent clones and stale expected-OID CAS rejection) plus one opt-in P0 legacy direct-push denial release gate. The opt-in gate is deliberately expected to FAIL on an unprotected bare Git remote, illustrating absent server-side enforcement; it does not verify production GitHub settings. Commands:
+
+```sh
+python -m pytest tests/test_qa_p0_git_publication_fencing.py -v
+ANTECHKIDS_QA_FENCING_GATE=1 python -m pytest tests/test_qa_p0_git_publication_fencing.py -v
+```
+
+On Windows PowerShell use `$env:ANTECHKIDS_QA_FENCING_GATE='1'` before the second invocation. These tests were **committed but NOT EXECUTED** in this session, so results are still NOT RUN.
+
 ## Counts
 Automated fault-injection scenarios executed in this QA campaign: **0**.
 PASS: **0**; FAIL: **0**; BLOCKED: **0**; NOT RUN: **24 designed scenarios**.
