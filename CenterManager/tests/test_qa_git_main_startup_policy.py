@@ -70,10 +70,8 @@ def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, 
     source.parent.mkdir(parents=True)
     local = tmp_path / "Database" / "center.db"
     local.parent.mkdir()
-    for path, value in ((source, "MAIN"), (local, "OLD_LOCAL")):
-        with sqlite3.connect(path) as db:
-            db.execute("CREATE TABLE t(v TEXT)")
-            db.execute("INSERT INTO t VALUES (?)", (value,))
+    source.write_bytes(b"MAIN-VALIDATED-TEST-ARTIFACT")
+    local.write_bytes(b"OLD_LOCAL-TEST-ARTIFACT")
     wal = local.with_name("center.db-wal")
     wal.write_bytes(b"stale wal from old generation")
     from centermanager.database import session
@@ -89,8 +87,7 @@ def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, 
     assert startup._install_authoritative_database_atomically(source)
     startup._finalize_startup_database_install()
     assert not wal.exists()
-    with sqlite3.connect(local) as db:
-        assert db.execute("SELECT v FROM t").fetchone()[0] == "MAIN"
+    assert local.read_bytes() == b"MAIN-VALIDATED-TEST-ARTIFACT"
     assert local.read_bytes() == source.read_bytes()
 
 
@@ -124,10 +121,8 @@ def test_post_install_failure_restores_previous_db_and_sidecar(tmp_path, monkeyp
     source.parent.mkdir()
     old = tmp_path / "Database" / "center.db"
     old.parent.mkdir()
-    for path, text in ((source, "REMOTE"), (old, "LOCAL")):
-        with sqlite3.connect(path) as db:
-            db.execute("CREATE TABLE t(v TEXT)")
-            db.execute("INSERT INTO t VALUES (?)", (text,))
+    source.write_bytes(b"REMOTE-TEST-ARTIFACT")
+    old.write_bytes(b"LOCAL-TEST-ARTIFACT")
     sidecar = old.with_name("center.db-wal")
     sidecar.write_bytes(b"synthetic legacy sidecar")
     from centermanager.database import session, encryption, artifact_security
