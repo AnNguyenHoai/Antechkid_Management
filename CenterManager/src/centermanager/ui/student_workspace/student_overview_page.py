@@ -41,7 +41,8 @@ class StudentOverviewPage(QWidget):
         columns = [
             {"key": key, "label": title, "sortable": False} for key, title in (
                 ("student_code", "Mã HS"), ("student_name", "Học sinh"),
-                ("status", "Trạng thái"), ("classes", "Lớp có buổi trong tháng"),
+                ("status", "Trạng thái"), ("classes", "Lớp đang học"),
+                ("monthly_classes", "Lớp có buổi trong tháng"),
                 ("due", "Buổi cần học"), ("present", "Có mặt"),
                 ("absent", "Vắng"), ("missing", "Chưa nhập"),
                 ("attendance_rate", "Có mặt %"), ("debt", "Còn nợ (VND)"),
