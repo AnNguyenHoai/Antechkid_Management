@@ -59,6 +59,7 @@ This inventory is the committed architecture classification for application serv
 | `student_highlight_service.py` | PASS | repository-owned | — |
 | `student_import_service.py` | PASS | repository-owned + service-owned import parsing | — |
 | `student_note_service.py` | PASS | repository-owned | — |
+| `student_overview_service.py` | PASS | provider-backed students + attendance / Outstanding aggregation | — |
 | `student_service.py` | PASS | repository-owned | — |
 | `student_summary_service.py` | PASS | repository-owned | — |
 | `system_operations_service.py` | NON_REPOSITORY | platform/filesystem health | — |
