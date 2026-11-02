@@ -9,6 +9,7 @@ from typing import Callable
 
 from .authority import Coordinator, CoordinatorError
 from .storage import LocalCandidateStore
+from .verification import CandidateVerifier
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,8 @@ class Principal:
 
 
 def build_app(coordinator: Coordinator, store: LocalCandidateStore,
-              verify_token: Callable[[str], Principal]):
+              verify_token: Callable[[str], Principal],
+              candidate_verifier: CandidateVerifier | None = None):
     """Build a staging API with pluggable authenticated identity.
 
     verify_token MUST cryptographically validate credentials and their audience
@@ -94,11 +96,28 @@ def build_app(coordinator: Coordinator, store: LocalCandidateStore,
             payload = bytes.fromhex(body.ciphertext_hex)
             store.put(repository, payload, body.sha256)
             # Hash verification alone is NOT SQLCipher integrity or signed identity validation.
-            coordinator.register_candidate(repository, principal.identity, body.candidate_id,
-                                           body.sha256, body.generation, body.identity,
-                                           verified=False)
             return {"status": "UPLOADED_UNVERIFIED", "candidate_id": body.candidate_id}
         except (CoordinatorError, ValueError) as exc:
             raise HTTPException(422, str(exc))
+
+
+    class CandidateVerification(BaseModel):
+        candidate_id: str
+        manifest: dict
+        signature: str
+
+    @app.post("/v1/repositories/{repository}/candidates/verify")
+    def verify_candidate(repository: str, body: CandidateVerification,
+                         principal: Principal = Depends(identity)):
+        require(principal, repository, "write")
+        if candidate_verifier is None:
+            raise HTTPException(503, "TRUSTED_VERIFIER_NOT_CONFIGURED")
+        try:
+            return candidate_verifier.verify_and_register(
+                repository, principal.identity, body.candidate_id,
+                body.manifest, body.signature
+            )
+        except CoordinatorError as exc:
+            raise HTTPException(422, exc.code)
 
     return app
