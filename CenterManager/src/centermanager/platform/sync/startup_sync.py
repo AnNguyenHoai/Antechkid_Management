@@ -119,19 +119,20 @@ class StartupSynchronization:
         )
         journal = WriteRecoveryJournal()
         try:
-            # A clean local receipt is allowed to proceed without new captures.
-            try:
-                journal.assert_replaceable(legacy=True)
-                return True
-            except RecoveryRequired:
-                pass
-
+            # Always pin the accepted ref even for an already-clean workspace.
+            # Otherwise a second fetch/reset may silently install another MAIN.
             accepted = self._provider.get_fetched_remote_main_commit()
             observed = self._provider.observe_remote_main_commit()
             if not accepted or not observed or accepted != observed:
                 raise RecoveryRequired(
                     "Git MAIN cannot be independently verified; local work was not replaced."
                 )
+            self._accepted_startup_main_oid = accepted
+            try:
+                journal.assert_replaceable(legacy=True)
+                return True
+            except RecoveryRequired:
+                pass
             existing = journal.inspect()
             if existing is not None:
                 base = existing.get("base_main_oid")
@@ -178,11 +179,25 @@ class StartupSynchronization:
             return False
 
     def _reset_to_remote(self) -> bool:
-        """Reset local repository to match remote branch."""
+        """Reset to exactly the already-fetched, independently observed MAIN."""
         try:
-            return self._provider.reset_to_remote()
+            accepted = getattr(self, "_accepted_startup_main_oid", None)
+            if not accepted or len(accepted) != 40 or any(c not in "0123456789abcdef" for c in accepted.lower()):
+                logger.error("Startup accepted MAIN commit is missing or invalid")
+                return False
+            # Do not let provider.reset_to_remote() fetch a different generation
+            # after a recovery capture has already pinned the accepted commit.
+            self._provider._run_git_command(["reset", "--hard", accepted])
+            actual = self._provider.get_local_main_commit()
+            if actual != accepted:
+                logger.error("Startup reset did not install the pinned MAIN commit")
+                return False
+            if self._provider.observe_remote_main_commit() != accepted:
+                logger.error("Remote MAIN changed after preflight; do not install runtime database")
+                return False
+            return True
         except Exception as e:
-            logger.exception(f"Reset to remote failed: {e}")
+            logger.exception("Pinned MAIN reset failed: %s", e)
             return False
 
     def _preflight_authoritative_database(self) -> bool:
