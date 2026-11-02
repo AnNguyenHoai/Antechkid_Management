@@ -24,7 +24,8 @@ class StudentOverviewService:
         self._attendance = MonthlyAttendanceExceptionService(session_factory, self._repository_provider)
 
     @staticmethod
-    def compose(students, attendance_rows, debt_rows):
+    def compose(students, attendance_rows, debt_rows, active_classes=None):
+        active_classes = active_classes or {}
         attendance_by_student = defaultdict(list)
         for row in attendance_rows:
             attendance_by_student[row["student_id"]].append(row)
@@ -43,7 +44,8 @@ class StudentOverviewService:
                 "student_code": student.student_code,
                 "student_name": student.full_name,
                 "status": student.status,
-                "classes": ", ".join(sorted({row["class_name"] for row in attendance})),
+                "classes": ", ".join(sorted(active_classes.get(student.id, set()))),
+                "monthly_classes": ", ".join(sorted({row["class_name"] for row in attendance})),
                 "due": due, "present": present, "absent": absent, "missing": missing,
                 "attendance_rate": round(present * 100 / due, 1) if due else None,
                 "debt": debt_by_student[student.id],
@@ -53,6 +55,12 @@ class StudentOverviewService:
     def list_rows(self, *, year: int, month: int, as_of_date: date | None = None):
         cutoff = as_of_date or get_clock().today()
         with self._session_factory() as db:
+            active_classes = defaultdict(set)
+            enrollments, _ = self._repository_provider.enrollments(db).list_for_outstanding(limit=None)
+            for enrollment in enrollments:
+                if (enrollment.status == "ACTIVE" and enrollment.class_ is not None
+                        and enrollment.class_.deleted_at is None):
+                    active_classes[enrollment.student_id].add(enrollment.class_.name)
             students = [student for student in
                         self._repository_provider.students(db).list_all_including_deleted()
                         if student.deleted_at is None]
@@ -64,4 +72,4 @@ class StudentOverviewService:
             view=OutstandingService.VIEW_OPEN_RECEIVABLES,
             on_date=cutoff, as_of_date=cutoff, limit=None,
         )
-        return self.compose(students, attendance, debt_rows)
+        return self.compose(students, attendance, debt_rows, active_classes)
