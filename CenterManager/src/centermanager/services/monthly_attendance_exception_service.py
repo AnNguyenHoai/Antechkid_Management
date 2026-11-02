@@ -36,7 +36,7 @@ class MonthlyAttendanceExceptionService:
     def list_rows(
         self, *, year: int, month: int, class_id: Optional[int] = None,
         minimum_rate: float = 80.0, as_of_date: Optional[date] = None,
-        issue: str = "ALL",
+        issue: str = "ALL", include_all: bool = False,
     ) -> list[dict]:
         if not 1 <= month <= 12 or not 2000 <= year <= 2100:
             raise ValueError("Invalid reporting month")
@@ -106,7 +106,7 @@ class MonthlyAttendanceExceptionService:
             row["recording_rate"] = round(row["recorded"] / due * 100, 2)
             is_low = row["attendance_rate"] < minimum_rate
             is_missing = row["missing"] > 0
-            if (issue == "ALL" and not (is_low or is_missing)
+            if not include_all and (issue == "ALL" and not (is_low or is_missing)
                     or issue == "LOW_ATTENDANCE" and not is_low
                     or issue == "MISSING_RECORDS" and not is_missing):
                 continue

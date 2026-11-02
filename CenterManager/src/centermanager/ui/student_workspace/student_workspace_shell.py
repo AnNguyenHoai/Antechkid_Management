@@ -15,6 +15,8 @@ from centermanager.platform.context import PlatformContext
 from centermanager.platform.sync.events import ReloadRequired
 from centermanager.ui.design_system.feedback import FeedbackController
 from centermanager.ui.student_workspace.student_analytics_page import StudentAnalyticsPage
+from centermanager.ui.student_workspace.student_overview_page import StudentOverviewPage
+from centermanager.services.student_overview_service import StudentOverviewService
 from centermanager.ui.student_workspace.student_dashboard_page import StudentDashboardPage
 from centermanager.ui.student_workspace.student_detail_page import StudentDetailPage
 from centermanager.ui.student_workspace.student_list_page import StudentListPage
@@ -163,6 +165,7 @@ class StudentWorkspaceShell(WorkspaceBase):
             {"id": "dashboard", "icon": "", "label": "Dashboard"},
             {"id": "students", "icon": "", "label": "Students"},
             {"id": "analytics", "icon": "", "label": "Analytics"},
+            {"id": "overview", "icon": "", "label": "Overview"},
         ]
         self.nav = WorkspaceNavigation("Student Workspace", pages)
         body.addWidget(self.nav)
@@ -226,6 +229,11 @@ class StudentWorkspaceShell(WorkspaceBase):
             feedback_controller=self._feedback_controller,
         )
         self.content_stack.addWidget(self.analytics_page)
+
+        self.overview_page = StudentOverviewPage(
+            StudentOverviewService(self._attendance_service._session_factory, self._outstanding_service)
+        )
+        self.content_stack.addWidget(self.overview_page)
 
         body.addWidget(self.content_stack, 1)
         layout.addLayout(body)
@@ -298,6 +306,11 @@ class StudentWorkspaceShell(WorkspaceBase):
             self.nav.set_active_page("students")
             self.header.set_context("Student Workspace", "Students")
             self.list_page.refresh()
+        elif page_id == "overview":
+            self.content_stack.setCurrentWidget(self.overview_page)
+            self.nav.set_active_page("overview")
+            self.header.set_context("Student Workspace", "Overview")
+            self.overview_page.refresh()
         elif page_id == "analytics":
             self.content_stack.setCurrentWidget(self.analytics_page)
             self.nav.set_active_page("analytics")
