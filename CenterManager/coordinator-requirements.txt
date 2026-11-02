@@ -1,0 +1,4 @@
+# Optional staging API dependencies; NOT installed by Windows application.
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+psycopg[binary]>=3.2,<4
