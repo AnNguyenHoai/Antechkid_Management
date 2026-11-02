@@ -196,3 +196,39 @@ def test_clone_passes_scoped_preclone_evidence():
     startup._provider = Provider()
     assert startup._clone_repository()
     assert seen["preclone_capture"] == capture
+
+
+def test_reconciled_local_untracked_files_are_cleaned_only_after_protected_copy():
+    commands = []
+    class Provider:
+        def _run_git_command(self, args):
+            commands.append(args)
+        def get_local_main_commit(self):
+            return "a" * 40
+        def observe_remote_main_commit(self):
+            return "a" * 40
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._provider = Provider()
+    startup._accepted_startup_main_oid = "a" * 40
+    startup._startup_reconciled_unaccepted_local = True
+    assert startup._reset_to_remote()
+    assert commands == [
+        ["reset", "--hard", "a" * 40],
+        ["clean", "-fd"],
+    ]
+
+
+def test_untracked_cleanup_never_runs_without_verified_reconciliation():
+    commands = []
+    class Provider:
+        def _run_git_command(self, args):
+            commands.append(args)
+        def get_local_main_commit(self):
+            return "a" * 40
+        def observe_remote_main_commit(self):
+            return "a" * 40
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._provider = Provider()
+    startup._accepted_startup_main_oid = "a" * 40
+    assert startup._reset_to_remote()
+    assert commands == [["reset", "--hard", "a" * 40]]
