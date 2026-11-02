@@ -33,3 +33,11 @@ CI #884 belongs to the initial PR head, not the subsequent audit commits; final 
 - **P1 stale remote after last observation:** origin can advance after the second `ls-remote` while local installation proceeds. Pinning the SHA avoids installing a different commit; policy must specify whether any stale-but-previously-accepted SHA is permissible or whether startup requires latest remote at unlock. Do not claim strict latest HEAD under races without final check.
 
 **QA decision:** HOLD pending above P0 blockers and Windows SQLCipher UAT; ongoing CI passing alone does not establish startup correctness. Avoid deploying current Draft to real production.
+
+
+## Scoped preclone path implementation
+A missing local Git repo with existing runtime DB now gets a verified sibling `runtime.write-recovery/preclone/<uuid>` file copy with SHA256 manifest **before any clone**. The only new clone exception is the explicit `preclone_capture` option; it validates the copy, the unchanged original file bytes, expected runtime roots and absence of another journal/repository before proceeding. Normal clone invocations retain the existing `require_replaceable` guard. The saved copy is not treated as a remote publication and is not automatically deleted.
+
+Additional tests exercise missing-repo preservation and passing the scoped capture into clone. The existing incomplete nonempty repository still fails closed, and any inability to capture files must block startup.
+
+**Reminder:** release still requires exact-head CI and real Windows SQLCipher UAT; the current draft is not approved for rollout. Cross-artifact attachment/manifest failure atomicity remains pending.
