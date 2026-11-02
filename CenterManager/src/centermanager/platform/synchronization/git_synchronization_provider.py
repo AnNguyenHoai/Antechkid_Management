@@ -239,7 +239,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 saved = (capture / relative_path).resolve()
                 if not saved.is_relative_to(capture) or not saved.is_file():
                     raise RecoveryRequired("Preclone capture is incomplete")
-                source = (journal.runtime / relative_path).resolve()
+                roots = journal._workspace_roots()
+                root_name = relative_path.parts[0]
+                if root_name not in roots or root_name == "repository":
+                    raise RecoveryRequired("Unexpected preclone workspace root")
+                source = (Path(roots[root_name]) / Path(*relative_path.parts[1:])).resolve()
                 if not source.is_file():
                     raise RecoveryRequired("Preclone source disappeared")
                 if (hashlib.sha256(saved.read_bytes()).hexdigest() != digest
