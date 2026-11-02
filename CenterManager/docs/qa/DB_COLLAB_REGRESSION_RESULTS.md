@@ -25,7 +25,7 @@ Added `tests/test_qa_p0_collaboration_contention.py` with **8 parameterized test
 
 GitHub workflow **run #824** for commit `e747fdafa0cd6a5a6584543119191cd3f51d1570` completed with success. This does **not** establish PASS for the newly added cases at a later SHA.
 
-## Counts
+## Publication race continuation\n\nAdded `tests/test_qa_p0_publication_races.py` (4 cases): atomic lock/main CAS rejection when authority moves, successful atomic two-ref publication, lost push ACK reconciled by exact remote OID, and rejected conflicting publication retaining offline local commit. Uses only disposable local bare Git repos. These tests validate Git mechanics, **not deployed host branch protection or legacy-client enforcement**. All four are NOT RUN until corresponding new-HEAD CI confirms outcomes.\n\nCI run #826 was IN PROGRESS when checked; do not infer its result or coverage of subsequent commits.\n\n## Counts
 Automated fault-injection scenarios executed in this QA campaign: **0**.
 PASS: **0**; FAIL: **0**; BLOCKED: **0**; NOT RUN: **24 designed scenarios**.
 
