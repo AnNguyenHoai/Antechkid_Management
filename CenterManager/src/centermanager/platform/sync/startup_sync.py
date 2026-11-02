@@ -152,6 +152,15 @@ class StartupSynchronization:
         )
         journal = WriteRecoveryJournal()
         try:
+            # Git MAIN wins at process startup, never while this process still
+            # owns an active local editor/mutation gate.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RecoveryRequired(
+                        "Cannot replace runtime while a local WRITE editor remains active."
+                    )
             # Always pin the accepted ref even for an already-clean workspace.
             # Otherwise a second fetch/reset may silently install another MAIN.
             accepted = self._provider.get_fetched_remote_main_commit()
