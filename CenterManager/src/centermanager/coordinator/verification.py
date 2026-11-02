@@ -4,6 +4,7 @@ A signer must be provisioned out-of-band and its public key pinned per repositor
 Neither uploader identity nor untrusted manifest data grants signing authority.
 """
 import base64
+import binascii
 import hashlib
 import json
 from dataclasses import dataclass
@@ -53,7 +54,7 @@ class CandidateVerifier:
         try:
             signature = base64.b64decode(signature_b64, validate=True)
             Ed25519PublicKey.from_public_bytes(trusted.signer_public_key).verify(signature, payload)
-        except (ValueError, InvalidSignature, TypeError) as exc:
+        except (ValueError, InvalidSignature, TypeError, binascii.Error) as exc:
             raise CoordinatorError("INVALID_SIGNATURE") from exc
         sha = manifest["ciphertext_sha256"]
         if not self.store.verify(repo_id, sha):
