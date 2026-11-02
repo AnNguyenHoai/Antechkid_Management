@@ -10,7 +10,7 @@ from hashlib import sha256
 import json
 import uuid
 from sqlalchemy import (create_engine, String, Integer, DateTime, ForeignKey, Text,
-                        UniqueConstraint, select)
+                        UniqueConstraint, select, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 
@@ -87,6 +87,24 @@ class Coordinator:
         self.engine = engine
         self.lease_seconds = lease_seconds
 
+    @staticmethod
+    def _database_now(db):
+        """Authoritative lease clock: PostgreSQL primary, never desktop time.
+
+        SQLite fallback is permitted exclusively for isolated deterministic unit
+        tests. Production must supply PostgreSQL (enforced by deployment gate).
+        """
+        dialect = db.bind.dialect.name
+        if dialect == "postgresql":
+            value = db.execute(text("SELECT clock_timestamp()")).scalar_one()
+            if value.tzinfo is None:
+                raise CoordinatorError("DATABASE_CLOCK_UNCERTAIN")
+            return value.astimezone(timezone.utc)
+        if dialect == "sqlite":
+            value = db.execute(text("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')")).scalar_one()
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        raise CoordinatorError("UNSUPPORTED_DATABASE")
+
     def create_schema_for_tests(self):
         """Use migrations for deployment, this helper is test-only."""
         Base.metadata.create_all(self.engine)
@@ -139,7 +157,7 @@ class Coordinator:
                 if existing.request_hash != fingerprint:
                     raise CoordinatorError("IDEMPOTENCY_CONFLICT")
                 return json.loads(existing.response)
-            now = datetime.now(timezone.utc)
+            now = self._database_now(db)
             expires = row.expires_at
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
