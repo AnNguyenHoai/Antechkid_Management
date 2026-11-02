@@ -41,3 +41,16 @@ A missing local Git repo with existing runtime DB now gets a verified sibling `r
 Additional tests exercise missing-repo preservation and passing the scoped capture into clone. The existing incomplete nonempty repository still fails closed, and any inability to capture files must block startup.
 
 **Reminder:** release still requires exact-head CI and real Windows SQLCipher UAT; the current draft is not approved for rollout. Cross-artifact attachment/manifest failure atomicity remains pending.
+
+
+## CI #898 audit and targeted remediation (Nov 3, 2026)
+[Run #898](https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41487465024): FAILED in all three Windows shards; 16 failed assertions total (8+3+5). This is not a validated release.
+- Existing tests asserting "dirty local data blocks startup" fail under founder-approved Git-MAIN-wins startup; updated their **startup-only** oracles to require safe capture then accepted MAIN, preserving non-startup fail-closed guards.
+- The A4.2, A4.3 and A4.5 tests asserted removed direct-truncation source strings; rewired to require atomic installer and prior authoritative preflight.
+- Old fake providers lack independent remote SHA methods; the focused historical mocks now supply or explicitly stub verified remote startup contract.
+- New SQLite smoke fixtures failed WinError 32 at os.replace under Windows due file handles held by test database connections; changed to raw temporary byte artifacts with production validator mocked, retaining separate real SQLCipher regression suites.
+- Several E1B2A tests failed `assert_replaceable()` after successful startup. Root cause of current implementation: `record_synchronized()` fingerprints rollback copies saved **inside runtime**, which are deleted immediately afterward. Moved rollback copies to sibling recovery root outside runtime fingerprint.
+- A report-generation failure while WRITE is still active must not invoke Git-MAIN-wins reset. Added a closed local mutation gate assertion before accepting startup reconciliation.
+- Git reset --hard leaves untracked legacy files; the new startup path can run Git clean only when a verified reconciliation capture is already recorded. Added explicit tests for both allowed/denied clean paths.
+
+**Status at authoring:** new changes were committed after #898; they have NOT passed an exact-head Windows CI. Do not merge/deploy on the basis of resolved hypotheses alone.
