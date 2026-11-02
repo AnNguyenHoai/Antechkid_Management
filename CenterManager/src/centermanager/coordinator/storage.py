@@ -48,3 +48,9 @@ class LocalCandidateStore:
         scope = hashlib.sha256(repository_id.encode()).hexdigest()
         path = self.root / scope / sha256
         return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == sha256
+
+    def size(self, repository_id: str, sha256: str) -> int:
+        if not self.verify(repository_id, sha256):
+            raise CoordinatorError("CANDIDATE_STORAGE_MISMATCH")
+        scope = hashlib.sha256(repository_id.encode()).hexdigest()
+        return (self.root / scope / sha256).stat().st_size
