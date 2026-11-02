@@ -56,7 +56,9 @@ def test_cancel_grace_waiting_removes_remote_request_without_releasing_owner(mac
     assert not tx.start_editing()
     assert tx.state == WriteTransactionState.WAITING
     assert waiter.has_pending_waiting_request()
-    assert tx.cancel_waiting()
+    assert waiter.cancel_waiting_request()  # Verified remote queue removal.
+    tx.cancel_waiting()  # Then reconcile local UI transaction projection.
+    assert tx.state == WriteTransactionState.IDLE
     assert not waiter.has_pending_waiting_request()
     assert owner.get_queue()["length"] == 0
     assert owner_provider._remote_lock_oid() == original_oid
