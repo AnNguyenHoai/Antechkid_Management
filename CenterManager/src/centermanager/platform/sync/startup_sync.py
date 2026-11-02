@@ -170,6 +170,7 @@ class StartupSynchronization:
                     "Git MAIN cannot be independently verified; local work was not replaced."
                 )
             self._accepted_startup_main_oid = accepted
+            self._startup_reconciled_unaccepted_local = False
             try:
                 journal.assert_replaceable(legacy=True)
                 return True
@@ -192,6 +193,7 @@ class StartupSynchronization:
                 observe_main=self._provider.observe_remote_main_commit,
             )
             journal.assert_replaceable()
+            self._startup_reconciled_unaccepted_local = True
             logger.warning(
                 "Startup: captured unaccepted local workspace; Git MAIN %s will replace it",
                 accepted,
@@ -286,6 +288,11 @@ class StartupSynchronization:
             # Do not let provider.reset_to_remote() fetch a different generation
             # after a recovery capture has already pinned the accepted commit.
             self._provider._run_git_command(["reset", "--hard", accepted])
+            if getattr(self, "_startup_reconciled_unaccepted_local", False):
+                # Untracked legacy artifacts cannot be left in the accepted
+                # repository. Existing reconciliation has preserved their
+                # exact bytes (including repo worktree) in a verified capture.
+                self._provider._run_git_command(["clean", "-fd"])
             actual = self._provider.get_local_main_commit()
             if actual != accepted:
                 logger.error("Startup reset did not install the pinned MAIN commit")
