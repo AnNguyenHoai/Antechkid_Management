@@ -89,3 +89,28 @@ def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, 
     with sqlite3.connect(local) as db:
         assert db.execute("SELECT v FROM t").fetchone()[0] == "MAIN"
     assert local.read_bytes() == source.read_bytes()
+
+
+def test_reset_pins_preflight_oid_and_refuses_remote_drift():
+    seen = []
+    class Provider:
+        def _run_git_command(self, args):
+            seen.append(tuple(args))
+        def get_local_main_commit(self):
+            return "a" * 40
+        def observe_remote_main_commit(self):
+            return "b" * 40  # Remote advanced after our preflight.
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._provider = Provider()
+    startup._accepted_startup_main_oid = "a" * 40
+    assert startup._reset_to_remote() is False
+    assert seen == [("reset", "--hard", "a" * 40)]
+
+
+def test_reset_rejects_missing_accepted_oid_before_running_git():
+    class Provider:
+        def _run_git_command(self, args):
+            raise AssertionError("unverified reset should never run")
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._provider = Provider()
+    assert startup._reset_to_remote() is False
