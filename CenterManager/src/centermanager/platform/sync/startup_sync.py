@@ -42,6 +42,8 @@ class StartupSynchronization:
         # 1. Ensure repository exists
         if not self._repo_path.exists() or not (self._repo_path / ".git").exists():
             logger.info("Repository not found, cloning...")
+            if not self._preserve_missing_repository_runtime():
+                return False
             if not self._clone_repository():
                 logger.error("Clone failed")
                 return False
@@ -189,6 +191,62 @@ class StartupSynchronization:
         except Exception as exc:
             self.recovery_error = str(exc)
             logger.exception("Git-authoritative startup preflight blocked safely")
+            return False
+
+    def _preserve_missing_repository_runtime(self) -> bool:
+        """Safeguard legacy files before first clone without bypassing clone guard.
+
+        Never alter production Git permissions or pretend this is an accepted
+        publication receipt.  The independent capture is only a rollback copy.
+        """
+        import hashlib
+        import uuid
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        journal = WriteRecoveryJournal()
+        try:
+            if journal.inspect() is not None:
+                self.recovery_error = "Existing recovery journal requires a matching repository before clone"
+                return False
+            if self._repo_path.exists() and any(self._repo_path.iterdir()):
+                self.recovery_error = "Incomplete repository contains files; preserve and inspect manually"
+                return False
+            if not self._runtime_db_path.exists():
+                return True
+            root = journal.root / "preclone" / uuid.uuid4().hex
+            root.mkdir(parents=True, exist_ok=False)
+            files = {}
+            for name, source_root in journal._workspace_roots().items():
+                if name == "repository":
+                    continue
+                source_root = Path(source_root)
+                if not source_root.exists():
+                    continue
+                if source_root.is_symlink():
+                    raise RuntimeError("Symlinked workspace cannot be preserved")
+                for source in sorted(source_root.rglob("*")):
+                    if source.is_symlink():
+                        raise RuntimeError("Symlinked workspace file cannot be preserved")
+                    if not source.is_file():
+                        continue
+                    rel = (Path(name) / source.relative_to(source_root)).as_posix()
+                    dest = root / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, dest)
+                    digest = hashlib.sha256(dest.read_bytes()).hexdigest()
+                    if digest != hashlib.sha256(source.read_bytes()).hexdigest():
+                        raise RuntimeError("Preclone workspace capture checksum mismatch")
+                    files[rel] = digest
+            manifest = root / "manifest.json"
+            with manifest.open("x", encoding="utf-8") as handle:
+                json.dump({"files": files}, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._startup_preclone_capture = root
+            logger.warning("Preserved missing-repository legacy workspace at %s", root)
+            return True
+        except Exception as exc:
+            self.recovery_error = str(exc)
+            logger.exception("Cannot preserve missing-repository runtime before clone")
             return False
 
     def _clone_repository(self) -> bool:
