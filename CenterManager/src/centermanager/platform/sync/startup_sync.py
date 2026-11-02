@@ -93,16 +93,24 @@ class StartupSynchronization:
         # 5. Always apply repository database to runtime
         if not self._apply_runtime_database():
             logger.error("Failed to apply repository database to runtime")
+            self._rollback_startup_database_install()
             return False
 
         # 6. Refresh database sessions. This is part of startup correctness,
         # not best-effort logging: a copied DB that cannot be opened must make
         # synchronization fail closed.
         if not self._refresh_database_sessions():
+            self._rollback_startup_database_install()
             return False
 
-        from centermanager.platform.write_recovery import WriteRecoveryJournal
-        WriteRecoveryJournal().record_synchronized()
+        try:
+            from centermanager.platform.write_recovery import WriteRecoveryJournal
+            WriteRecoveryJournal().record_synchronized()
+        except Exception:
+            logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
+            self._rollback_startup_database_install()
+            return False
+        self._finalize_startup_database_install()
         logger.info("Startup synchronization completed successfully")
         return True
 
@@ -257,6 +265,7 @@ class StartupSynchronization:
             if hashlib.sha256(dest.read_bytes()).digest() != expected:
                 raise RuntimeError("Installed Git MAIN database checksum mismatch")
             succeeded = True
+            self._startup_db_install_backup = (dest, previous, moved_db, tuple(moved_sidecars))
             logger.info("Authoritative database atomically installed; stale WAL detached")
             # Caller refreshes sessions after finishing manifest and metadata.
             return True
@@ -276,12 +285,42 @@ class StartupSynchronization:
             return False
         finally:
             stage.unlink(missing_ok=True)
-            # Preserve old copies until the replacement is completed.  Once
-            # installed and validated, the discarded generation must not replay.
-            if succeeded:
-                previous.unlink(missing_ok=True)
-                for _, backup in moved_sidecars:
-                    backup.unlink(missing_ok=True)
+            # Keep prior DB and WAL until manifest, session refresh, and
+            # recovery receipt all finish. run() finalizes or rolls back.
+
+    def _rollback_startup_database_install(self) -> None:
+        """Restore the previous DB generation if later startup phases fail."""
+        saved = getattr(self, "_startup_db_install_backup", None)
+        if saved is None:
+            return
+        from centermanager.database import session as session_module
+        dest, previous, moved_db, moved_sidecars = saved
+        try:
+            if not session_module.runtime_db_maintenance_active():
+                session_module.quiesce_runtime_db()
+            dest.unlink(missing_ok=True)
+            for suffix in ("-wal", "-shm", "-journal"):
+                dest.with_name(dest.name + suffix).unlink(missing_ok=True)
+            if moved_db:
+                os.replace(previous, dest)
+            for live, backup in moved_sidecars:
+                os.replace(backup, live)
+            session_module.refresh_runtime_db()
+            self._startup_db_install_backup = None
+            logger.warning("Startup failed: restored previous database and WAL generation")
+        except Exception:
+            logger.exception("Startup rollback failed: preserve previous files; database remains fenced")
+
+    def _finalize_startup_database_install(self) -> None:
+        """Discard old generation only after all startup integrity gates passed."""
+        saved = getattr(self, "_startup_db_install_backup", None)
+        if saved is None:
+            return
+        _, previous, _, moved_sidecars = saved
+        previous.unlink(missing_ok=True)
+        for _, backup in moved_sidecars:
+            backup.unlink(missing_ok=True)
+        self._startup_db_install_backup = None
 
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
