@@ -42,6 +42,7 @@ This inventory is the committed architecture classification for application serv
 | `git_config_service.py` | NON_REPOSITORY | encrypted filesystem config | — |
 | `home_dashboard_service.py` | PASS | repository-owned | — |
 | `income_service.py` | PASS | repository-owned | — |
+| `monthly_attendance_exception_service.py` | PASS | repository-owned monthly attendance, enrollment and session reads | — |
 | `outstanding_service.py` | PASS | repository-owned | — |
 | `parent_service.py` | PASS | repository-owned | — |
 | `permission_service.py` | PASS | repository-owned | — |

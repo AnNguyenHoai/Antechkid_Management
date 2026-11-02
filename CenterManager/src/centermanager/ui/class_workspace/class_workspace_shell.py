@@ -13,6 +13,8 @@ from centermanager.ui.class_workspace.class_list_page import ClassListPage
 from centermanager.ui.class_workspace.class_detail_page import ClassDetailPage
 from centermanager.ui.class_workspace.class_dashboard_page import ClassDashboardPage
 from centermanager.ui.class_workspace.class_overview_page import ClassOverviewPage
+from centermanager.ui.class_workspace.monthly_attendance_exceptions_page import MonthlyAttendanceExceptionsPage
+from centermanager.services.monthly_attendance_exception_service import MonthlyAttendanceExceptionService
 from centermanager.events.class_events import (
     ClassCreated, ClassUpdated, ClassArchived, ClassRestored, ClassSessionChanged,
 )
@@ -79,6 +81,7 @@ class ClassWorkspaceShell(QWidget):
             {"id": "dashboard", "icon": "📊", "label": "Dashboard"},
             {"id": "overview", "icon": "👥", "label": "Class Overview"},
             {"id": "classes", "icon": "📚", "label": "Classes"},
+            {"id": "monthly_attendance", "icon": "📋", "label": "Monthly Attendance"},
         ]
         self.nav = WorkspaceNavigation("Class Workspace", pages)
         self.nav.page_selected.connect(self.navigate_to)
@@ -99,6 +102,12 @@ class ClassWorkspaceShell(QWidget):
         self.overview_page = ClassOverviewPage(self._class_service)
         self.overview_page.class_selected.connect(self._on_class_selected)
         self.content_stack.addWidget(self.overview_page)
+
+        self.monthly_attendance_page = MonthlyAttendanceExceptionsPage(
+            MonthlyAttendanceExceptionService(self._attendance_service._session_factory),
+            self._class_service,
+        )
+        self.content_stack.addWidget(self.monthly_attendance_page)
 
         # Class List
         self.list_page = ClassListPage(
@@ -167,6 +176,8 @@ class ClassWorkspaceShell(QWidget):
         self.list_page.refresh()
         self.dashboard_page.refresh()
         self.overview_page.refresh()
+        if self.content_stack.currentWidget() is self.monthly_attendance_page:
+            self.monthly_attendance_page.refresh()
 
         # Only reload detail when it is currently showing the affected class.
         if self._current_class_id == class_id:
@@ -185,6 +196,11 @@ class ClassWorkspaceShell(QWidget):
             self.nav.set_active_page("overview")
             self.header.set_context("Class Workspace", "Class Overview")
             self.overview_page.refresh()
+        elif page_id == "monthly_attendance":
+            self.content_stack.setCurrentWidget(self.monthly_attendance_page)
+            self.nav.set_active_page("monthly_attendance")
+            self.header.set_context("Class Workspace", "Monthly Attendance")
+            self.monthly_attendance_page.refresh()
         elif page_id == "classes":
             self.content_stack.setCurrentWidget(self.list_page)
             self.nav.set_active_page("classes")

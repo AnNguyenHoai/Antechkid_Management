@@ -13,9 +13,13 @@ permissions:
 
 jobs:
   pytest:
-    name: Full pytest suite (Windows)
+    name: Full pytest suite (Windows, shard ${{ matrix.shard }})
     runs-on: windows-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     defaults:
       run:
         working-directory: CenterManager
@@ -49,26 +53,20 @@ jobs:
       - name: Run full pytest suite
         env:
           QT_QPA_PLATFORM: offscreen
-        run: >-
-          python -m pytest
-          --tb=long
-          --junitxml=pytest-report.xml
-          --durations=50
-          --timeout=120
-          --timeout-method=thread
+        run: python scripts/run_pytest_shard.py --shard ${{ matrix.shard }} --count 3
 
       - name: Upload pytest report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-report-${{ github.run_id }}
-          path: CenterManager/pytest-report.xml
+          name: pytest-report-${{ github.run_id }}-shard-${{ matrix.shard }}
+          path: CenterManager/pytest-report-shard-${{ matrix.shard }}.xml
           if-no-files-found: warn
 
       - name: Upload UI visual regression evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-prod-10-visual-evidence-${{ github.run_id }}
+          name: ui-prod-10-visual-evidence-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: CenterManager/visual-regression-artifacts/ui_prod_10
           if-no-files-found: warn

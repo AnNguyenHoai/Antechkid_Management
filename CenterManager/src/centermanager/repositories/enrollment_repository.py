@@ -221,6 +221,17 @@ class EnrollmentRepository(BaseRepository[Enrollment]):
             query = query.limit(max(1, limit))
         return query.all(), total
 
+    def list_monthly_roster_candidates(self, class_ids: set[int]) -> List[Enrollment]:
+        if not class_ids:
+            return []
+        return self._session.query(Enrollment).options(
+            joinedload(Enrollment.student),
+            joinedload(Enrollment.freezes),
+        ).filter(
+            Enrollment.class_id.in_(class_ids),
+            Enrollment.reconciled_into_enrollment_id.is_(None),
+        ).all()
+
     def get_by_class(self, class_id: int) -> List[Enrollment]:
         return self._session.query(Enrollment).options(
             joinedload(Enrollment.freezes)
