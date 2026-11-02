@@ -252,7 +252,7 @@ class StartupSynchronization:
     def _clone_repository(self) -> bool:
         try:
             self._repo_path.parent.mkdir(parents=True, exist_ok=True)
-            result = self._provider.clone(progress_callback=None)
+            result = self._provider.clone(progress_callback=None, preclone_capture=getattr(self, '_startup_preclone_capture', None))
             if result:
                 logger.info(f"Repository cloned successfully to {self._repo_path}")
             return result
