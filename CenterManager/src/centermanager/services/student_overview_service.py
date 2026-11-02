@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import date
 
 from centermanager.core.clock import get_clock
+from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.monthly_attendance_exception_service import MonthlyAttendanceExceptionService
 from centermanager.services.outstanding_service import OutstandingService
 
@@ -18,8 +19,9 @@ class StudentOverviewService:
     def __init__(self, session_factory, outstanding_service: OutstandingService,
                  repository_provider=None):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or SqlAlchemyRepositoryProvider()
         self._outstanding = outstanding_service
-        self._attendance = MonthlyAttendanceExceptionService(session_factory, repository_provider)
+        self._attendance = MonthlyAttendanceExceptionService(session_factory, self._repository_provider)
 
     @staticmethod
     def compose(students, attendance_rows, debt_rows):
@@ -52,7 +54,7 @@ class StudentOverviewService:
         cutoff = as_of_date or get_clock().today()
         with self._session_factory() as db:
             students = [student for student in
-                        self._attendance._repository_provider.students(db).list_all_including_deleted()
+                        self._repository_provider.students(db).list_all_including_deleted()
                         if student.deleted_at is None]
         attendance = self._attendance.list_rows(
             year=year, month=month, as_of_date=cutoff,
