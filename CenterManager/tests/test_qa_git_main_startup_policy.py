@@ -80,11 +80,14 @@ def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, 
     from centermanager.database import encryption
     from centermanager.database import artifact_security
     monkeypatch.setattr(session, "quiesce_runtime_db", lambda: None)
+    import gc
+    gc.collect()
     monkeypatch.setattr(encryption, "database_encryption_required", lambda: False)
     monkeypatch.setattr(artifact_security, "validate_database_artifact", lambda *a, **k: None)
     startup = StartupSynchronization.__new__(StartupSynchronization)
     startup._runtime_db_path = local
     assert startup._install_authoritative_database_atomically(source)
+    startup._finalize_startup_database_install()
     assert not wal.exists()
     with sqlite3.connect(local) as db:
         assert db.execute("SELECT v FROM t").fetchone()[0] == "MAIN"
