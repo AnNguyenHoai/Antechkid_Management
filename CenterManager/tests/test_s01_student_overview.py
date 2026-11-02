@@ -42,11 +42,12 @@ def test_compose_two_classes_uses_total_due_sessions():
           "present": 3, "absent": 1, "missing": 0},
          {"student_id": 1, "class_name": "Scratch", "required": 2,
           "present": 1, "absent": 0, "missing": 1}],
-        []
+        [], {1: {"Python", "Scratch"}}
     )
     assert rows[0]["due"] == 6
     assert rows[0]["attendance_rate"] == 66.7
     assert rows[0]["classes"] == "Python, Scratch"
+    assert rows[0]["monthly_classes"] == "Python, Scratch"
 
 
 def test_new_ui_integrated_and_read_only():
