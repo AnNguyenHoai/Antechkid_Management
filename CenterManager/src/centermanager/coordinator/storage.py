@@ -54,3 +54,10 @@ class LocalCandidateStore:
             raise CoordinatorError("CANDIDATE_STORAGE_MISMATCH")
         scope = hashlib.sha256(repository_id.encode()).hexdigest()
         return (self.root / scope / sha256).stat().st_size
+
+    def read(self, repository_id: str, sha256: str) -> bytes:
+        """Return only bytes whose content-addressed hash still matches."""
+        if not self.verify(repository_id, sha256):
+            raise CoordinatorError("CANDIDATE_STORAGE_MISMATCH")
+        scope = hashlib.sha256(repository_id.encode()).hexdigest()
+        return (self.root / scope / sha256).read_bytes()
