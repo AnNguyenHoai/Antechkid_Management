@@ -114,3 +114,30 @@ def test_reset_rejects_missing_accepted_oid_before_running_git():
     startup = StartupSynchronization.__new__(StartupSynchronization)
     startup._provider = Provider()
     assert startup._reset_to_remote() is False
+
+
+def test_post_install_failure_restores_previous_db_and_sidecar(tmp_path, monkeypatch):
+    source = tmp_path / "repo" / "center.db"
+    source.parent.mkdir()
+    old = tmp_path / "Database" / "center.db"
+    old.parent.mkdir()
+    for path, text in ((source, "REMOTE"), (old, "LOCAL")):
+        with sqlite3.connect(path) as db:
+            db.execute("CREATE TABLE t(v TEXT)")
+            db.execute("INSERT INTO t VALUES (?)", (text,))
+    sidecar = old.with_name("center.db-wal")
+    sidecar.write_bytes(b"synthetic legacy sidecar")
+    from centermanager.database import session, encryption, artifact_security
+    monkeypatch.setattr(session, "quiesce_runtime_db", lambda: None)
+    monkeypatch.setattr(session, "refresh_runtime_db", lambda: None)
+    monkeypatch.setattr(session, "runtime_db_maintenance_active", lambda: True)
+    monkeypatch.setattr(encryption, "database_encryption_required", lambda: False)
+    monkeypatch.setattr(artifact_security, "validate_database_artifact", lambda *a, **k: None)
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._runtime_db_path = old
+    original = old.read_bytes()
+    assert startup._install_authoritative_database_atomically(source)
+    startup._rollback_startup_database_install()
+    assert old.read_bytes() == original
+    assert sidecar.read_bytes() == b"synthetic legacy sidecar"
+    assert getattr(startup, "_startup_db_install_backup", None) is None
