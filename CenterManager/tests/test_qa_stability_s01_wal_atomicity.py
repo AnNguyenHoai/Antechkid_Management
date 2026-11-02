@@ -29,9 +29,17 @@ def synthetic_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(wal_safety, "get_paths", lambda: Paths())
     monkeypatch.setattr(wal_safety, "database_encryption_required", lambda: False)
     import centermanager.database.session as session
-    monkeypatch.setattr(session, "quiesce_runtime_db", lambda: None)
-    monkeypatch.setattr(session, "refresh_runtime_db", lambda: None)
-    return db
+    # A checkpoint permit is valid only inside the actual process maintenance fence.
+    # This isolated fixture supplies that fence without manipulating global
+    # production engine/session factories or touching a real runtime.
+    from centermanager.database.engine import (
+        begin_runtime_db_maintenance,
+        end_runtime_db_maintenance,
+    )
+    monkeypatch.setattr(session, "quiesce_runtime_db", begin_runtime_db_maintenance)
+    monkeypatch.setattr(session, "refresh_runtime_db", end_runtime_db_maintenance)
+    yield db
+    end_runtime_db_maintenance()
 
 
 def _values(path):
