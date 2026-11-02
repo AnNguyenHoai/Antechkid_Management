@@ -78,6 +78,8 @@ class GitProjector:
                 else:
                     _git(root, "checkout", "-B", self.branch)
                 marker = root / "e1c-projection.txt"
+                if prior is not None and not marker.is_file():
+                    raise CoordinatorError("PROJECTION_REMOTE_CONFLICT")
                 if marker.is_file():
                     existing = marker.read_text(encoding="utf-8")
                     expected_marker = (
