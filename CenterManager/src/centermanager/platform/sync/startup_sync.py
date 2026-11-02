@@ -198,6 +198,75 @@ class StartupSynchronization:
         )
         return False
 
+    def _install_authoritative_database_atomically(self, repo_db: Path) -> bool:
+        """Stage validated MAIN, fence DB handles, atomically replace and rollback."""
+        import hashlib
+        import uuid
+        from centermanager.database import session as session_module
+        from centermanager.database.artifact_security import validate_database_artifact
+        from centermanager.database.encryption import (
+            database_encryption_required, DatabaseKeyStore,
+        )
+
+        dest = self._runtime_db_path
+        token = uuid.uuid4().hex
+        stage = dest.with_name(f".{dest.name}.startup-{token}.tmp")
+        previous = dest.with_name(f".{dest.name}.previous-{token}")
+        sidecars = [dest.with_name(dest.name + suffix) for suffix in ("-wal", "-shm", "-journal")]
+        backups = [(p, p.with_name(f".{p.name}.previous-{token}")) for p in sidecars]
+        moved_sidecars = []
+        moved_db = installed = fenced = False
+        try:
+            with repo_db.open("rb") as source, stage.open("xb") as target:
+                shutil.copyfileobj(source, target, 1024 * 1024)
+                target.flush()
+                os.fsync(target.fileno())
+            encrypted = database_encryption_required()
+            key = DatabaseKeyStore().load() if encrypted else None
+            validate_database_artifact(
+                stage, encryption_required=encrypted, key=key,
+            )
+            expected = hashlib.sha256(stage.read_bytes()).digest()
+
+            session_module.quiesce_runtime_db()
+            fenced = True
+            if dest.exists():
+                os.replace(dest, previous)
+                moved_db = True
+            for live, backup in backups:
+                if live.exists():
+                    os.replace(live, backup)
+                    moved_sidecars.append((live, backup))
+            os.replace(stage, dest)
+            installed = True
+            if hashlib.sha256(dest.read_bytes()).digest() != expected:
+                raise RuntimeError("Installed Git MAIN database checksum mismatch")
+            logger.info("Authoritative database atomically installed; stale WAL detached")
+            # Caller refreshes sessions after finishing manifest and metadata.
+            return True
+        except Exception:
+            logger.exception("Startup SQLCipher atomic install failed")
+            if fenced:
+                try:
+                    if installed:
+                        dest.unlink(missing_ok=True)
+                    if moved_db:
+                        os.replace(previous, dest)
+                    for live, backup in moved_sidecars:
+                        os.replace(backup, live)
+                    session_module.refresh_runtime_db()
+                except Exception:
+                    logger.exception("Startup rollback failed; keep maintenance fence")
+            return False
+        finally:
+            stage.unlink(missing_ok=True)
+            # Preserve old copies until the replacement is completed.  Once
+            # installed and validated, the discarded generation must not replay.
+            if installed:
+                previous.unlink(missing_ok=True)
+                for _, backup in moved_sidecars:
+                    backup.unlink(missing_ok=True)
+
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
@@ -210,22 +279,10 @@ class StartupSynchronization:
         self._runtime_db_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Copy database using binary read/write
-            with open(repo_db, 'rb') as fsrc:
-                with open(self._runtime_db_path, 'wb') as fdst:
-                    fdst.write(fsrc.read())
-                    fdst.flush()
-                    os.fsync(fdst.fileno())
-
-            # Verify
-            if self._runtime_db_path.exists() and repo_db.exists():
-                src_size = repo_db.stat().st_size
-                dst_size = self._runtime_db_path.stat().st_size
-                logger.info(f"Runtime database updated: src_size={src_size}, dst_size={dst_size}")
-                if src_size != dst_size:
-                    logger.warning(f"Size mismatch after copy: src={src_size}, dst={dst_size}")
-            else:
-                logger.warning("Runtime database copy may have failed")
+            # Never truncate a live SQLCipher database or let stale WAL/SHM
+            # from the discarded local generation replay onto accepted MAIN.
+            if not self._install_authoritative_database_atomically(repo_db):
+                return False
 
             logger.info(f"Runtime database updated from repository: {self._runtime_db_path}")
 
