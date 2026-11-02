@@ -23,3 +23,13 @@ New `tests/test_qa_git_main_startup_policy.py` checks mismatched Git proof refus
 - **Still outstanding:** legacy journal reconciliation may depend on a readable SQLCipher key and materialization contract. Test a real prior EXE workspace copy; do not assume the synthetic SQLite smoke test covers it.
 
 CI #884 belongs to the initial PR head, not the subsequent audit commits; final approval needs exact latest head results.
+
+
+## Further audit — missing clone and multi-artifact atomicity (release blockers)
+- **P0 missing repository bootstrap:** `StartupSynchronization.run` clones before it can check the new Git-authoritative startup policy. Existing `GitSynchronizationProvider.clone()` invokes `require_replaceable()` before cloning; for a legacy local database with no journal/repository it can still reject initialization. The new authorization is therefore not complete for a replaced EXE with a fresh runtime folder or missing `runtime/repository`. Do not remove this guard without an offline preclone capture strategy and a verified remote ref.
+- **P0 recovery receipt mismatch across partial failure:** startup `reconcile` writes a RECONCILED receipt before actual reset. If Git reset succeeds but database install/manifest update fails, the next startup must validate current fingerprint and retained captured generation. A successful DB-only rollback does not revert Git repository or its receipt. Existing tests do not establish a fully transactional recovery after all such failure orders.
+- **P1 cross-artifact skew:** `_sync_employee_attachments_from_repository` deletes the runtime attachment directory before copy and has no rollback; manifest and metadata version are truncated/overwritten independently. On failure after DB replacement, the DB may be restored but attachments/manifest may be at the new generation. This contradicts a single accepted application snapshot.
+- **P1 untracked data:** new pinned `git reset --hard <SHA>` does not remove untracked files. Existing receipt verification may continue failing even though Git MAIN is authoritative; destructive cleanup must only happen after a verified immutable backup and must not remove any recovery captures.
+- **P1 stale remote after last observation:** origin can advance after the second `ls-remote` while local installation proceeds. Pinning the SHA avoids installing a different commit; policy must specify whether any stale-but-previously-accepted SHA is permissible or whether startup requires latest remote at unlock. Do not claim strict latest HEAD under races without final check.
+
+**QA decision:** HOLD pending above P0 blockers and Windows SQLCipher UAT; ongoing CI passing alone does not establish startup correctness. Avoid deploying current Draft to real production.
