@@ -77,10 +77,13 @@ class StartupSynchronization:
         if not self._prepare_authoritative_startup_replacement():
             return False
 
+        # Record the pre-reset local revision for rollback on downstream failure.
+        self._startup_previous_local_oid = self._provider.get_local_main_commit()
         # 3. Always reset local to remote (source of truth)
         logger.info("Resetting local repository to remote (source of truth)")
         if not self._reset_to_remote():
             logger.error("Reset to remote failed")
+            self._rollback_startup_git_repository()
             return False
 
         # 4. Validate the authoritative DB *before* copying it into runtime.
@@ -88,12 +91,14 @@ class StartupSynchronization:
         # migrate a plaintext collaboration DB because all clients must share
         # the same controlled encryption state.
         if not self._preflight_authoritative_database():
+            self._rollback_startup_git_repository()
             return False
 
         # 5. Always apply repository database to runtime
         if not self._apply_runtime_database():
             logger.error("Failed to apply repository database to runtime")
             self._rollback_startup_database_install()
+            self._rollback_startup_git_repository()
             return False
 
         # 6. Refresh database sessions. This is part of startup correctness,
@@ -111,8 +116,26 @@ class StartupSynchronization:
             self._rollback_startup_database_install()
             return False
         self._finalize_startup_database_install()
+        self._startup_previous_local_oid = None
         logger.info("Startup synchronization completed successfully")
         return True
+
+    def _rollback_startup_git_repository(self) -> None:
+        """Restore prior tracked Git generation after a failed startup install.
+
+        The recovery capture remains authoritative for any untracked work.
+        This never modifies the remote or WRITE lock.
+        """
+        previous = getattr(self, "_startup_previous_local_oid", None)
+        if not previous:
+            return
+        try:
+            self._provider._run_git_command(["reset", "--hard", previous])
+            if self._provider.get_local_main_commit() != previous:
+                raise RuntimeError("Local repository rollback OID mismatch")
+            self._startup_previous_local_oid = None
+        except Exception:
+            logger.exception("Startup Git rollback failed: retain recovery artifacts; do not proceed")
 
     def _prepare_authoritative_startup_replacement(self) -> bool:
         """Approve Git-MAIN-wins startup without silently discarding local work.
