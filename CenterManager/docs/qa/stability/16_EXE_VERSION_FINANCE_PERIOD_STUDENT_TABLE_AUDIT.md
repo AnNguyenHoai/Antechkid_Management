@@ -148,3 +148,27 @@ Source run: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41
 - Exact new-head Windows CI and SQLCipher-clone/Windows visual UAT remain mandatory before merge.
 
 No Git credentials, EXE/version authorization, database schema or historical ledger mutations were changed by these fixes.
+
+
+## FIN-MOV-01 — Real period movement (implemented, 2026-11-03)
+
+The previous period-overlap view remains labeled as cumulative. A **separate read-only report** is available from Finance > Outstanding > `Biến động công nợ kỳ` for the FinancePeriod start/end provided by the workspace:
+
+- Uses all historical non-reconciled Enrollment IDs from the canonical EnrollmentRepository, **not** the overlap filter. Each row is exactly one Enrollment (archive/withdrawal does not silently erase unpaid debt).
+- Opening date is calendar day **before** period_start; closing date is period_end, both inclusive. Accrual uses `OutstandingService._calculate_accrued` with the exact same TuitionAccrualService policy as the existing Outstanding read model.
+- Settlement uses `IncomeRepository.list_active_tuition_settlement_components(enrollment_id, as_of_date=period_end)`: cash Tuition Income and refunds (signed negative Income) are `Thu thuần`; TuitionAdjustment CREDIT and EnrollmentTransfer in/out are signed `Điều chỉnh`. This prevents double-counting the TuitionAdjustment linked to a refund.
+- Reconciliation for configured contracts: `closing = opening + accrued_in_period - received_signed_in_period - noncash_adjustment_signed_in_period`. A violated equation, unknown ledger source or missing canonical component reader fails closed rather than showing misleading totals.
+- Contract without price configuration has opening/accrued/closing **UNCONFIGURED**, but its recorded signed receipts and adjustments remain visible and are reported in separate unresolved totals, not added to known monetary debt.
+- Signed closing total may be offset by another Enrollment, but collectible debt and prepaid credit are explicitly reported as **separate** totals summed by individual Enrollment (no unauthorized auto-transfer).
+- UI has a readable horizontally/vertically scrollable eight-column table and a CSV export with exact Enrollment IDs, signed movements and totals; it does not mutate database or publish Git.
+- Tests cover period boundary transactions (October->November->December), billable accrual changes, refund as negative Income, noncash transfer, cross-course credit isolation, duplicate Enrollment entries, unconfigured price, invalid date range and unsupported ledger source.
+
+### Release limitations / UAT gates
+
+1. **Historical restatement policy:** The report is derived from current active/canonical ledger entries as of each effective date, not an immutable month-end close snapshot. Backdated edits, voids and retroactive session policy changes can legitimately restate past-period reports; reconcile against archived finance exports if immutable close evidence is required. This PR does not implement frozen month-end closes.
+2. **Source scope:** Official receipts and transfers require correct Enrollment attribution. Legacy Tuition Income without Enrollment linkage is not silently assigned; it remains outside Enrollment totals until explicitly reconciled through the existing audited workflow.
+3. **As-of selection:** The period's closing date may be future relative to the day the report is opened; planned future sessions are not automatically accrued unless the canonical billable-session policy permits them. For operational-to-date reports, select a completed period or explicitly explain the cutoff.
+4. **Scaling:** A full tuition report currently reads all enrolled contracts and two accrual snapshots per contract in one read-only session. Test performance against a cloned SQLCipher runtime before accepting large historical datasets.
+5. **Reconciliation:** Verify a class spanning multiple FinancePeriods, tuition upfront prepayments, refunds, transfer credits, archived classes, canceled/withdrawn Enrollment, and unknown tuition price with a disposable SQLCipher clone. Compare CSV per Enrollment and confirm `opening + accrued - receipts - adjustments == closing`. Do not merge without exact-head Windows CI and Windows visual DPI UAT.
+
+The old `VIEW_PERIOD_ACTIVITY` has not been relabeled as actual period movements. This is an independent report, invoked explicitly from the Outstanding workspace.
