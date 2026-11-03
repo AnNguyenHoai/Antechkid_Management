@@ -38,6 +38,11 @@ class StartupSynchronization:
     def run(self) -> bool:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
+        # A previous process may have died between individually atomic
+        # filesystem renames.  Neither Git reset nor journal reconciliation
+        # may run until an incomplete installation is explicitly recovered.
+        if not self._check_interrupted_startup_install():
+            return False
 
         # 1. Ensure repository exists
         if not self._repo_path.exists() or not (self._repo_path / ".git").exists():
@@ -123,9 +128,71 @@ class StartupSynchronization:
             return False
         self._finalize_startup_database_install()
         self._finalize_startup_assets()
+        self._complete_startup_install()
         self._startup_previous_local_oid = None
         logger.info("Startup synchronization completed successfully")
         return True
+
+    def _startup_install_marker_path(self) -> Path:
+        """Location never included in the runtime journal fingerprint."""
+        runtime_root = self._runtime_db_path.parent.parent.resolve()
+        return (
+            runtime_root.with_name(runtime_root.name + ".write-recovery")
+            / "startup-install.pending.json"
+        )
+
+    def _check_interrupted_startup_install(self) -> bool:
+        marker = self._startup_install_marker_path()
+        if not marker.exists():
+            return True
+        # Fail closed even for malformed or truncated markers: another process
+        # may have stopped after DB/WAL replacement but before asset install.
+        self.recovery_error = (
+            "Interrupted startup installation detected. Preserve runtime and "
+            "sibling .write-recovery before attempting another synchronization."
+        )
+        logger.error("%s marker=%s", self.recovery_error, marker)
+        return False
+
+    def _begin_startup_install(self) -> None:
+        """Persist pending state *before* any live DB/asset replacement.
+
+        One marker per runtime. The marker is a diagnostic safety barrier,
+        not a WRITE receipt, not an authorization to delete data, and not a
+        substitute for future restart replay or explicit recovery.
+        """
+        import uuid
+        marker = self._startup_install_marker_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        if marker.exists():
+            raise RuntimeError("An interrupted startup installation already exists")
+        token = uuid.uuid4().hex
+        temporary = marker.with_name(marker.name + "." + token + ".tmp")
+        payload = {
+            "format": 1,
+            "transaction_id": token,
+            "state": "INSTALL_PENDING",
+            "runtime_database": str(self._runtime_db_path.resolve()),
+            "git_main_oid": getattr(self, "_accepted_startup_main_oid", None),
+        }
+        try:
+            with temporary.open("x", encoding="utf-8") as handle:
+                json.dump(payload, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if marker.exists():
+                raise RuntimeError("Startup pending marker appeared concurrently")
+            os.replace(temporary, marker)
+            self._startup_pending_install = marker
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _complete_startup_install(self) -> None:
+        """Clear the barrier only after all startup acceptance gates pass."""
+        marker = getattr(self, "_startup_pending_install", None)
+        if marker is not None:
+            marker.unlink()
+            self._startup_pending_install = None
 
     def _rollback_startup_git_repository(self) -> None:
         """Restore prior tracked Git generation after a failed startup install.
@@ -536,6 +603,7 @@ class StartupSynchronization:
 
         try:
             self._prepare_startup_assets()
+            self._begin_startup_install()
             # Never truncate a live SQLCipher database or let stale WAL/SHM
             # from the discarded local generation replay onto accepted MAIN.
             if not self._install_authoritative_database_atomically(repo_db):
