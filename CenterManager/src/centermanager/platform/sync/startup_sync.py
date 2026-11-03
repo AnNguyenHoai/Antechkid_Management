@@ -144,51 +144,57 @@ class StartupSynchronization:
             / "startup-install.pending.json"
         )
 
+    def _startup_replay_targets(self):
+        db = self._runtime_db_path
+        return (
+            ("database", db),
+            ("wal", db.with_name(db.name + "-wal")),
+            ("shm", db.with_name(db.name + "-shm")),
+            ("journal", db.with_name(db.name + "-journal")),
+            ("employees", self._paths.attachment_dir / "Employees"),
+            ("manifest", self._runtime_manifest_path),
+            ("version", self._metadata_dir / "version.json"),
+        )
+
     def _check_interrupted_startup_install(self) -> bool:
         marker = self._startup_install_marker_path()
         if not marker.exists():
             return True
-        # Fail closed even for malformed or truncated markers: another process
-        # may have stopped after DB/WAL replacement but before asset install.
-        self.recovery_error = (
-            "Interrupted startup installation detected. Preserve runtime and "
-            "sibling .write-recovery before attempting another synchronization."
+        from centermanager.platform.sync.startup_install_replay import (
+            recover_interrupted_install, InterruptedInstallError,
         )
-        logger.error("%s marker=%s", self.recovery_error, marker)
-        return False
+        try:
+            # No production engine or Git publication is allowed here. A
+            # recovered old snapshot remains temporary until fetch and exact
+            # Git MAIN install succeed later in run().
+            from centermanager.database import session as session_module
+            session_module.quiesce_runtime_db()
+            recover_interrupted_install(marker, self._startup_replay_targets())
+            logger.warning(
+                "Interrupted local install restored from verified snapshot; "
+                "normal Git MAIN synchronization is still mandatory"
+            )
+            return True
+        except (InterruptedInstallError, OSError, RuntimeError):
+            self.recovery_error = (
+                "Interrupted startup installation could not be verified or "
+                "recovered. Preserve runtime and .write-recovery; startup blocked."
+            )
+            logger.exception("%s", self.recovery_error)
+            return False
 
     def _begin_startup_install(self) -> None:
-        """Persist pending state *before* any live DB/asset replacement.
-
-        One marker per runtime. The marker is a diagnostic safety barrier,
-        not a WRITE receipt, not an authorization to delete data, and not a
-        substitute for future restart replay or explicit recovery.
-        """
-        import uuid
+        """Persist original DB/WAL/asset bytes before any live replacement."""
+        from centermanager.platform.sync.startup_install_replay import capture_before_install
+        from centermanager.database import session as session_module
+        # Preexisting WAL must not change while its bytes are captured.
+        session_module.quiesce_runtime_db()
         marker = self._startup_install_marker_path()
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        if marker.exists():
-            raise RuntimeError("An interrupted startup installation already exists")
-        token = uuid.uuid4().hex
-        temporary = marker.with_name(marker.name + "." + token + ".tmp")
-        payload = {
-            "format": 1,
-            "transaction_id": token,
-            "state": "INSTALL_PENDING",
-            "runtime_database": str(self._runtime_db_path.resolve()),
-            "git_main_oid": getattr(self, "_accepted_startup_main_oid", None),
-        }
-        try:
-            with temporary.open("x", encoding="utf-8") as handle:
-                json.dump(payload, handle, sort_keys=True)
-                handle.flush()
-                os.fsync(handle.fileno())
-            if marker.exists():
-                raise RuntimeError("Startup pending marker appeared concurrently")
-            os.replace(temporary, marker)
-            self._startup_pending_install = marker
-        finally:
-            temporary.unlink(missing_ok=True)
+        capture_before_install(
+            marker, self._startup_replay_targets(),
+            getattr(self, "_accepted_startup_main_oid", None),
+        )
+        self._startup_pending_install = marker
 
     def _complete_failed_startup_rollback(self) -> None:
         """Remove pending marker only if every in-process rollback completed.
