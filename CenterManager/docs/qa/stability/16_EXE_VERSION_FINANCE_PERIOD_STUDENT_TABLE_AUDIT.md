@@ -124,3 +124,10 @@ A separate cross-course netting issue was confirmed: `StudentOutstandingSummary.
 This PR changes `StudentOutstandingSummary.debt_amount` and `.prepaid_amount` to aggregate exact Enrollment details independently (only for configured tuition), and changes the Student Financial headline to show **receivable debt without credit offset**. The independent prepaid amount is shown as a separate status when nonzero. `total_outstanding` remains a signed historical/reconciliation amount for backwards compatibility; it must not be used as collectible debt. Existing ledgers/Income/Enrollment records are untouched. Added regression for Enrollment 42 debt 300k plus Enrollment 43 prepaid 150k: collectible debt must be 300k and credit 150k, not net 150k.
 
 This adjustment does **not** authorize cross-course transfers or credit reassignment. Such transfers would require an explicit audited business workflow outside this change.
+
+
+### Dashboard consistency follow-up
+
+`FinanceDashboardService` previously derived Outstanding Tuition from the selected FinancePeriod's overlapping Enrollment set and returned zero debt if no period was configured, even though the center could have collectible Enrollment receivables. This PR adds `OutstandingService.get_receivable_stats(on_date=...)` backed by `VIEW_OPEN_RECEIVABLES` and uses it for the dashboard's debt KPI. Missing FinancePeriod now leaves Income/Expense period KPIs unavailable/zero but retains **course receivables and debtor counts**. Existing synthetic dashboard stubs using only the legacy method remain supported. The selected-period Income/Expense and Settlement calculation paths are unchanged.
+
+Do not confuse the dashboard's live collectible debt with its cash-flow window. Regression tests prove the debt projection is not constrained by the month and is still available when no FinancePeriod exists.
