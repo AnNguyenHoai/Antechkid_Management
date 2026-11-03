@@ -44,3 +44,10 @@ At Finance Workspace > Diagnostics, As of 03/11/2026, All findings, UI displays:
 Changed `FinanceWorkspaceShell._has_finance_access` to use the same canonical `AuthorizationService.allows(user, Capability.FINANCE_VIEW)` check as `FinanceDiagnosticsService.get_findings` and `FinanceDiagnosticsPage._principal_snapshot`. This removes the conditional admin-only UI bypass. Added regression for permitted/denied admin, finance, teacher, reception, manager, plus inactive users.
 
 This change **does not** alter WRITE, settlement, finance-period-admin permissions or automatically grant rights to any role. The default seeded admin remains authorized because it already has all persisted permissions. If the screenshot error occurs for an account with verified `finance.view`, this access-policy fix alone does NOT repair SQLCipher/schema/SQL query failures; inspect the sanitized client log.
+
+
+## CI #1001 — architecture assertion remediation
+
+Windows CI https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41606219009 at `9f9dfeac`: shard 1 and 2 PASS; shard 0 has **1 FAILED, 1033 passed, 3 skipped**. Only failure: `test_ep_prototype_08_finance_access_is_permission_gated` assumed that `FinanceWorkspaceShell._has_finance_access` must literally contain the string `finance.view`. The approved code instead calls `has_capability(Capability.FINANCE_VIEW)`, which resolves to the exact canonical finance.view grant and respects inactive/revoked accounts. The previous source-string test was obsolete, not evidence of a permission regression.
+
+Updated the architecture assertion to accept the typed capability form as well as the legacy literal and to reject the former `or user.is_admin` bypass explicitly. Existing behavioral tests continue to assert allowed/revoked roles. Production permission code and SQLCipher/finance ledger remain unchanged by this CI fix. **Exact-head Windows CI still required** before merge.
