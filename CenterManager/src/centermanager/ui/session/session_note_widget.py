@@ -72,6 +72,11 @@ class SessionNoteWidget(QWidget):
         header.addWidget(self.delete_btn)
 
         main_layout.addLayout(header)
+        self.save_status = QLabel("Changes saved")
+        self.save_status.setStyleSheet("color: #687782; font-size: 12px;")
+        self.save_status.setWordWrap(True)
+        self.save_status.setVisible(False)
+        main_layout.addWidget(self.save_status)
 
         # ---- Content area (stacked: empty / form) ----
         self.stacked = QStackedWidget()
