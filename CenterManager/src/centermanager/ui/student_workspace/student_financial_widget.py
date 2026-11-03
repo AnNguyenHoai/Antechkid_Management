@@ -119,7 +119,7 @@ class StudentFinancialWidget(QWidget):
         summary_layout.setVerticalSpacing(SPACING["md"])
         self.total_expected_label = self._create_summary_card("Expected tuition", "0 VND")
         self.total_paid_label = self._create_summary_card("Paid", "0 VND")
-        self.outstanding_label = self._create_summary_card("Outstanding", "0 VND")
+        self.outstanding_label = self._create_summary_card("Receivable debt (no credit offset)", "0 VND")
         self.status_label = self._create_summary_card("Status", "No data")
         summary_cards = (
             self.total_expected_label,
@@ -419,16 +419,21 @@ class StudentFinancialWidget(QWidget):
             return
 
         self.total_expected_label._value_widget.setText(f"{self._summary.total_expected:,.0f} VND")
-        outstanding = self._summary.total_outstanding
-        self.outstanding_label._value_widget.setText(f"{outstanding:,.0f} VND")
+        # Never net prepaid credit from one Enrollment against another
+        # Enrollment's receivable: separate course wallets are independent.
+        debt = self._summary.debt_amount
+        prepaid = self._summary.prepaid_amount
+        self.outstanding_label._value_widget.setText(f"{debt:,.0f} VND")
         if has_unconfigured:
             status_text = "Partially configured"
-        elif outstanding > 0:
+        elif debt > 0 and prepaid > 0:
+            status_text = f"Debt + separate prepaid {prepaid:,.0f} VND"
+        elif debt > 0:
             status_text = "Outstanding"
-        elif outstanding == 0:
-            status_text = "Paid"
+        elif prepaid > 0:
+            status_text = f"Prepaid {prepaid:,.0f} VND"
         else:
-            status_text = "Overpaid"
+            status_text = "Paid"
         self.status_label._value_widget.setText(status_text)
 
     def _update_detail_table(self) -> None:
