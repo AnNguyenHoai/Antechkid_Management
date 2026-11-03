@@ -433,6 +433,7 @@ class CollaborationManager:
         return True
 
     def _request_remote_write(self, reason):
+        self._waiting_handoff_code = ""
         request_id = str(uuid.uuid4())
         if self._is_writing:
             remote = self._get_remote_lock_status()
@@ -547,6 +548,7 @@ class CollaborationManager:
             self._sync_local_lock()
             if not self._is_writing:
                 self._ungranted_lock = True
+                self._waiting_handoff_code = "LOCAL_LOCK_SYNC_FAILED"
                 return False
             self._ungranted_lock = False
             self._pending_request = None
@@ -918,6 +920,7 @@ class CollaborationManager:
                 self._pending_request = None
                 self._cancel_pending = False
                 self._waiting_diagnostic = ""
+                self._waiting_handoff_code = ""
                 return True
             except Exception:
                 logger.warning("Cancellation acknowledgement is unknown", exc_info=True)
