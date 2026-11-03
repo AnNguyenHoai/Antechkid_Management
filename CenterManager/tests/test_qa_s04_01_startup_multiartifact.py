@@ -342,3 +342,32 @@ def test_failed_asset_rollback_does_not_skip_database_or_git(snapshot):
     sync._rollback_failed_install_all()
     assert events == ["database", "assets", "git"]
     assert sync._startup_install_marker_path().exists()
+
+
+def test_verified_crash_replay_releases_maintenance_fence_for_git_preflight(snapshot, monkeypatch):
+    """A successful crash replay must not strand SQLCipher behind the global fence."""
+    sync, root = snapshot
+    sync._begin_startup_install()
+    from centermanager.database import session as session_module
+    events = []
+    monkeypatch.setattr(session_module, "quiesce_runtime_db", lambda: events.append("fence"))
+    monkeypatch.setattr(session_module, "end_runtime_db_maintenance", lambda: events.append("unfence"))
+    assert sync._check_interrupted_startup_install()
+    assert events == ["fence", "unfence"]
+
+
+def test_corrupted_replay_does_not_release_maintenance_fence(snapshot, monkeypatch):
+    """A failed replay must remain fail-closed rather than allow DB use."""
+    sync, root = snapshot
+    sync._begin_startup_install()
+    import json
+    marker = sync._startup_install_marker_path()
+    token = json.loads(marker.read_text(encoding="utf-8"))["transaction_id"]
+    (marker.parent / "startup-replay" / token / "0" / "__file__").write_bytes(b"INVALID")
+    from centermanager.database import session as session_module
+    events = []
+    monkeypatch.setattr(session_module, "quiesce_runtime_db", lambda: events.append("fence"))
+    monkeypatch.setattr(session_module, "end_runtime_db_maintenance", lambda: events.append("unfence"))
+    assert not sync._check_interrupted_startup_install()
+    assert events == ["fence"]
+    assert marker.exists()
