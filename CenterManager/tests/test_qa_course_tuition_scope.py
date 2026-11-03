@@ -54,7 +54,9 @@ def test_course_balance_is_not_restricted_to_enrollments_in_current_finance_peri
     assert len(summary.details) == 2
     assert summary.total_expected == Decimal("1000000")
     assert summary.total_paid == Decimal("850000")
-    assert summary.total_outstanding == Decimal("150000")
+    assert summary.total_outstanding == Decimal("150000")  # signed reconciliation only
+    assert summary.debt_amount == Decimal("300000")  # never offset by other course
+    assert summary.prepaid_amount == Decimal("150000")
 
 
 def test_legacy_get_all_outstanding_does_not_raise_undefined_hide_flag():
