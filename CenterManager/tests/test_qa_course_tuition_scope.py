@@ -141,3 +141,35 @@ def test_finance_dashboard_reports_course_debt_without_accounting_period():
     assert data["total_outstanding"] == Decimal("300000")
     assert data["students_with_debt"] == 1
     assert data["revenue_period"] == 0
+
+
+def test_outstanding_workspace_defaults_to_all_course_balances(qapp):
+    from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
+    page = OutstandingListPage(None, None, None)
+    assert page._view() == OutstandingService.VIEW_COURSE_BALANCES
+    modes = [page.view_combo.itemData(index) for index in range(page.view_combo.count())]
+    assert modes == [
+        OutstandingService.VIEW_COURSE_BALANCES,
+        OutstandingService.VIEW_OPEN_RECEIVABLES,
+        OutstandingService.VIEW_PERIOD_ACTIVITY,
+    ]
+
+
+def test_course_balance_class_filter_uses_all_enrollments_without_period():
+    service = OutstandingService(lambda: _Session())
+    service._report_period_for_request = lambda *args, **kwargs: (
+        (_ for _ in ()).throw(AssertionError("Course class list cannot require FinancePeriod"))
+    )
+    seen = []
+    def collect(*args, **kwargs):
+        seen.append(kwargs)
+        return [_dto(42, 800000, 500000), _dto(43, 200000, 350000)]
+    service._collect_outstanding = collect
+    classes = service.list_outstanding_classes(
+        period_start=date(2026, 11, 1),
+        on_date=date(2026, 11, 3),
+        view=OutstandingService.VIEW_COURSE_BALANCES,
+    )
+    assert classes == [(11, "Scratch")]
+    assert seen[0]["resolved_period_start"] is None
+    assert seen[0]["view"] == OutstandingService.VIEW_COURSE_BALANCES
