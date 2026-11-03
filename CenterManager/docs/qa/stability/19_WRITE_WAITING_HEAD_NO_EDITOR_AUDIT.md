@@ -36,3 +36,27 @@ W01 ABSENT lock with confirmed current queue head automatically reaches WRITE af
 
 ## Remediation recommendation
 Do not alter the 600s GRACE, remove CAS, force-drop collaboration refs, or self-grant WRITE. First add bounded read-only handoff diagnostics to the waiting UI and test the exact branch causing the stall. If screenshot's status persists beyond the expected poll interval with remote ABSENT and current head confirmed, treat as a real auto-handoff bug and inspect provider acquisition and poller lifecycle. Avoid unrelated DB and Git MAIN migrations.
+
+
+## Follow-up: remote read-only evidence and reproduced source-level stale WAITING race
+
+After the founder confirmed WAITING position 1 persisted beyond two minutes, a **read-only** GitHub API observation of the official `Antechkid_CenterManager_DatabaseOfficial` repository returned:
+- `refs/heads/lock-main` absent (HTTP 404); no recorded WRITE lock on this ref **at observation time**.
+- `refs/heads/queue-main` present; its `queue.json` blob was `{"requests": []}`.
+- Historic queue commits show a request appeared around 2026-11-03 17:17:58 Asia/Ho_Chi_Minh then the queue returned to empty by about 17:18:20. This does NOT reveal why the request disappeared, whether it belonged to the screenshot session, or whether another remote was used by that EXE.
+
+**Confirmed code race:** `CollaborationPoller._poll` emitted `snapshot_changed` only when lock/queue/version changed. A queue request can be added and removed entirely between polling windows. If the most recent snapshot was already empty, the new empty snapshot compares equal, no UI callback is emitted, and `MainWindow._reconcile_waiting_transaction` never gets a successful post-request observation to clear local `WriteTransactionState.WAITING`. A stale position-1 message can persist despite authoritative queue-main being empty.
+
+### Implemented fix in PR #551
+
+1. The poller now emits a **fresh successful authoritative snapshot for each poll while a local pending WRITE request exists**, even if the remote lock/queue payload is unchanged. This permits the MainWindow's existing exact-session and request-id reconciliation to confirm deletion and exit WAITING; malformed/failed remote observations remain fail-closed.
+2. The manager exposes a non-sensitive last handoff failure code (e.g. `GIT_LOCK_ACQUISITION_FAILED`, `QUEUE_HEAD_MISMATCH`, `MAIN_HANDOFF_FAILED`, `OWNERSHIP_VERIFICATION_FAILED`, `CLOCK_SKEW_GRACE`) instead of silent False. The poller records failed head handoffs by code while preserving queue integrity and Git CAS.
+3. MainWindow waiting top-bar no longer renders `Waiting (pos 1) - None`; it reports pending Git validation or the last handoff reason.
+4. Application Shell no longer claims another editor is active merely because a local WAITING request exists.
+5. Regressions: remote ABSENT + current queue-head + failed Git acquisition stays READ and reports code, then valid retry gets WRITE; GRACE never grants; successful empty queue observation transitions local WAITING to idle; unchanged snapshots continue to notify while pending local intent; a no-editor WAITING top bar provides accurate guidance.
+
+### Release gate / safety
+
+- This corrects a **proven stale-UI reconciliation race**; it does **not** conclusively identify the *original* reason an enqueue/lock acquisition failed on the Windows EXE. A separate Git remote, release build mismatch, missing PAT permission on `lock-main`, or blocked MAIN handoff can still cause WRITE to fail.
+- Never force-release Git lock, shorten grace, convert WAITING to WRITE without exact remote lock ownership, or bypass the E1B unpublished-local-change journal.
+- Confirm exact-head Windows CI and repeat on a disposable EXE/runtime clone; record Git provider lock failure codes and timestamps, verify the repository URL/branch in EXE configuration (without exposing credentials). Do not merge until these gates are met.
