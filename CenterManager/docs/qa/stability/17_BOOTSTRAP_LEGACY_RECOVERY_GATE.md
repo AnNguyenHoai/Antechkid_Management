@@ -51,3 +51,14 @@ B05 remote Git offline/OID UNKNOWN: startup refuses.
 B06 original legacy manifest and DB remain untouched if startup fails prior to Git verification.
 
 B07 Windows EXE packaged with local recovery and repro runtime copy: valid MAIN and capture allow login only after successful authoritative installation; mutation authorization remains read-only unless a separate WRITE grant is acquired.
+
+
+## CI #994 audit — Windows shard-0 SQLCipher test isolation
+
+Run: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41595567291 (commit `0df7d204`).
+- Windows shard 1 PASS and shard 2 PASS. Shard 0: 1 failure, 1031 passes, 3 skips in `test_database_artifact_security::test_materialize_runtime_db_keeps_authoritative_git_artifact_encrypted`.
+- The originating exception is `RuntimeDatabaseMaintenanceError: Runtime database is temporarily unavailable during backup restore`, thrown by `engine.acquire_runtime_dbapi_connection` because the process-global runtime maintenance fence remained enabled. The SQLCipher artifact validator wraps the exception as `DatabaseArtifactSecurityError: Encrypted database artifact cannot be authenticated with the workspace key`. That wrapper text is misleading for this failure; it is not evidence of an invalid key, invalid ciphertext or live database damage.
+- This test creates disposable encrypted test bytes and is unrelated to the modified bootstrap handoff path. A similar order-dependent shared-state leak was previously observed in E1B2B tests. The exact earlier fixture leaving the flag enabled has **not** been proven by CI #994 logs alone.
+- Test-only isolation: the synthetic SQLCipher artifact fixture now checks that zero runtime DBAPI handles remain registered, resets a stale global maintenance fence at the fixture boundary, and asserts no native handles are leaked on exit. It does not change production `begin_runtime_db_maintenance`, `end_runtime_db_maintenance`, SQLCipher credential verification or crash-recovery barriers.
+- A persistent production maintenance leak is still a separate lifecycle audit concern; passing this test does not certify that the original state leak has been eliminated.
+- Verify new head Windows CI, then carry out genuine cloned Windows EXE + SQLCipher/WAL legacy-upgrade UAT. Until then PR remains Draft.
