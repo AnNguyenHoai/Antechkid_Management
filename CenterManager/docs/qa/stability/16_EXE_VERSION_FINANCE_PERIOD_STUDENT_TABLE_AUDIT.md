@@ -1,0 +1,186 @@
+# CenterManager — EXE Compatibility, Tuition Scope and Student Table Audit
+
+**Date:** 2026-11-03  
+**Audit base:** `main_repos`, commit `07b11f52a5584ac943b91015b144c9c6e215a540`.  
+**Scope:** source inspection, narrow UI corrections, synthetic regression tests. NOT a production database inspection or real Windows EXE visual UAT.  
+**Constraints:** Git MAIN is authoritative; no hosted coordinator/server; do not change financial ledger, legacy DB snapshots, credentials or active remote settings as part of UI fixes.
+
+## A. EXE version / WRITE compatibility — P0 design gate
+
+### Confirmed source observations
+
+1. `core/version.py::get_application_version` reads immutable release identity from `CenterManager/VERSION` (source) or packaged `RELEASE_MANIFEST.json` (frozen). This is **SemVer string**, not database generation.
+2. `platform/version/version_manager.py` publishes `runtime_version` integers, and `metadata/version.json` stores platform/pending versions. This is a **runtime publication counter** rather than a minimum-compatible EXE release. Do not confuse these.
+3. Repository manifests contain `minimum_app_version` (existing default `0.1.0` in VersionManager's template), but current `services/write_transaction.py::start_editing` starts lock acquisition after recovery checks without evaluating app minimum; `platform/collaboration/collaboration_manager.py::request_write` has no app-version check at this entry point.
+4. `platform/sync/startup_sync.py` already requires fresh remote MAIN verification before normal startup and records that MAIN authoritative. No proven end-to-end enforcement for older packaged binaries has been established from these inspected paths.
+
+### Critical threat-model distinction
+
+**A new client-side version check cannot constrain an already-deployed legacy EXE that ignores the check and retains credentials able to push authoritative Git MAIN.** Mark this as P0 residual risk. It is invalid to claim legacy DB overwrite is prevented until Git-side enforcement denies obsolete credentials/writers (e.g. a GitHub-protected publication identity / narrowly scoped GitHub Actions workflow / credential rotation and non-bypassable branch rules). This can be built without hosting a separate server, but is a separate release/permission decision.
+
+### Recommended narrowly-scoped compatibility contract
+
+- Admin publishes an immutable release `app_version` and a monotonic **minimum_writer_version** to Git as a release-operation with remote OID CAS, not as a side effect of each user's first startup. Retain optional `minimum_reader_version` for genuinely incompatible DB-schema upgrades. For absent/malformed/unverifiable remote policy: block WRITE (and fail normal startup if the authoritative DB cannot be verified). Do not silently treat missing policy as unrestricted legacy mode.
+- A new EXE may **propose** a version bump on its first launch, but must not unilaterally publish a new minimum that instantly demotes other operators. Promotion requires authorized release gate and audit. Independently bump the `VERSION`/packaged `RELEASE_MANIFEST.json` with every distributed release, and validate the packaged identity.
+- Use semantic version comparison (including release-candidate precedence); never string lexical ordering. Treat downgrade/nonmatching app identity as incompatible.
+- Validate the current **freshly fetched** remote policy at startup, immediately before `request_write` (including waiting/grant handoff) and before Git MAIN publication; if policy observation fails mid-session, suspend edits/publish, retain durable journal, release lock only through fenced handoff. A read-only user can still see accepted MAIN if encrypted/schema compatible.
+- The UI should show current version, required version and an actionable update warning, disable Start Editing and mutation actions. Read mode must never secretly run migrations, reports or background SQL writes.
+- Version policy changing while another user is editing needs an explicit drain/writer cutover rule. Never set a new minimum during another user's accepted WRITE session without handling it under fencing.
+
+### Acceptance tests before any version protection claim
+
+V01 older EXE read-only, denied initial/queued WRITE; V02 missing/bad remote version policy denied WRITE; V03 current EXE accepted; V04 semver RC/prerelease correct; V05 remote change while WRITE waiting, while editing and just before publish; V06 Git offline or stale fetch; V07 local version file tampered; V08 old EXE with surviving PAT attempts direct push MAIN (must be **rejected Git-side**, or document protection not achieved); V09 recovery WRITE journal preserved on downgrade; V10 concurrent first-launch version races produce no lost update.
+
+**Decision:** design-only. Do not implement a partial app-side gate as if it provides legacy Git publication fencing.
+
+## B. Course-based tuition versus FinancePeriod — P0/P1 semantic audit
+
+### Proven code behavior
+
+- Tuition accrual is fundamentally tied to **Enrollment**: `services/tuition_accrual_service.py::calculate_from_records` counts billable teaching sessions before `as_of_date`, applies unit fee and proportional discount; `services/outstanding_service.py::_calculate_from_enrollment` joins this accumulated obligation to tuition payments summed for the same enrollment up to the cutoff. This remains a lifetime-to-date enrollment balance, not a monthly contract.
+- `OutstandingService` exposes two distinct views: `VIEW_OPEN_RECEIVABLES` (unrestricted by FinancePeriod) and `VIEW_PERIOD_ACTIVITY` (filters enrollments overlapping the selected FinancePeriod), but **the latter still computes cumulative earned and cumulative paid since enrollment**, rather than isolating incrementally earned/paid within that reporting period. The label “Phát sinh trong kỳ” is therefore potentially materially misleading.
+- `ui/finance_workspace/outstanding_list_page.py` already defaults its view selector to “Công nợ còn mở (tất cả kỳ)” before “Phát sinh trong kỳ”; preserving this distinction is preferable to removing FinancePeriod.
+- `services/outstanding_service.py::get_student_summary` calls `get_outstanding_page` with the **default period-scoped view**, so a student financial overview can omit older enrollments not overlapping the reporting period while showing lifetime paid/accrued amounts of included enrollments.
+- `ui/student_workspace/student_financial_widget.py::set_student` resolves an accounting period, calls `_load_outstanding_summary(period_start, ...)` and separately `_load_incomes` filtered by **finance_period_start** and payment dates. Thus the total paid in enrollment summary and the visible payment-history rows can refer to **different scopes** even though displayed together.
+- `services/wallet_service.py` aggregates cash/bank Income and Expense by period for accounting settlement. These cash/bank wallets must not be conflated with an enrollment's tuition/prepayment credit: they answer different questions and **should remain period-based**.
+- Additional source defect: `OutstandingService.get_all_outstanding` forwards `hide_settled_inactive=hide_settled_inactive` although the method signature does not define this variable. Any executed call through that path can raise `NameError`. Resolve separately with a regression test.
+
+### Business terms that must not be mixed
+
+1. **Contract total** = planned billable sessions × contract rate − contracted discount / agreed adjustments.
+2. **Accrued to date** = billable sessions actually due as of cutoff × fee − applicable discount.
+3. **Total paid to date** = valid active tuition Income tied to the same Enrollment as of cutoff, net of reversed/refunded items per ledger policy.
+4. **Currently collectible debt** = max(0, accrued-to-date − paid-to-date) (unless the contract has different due-date policy).
+5. **Remaining contract commitment** = contract total − accrued-to-date, not yet necessarily overdue.
+6. **Accounting-period movements** = receipts/realized Income, expenses and recognized accrual changes strictly inside period, not outstanding balance rebadged as monthly activity.
+
+Example synthetic enrollment: 24 planned sessions at 100k/session, 8 billable sessions accrued, 500k paid. Contract commitment 2.4m, earned 800k, currently collectible 300k, future unearned 1.6m. A 1-month accounting window does not split the contract or create a new Enrollment.
+
+### Recommended solution — preserve ledger, separate projections
+
+- Keep Enrollment as tuition obligation identity and the exact per-session billing policy. Do not migrate historical transactions or reset wallet balances just to change visual grouping.
+- Make **“Nợ theo Enrollment/toàn khóa đến ngày X”** the primary tuition collection view and Student Financial summary; calculate globally by Enrollment ID, independent of FinancePeriod. Distinguish “đã phát sinh”, “đã thu”, “còn phải thu” and “chưa phát sinh của khóa”.
+- Keep FinancePeriod for realized cash/bank reporting, WalletService, Settlement, Income/Expense bookkeeping. For period movement view, compute **opening balance + period accrual − period payments ± adjustments = closing balance**; implement this reconciliation explicitly rather than filtering Enrollment start/end alone.
+- If period does not exist, do not make course collection/inquiry disappear; only accounting-period report/settlement needs a configured FinancePeriod.
+- Preserve canceled, withdrawn, archived and repeated Enrollments by exact ID; avoid joining only student/class; handle tuition credits/refunds and mixed unconfigured policies transparently.
+- UI should label ledger scope and cutoff, not mix period-filtered payment history with lifetime summary without explanation. Provide a separate “Tất cả giao dịch của khóa” history when studying collection.
+- Regression cases: payment crossing months, upfront prepay, 24-session course spanning 4 months, class archive with debt, enrollment withdrawn and rejoined, old periods closed, no FinancePeriod configuration, refunds/voided Income, two simultaneous enrollments, as-of cutoff, unresolved pricing, repeated enrollment in the same class and reconciliation of accounting-period cash movements.
+
+**Decision:** do not alter money calculations or database schema until the required collection/due-date rule is confirmed; start with read-model and UI clarity tests. No production financial writes performed in this PR.
+
+## C. Student / debt / attendance tables — source-based UI findings and fix
+
+- `ui/shared/data_table.py` uses `QTableWidget`, interactive headers and right-side tooltip for full cell values. Qt scrollbars are available, but former widget-specific `ResizeMode.Stretch` in both `ui/student_workspace/student_financial_widget.py` tables forced columns to fill narrow viewports (risk: excessively small headers/cells, elided text).
+- `ui/finance_workspace/outstanding_list_page.py` has seven columns. `ui/class_workspace/monthly_attendance_exceptions_page.py` has nine. At narrow widths or high Windows display scaling, columns require explicit horizontal overflow. `ui/student_workspace/student_attendance_widget.py` uses the shared DataTable with four columns; `ui/student_workspace/student_list_page.py` uses five columns. These two do not exhibit the same forced Stretch override in the inspected source.
+- Student Detail already wraps Enrollment and Finance tabs in `QScrollArea` (`ui/student_workspace/student_detail_page.py`), so vertical scrolling exists at tab level. The specific inner table horizontal scroll is independent.
+- A screenshot-based verdict that every table renders without clipping **cannot** be claimed from source inspection alone. Windows/DPI visual UAT is still required.
+
+### Implemented in this audit PR
+
+- Student finance detail and history: remove `Stretch`, retain `Interactive` widths, disable stretch-last-section; explicit horizontal/vertical as-needed scrollbars; give each column a usable base width.
+- Outstanding list (7 columns) and monthly attendance exceptions (9 columns): explicit scrollbars and minimum-friendly set widths, disable stretch-last.
+- New synthetic Qt regression tests place grids at ~465px and verify horizontal scrolling occurs. No data calculations or table sorting/selection code changed.
+
+### UI UAT matrix
+
+Test window widths 1920 / 1366 / 1024 / 800 / 640 logical pixels and Windows scaling 100 / 125 / 150%; long student and class names; large VND amounts; archived class; 100+ absent/missing records; keyboard horizontal navigation; touchpad trackpad wheel/horizontal shift; both scroll axes; pagination and row selection after horizontal scroll; footer and toolbar are still accessible. Ensure the horizontal scrollbar appears **within the grid**, not by compressing all columns or clipping content without affordance.
+
+## Recommended priority / execution order
+
+1. **P0 release safety:** decide whether Git-side legacy publisher blocking is required, and define SemVer promotion policy; do not claim old EXEs are fenced by an app-only version check.
+2. **P0 finance display truth:** separate Enrollment lifetime debt from period movements; add reconciliation tests before changing calculation behavior.
+3. **P1 UI visibility:** merge only after new Qt tests and Windows scaling screenshots PASS. This PR implements narrow UI fixes; actual Windows visual UAT is still pending.
+4. **P1 separate defect:** fix undefined `hide_settled_inactive` in `get_all_outstanding` with focused regression tests.
+
+
+## Founder decision — scope update (2026-11-03)
+
+The EXE-version / legacy-publisher fencing work is explicitly **DEFERRED** by the founder. No release-version authority, client-version gate or Git credential enforcement is implemented in this PR. Its prior architecture audit remains a reference only.
+
+### Course-based tuition implementation in this PR
+
+- Introduced explicit `OutstandingService.VIEW_COURSE_BALANCES`: returns balances for all Enrollment identities regardless of FinancePeriod, including paid/prepaid/unconfigured cases. It is **not** the existing `VIEW_OPEN_RECEIVABLES` (which deliberately shows only still-owed balances).
+- Student Financial page uses that view as the primary course-to-date summary, with an as-of cutoff. It does not depend on the existence of FinancePeriod configuration.
+- Student Financial tuition payment history is limited to active `Tuition` Income across all FinancePeriods through the same as-of date, not mixed Income types or only the current period.
+- The Finance Outstanding page's old 'Phát sinh trong kỳ' label was not semantically correct: the underlying rows are cumulative Enrollment balances for contracts overlapping the period. Rename to `Enrollment giao kỳ (số dư lũy kế)` and label totals as cumulative until proper opening/activity/closing movement projection is independently implemented.
+- Fix `get_all_outstanding` forwarding of undefined `hide_settled_inactive` variable, accepting it as an explicit optional argument and forwarding the selected view.
+- **No mutation of Income, Enrollment, TuitionAccrual, FinancePeriod, Wallet, Settlement or database schema.** Existing financial period settlement remains the accounting record.
+
+### Remaining design limitation
+
+The true period movement formula (opening balance + newly accrued sessions − newly received attributed Tuition payments ± adjustments = closing balance) is **not** yet implemented. The period-filtered view is accurately described as a cumulative balance, not mislabeled as a period movement. Historical refunds, re-enrollments, unconfigured contracts and actual database values still require financial UAT/reconciliation.
+
+### Added tests
+
+`test_qa_course_tuition_scope.py` asserts the all-Enrollment read view bypasses FinancePeriod resolution, keeps exact Enrollment identities, forwards the old list adapter without NameError and presents all-time active Tuition history with the selected as-of cutoff. `test_qa_ui_narrow_table_scroll.py` checks visible horizontal scrolling on narrow grids.
+
+Merge gate: Windows CI on exact PR head plus financial comparison against a cloned SQLCipher DB and 100/125/150% DPI visual checks. No live DB or Git MAIN changes.
+
+
+### Per-Enrollment credit isolation — additional finding and implementation
+
+A separate cross-course netting issue was confirmed: `StudentOutstandingSummary.total_outstanding = total_expected - total_paid` is a **signed reconciliation** and may offset debt from Enrollment A with prepaid credit from Enrollment B. Under the center's per-course credit policy this is not a valid collectible-debt number. The underlying `OutstandingDTO` already exposes per-Enrollment `debt_amount` and `prepaid_amount` and the Finance Outstanding stats already sum these **separately**.
+
+This PR changes `StudentOutstandingSummary.debt_amount` and `.prepaid_amount` to aggregate exact Enrollment details independently (only for configured tuition), and changes the Student Financial headline to show **receivable debt without credit offset**. The independent prepaid amount is shown as a separate status when nonzero. `total_outstanding` remains a signed historical/reconciliation amount for backwards compatibility; it must not be used as collectible debt. Existing ledgers/Income/Enrollment records are untouched. Added regression for Enrollment 42 debt 300k plus Enrollment 43 prepaid 150k: collectible debt must be 300k and credit 150k, not net 150k.
+
+This adjustment does **not** authorize cross-course transfers or credit reassignment. Such transfers would require an explicit audited business workflow outside this change.
+
+
+### Dashboard consistency follow-up
+
+`FinanceDashboardService` previously derived Outstanding Tuition from the selected FinancePeriod's overlapping Enrollment set and returned zero debt if no period was configured, even though the center could have collectible Enrollment receivables. This PR adds `OutstandingService.get_receivable_stats(on_date=...)` backed by `VIEW_OPEN_RECEIVABLES` and uses it for the dashboard's debt KPI. Missing FinancePeriod now leaves Income/Expense period KPIs unavailable/zero but retains **course receivables and debtor counts**. Existing synthetic dashboard stubs using only the legacy method remain supported. The selected-period Income/Expense and Settlement calculation paths are unchanged.
+
+Do not confuse the dashboard's live collectible debt with its cash-flow window. Regression tests prove the debt projection is not constrained by the month and is still available when no FinancePeriod exists.
+
+
+### Outstanding list default behavior
+
+The previous `VIEW_OPEN_RECEIVABLES` default omitted prepaid Enrollment rows entirely, despite a visible 'Trả trước / Dư' status filter. It could also hide paid records needed for wallet audit. The Outstanding list now starts in `VIEW_COURSE_BALANCES` so all configured, unconfigured, paid, owed and prepaid enrollments (subject to the existing settled-inactive visibility default) can be filtered without a FinancePeriod. The other two selectors remain available: still-owed open receivables across all periods, and period-overlap cumulative balances. Class filter discovery now uses the same unbounded course view so historical classes are not silently absent. No Income or Enrollment record is migrated.
+
+
+## CI #975 failure audit and remediation (2026-11-03)
+
+Source run: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41581507712 at `4969ef4f`.
+
+- **Shard 0 (two failures)**: Qt narrow-table tests saw `QHeaderView.ResizeMode.Stretch` on first columns of Monthly Attendance and Outstanding, despite `setStretchLastSection(False)`. Fix: explicitly set `QHeaderView.ResizeMode.Interactive` before sizing columns, preserving horizontal overflow behavior.
+- **Shard 2 (three failures)**: (1) F29 source contract expected the label `Công nợ còn mở (tất cả kỳ)`; restored that secondary-mode label while keeping the new all-course default. (2) legacy dashboard stub permits no Outstanding query without FinancePeriod; production `get_receivable_stats()` remains available for true all-course debt, while old period-only stub is not queried when no period exists. (3) old branding source regression demanded stretched Student Finance columns; updated its assertion to require Interactive widths and explicit scrollbars instead.
+- **Shard 1 PASS.** These five failures do not demonstrate corrupted SQLCipher data or incorrect tuition accrual. Older intermediate CI runs contain overlapping failures.
+- Exact new-head Windows CI and SQLCipher-clone/Windows visual UAT remain mandatory before merge.
+
+No Git credentials, EXE/version authorization, database schema or historical ledger mutations were changed by these fixes.
+
+
+## FIN-MOV-01 — Real period movement (implemented, 2026-11-03)
+
+The previous period-overlap view remains labeled as cumulative. A **separate read-only report** is available from Finance > Outstanding > `Biến động công nợ kỳ` for the FinancePeriod start/end provided by the workspace:
+
+- Uses all historical non-reconciled Enrollment IDs from the canonical EnrollmentRepository, **not** the overlap filter. Each row is exactly one Enrollment (archive/withdrawal does not silently erase unpaid debt).
+- Opening date is calendar day **before** period_start; closing date is period_end, both inclusive. Accrual uses `OutstandingService._calculate_accrued` with the exact same TuitionAccrualService policy as the existing Outstanding read model.
+- Settlement uses `IncomeRepository.list_active_tuition_settlement_components(enrollment_id, as_of_date=period_end)`: cash Tuition Income and refunds (signed negative Income) are `Thu thuần`; TuitionAdjustment CREDIT and EnrollmentTransfer in/out are signed `Điều chỉnh`. This prevents double-counting the TuitionAdjustment linked to a refund.
+- Reconciliation for configured contracts: `closing = opening + accrued_in_period - received_signed_in_period - noncash_adjustment_signed_in_period`. A violated equation, unknown ledger source or missing canonical component reader fails closed rather than showing misleading totals.
+- Contract without price configuration has opening/accrued/closing **UNCONFIGURED**, but its recorded signed receipts and adjustments remain visible and are reported in separate unresolved totals, not added to known monetary debt.
+- Signed closing total may be offset by another Enrollment, but collectible debt and prepaid credit are explicitly reported as **separate** totals summed by individual Enrollment (no unauthorized auto-transfer).
+- UI has a readable horizontally/vertically scrollable eight-column table and a CSV export with exact Enrollment IDs, signed movements and totals; it does not mutate database or publish Git.
+- Tests cover period boundary transactions (October->November->December), billable accrual changes, refund as negative Income, noncash transfer, cross-course credit isolation, duplicate Enrollment entries, unconfigured price, invalid date range and unsupported ledger source.
+
+### Release limitations / UAT gates
+
+1. **Historical restatement policy:** The report is derived from current active/canonical ledger entries as of each effective date, not an immutable month-end close snapshot. Backdated edits, voids and retroactive session policy changes can legitimately restate past-period reports; reconcile against archived finance exports if immutable close evidence is required. This PR does not implement frozen month-end closes.
+2. **Source scope:** Official receipts and transfers require correct Enrollment attribution. Legacy Tuition Income without Enrollment linkage is not silently assigned; it remains outside Enrollment totals until explicitly reconciled through the existing audited workflow.
+3. **As-of selection:** The period's closing date may be future relative to the day the report is opened; planned future sessions are not automatically accrued unless the canonical billable-session policy permits them. For operational-to-date reports, select a completed period or explicitly explain the cutoff.
+4. **Scaling:** A full tuition report currently reads all enrolled contracts and two accrual snapshots per contract in one read-only session. Test performance against a cloned SQLCipher runtime before accepting large historical datasets.
+5. **Reconciliation:** Verify a class spanning multiple FinancePeriods, tuition upfront prepayments, refunds, transfer credits, archived classes, canceled/withdrawn Enrollment, and unknown tuition price with a disposable SQLCipher clone. Compare CSV per Enrollment and confirm `opening + accrued - receipts - adjustments == closing`. Do not merge without exact-head Windows CI and Windows visual DPI UAT.
+
+The old `VIEW_PERIOD_ACTIVITY` has not been relabeled as actual period movements. This is an independent report, invoked explicitly from the Outstanding workspace.
+
+
+## CI #988 — follow-up audit and fixes
+
+At commit `7a84f5ac`, GitHub Actions run https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41587829796 FAILED all three Windows shards with **five deterministic test failures**, none of which reached an actual cloned operational SQLCipher fixture.
+
+1. Architecture inventory tests (shards 1 and 2) require every service Python filename to be in `docs/architecture/EP-ARCH-03_SERVICE_INVENTORY.md`. Registered the new read-only repository-backed `tuition_period_movement_service.py` as `PASS`.
+2. Tuition/accounting boundary test (shard 1) forbids `FinancePeriod` references in newly added tuition service files. The service consumes a bounded pair of calendar dates supplied by the UI and never imports a FinancePeriod model; removed the conflicting terminology in its docstring/error message, preserving isolation of Enrollment tuition semantics.
+3. Dashboard test (shard 2) bypassed the constructor with `__new__` but did not set `_outstanding_service`; initialized the required dependency in the test fixture rather than suppressing production validation.
+4. Settlement guard test (shard 0) expected lower-case `canonical signed` while the intentionally fail-closed production exception started with upper-case `Canonical signed`; fixed the test assertion to match the exact message.
+
+No weakening of ledger settlement checks, per-Enrollment reconciliation, SQLCipher or WRITE protection. This new head needs exact-SHA Windows CI confirmation. No merge until that and real SQLCipher-clone reconciliation/UAT have passed.

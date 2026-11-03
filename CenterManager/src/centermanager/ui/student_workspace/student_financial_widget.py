@@ -10,7 +10,7 @@ import logging
 from datetime import date
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGridLayout, QHeaderView, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from centermanager.dto.outstanding_dto import StudentOutstandingSummary
@@ -94,10 +94,10 @@ class StudentFinancialWidget(QWidget):
 
         header = Card(
             "Finance summary",
-            "Read-only tuition and payment context for this student.",
+            "Read-only enrollment tuition and payment history through the selected date.",
             parent=self.content,
         )
-        self.period_label = QLabel("Finance period: —", header)
+        self.period_label = QLabel("Học phí toàn khóa: —", header)
         self.period_label.setWordWrap(True)
         self.period_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['body_small']}px;"
@@ -119,7 +119,7 @@ class StudentFinancialWidget(QWidget):
         summary_layout.setVerticalSpacing(SPACING["md"])
         self.total_expected_label = self._create_summary_card("Expected tuition", "0 VND")
         self.total_paid_label = self._create_summary_card("Paid", "0 VND")
-        self.outstanding_label = self._create_summary_card("Outstanding", "0 VND")
+        self.outstanding_label = self._create_summary_card("Receivable debt (no credit offset)", "0 VND")
         self.status_label = self._create_summary_card("Status", "No data")
         summary_cards = (
             self.total_expected_label,
@@ -152,14 +152,21 @@ class StudentFinancialWidget(QWidget):
             empty_message="Tuition details will appear when the student has a configured enrollment.",
             parent=class_card,
         )
-        self.detail_data_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.detail_data_table.table.horizontalHeader().setStretchLastSection(False)
+        # A five-column enrollment balance must remain legible in the narrow
+        # Student Detail tab: do not compress columns to fit the viewport.
+        detail_grid = self.detail_data_table.table
+        detail_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        detail_grid.horizontalHeader().setStretchLastSection(False)
+        detail_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        detail_grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for col, width in enumerate((200, 125, 125, 155, 125)):
+            detail_grid.setColumnWidth(col, width)
         class_card.add_widget(self.detail_data_table)
         layout.addWidget(class_card)
 
         history_card = Card(
             "Payment history",
-            "Payments recorded by Finance for the selected finance period.",
+            "All active tuition payments through the as-of date (not restricted to a Finance period).",
             parent=self.content,
         )
         self.payment_table = DataTable(
@@ -177,8 +184,13 @@ class StudentFinancialWidget(QWidget):
             empty_message="Payments for this finance period will appear here.",
             parent=history_card,
         )
-        self.payment_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.payment_table.table.horizontalHeader().setStretchLastSection(False)
+        history_grid = self.payment_table.table
+        history_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        history_grid.horizontalHeader().setStretchLastSection(False)
+        history_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        history_grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for col, width in enumerate((110, 190, 130, 140, 140, 160)):
+            history_grid.setColumnWidth(col, width)
         history_card.add_widget(self.payment_table)
         layout.addWidget(history_card, 1)
 
@@ -246,12 +258,17 @@ class StudentFinancialWidget(QWidget):
         self.payment_table.set_loading(True)
         self._income_load_failed = False
         self._summary_load_failed = False
-        target_date, period_start, period_end = self._resolve_finance_period_context()
-        self._resolved_period_start = period_start
-        self._resolved_period_end = period_end
+        # Course tuition must remain available even when the accounting
+        # FinancePeriod has not been configured. The selected date is only
+        # an as-of cutoff, never a new billing bucket.
+        target_date = self._requested_on_date or self._requested_period_start or date.today()
+        self._resolved_period_start = None
+        self._resolved_period_end = None
         self._update_period_label()
-        self._load_outstanding_summary(period_start, target_date)
-        self._load_incomes(period_start, period_end)
+        self._load_outstanding_summary(None, target_date)
+        # Student tuition is an Enrollment lifetime balance, not an
+        # accounting-period movement. Keep all payment history through cutoff.
+        self._load_incomes(None, target_date)
         self._update_ui()
 
     def _can_view_finance(self) -> bool:
@@ -294,23 +311,20 @@ class StudentFinancialWidget(QWidget):
             return target_date, self._requested_period_start, None
 
     def _update_period_label(self) -> None:
-        if self._resolved_period_start is None:
-            self.period_label.setText("Finance period: Not configured")
-            return
-        if self._resolved_period_end is None:
-            self.period_label.setText(f"Finance period: from {self._resolved_period_start:%d/%m/%Y}")
-            return
+        cutoff = self._requested_on_date or self._requested_period_start or date.today()
         self.period_label.setText(
-            f"Finance period: {self._resolved_period_start:%d/%m/%Y} - {self._resolved_period_end:%d/%m/%Y}"
+            f"Học phí theo Enrollment đến {cutoff:%d/%m/%Y} — "
+            "không chia nhỏ theo kỳ Finance"
         )
 
     def _load_incomes(self, period_start: Optional[date], period_end: Optional[date]) -> None:
-        if self._student_id is None or not self._can_view_finance() or period_start is None:
+        if self._student_id is None or not self._can_view_finance():
             self._incomes = []
             return
         try:
             first_page, total = self._income_service.list_incomes(
                 student_id=self._student_id,
+                income_type="Tuition",
                 page=1,
                 per_page=1,
                 finance_period_start=period_start,
@@ -325,6 +339,7 @@ class StudentFinancialWidget(QWidget):
                 return
             items, _ = self._income_service.list_incomes(
                 student_id=self._student_id,
+                income_type="Tuition",
                 page=1,
                 per_page=total,
                 finance_period_start=period_start,
@@ -354,6 +369,7 @@ class StudentFinancialWidget(QWidget):
                 self._student_id,
                 period_start=period_start,
                 on_date=target_date,
+                view=OutstandingService.VIEW_COURSE_BALANCES,
             )
         except Exception as exc:
             logger.exception("Failed to load outstanding summary")
@@ -403,16 +419,21 @@ class StudentFinancialWidget(QWidget):
             return
 
         self.total_expected_label._value_widget.setText(f"{self._summary.total_expected:,.0f} VND")
-        outstanding = self._summary.total_outstanding
-        self.outstanding_label._value_widget.setText(f"{outstanding:,.0f} VND")
+        # Never net prepaid credit from one Enrollment against another
+        # Enrollment's receivable: separate course wallets are independent.
+        debt = self._summary.debt_amount
+        prepaid = self._summary.prepaid_amount
+        self.outstanding_label._value_widget.setText(f"{debt:,.0f} VND")
         if has_unconfigured:
             status_text = "Partially configured"
-        elif outstanding > 0:
+        elif debt > 0 and prepaid > 0:
+            status_text = f"Debt + separate prepaid {prepaid:,.0f} VND"
+        elif debt > 0:
             status_text = "Outstanding"
-        elif outstanding == 0:
-            status_text = "Paid"
+        elif prepaid > 0:
+            status_text = f"Prepaid {prepaid:,.0f} VND"
         else:
-            status_text = "Overpaid"
+            status_text = "Paid"
         self.status_label._value_widget.setText(status_text)
 
     def _update_detail_table(self) -> None:

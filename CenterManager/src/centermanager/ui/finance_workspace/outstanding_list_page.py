@@ -5,11 +5,12 @@ from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -32,6 +33,7 @@ from centermanager.services.tuition_detail_service import TuitionDetailService
 from centermanager.ui.design_system import SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.finance_workspace.tuition_detail_dialog import TuitionDetailDialog
+from centermanager.ui.finance_workspace.tuition_period_movement_dialog import TuitionPeriodMovementDialog
 from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ class OutstandingListPage(QWidget):
         self._items: List[OutstandingDTO] = []
         self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
+        self._period_end: Optional[date] = None
         self._period_configured = None
         self._current_page = 1
         self._page_size = 20
@@ -96,14 +99,20 @@ class OutstandingListPage(QWidget):
         self.export_btn.setFixedHeight(34)
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
+
+        self.movement_btn = SecondaryButton("Biến động công nợ kỳ")
+        self.movement_btn.setFixedHeight(34)
+        self.movement_btn.clicked.connect(self._open_movement_report)
+        top_row.addWidget(self.movement_btn)
         top_row.addStretch()
         toolbar_layout.addLayout(top_row)
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(SPACING["sm"])
         self.view_combo = QComboBox()
+        self.view_combo.addItem("Tất cả khóa (số dư lũy kế)", OutstandingService.VIEW_COURSE_BALANCES)
         self.view_combo.addItem("Công nợ còn mở (tất cả kỳ)", OutstandingService.VIEW_OPEN_RECEIVABLES)
-        self.view_combo.addItem("Phát sinh trong kỳ", OutstandingService.VIEW_PERIOD_ACTIVITY)
+        self.view_combo.addItem("Enrollment giao kỳ (số dư lũy kế)", OutstandingService.VIEW_PERIOD_ACTIVITY)
         self.view_combo.currentIndexChanged.connect(self._view_changed)
         filter_row.addWidget(QLabel("Chế độ:"))
         filter_row.addWidget(self.view_combo)
@@ -136,8 +145,8 @@ class OutstandingListPage(QWidget):
             SPACING["md"], SPACING["sm"], SPACING["md"], SPACING["sm"]
         )
         kpi_row.setSpacing(SPACING["lg"])
-        self.expected_kpi = QLabel("Đã phát sinh: 0 VND")
-        self.paid_kpi = QLabel("Đã thu: 0 VND")
+        self.expected_kpi = QLabel("Đã phát sinh lũy kế: 0 VND")
+        self.paid_kpi = QLabel("Đã thu lũy kế: 0 VND")
         self.outstanding_kpi = QLabel("Còn nợ: 0 VND")
         self.prepaid_kpi = QLabel("Trả trước: 0 VND")
         self.debt_students_kpi = QLabel("HS còn nợ: 0")
@@ -164,6 +173,15 @@ class OutstandingListPage(QWidget):
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
         self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
+        # Preserve readable amounts and class names, scroll horizontally on
+        # smaller windows instead of shrinking seven finance columns.
+        grid = self.data_table.table
+        grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        grid.horizontalHeader().setStretchLastSection(False)
+        grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for index, width in enumerate((110, 175, 195, 150, 135, 165, 145)):
+            grid.setColumnWidth(index, width)
         self.data_table.setToolTip("Nhấp đúp một dòng để xem chi tiết học phí Enrollment.")
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
@@ -198,8 +216,11 @@ class OutstandingListPage(QWidget):
         period_configured=None,
         **_kwargs,
     ) -> None:
-        del period_end
         previous_period = self._period_start
+        if period_end is not None:
+            self._period_end = period_end
+        elif period_configured is False:
+            self._period_end = None
         if target_date is not None:
             self._target_date = target_date
         if period_configured is not None:
@@ -341,8 +362,8 @@ class OutstandingListPage(QWidget):
         total_prepaid = int(stats.get("total_prepaid", 0))
         total_debt_students = int(stats.get("total_students_with_debt", 0))
         total_unconfigured = int(stats.get("total_unconfigured_tuition", 0))
-        self.expected_kpi.setText(f"Đã phát sinh: {total_expected:,.0f} VND")
-        self.paid_kpi.setText(f"Đã thu: {total_paid:,.0f} VND")
+        self.expected_kpi.setText(f"Đã phát sinh lũy kế: {total_expected:,.0f} VND")
+        self.paid_kpi.setText(f"Đã thu lũy kế: {total_paid:,.0f} VND")
         self.outstanding_kpi.setText(f"Còn nợ: {total_outstanding:,.0f} VND")
         self.prepaid_kpi.setText(f"Trả trước: {total_prepaid:,.0f} VND")
         self.debt_students_kpi.setText(f"HS còn nợ: {total_debt_students}")
@@ -401,6 +422,27 @@ class OutstandingListPage(QWidget):
         self.class_combo.blockSignals(class_blocked)
         self._current_page = 1
         self._load_page()
+
+    def _open_movement_report(self) -> None:
+        """Explicit ledger movement window, separate from cumulative balances."""
+        if (self._period_configured is False or self._period_start is None
+                or self._period_end is None):
+            QMessageBox.information(
+                self, "Chưa có kỳ tài chính",
+                "Cần chọn kỳ tài chính có ngày bắt đầu và kết thúc để xem biến động."
+            )
+            return
+        try:
+            TuitionPeriodMovementDialog(
+                self._service,
+                self._period_start,
+                self._period_end,
+                class_id=self.class_combo.currentData(),
+                parent=self,
+            ).exec()
+        except Exception as exc:
+            logger.exception("Tuition period movement report failed")
+            QMessageBox.critical(self, "Lỗi báo cáo biến động", str(exc))
 
     def _export_csv(self) -> None:
         if self._period_configured is False and self._view() == OutstandingService.VIEW_PERIOD_ACTIVITY:

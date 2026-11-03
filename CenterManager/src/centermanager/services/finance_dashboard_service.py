@@ -95,6 +95,12 @@ class FinanceDashboardService:
     ) -> Dict[str, int]:
         if self._outstanding_service is None:
             return {}
+        # Tuition receivables are cumulative by Enrollment, never a new debt
+        # generated per accounting period. Preserve legacy injected stubs that
+        # implement only get_outstanding_stats().
+        receivables = getattr(self._outstanding_service, "get_receivable_stats", None)
+        if callable(receivables):
+            return receivables(on_date=target_date)
         # Older/lightweight dashboard callers have no FinancePeriodService and
         # historically expose a no-argument Outstanding API. Preserve that path.
         if period_start is None or (
@@ -253,6 +259,18 @@ class FinanceDashboardService:
 
         if period is None:
             empty_methods = self._empty_payment_methods()
+            # Missing accounting-period configuration must not erase
+            # Enrollment receivables: they are independent business facts.
+            # Historical/lightweight adapters with only the period-scoped
+            # get_outstanding_stats API cannot provide course debt without a
+            # FinancePeriod. Do not invoke that period API with no period.
+            receivables = getattr(
+                self._outstanding_service, "get_receivable_stats", None
+            ) if self._outstanding_service is not None else None
+            debt_stats = (
+                self._get_outstanding_stats(target_date=target)
+                if callable(receivables) else {}
+            )
             return {
                 "period_configured": False,
                 "period_start": None,
@@ -273,9 +291,9 @@ class FinanceDashboardService:
                 "revenue_by_method_month": dict(empty_methods),
                 "expense_by_method_month": dict(empty_methods),
                 "cash_vs_bank": self._build_cash_vs_bank(empty_methods, empty_methods),
-                "total_outstanding": 0,
-                "students_with_debt": 0,
-                "unconfigured_tuition_count": 0,
+                "total_outstanding": debt_stats.get("total_outstanding", 0),
+                "students_with_debt": debt_stats.get("total_students_with_debt", 0),
+                "unconfigured_tuition_count": debt_stats.get("total_unconfigured_tuition", 0),
             }
 
         resolved_period_start, resolved_period_end, query_end = period

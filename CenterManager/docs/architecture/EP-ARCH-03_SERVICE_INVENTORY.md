@@ -71,6 +71,7 @@ This inventory is the committed architecture classification for application serv
 | `tuition_accrual_service.py` | PASS | repository-owned | — |
 | `tuition_adjustment_service.py` | PASS | repository-owned adjustment/Income orchestration | — |
 | `tuition_detail_service.py` | PASS | repository-owned read model | — |
+| `tuition_period_movement_service.py` | PASS | read-only Enrollment/Income repository-backed projection via OutstandingService composition | — |
 | `wallet_service.py` | PASS | repository-owned aggregation through `RepositoryProvider.incomes/expenses` | — |
 
 ## PR J Legacy Enrollment Reconciliation

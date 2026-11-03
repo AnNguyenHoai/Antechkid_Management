@@ -56,7 +56,11 @@ def test_student_enrollment_uses_grid_layout_for_summary_and_actions():
 def test_student_finance_uses_grid_summary_and_even_table_columns():
     source = _source("ui/student_workspace/student_financial_widget.py")
     assert "summary_layout = QGridLayout" in source
-    assert source.count("QHeaderView.ResizeMode.Stretch") >= 2
+    # Finance tabs have long amounts and class names. Explicit Interactive
+    # widths plus overflow are required instead of stretching into cramped cells.
+    assert source.count("QHeaderView.ResizeMode.Interactive") >= 2
+    assert source.count("Qt.ScrollBarPolicy.ScrollBarAsNeeded") >= 4
+    assert "QHeaderView.ResizeMode.Stretch" not in source
 
 
 def test_application_shell_applies_new_title_and_avatar():
