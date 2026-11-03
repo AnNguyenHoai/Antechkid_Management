@@ -60,3 +60,13 @@ After the founder confirmed WAITING position 1 persisted beyond two minutes, a *
 - This corrects a **proven stale-UI reconciliation race**; it does **not** conclusively identify the *original* reason an enqueue/lock acquisition failed on the Windows EXE. A separate Git remote, release build mismatch, missing PAT permission on `lock-main`, or blocked MAIN handoff can still cause WRITE to fail.
 - Never force-release Git lock, shorten grace, convert WAITING to WRITE without exact remote lock ownership, or bypass the E1B unpublished-local-change journal.
 - Confirm exact-head Windows CI and repeat on a disposable EXE/runtime clone; record Git provider lock failure codes and timestamps, verify the repository URL/branch in EXE configuration (without exposing credentials). Do not merge until these gates are met.
+
+
+## Windows CI #1020 failure audit and correction (2026-11-03)
+
+Workflow: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41620450722 at `7bec981c`:
+- **Shard 0:** `test_unchanged_empty_git_snapshot_still_reaches_waiting_reconciler` FAIL at first `len(observed) == 1`, but the Python lambda attached to `snapshot_changed` is not guaranteed to execute synchronously for a QThread-affine poller in Qt. The test previously counted lambda invocations instead of observed signal emissions. Use Qt `QSignalSpy` for deterministic signal counts and read `get_last_snapshot()` for the exact payload; no production poller decision was weakened.
+- **Shard 1:** PASS.
+- **Shard 2:** `test_editing_transition_feedback_pr_e::test_animation_is_presentation_only_and_preserves_write_signals` enforces absence of substring `git ` in the *entire* presentation-only Application Shell source. The new wait guidance introduced this word in user-facing copy/comment, violating the UI boundary source-level test. Reworded as 'remote lock verification and handoff', with no Git operations imported or performed by Application Shell.
+- The regression tests for real bare-Git acquisition failure/retry, GRACE and reconciliation are retained. No change to lease grace, queue CAS, write grant or MAIN acceptance criteria.
+- Re-run exact-head Windows CI before merge. Old EXE may still WAIT until it is rebuilt from validated code; a clear grant requires authoritative Git lock and MAIN verification.
