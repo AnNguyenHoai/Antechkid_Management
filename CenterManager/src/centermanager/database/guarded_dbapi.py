@@ -97,6 +97,14 @@ class GuardedConnection:
                     self._require('checkpoint')
                 elif name == 'foreign_keys' and str(arg2).upper() in {'ON', '1'}:
                     pass  # Per-connection safety, never persistent business data.
+                elif name == 'query_only' and str(arg2).upper() in {'ON', 'OFF', '1', '0'}:
+                    # Connection-local SELECT-only enforcement used by Finance
+                    # Diagnostics. This never authorizes database mutations:
+                    # all DML/DDL, transaction commits and other PRAGMAs still
+                    # pass through the independent WRITE/maintenance gate.
+                    # Both ON and OFF must be possible so pooled connections
+                    # are restored even if a diagnostic SELECT fails.
+                    pass
                 elif arg2 is not None and name not in _READ_PRAGMAS_WITH_ARGUMENT:
                     self._require('pragma')
                 elif name in {'optimize', 'incremental_vacuum', 'writable_schema', 'key', 'rekey'}:
