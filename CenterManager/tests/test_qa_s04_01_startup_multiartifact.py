@@ -158,3 +158,43 @@ def test_failed_session_refresh_rolls_back_all_artifacts(snapshot):
     assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
     assert '"runtime_version": 1' in (root / "manifest.json").read_text()
     assert '"platform_version": 1' in (root / "metadata" / "version.json").read_text()
+
+
+def test_process_kill_marker_blocks_second_start_before_network_or_git(snapshot):
+    """A killed process leaves its durable marker; restart must fail closed."""
+    sync, root = snapshot
+    sync._begin_startup_install()
+    marker = sync._startup_install_marker_path()
+    assert marker.is_file()
+    import json
+    assert json.loads(marker.read_text(encoding="utf-8"))["state"] == "INSTALL_PENDING"
+
+    # New object simulates a new EXE process without in-memory rollback state.
+    restarted = StartupSynchronization.__new__(StartupSynchronization)
+    restarted._runtime_db_path = sync._runtime_db_path
+    restarted._repo_path = sync._repo_path
+    restarted._provider = SimpleNamespace(
+        connect=lambda: (_ for _ in ()).throw(AssertionError("Git must not run"))
+    )
+    assert restarted.run() is False
+    assert "Interrupted startup installation" in restarted.recovery_error
+    assert marker.exists()
+
+
+def test_successful_install_commit_clears_interruption_marker(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    marker = sync._startup_install_marker_path()
+    assert marker.exists()
+    sync._complete_startup_install()
+    assert not marker.exists()
+    assert sync._check_interrupted_startup_install()
+
+
+def test_truncated_interruption_marker_still_blocks_startup(snapshot):
+    sync, root = snapshot
+    marker = sync._startup_install_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('{"format":', encoding="utf-8")
+    assert not sync._check_interrupted_startup_install()
+    assert marker.read_text(encoding="utf-8") == '{"format":'
