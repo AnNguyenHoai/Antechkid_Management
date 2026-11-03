@@ -95,6 +95,12 @@ class FinanceDashboardService:
     ) -> Dict[str, int]:
         if self._outstanding_service is None:
             return {}
+        # Tuition receivables are cumulative by Enrollment, never a new debt
+        # generated per accounting period. Preserve legacy injected stubs that
+        # implement only get_outstanding_stats().
+        receivables = getattr(self._outstanding_service, "get_receivable_stats", None)
+        if callable(receivables):
+            return receivables(on_date=target_date)
         # Older/lightweight dashboard callers have no FinancePeriodService and
         # historically expose a no-argument Outstanding API. Preserve that path.
         if period_start is None or (
