@@ -258,11 +258,14 @@ class StudentFinancialWidget(QWidget):
         self.payment_table.set_loading(True)
         self._income_load_failed = False
         self._summary_load_failed = False
-        target_date, period_start, period_end = self._resolve_finance_period_context()
-        self._resolved_period_start = period_start
-        self._resolved_period_end = period_end
+        # Course tuition must remain available even when the accounting
+        # FinancePeriod has not been configured. The selected date is only
+        # an as-of cutoff, never a new billing bucket.
+        target_date = self._requested_on_date or self._requested_period_start or date.today()
+        self._resolved_period_start = None
+        self._resolved_period_end = None
         self._update_period_label()
-        self._load_outstanding_summary(period_start, target_date)
+        self._load_outstanding_summary(None, target_date)
         # Student tuition is an Enrollment lifetime balance, not an
         # accounting-period movement. Keep all payment history through cutoff.
         self._load_incomes(None, target_date)
