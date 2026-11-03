@@ -38,6 +38,9 @@ class _FetchAssertingProvider:
         assert not self.contaminant.exists()
         return True
 
+    def get_local_main_commit(self):
+        return "a" * 40
+
     def reset_to_remote(self):
         self.calls.append("reset")
         return True
