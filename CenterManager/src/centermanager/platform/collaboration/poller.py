@@ -364,9 +364,14 @@ class CollaborationPoller(QObject):
 
             # Auto-handoff must happen from the authoritative, freshly observed
             # state. The manager performs the final queue-head and CAS lock checks.
+            diagnostic_getter = getattr(self._cm, "get_waiting_handoff_code", None)
+            before_handoff = diagnostic_getter() if callable(diagnostic_getter) else ""
             self._try_handoff_waiting_request(remote_lock, queue)
+            after_handoff = diagnostic_getter() if callable(diagnostic_getter) else ""
 
-            if self._last_snapshot is None or snapshot.is_changed_from(self._last_snapshot):
+            if (self._last_snapshot is None
+                    or snapshot.is_changed_from(self._last_snapshot)
+                    or before_handoff != after_handoff):
                 self._last_snapshot = snapshot
                 self.snapshot_changed.emit(snapshot)
                 if self._event_bus:
