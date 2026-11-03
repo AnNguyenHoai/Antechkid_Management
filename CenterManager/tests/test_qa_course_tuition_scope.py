@@ -121,3 +121,23 @@ def test_finance_dashboard_uses_receivables_not_selected_month_for_debt():
     assert dashboard._get_outstanding_stats(
         date(2026, 11, 1), date(2026, 11, 3)
     )["total_outstanding"] == Decimal("300000")
+
+
+def test_finance_dashboard_reports_course_debt_without_accounting_period():
+    from centermanager.services.finance_dashboard_service import FinanceDashboardService
+    dashboard = FinanceDashboardService.__new__(FinanceDashboardService)
+    day = date(2026, 11, 3)
+    dashboard._get_today_date = lambda: day
+    dashboard._resolve_dashboard_period = lambda *args, **kwargs: None
+    dashboard.get_revenue_today = lambda: 0
+    dashboard.get_expense_today = lambda: 0
+    dashboard._get_outstanding_stats = lambda **kwargs: {
+        "total_outstanding": Decimal("300000"),
+        "total_students_with_debt": 1,
+        "total_unconfigured_tuition": 0,
+    }
+    data = dashboard.get_dashboard_data(target_date=day, period_configured=False)
+    assert data["period_configured"] is False
+    assert data["total_outstanding"] == Decimal("300000")
+    assert data["students_with_debt"] == 1
+    assert data["revenue_period"] == 0
