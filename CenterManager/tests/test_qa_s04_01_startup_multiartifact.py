@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from centermanager.platform.sync.startup_sync import StartupSynchronization
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401 - pytest fixture
 
 
 @pytest.fixture
