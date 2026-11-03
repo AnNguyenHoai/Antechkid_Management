@@ -1,6 +1,6 @@
 """Read-only, exact-Enrollment tuition receivables movement by accounting period.
 
-A FinancePeriod is a date window only.  Outstanding remains a cumulative
+A accounting period is a date window only.  Outstanding remains a cumulative
 Enrollment balance; movements are calculated as the difference of its two
 canonical as-of snapshots plus the signed settlement event ledger.
 
@@ -82,7 +82,7 @@ class TuitionPeriodMovementService:
                 or isinstance(period_start, datetime)
                 or isinstance(period_end, datetime)
                 or period_start > period_end or period_start <= date.min):
-            raise ValueError("A valid closed FinancePeriod with a preceding day is required")
+            raise ValueError("A valid closed accounting period with a preceding day is required")
         opening_date = period_start - timedelta(days=1)
         outstanding = self._outstanding
         provider = outstanding._repository_provider
