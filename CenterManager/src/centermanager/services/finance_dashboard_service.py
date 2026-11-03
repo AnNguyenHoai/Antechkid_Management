@@ -259,6 +259,9 @@ class FinanceDashboardService:
 
         if period is None:
             empty_methods = self._empty_payment_methods()
+            # Missing accounting-period configuration must not erase
+            # Enrollment receivables: they are independent business facts.
+            debt_stats = self._get_outstanding_stats(target_date=target)
             return {
                 "period_configured": False,
                 "period_start": None,
@@ -279,9 +282,9 @@ class FinanceDashboardService:
                 "revenue_by_method_month": dict(empty_methods),
                 "expense_by_method_month": dict(empty_methods),
                 "cash_vs_bank": self._build_cash_vs_bank(empty_methods, empty_methods),
-                "total_outstanding": 0,
-                "students_with_debt": 0,
-                "unconfigured_tuition_count": 0,
+                "total_outstanding": debt_stats.get("total_outstanding", 0),
+                "students_with_debt": debt_stats.get("total_students_with_debt", 0),
+                "unconfigured_tuition_count": debt_stats.get("total_unconfigured_tuition", 0),
             }
 
         resolved_period_start, resolved_period_end, query_end = period
