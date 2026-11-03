@@ -35,3 +35,20 @@ PR remains QA-only and draft; do not merge into production until fix PR removes 
 - Regression tests simulate a new EXE process with no in-memory transaction state, malformed marker and normal/incomplete rollback cleanup decisions.
 - **Important limitation:** This is a durable *detection + fail-closed* gate, not autonomous restoration after a hard process kill. A persisted rollback inventory and Windows process-kill/restart UAT are still required to safely recover unattended. Do not delete the pending marker to bypass the gate; first preserve the entire runtime and sibling recovery folder and reconcile its generations.
 - A successful Windows CI does not prove real process kill behavior, power-loss fsync durability or SQLCipher/WAL recovery.
+
+
+## S04-01B continuation — verified local replay, then mandatory Git MAIN
+The first pending-marker gate was deliberately fail-closed, but could leave an EXE unusable indefinitely after a power loss. The follow-on implementation uses `startup_install_replay.py`:
+1. Before mutation, quiesce DB handles and save independently checksum-verified originals of SQLCipher DB plus WAL/SHM/journal, Employee attachments, manifest and version metadata in a sibling `startup-replay/<transaction-id>` folder. Write marker only after copies verify.
+2. Next process checks the marker before any Git clone/fetch or runtime DB use. Reject old/malformed inventory or changed target paths. Verify **all** snapshots before touching any live file; replay idempotently if a previous replay itself was killed.
+3. Remove the marker only when local technical restoration succeeds. Then continue the **ordinary** startup path: connect/fetch remote, verify accepted MAIN, replace runtime with MAIN, refresh sessions and record receipt. Replayed local bytes are never published and never authorize login offline.
+4. Corruption, missing backups, untrusted paths or failed replay keep the marker and fail closed.
+
+Tests cover process-restart replay, corruption refusal, runtime mismatch refusal, stale WAL removal, and unavailable Git after replay.
+
+### Remaining release gates
+- CI at the precise new head is NOT yet verified.
+- The synthetic replay tests do not simulate a hard-killed Windows EXE during os.replace, or actual SQLCipher/WAL mutations. Perform process-kill UAT in a disposable runtime.
+- A bare filesystem copy may capture an inconsistent database if another writer exists despite quiescing the local process; verify the WRITE authority guard and snapshot consistency on real SQLCipher fixtures.
+- The preserved backup folder may grow; define retention/cleanup only after safe independent snapshot acceptance, never delete a pending recovery copy.
+- The initial marker format 1 is intentionally not auto-replayed (no verified rollback inventory) and remains manual fail-closed.
