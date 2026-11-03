@@ -58,7 +58,14 @@ def test_ep_prototype_08_finance_access_is_permission_gated():
     access_source = ast.unparse(access)
     navigate_source = ast.unparse(navigate)
 
-    assert "finance.view" in access_source
+    # Capability.FINANCE_VIEW is the canonical, typed equivalent of the
+    # legacy "finance.view" string. Enforce a real access check rather than
+    # coupling this architecture test to one spelling of the permission.
+    assert (
+        'finance.view' in access_source
+        or 'has_capability(Capability.FINANCE_VIEW)' in access_source
+    )
+    assert "or user.is_admin" not in access_source
     assert "_has_finance_access" in navigate_source
     assert "if not self._authorized" in navigate_source
 
