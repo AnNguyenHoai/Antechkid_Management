@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -164,6 +164,14 @@ class OutstandingListPage(QWidget):
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
         self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
+        # Preserve readable amounts and class names, scroll horizontally on
+        # smaller windows instead of shrinking seven finance columns.
+        grid = self.data_table.table
+        grid.horizontalHeader().setStretchLastSection(False)
+        grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for index, width in enumerate((110, 175, 195, 150, 135, 165, 145)):
+            grid.setColumnWidth(index, width)
         self.data_table.setToolTip("Nhấp đúp một dòng để xem chi tiết học phí Enrollment.")
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
