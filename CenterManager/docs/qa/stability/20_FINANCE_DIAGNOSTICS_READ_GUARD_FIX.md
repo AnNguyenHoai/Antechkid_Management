@@ -25,3 +25,12 @@ Allow exactly `query_only` with ON/OFF/1/0 at the **connection-local PRAGMA** gu
 - Error inside query_only context restores OFF before cleanup.
 - **Pending:** exact-head Windows CI and disposable cloned Windows EXE runtime UAT. Do not claim the user screenshot has been resolved before testing that build.
 - If ERROR persists after tested build, fetch sanitized `Finance diagnostics failed: <exception class>` log from client; audit schema/SQLCipher lifecycle separately. Do not clear DB or alter MAIN/WRITE lease.
+
+
+## CI #1030 audit — pytest fixture wiring failure
+
+GitHub Actions https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41655916661 at `58c2fe12` completed FAILED: Windows shard 0 PASS, shard 1 PASS, shard 2 **1219 passed, 2 skipped, 3 setup errors**. All three errors are in newly added `test_finance_diagnostics_guarded_sqlcipher.py`: the imported E1B-2A `reporting` fixture needs the E1B-1 `workspace` fixture, which was not imported into the new test module. Pytest reports `fixture 'workspace' not found` before opening a SQLCipher test runtime.
+
+Fixed by explicitly registering `workspace` from `tests.test_e1b1_durable_write_recovery` alongside `reporting` from `tests.test_e1b2a_post_publish_consistency`. Production `GuardedConnection` and its mutation rules are unchanged by this CI fix. The three real SQLCipher regression tests have **not** yet been proved passing; exact-head CI is required.
+
+No operational database or official Git MAIN was modified.
