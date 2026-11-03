@@ -88,3 +88,9 @@ Child subprocess import fix from prior commit is verified by shard 2 PASS. Valid
 
 ### Additional Windows UAT reminder
 The current production startup uses the underlying Git provider configuration; changing only the cloned local `repository/.git/config` may be insufficient if a configured repository URL overrides it. Audit application provider configuration and prohibit external network access for the UAT EXE before first launch.
+
+
+## CI #950 root cause and fix — 2026-11-03
+- Windows run #950 (`e5c6f059`): shard 0 PASS; shard 1 PASS; shard 2 1 ERROR at collection/setup of `test_real_sqlcipher_wal_snapshot_recovers_after_partial_file_swap` because pytest could not resolve fixture `workspace`. No SQLCipher/WAL operation was executed by that test.
+- The `workspace` fixture was defined in `tests/test_e1b1_durable_write_recovery.py` but was not imported into the S04 test module. Fixed by explicit fixture import in `tests/test_qa_s04_01_startup_multiartifact.py`, consistent with the existing E1B-2A tests.
+- This is a test wiring defect, not evidence of database corruption, invalid cipher key, or a production write-authority regression. Exact-head Windows CI must pass before claiming the WAL case was actually exercised.
