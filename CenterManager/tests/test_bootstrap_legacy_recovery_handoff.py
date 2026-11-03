@@ -48,7 +48,7 @@ def _bootstrap(monkeypatch, tmp_path, *, journal_error=None):
     )
     manager._lifecycle = SimpleNamespace(transition_to=lambda state: events.append("lifecycle"))
     manager._repo_manager = SimpleNamespace(
-        detect=lambda: bootstrap_manager.RepositoryState.VALID,
+        detect=lambda: bootstrap_manager.RepositoryState.READY,
         refresh=lambda: None,
         validate=lambda: True,
     )
