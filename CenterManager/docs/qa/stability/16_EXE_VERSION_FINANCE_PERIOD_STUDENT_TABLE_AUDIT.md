@@ -91,3 +91,27 @@ Test window widths 1920 / 1366 / 1024 / 800 / 640 logical pixels and Windows sca
 2. **P0 finance display truth:** separate Enrollment lifetime debt from period movements; add reconciliation tests before changing calculation behavior.
 3. **P1 UI visibility:** merge only after new Qt tests and Windows scaling screenshots PASS. This PR implements narrow UI fixes; actual Windows visual UAT is still pending.
 4. **P1 separate defect:** fix undefined `hide_settled_inactive` in `get_all_outstanding` with focused regression tests.
+
+
+## Founder decision — scope update (2026-11-03)
+
+The EXE-version / legacy-publisher fencing work is explicitly **DEFERRED** by the founder. No release-version authority, client-version gate or Git credential enforcement is implemented in this PR. Its prior architecture audit remains a reference only.
+
+### Course-based tuition implementation in this PR
+
+- Introduced explicit `OutstandingService.VIEW_COURSE_BALANCES`: returns balances for all Enrollment identities regardless of FinancePeriod, including paid/prepaid/unconfigured cases. It is **not** the existing `VIEW_OPEN_RECEIVABLES` (which deliberately shows only still-owed balances).
+- Student Financial page uses that view as the primary course-to-date summary, with an as-of cutoff. It does not depend on the existence of FinancePeriod configuration.
+- Student Financial tuition payment history is limited to active `Tuition` Income across all FinancePeriods through the same as-of date, not mixed Income types or only the current period.
+- The Finance Outstanding page's old 'Phát sinh trong kỳ' label was not semantically correct: the underlying rows are cumulative Enrollment balances for contracts overlapping the period. Rename to `Enrollment giao kỳ (số dư lũy kế)` and label totals as cumulative until proper opening/activity/closing movement projection is independently implemented.
+- Fix `get_all_outstanding` forwarding of undefined `hide_settled_inactive` variable, accepting it as an explicit optional argument and forwarding the selected view.
+- **No mutation of Income, Enrollment, TuitionAccrual, FinancePeriod, Wallet, Settlement or database schema.** Existing financial period settlement remains the accounting record.
+
+### Remaining design limitation
+
+The true period movement formula (opening balance + newly accrued sessions − newly received attributed Tuition payments ± adjustments = closing balance) is **not** yet implemented. The period-filtered view is accurately described as a cumulative balance, not mislabeled as a period movement. Historical refunds, re-enrollments, unconfigured contracts and actual database values still require financial UAT/reconciliation.
+
+### Added tests
+
+`test_qa_course_tuition_scope.py` asserts the all-Enrollment read view bypasses FinancePeriod resolution, keeps exact Enrollment identities, forwards the old list adapter without NameError and presents all-time active Tuition history with the selected as-of cutoff. `test_qa_ui_narrow_table_scroll.py` checks visible horizontal scrolling on narrow grids.
+
+Merge gate: Windows CI on exact PR head plus financial comparison against a cloned SQLCipher DB and 100/125/150% DPI visual checks. No live DB or Git MAIN changes.
