@@ -126,6 +126,13 @@ def test_finance_dashboard_uses_receivables_not_selected_month_for_debt():
 def test_finance_dashboard_reports_course_debt_without_accounting_period():
     from centermanager.services.finance_dashboard_service import FinanceDashboardService
     dashboard = FinanceDashboardService.__new__(FinanceDashboardService)
+    dashboard._outstanding_service = SimpleNamespace(
+        get_receivable_stats=lambda *, on_date=None: {
+            "total_outstanding": Decimal("300000"),
+            "total_students_with_debt": 1,
+            "total_unconfigured_tuition": 0,
+        }
+    )
     day = date(2026, 11, 3)
     dashboard._get_today_date = lambda: day
     dashboard._resolve_dashboard_period = lambda *args, **kwargs: None
