@@ -10,7 +10,7 @@ import logging
 from datetime import date
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGridLayout, QHeaderView, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from centermanager.dto.outstanding_dto import StudentOutstandingSummary
