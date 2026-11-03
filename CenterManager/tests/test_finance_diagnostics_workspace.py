@@ -1,5 +1,6 @@
 """Phase 1 UI and boundary tests against synthetic, never production, finance rows."""
 import csv
+import pytest
 import io
 from time import perf_counter
 from dataclasses import replace
@@ -209,3 +210,48 @@ def test_finance_navigation_gates_diagnostics_route(db, qtbot, monkeypatch):
         _wait(qtbot, shell.diagnostics_page)
     shell.navigate_to("income")  # Revoked session cannot leave through a finance route.
     assert shell.content_stack.currentWidget() is shell.diagnostics_page
+
+
+def test_finance_diagnostics_visibility_follows_finance_view_not_role(db):
+    """Any active account with finance.view may open Finance; no admin bypass."""
+    from centermanager.core.capabilities import Capability
+    from centermanager.services.authorization_service import AuthorizationService
+
+    factory, _ = db
+    service = FinanceDiagnosticsService(factory)
+    cases = (
+        ("admin", True, True),
+        ("finance", True, True),
+        ("teacher", True, True),
+        ("reception", True, True),
+        ("manager", True, True),
+        ("admin", False, False),
+        ("finance", False, False),
+        ("teacher", False, False),
+    )
+    for role, grant, expected in cases:
+        account = SimpleNamespace(
+            role=SimpleNamespace(name=role),
+            permissions=frozenset({"finance.view"} if grant else ()),
+            is_active=True,
+        )
+        with CurrentUserContext(account):
+            assert FinanceWorkspaceShell._has_finance_access(None) is expected
+            assert AuthorizationService.allows(account, Capability.FINANCE_VIEW) is expected
+            if expected:
+                result = service.get_findings(as_of_date=AS_OF)
+                assert result.state == "OK"
+            else:
+                from centermanager.services.permission_service import PermissionDeniedError
+                with pytest.raises(PermissionDeniedError):
+                    service.get_findings(as_of_date=AS_OF)
+
+
+def test_inactive_account_with_finance_view_cannot_see_diagnostics():
+    account = SimpleNamespace(
+        role=SimpleNamespace(name="finance"),
+        permissions=frozenset({"finance.view"}),
+        is_active=False,
+    )
+    with CurrentUserContext(account):
+        assert FinanceWorkspaceShell._has_finance_access(None) is False
