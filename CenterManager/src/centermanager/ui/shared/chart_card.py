@@ -58,6 +58,20 @@ class ChartCard(QFrame):
         self.chart_widget.update()
 
 
+def format_compact_amount(value: float) -> str:
+    """Short VND tick/label strings that fit narrow chart axes."""
+    amount = float(value)
+    sign = "-" if amount < 0 else ""
+    absolute = abs(amount)
+    if absolute >= 1_000_000_000:
+        return f"{sign}{absolute / 1_000_000_000:.1f}B"
+    if absolute >= 1_000_000:
+        return f"{sign}{absolute / 1_000_000:.1f}M"
+    if absolute >= 1_000:
+        return f"{sign}{absolute / 1_000:.1f}K"
+    return f"{amount:,.0f}"
+
+
 class ChartWidget(QWidget):
     def __init__(self, chart_type: str = "bar", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -70,14 +84,20 @@ class ChartWidget(QWidget):
     def setData(self, data: List[Tuple[str, float]], colors: List[str]) -> None:
         self._data = data
         self._colors = colors
+        self.setToolTip("\n".join(
+            f"{label}: {float(value):,.0f} VND" for label, value in data
+        ))
         self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-        margin = 30
-        chart_rect = rect.adjusted(margin, margin, -margin, -margin)
+        if self._chart_type == "bar":
+            # Reserve enough room for K/M/B ticks and x-axis category labels.
+            chart_rect = rect.adjusted(56, 25, -24, -35)
+        else:
+            chart_rect = rect.adjusted(30, 30, -30, -30)
 
         if not self._data:
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data")
@@ -124,7 +144,7 @@ class ChartWidget(QWidget):
             # Draw value on top of bar
             painter.setPen(QPen(QColor(COLORS['text_primary']), 1))
             painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-            value_text = f"{value:.1f}" if value % 1 != 0 else str(int(value))
+            value_text = format_compact_amount(value)
             fm = QFontMetrics(painter.font())
             text_width = fm.horizontalAdvance(value_text)
             painter.drawText(QRectF(x + (bar_width - text_width) / 2, y - 18, text_width, 16),
@@ -143,10 +163,14 @@ class ChartWidget(QWidget):
         # Draw y-axis labels
         painter.setPen(QPen(QColor(COLORS['text_muted']), 1))
         painter.setFont(QFont("Arial", 8))
-        for y_val in range(0, int(max_val) + 1, max(1, int(max_val // 4))):
+        for tick in range(5):
+            y_val = max_val * tick / 4
             y_pos = rect.y() + rect.height() - (y_val / max_val) * rect.height()
-            painter.drawText(QRectF(rect.x() - 30, y_pos - 8, 25, 16),
-                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(y_val))
+            painter.drawText(
+                QRectF(rect.x() - 53, y_pos - 8, 47, 16),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                format_compact_amount(y_val),
+            )
             painter.drawLine(rect.x() - 4, y_pos, rect.x(), y_pos)
 
     def _draw_pie_chart(self, painter: QPainter, rect: QRectF) -> None:
