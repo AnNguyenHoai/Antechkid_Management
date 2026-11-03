@@ -537,7 +537,7 @@ class ApplicationTopBar(QFrame):
             # Remote authority may be verifying lease/queue CAS or retrying handoff.
             if "no active editor" in self._editor_text.lower():
                 message = (
-                    "You are next in the WRITE queue. No active editor is visible; "
+                    "Your WRITE request is queued. No active editor is visible; "
                     "Remote lock verification and handoff are still pending."
                 )
             else:
