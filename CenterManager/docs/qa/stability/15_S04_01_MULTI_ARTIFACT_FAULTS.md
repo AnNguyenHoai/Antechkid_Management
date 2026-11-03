@@ -18,3 +18,11 @@ Stage Employee attachments, manifest and version JSON in temp siblings on their 
 
 ## Gate
 PR remains QA-only and draft; do not merge into production until fix PR removes strict XFAILs, exact-head CI passes and Windows packaged SQLCipher UAT validates all scenarios.
+
+
+## S04-01A implementation after CI #919
+- Added `_prepare_startup_assets()`: pre-stage Employee attachments and copy prior attachments/manifest/version files to sibling recovery storage before touching the runtime DB.
+- Added `_rollback_startup_assets()` and `_finalize_startup_assets()`; ordinary copy/JSON errors now reverse non-DB materialization alongside SQLCipher DB rollback. Refresh/receipt failures in `run()` also initiate both rollbacks.
+- Employee assets are copied completely into staging first, then moved into place using same-volume `os.replace` after the current mirror is removed. Backup remains available for exceptions.
+- Removed the two `xfail(strict=True)` markers: partial attachments and partially-written metadata now have normal PASS requirements. Added manifest failure, staging failure and rollback coordination assertions.
+- This implementation handles **caught exceptions**, not arbitrary process termination between renames. A persisted transaction marker and restart replay remains S04-01B, a release blocker. It must be tested with real Windows process kill and SQLCipher. Do not promote PR #547 to production on CI alone.
