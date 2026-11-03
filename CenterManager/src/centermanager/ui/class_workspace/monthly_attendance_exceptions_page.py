@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QSpinBox, QDoubleSpinBox, QFileDialog, QMessageBox,
+    QPushButton, QSpinBox, QDoubleSpinBox, QFileDialog, QMessageBox, QHeaderView,
 )
 from centermanager.core.clock import get_clock
 from centermanager.services.monthly_attendance_exception_service import MonthlyAttendanceExceptionService
@@ -66,6 +66,7 @@ class MonthlyAttendanceExceptionsPage(QWidget):
         self.table = DataTable(columns, page_size=100, density=TableDensity.COMPACT)
         # Nine attendance columns cannot safely fit into a narrow window.
         grid = self.table.table
+        grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         grid.horizontalHeader().setStretchLastSection(False)
         grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
