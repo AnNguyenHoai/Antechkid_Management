@@ -600,9 +600,14 @@ class StartupSynchronization:
         repo_root = self._repo_path / "Attachments" / "Employees"
         runtime_root = self._paths.attachment_dir / "Employees"
         try:
+            staged = getattr(self, "_startup_assets", None)
+            staged_source = staged[1] if staged is not None else None
             if runtime_root.exists():
                 shutil.rmtree(runtime_root)
-            if repo_root.exists():
+            if staged_source is not None:
+                runtime_root.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staged_source, runtime_root)
+            elif repo_root.exists():
                 runtime_root.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(repo_root, runtime_root)
                 logger.info(
