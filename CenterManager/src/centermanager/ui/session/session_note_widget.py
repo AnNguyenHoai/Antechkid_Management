@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 SessionNoteWidget - form for creating/editing a session note.
-Header with title and action buttons (Cancel, Save, Delete).
+The parent dialog saves dirty notes only when Save & Close is requested.
 """
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QPlainTextEdit, QPushButton, QLabel, QFrame, QMessageBox,
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 class SessionNoteWidget(QWidget):
     note_saved = Signal()
     note_deleted = Signal()
+    dirty_changed = Signal(bool)
 
     def __init__(
         self,
@@ -37,11 +38,6 @@ class SessionNoteWidget(QWidget):
         self._dirty = False
         self._populating = False
         self._save_in_progress = False
-        self._autosave_timer = QTimer(self)
-        self._autosave_timer.setSingleShot(True)
-        self._autosave_timer.setInterval(1200)
-        self._autosave_timer.timeout.connect(self._autosave)
-
         self._setup_ui()
         self._load_note()
 
@@ -66,11 +62,6 @@ class SessionNoteWidget(QWidget):
         self.cancel_btn.setVisible(False)
         self.cancel_btn.clicked.connect(self._cancel_edit)
 
-        self.save_btn = QPushButton("Save now")
-        self.save_btn.setFixedWidth(80)
-        self.save_btn.setVisible(False)
-        self.save_btn.clicked.connect(lambda _checked=False: self._save(interactive=True))
-
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setFixedWidth(80)
         self.delete_btn.setStyleSheet("color: #d32f2f;")
@@ -78,7 +69,6 @@ class SessionNoteWidget(QWidget):
         self.delete_btn.clicked.connect(self._delete)
 
         header.addWidget(self.cancel_btn)
-        header.addWidget(self.save_btn)
         header.addWidget(self.delete_btn)
 
         main_layout.addLayout(header)
@@ -161,7 +151,9 @@ class SessionNoteWidget(QWidget):
 
     def _load_note(self) -> None:
         """Load existing note if any, never overwriting an unsaved draft."""
-        self._autosave_timer.stop()
+        if self._dirty:
+            self._set_save_status("Unsaved changes — close to save or discard explicitly")
+            return
         self._populating = True
         try:
             self._note = self._service.get_note(self._session_id)
@@ -179,6 +171,7 @@ class SessionNoteWidget(QWidget):
         finally:
             self._populating = False
             self._dirty = False
+            self.dirty_changed.emit(False)
             self._set_save_status("Changes saved")
 
     def _populate_form(self, note: SessionNote) -> None:
@@ -200,7 +193,6 @@ class SessionNoteWidget(QWidget):
     def _show_empty(self) -> None:
         self.stacked.setCurrentIndex(0)
         self.cancel_btn.setVisible(False)
-        self.save_btn.setVisible(False)
         self.save_status.setVisible(False)
         self.delete_btn.setVisible(False)
         self.create_btn.setVisible(True)
@@ -208,7 +200,6 @@ class SessionNoteWidget(QWidget):
     def _show_form(self, edit_mode: bool = False) -> None:
         self.stacked.setCurrentIndex(1)
         self.cancel_btn.setVisible(True)
-        self.save_btn.setVisible(True)
         self.save_status.setVisible(True)
         self.delete_btn.setVisible(edit_mode and self._note is not None)
         self.create_btn.setVisible(False)
@@ -219,25 +210,24 @@ class SessionNoteWidget(QWidget):
     def _mark_dirty(self, *_args) -> None:
         if self._populating or self._save_in_progress or not self.isEnabled():
             return
-        self._dirty = True
-        self._set_save_status("Unsaved changes — saving automatically…")
-        self._autosave_timer.start()
+        if not self._dirty:
+            self._dirty = True
+            self.dirty_changed.emit(True)
+        self._set_save_status("Unsaved changes — Save & Close to keep edits")
 
-    def _autosave(self) -> None:
-        # Disabled historical note widgets, including a disabled parent dialog,
-        # must NEVER issue a database mutation.
-        if self._dirty and self.isEnabled():
-            self._save(interactive=False)
+    def has_pending_changes(self) -> bool:
+        return self._dirty
 
     def flush_pending(self) -> bool:
-        """Flush an editable draft before closing/switching sessions.
+        """Save only when parent explicitly requests Save & Close.
 
-        A failed write preserves the draft. The owner dialog must not close
-        silently in this case.
+        READ history is never writable. On failure, keep the draft and block
+        closing. Normal editing must not write after every keystroke.
         """
-        self._autosave_timer.stop()
-        if not self._dirty or not self.isEnabled():
+        if not self._dirty:
             return True
+        if not self.isEnabled():
+            return False
         return self._save(interactive=False)
 
     def _cancel_edit(self) -> None:
@@ -249,8 +239,8 @@ class SessionNoteWidget(QWidget):
             )
             if choice != QMessageBox.StandardButton.Yes:
                 return
-        self._autosave_timer.stop()
         self._dirty = False
+        self.dirty_changed.emit(False)
         self._load_note()
 
     def _save(self, *, interactive: bool = True) -> bool:
@@ -258,7 +248,6 @@ class SessionNoteWidget(QWidget):
             return False
         if self._save_in_progress:
             return False
-        self._autosave_timer.stop()
         # For updates send raw empty strings so optional fields can be cleared.
         lesson_content = self.lesson_content_edit.toPlainText().strip()
         homework = self.homework_edit.toPlainText().strip()
@@ -286,16 +275,17 @@ class SessionNoteWidget(QWidget):
             self._note = saved_note
             self._is_edit_mode = True
             self._dirty = False
+            self.dirty_changed.emit(False)
             self._set_save_status("Saved")
             self._show_form(edit_mode=True)
             self.note_saved.emit()
             return True
         except Exception:
             # No permission, lost WRITE authority, validation or SQL failure:
-            # do not discard pending edits or claim autosave succeeded.
+            # do not discard pending edits or claim save succeeded.
             logger.exception("Teaching Note could not be saved")
             self._dirty = True
-            self._set_save_status("Not saved — check WRITE access; retry Save now")
+            self._set_save_status("Not saved — check WRITE, then Save & Close again")
             if interactive:
                 QMessageBox.warning(
                     self, "Teaching Note not saved",
@@ -316,9 +306,10 @@ class SessionNoteWidget(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self._autosave_timer.stop()
                 self._service.delete_note(self._session_id)
                 self._note = None
+                self._dirty = False
+                self.dirty_changed.emit(False)
                 self._is_edit_mode = False
                 self._clear_form()
                 self._show_empty()
@@ -334,7 +325,8 @@ class SessionNoteWidget(QWidget):
             if not self._dirty:
                 self._load_note()
             return True
-        if not self.flush_pending():
+        if self._dirty:
+            self._set_save_status("Unsaved changes — Save & Close before switching sessions")
             return False
         self._session_id = session_id
         self._load_note()
