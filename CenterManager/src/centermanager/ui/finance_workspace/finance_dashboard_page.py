@@ -64,15 +64,10 @@ class FinanceDashboardPage(QWidget):
 
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
-        scope_help = QLabel(
-            "Income: active receipts; Expense: Paid/Completed only. "
-            "Net: received minus paid in the selected period. "
-            "Tuition debt: current open receivables across ALL Enrollments, "
-            "not just the selected month."
-        )
-        scope_help.setWordWrap(True)
-        scope_help.setStyleSheet("color: #536479; font-size: 12px;")
-        container_layout.addWidget(scope_help)
+        self.scope_help = QLabel(self._dashboard_scope_text({}))
+        self.scope_help.setWordWrap(True)
+        self.scope_help.setStyleSheet("color: #536479; font-size: 12px;")
+        container_layout.addWidget(self.scope_help)
 
         drilldown_row = QHBoxLayout()
         drilldown_row.setSpacing(SPACING['sm'])
@@ -178,6 +173,7 @@ class FinanceDashboardPage(QWidget):
                 period_configured=self._period_configured,
             )
             self._update_kpis(data)
+            self.scope_help.setText(self._dashboard_scope_text(data))
             self._update_income_table(data.get("recent_income", []))
             self._update_expense_table(data.get("recent_expense", []))
 
@@ -204,6 +200,23 @@ class FinanceDashboardPage(QWidget):
             self._show_error()
         finally:
             self.loading.setVisible(False)
+
+    @staticmethod
+    def _dashboard_scope_text(data: dict) -> str:
+        info = (
+            "Income: active receipts; Expense: Paid/Completed only. "
+            "Net: receipts minus paid expenses in the selected period. "
+            "Tuition debt: open balances across ALL Enrollment wallets."
+        )
+        if data.get("period_configured", True) and (
+            data.get("revenue_period", 0) > 0
+            and data.get("expense_period", 0) == 0
+        ):
+            info += (
+                " No Paid/Completed expense was counted for this period. "
+                "Check the Expense page for Pending entries or incorrect dates."
+            )
+        return info
 
     def _update_kpis(self, data: dict) -> None:
         def fmt_money(value):
