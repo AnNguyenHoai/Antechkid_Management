@@ -58,3 +58,11 @@ Tests cover process-restart replay, corruption refusal, runtime mismatch refusal
 - Added child-process `os._exit(71)` fixture to simulate actual loss of Python process state after writing a durable marker and partial live artifacts, then verify fresh parent replay.
 - Added a centralized `_rollback_failed_install_all` so DB, attachments/metadata and Git rollback are all attempted even if an earlier restoration throws. Partial failure retains the marker and blocks the next startup.
 - Exact-head CI validation remains required. This test does not claim Windows power-loss atomicity.
+
+
+## CI #940 audit, Nov 3 2026
+CI: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41565581938 at `2fbd2e73`.
+- Shard 2: `test_real_child_process_exit_preserves_replayable_snapshot` exited 1 instead of expected 71. The subprocess lacked pytest's source import path, causing `ModuleNotFoundError: No module named 'centermanager'` before any child capture or simulated crash. Corrected child bootstrap to place `Path.cwd()/src` on its import path (test-only).
+- Shard 0: one independent setup error in existing `test_authorized_write_student_service_and_permission_floor`. `materialize_runtime_database_to_repository` called validation while a process-wide maintenance fence was active, yielding `RuntimeDatabaseMaintenanceError: Runtime database is temporarily unavailable during backup restore`, wrapped as `DatabaseArtifactSecurityError`. This test fixture predates S04 and does not execute startup replay. CI #930 passed this suite, so a shared-state order/leak or sporadic test environment gate remains a hypothesis, not a proven production defect. Do not disable SQLCipher validation or alter WRITE gates to make it pass. Reproduce on repeat CI and isolate the owning fixture before any fix.
+- Shard 1: PASS.
+- New head requires exact-SHA CI. Keep PR draft pending confirmed full-suite pass and real Windows SQLCipher UAT.
