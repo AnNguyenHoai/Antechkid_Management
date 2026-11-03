@@ -254,3 +254,29 @@ def test_interrupted_replay_refuses_incompatible_runtime_target(snapshot):
     other._metadata_dir = sync._metadata_dir
     assert not other._check_interrupted_startup_install()
     assert sync._startup_install_marker_path().exists()
+
+
+def test_replay_is_not_authoritative_without_subsequent_git_fetch(snapshot):
+    """Restored LOCAL files cannot authorize login while Git MAIN is offline."""
+    sync, root = snapshot
+    sync._begin_startup_install()
+    marker = sync._startup_install_marker_path()
+    (root / "Database" / "center.db").write_bytes(b"HALF-DB")
+    (root / "repository" / ".git").mkdir()
+    sync._provider = SimpleNamespace(connect=lambda: True)
+    sync._fetch_remote = lambda: False
+    sync._prepare_authoritative_startup_replacement = lambda: (
+        _ for _ in ()
+    ).throw(AssertionError("Must not accept old local snapshot"))
+    assert sync.run() is False
+    assert not marker.exists()  # Replay completed, but startup still denied.
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
+
+
+def test_missing_old_wal_is_removed_on_interrupted_replay(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    wal = root / "Database" / "center.db-wal"
+    wal.write_bytes(b"UNACCEPTED-MAIN-WAL")
+    assert sync._check_interrupted_startup_install()
+    assert not wal.exists()
