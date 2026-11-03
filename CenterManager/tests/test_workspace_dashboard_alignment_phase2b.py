@@ -83,8 +83,8 @@ def test_finance_dashboard_uses_shared_controls_and_balanced_chart_row():
     assert "from centermanager.ui.shared import StatisticGrid, DataTable, LoadingWidget, ChartCard, SectionHeader" in source
     assert "ButtonVariant.GHOST" in source
     assert '{"icon": "income", "label": "Income Selected Period"' in source
-    assert '{"icon": "expense", "label": "Expense Selected Period"' in source
-    assert '{"icon": "warning", "label": "Outstanding Tuition"' in source
+    assert '{"icon": "expense", "label": "Paid Expense Selected Period"' in source
+    assert '{"icon": "warning", "label": "Outstanding Tuition (all courses)"' in source
     assert 'payment_method_row.addWidget(self.revenue_method_chart, 1)' in source
     assert 'payment_method_row.addWidget(self.expense_method_chart, 1)' in source
 
