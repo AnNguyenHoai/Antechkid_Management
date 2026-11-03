@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QScrollArea,
     QFrame,
+    QLabel,
 )
 
 from centermanager.core.clock import get_clock
