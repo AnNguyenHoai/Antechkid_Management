@@ -54,3 +54,12 @@ Additional tests exercise missing-repo preservation and passing the scoped captu
 - Git reset --hard leaves untracked legacy files; the new startup path can run Git clean only when a verified reconciliation capture is already recorded. Added explicit tests for both allowed/denied clean paths.
 
 **Status at authoring:** new changes were committed after #898; they have NOT passed an exact-head Windows CI. Do not merge/deploy on the basis of resolved hypotheses alone.
+
+
+## CI #910 failure audit (2026-11-03)
+Run: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41495304899 at head `8b3e1e796f8baddd16d0ae98b13fd86d007ddaf5`.
+- Windows shard 0: one fixture failure. `_FetchAssertingProvider` lacked `get_local_main_commit` used by startup Git rollback bookkeeping. Fixed only the fixture.
+- Windows shard 1: PASS.
+- Windows shard 2: two real Windows filesystem failures. `os.replace(local_db, rollback)` failed with `WinError 17` because the test runtime was on drive C: but the recovery root, taken from globally configured paths, was on drive D:. The source now derives a sibling recovery folder from the **live DB runtime path** so atomic rename always stays within one filesystem. Rollback stays outside the runtime fingerprint; the tests assert backup drive matches the original.
+- This is a production-relevant path-placement defect, not justification to disable database rollback.
+- Fix commits require exact-head CI confirmation. No production data used, PR remains draft.
