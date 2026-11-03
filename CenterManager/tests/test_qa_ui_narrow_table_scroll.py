@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QHeaderView
 
 from centermanager.ui.student_workspace.student_financial_widget import StudentFinancialWidget
 from centermanager.ui.class_workspace.monthly_attendance_exceptions_page import MonthlyAttendanceExceptionsPage
+from centermanager.ui.finance_workspace.outstanding_list_page import OutstandingListPage
 
 
 def _assert_horizontal_scroll(table, qapp):
@@ -31,3 +32,8 @@ def test_student_financial_tables_scroll_instead_of_compress(qapp):
 def test_monthly_attendance_nine_columns_scroll_in_narrow_view(qapp):
     page = MonthlyAttendanceExceptionsPage(None, None)
     _assert_horizontal_scroll(page.table.table, qapp)
+
+
+def test_outstanding_seven_columns_scroll_in_narrow_view(qapp):
+    page = OutstandingListPage(None, None, None)
+    _assert_horizontal_scroll(page.data_table.table, qapp)
