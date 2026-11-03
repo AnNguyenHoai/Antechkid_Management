@@ -115,8 +115,16 @@ class StudentOutstandingSummary:
 
     @property
     def debt_amount(self):
-        return max(self.total_outstanding, 0)
+        """Collectible receivables across exact Enrollment wallets, without offset."""
+        return sum(
+            (item.debt_amount for item in self.details if item.tuition_configured),
+            0,
+        )
 
     @property
     def prepaid_amount(self):
-        return max(-self.total_outstanding, 0)
+        """Independent credits; never silently settle another Enrollment debt."""
+        return sum(
+            (item.prepaid_amount for item in self.details if item.tuition_configured),
+            0,
+        )
