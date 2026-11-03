@@ -235,3 +235,27 @@ def test_untracked_cleanup_never_runs_without_verified_reconciliation():
     startup._accepted_startup_main_oid = "a" * 40
     assert startup._reset_to_remote()
     assert commands == [["reset", "--hard", "a" * 40]]
+
+
+def test_startup_copy_failure_after_db_install_does_not_complete(tmp_path, monkeypatch):
+    """Fault-injection contract: failed attachment materialization rejects startup."""
+    import centermanager.platform.sync.startup_sync as mod
+
+    root = tmp_path / "runtime"
+    (root / "repository" / "database").mkdir(parents=True)
+    (root / "Database").mkdir()
+    (root / "metadata").mkdir()
+    repo_db = root / "repository" / "database" / "center.db"
+    repo_db.write_bytes(b"MAIN")
+    old_db = root / "Database" / "center.db"
+    old_db.write_bytes(b"OLD")
+
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    startup._repo_path = root / "repository"
+    startup._runtime_db_path = old_db
+    startup._runtime_manifest_path = root / "manifest.json"
+    startup._metadata_dir = root / "metadata"
+    startup._paths = SimpleNamespace(attachment_dir=root / "Attachments")
+    startup._install_authoritative_database_atomically = lambda source: old_db.write_bytes(source.read_bytes()) or True
+    startup._sync_employee_attachments_from_repository = lambda: (_ for _ in ()).throw(OSError("synthetic attachment copy failure"))
+    assert startup._apply_runtime_database() is False
