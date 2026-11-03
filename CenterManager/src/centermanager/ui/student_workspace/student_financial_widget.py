@@ -94,10 +94,10 @@ class StudentFinancialWidget(QWidget):
 
         header = Card(
             "Finance summary",
-            "Read-only tuition and payment context for this student.",
+            "Read-only enrollment tuition and payment history through the selected date.",
             parent=self.content,
         )
-        self.period_label = QLabel("Finance period: —", header)
+        self.period_label = QLabel("Học phí toàn khóa: —", header)
         self.period_label.setWordWrap(True)
         self.period_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: {TYPOGRAPHY['body_small']}px;"
@@ -166,7 +166,7 @@ class StudentFinancialWidget(QWidget):
 
         history_card = Card(
             "Payment history",
-            "Payments recorded by Finance for the selected finance period.",
+            "All active income records through the as-of date (not restricted to a Finance period).",
             parent=self.content,
         )
         self.payment_table = DataTable(
@@ -263,7 +263,9 @@ class StudentFinancialWidget(QWidget):
         self._resolved_period_end = period_end
         self._update_period_label()
         self._load_outstanding_summary(period_start, target_date)
-        self._load_incomes(period_start, period_end)
+        # Student tuition is an Enrollment lifetime balance, not an
+        # accounting-period movement. Keep all payment history through cutoff.
+        self._load_incomes(None, target_date)
         self._update_ui()
 
     def _can_view_finance(self) -> bool:
@@ -306,18 +308,14 @@ class StudentFinancialWidget(QWidget):
             return target_date, self._requested_period_start, None
 
     def _update_period_label(self) -> None:
-        if self._resolved_period_start is None:
-            self.period_label.setText("Finance period: Not configured")
-            return
-        if self._resolved_period_end is None:
-            self.period_label.setText(f"Finance period: from {self._resolved_period_start:%d/%m/%Y}")
-            return
+        cutoff = self._requested_on_date or self._requested_period_start or date.today()
         self.period_label.setText(
-            f"Finance period: {self._resolved_period_start:%d/%m/%Y} - {self._resolved_period_end:%d/%m/%Y}"
+            f"Học phí theo Enrollment đến {cutoff:%d/%m/%Y} — "
+            "không chia nhỏ theo kỳ Finance"
         )
 
     def _load_incomes(self, period_start: Optional[date], period_end: Optional[date]) -> None:
-        if self._student_id is None or not self._can_view_finance() or period_start is None:
+        if self._student_id is None or not self._can_view_finance():
             self._incomes = []
             return
         try:
@@ -366,6 +364,7 @@ class StudentFinancialWidget(QWidget):
                 self._student_id,
                 period_start=period_start,
                 on_date=target_date,
+                view=OutstandingService.VIEW_COURSE_BALANCES,
             )
         except Exception as exc:
             logger.exception("Failed to load outstanding summary")
