@@ -37,6 +37,20 @@ def values(path):
 
 @pytest.fixture
 def workspace(temp_runtime, tmp_path, monkeypatch):
+    # This fixture creates a NEW isolated encrypted runtime. The engine's
+    # maintenance fence is process-global and can be left set by earlier
+    # fault-injection tests in the same pytest shard. Reset ONLY the test
+    # fixture boundary, after proving no tracked native DBAPI handles exist.
+    # Never relax the production maintenance guard.
+    from centermanager.database.engine import (
+        runtime_db_maintenance_active, runtime_dbapi_connection_count,
+        end_runtime_db_maintenance,
+    )
+    if runtime_db_maintenance_active():
+        assert runtime_dbapi_connection_count() == 0, (
+            "Previous test retained native DBAPI handles under maintenance"
+        )
+        end_runtime_db_maintenance()
     monkeypatch.setenv('ANTECHKIDS_FORCE_DATABASE_ENCRYPTION', '1')
     monkeypatch.setattr(DatabaseKeyStore, 'load', lambda self: KEY)
     paths = get_paths()
