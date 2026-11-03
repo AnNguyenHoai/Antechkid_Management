@@ -535,7 +535,7 @@ class ApplicationTopBar(QFrame):
         elif "waiting" in tx:
             # Queue presence alone does not prove a competing editor exists.
             # Git may be verifying a lease/queue CAS or retrying handoff.
-            if "no active editor" in self._editor_state.lower():
+            if "no active editor" in self._editor_text.lower():
                 message = (
                     "You are next in the WRITE queue. No active editor is visible; "
                     "Git lock verification/handoff is still pending."
