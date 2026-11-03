@@ -321,3 +321,22 @@ def test_real_child_process_exit_preserves_replayable_snapshot(snapshot):
     assert sync._check_interrupted_startup_install()
     assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
     assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
+
+
+def test_failed_asset_rollback_does_not_skip_database_or_git(snapshot):
+    sync, root = snapshot
+    events = []
+    sync._begin_startup_install()
+    sync._startup_assets = ([(Path("broken"), Path("backup"), True)], None)
+    sync._startup_previous_local_oid = "a" * 40
+    sync._rollback_startup_database_install = lambda: events.append("database")
+
+    def fail_assets():
+        events.append("assets")
+        raise OSError("injected asset rollback failure")
+
+    sync._rollback_startup_assets = fail_assets
+    sync._rollback_startup_git_repository = lambda: events.append("git")
+    sync._rollback_failed_install_all()
+    assert events == ["database", "assets", "git"]
+    assert sync._startup_install_marker_path().exists()
