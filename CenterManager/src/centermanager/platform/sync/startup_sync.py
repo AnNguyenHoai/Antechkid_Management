@@ -108,6 +108,8 @@ class StartupSynchronization:
         # synchronization fail closed.
         if not self._refresh_database_sessions():
             self._rollback_startup_database_install()
+            self._rollback_startup_assets()
+            self._rollback_startup_git_repository()
             return False
 
         try:
@@ -116,8 +118,11 @@ class StartupSynchronization:
         except Exception:
             logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
             self._rollback_startup_database_install()
+            self._rollback_startup_assets()
+            self._rollback_startup_git_repository()
             return False
         self._finalize_startup_database_install()
+        self._finalize_startup_assets()
         self._startup_previous_local_oid = None
         logger.info("Startup synchronization completed successfully")
         return True
@@ -428,6 +433,96 @@ class StartupSynchronization:
             backup.unlink(missing_ok=True)
         self._startup_db_install_backup = None
 
+    def _prepare_startup_assets(self) -> None:
+        """Stage MAIN assets and retain an immutable, non-runtime rollback copy.
+
+        This handles ordinary exceptions. A killed process needs a separate
+        durable interrupted-install protocol (S04-01B).
+        """
+        import uuid
+        token = uuid.uuid4().hex
+        employees = self._paths.attachment_dir / "Employees"
+        version = self._metadata_dir / "version.json"
+        manifest = self._runtime_manifest_path
+        targets = (employees, manifest, version)
+        copies = []
+        try:
+            for dest in targets:
+                # Each backup must be on the same volume as its destination,
+                # and outside WriteRecoveryJournal's workspace fingerprint.
+                runtime_parent = dest.parent
+                while runtime_parent.name not in {"runtime", "Runtime"} and runtime_parent != runtime_parent.parent:
+                    runtime_parent = runtime_parent.parent
+                if runtime_parent == runtime_parent.parent:
+                    runtime_parent = self._runtime_db_path.parent.parent
+                rollback = (
+                    runtime_parent.with_name(runtime_parent.name + ".write-recovery")
+                    / "startup-assets" / token / dest.name
+                )
+                exists = dest.exists()
+                if exists:
+                    rollback.parent.mkdir(parents=True, exist_ok=True)
+                    if dest.is_dir():
+                        shutil.copytree(dest, rollback)
+                    else:
+                        shutil.copy2(dest, rollback)
+                copies.append((dest, rollback, exists))
+            # Ensure source attachments are completely readable before the
+            # already-validated database can be installed.
+            repo_employees = self._repo_path / "Attachments" / "Employees"
+            if repo_employees.exists():
+                staged_employees = (
+                    employees.parent.parent.with_name(employees.parent.parent.name + ".write-recovery")
+                    / "startup-assets" / token / "staged-employees"
+                )
+                staged_employees.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(repo_employees, staged_employees)
+            else:
+                staged_employees = None
+            self._startup_assets = (copies, staged_employees)
+        except Exception:
+            logger.exception("Unable to stage startup assets; live workspace remains unchanged")
+            raise
+
+    def _rollback_startup_assets(self) -> None:
+        saved = getattr(self, "_startup_assets", None)
+        if saved is None:
+            return
+        copies, _ = saved
+        failures = []
+        for dest, backup, existed in reversed(copies):
+            try:
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                elif dest.exists():
+                    dest.unlink()
+                if existed:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    if backup.is_dir():
+                        shutil.copytree(backup, dest)
+                    else:
+                        shutil.copy2(backup, dest)
+            except Exception as exc:
+                failures.append((str(dest), str(exc)))
+                logger.exception("Startup asset rollback failed for %s", dest)
+        if failures:
+            raise RuntimeError("Startup assets could not all be restored: " + repr(failures))
+        self._finalize_startup_assets()
+
+    def _finalize_startup_assets(self) -> None:
+        saved = getattr(self, "_startup_assets", None)
+        if saved is None:
+            return
+        copies, staged = saved
+        for _, backup, _ in copies:
+            if backup.is_dir():
+                shutil.rmtree(backup)
+            else:
+                backup.unlink(missing_ok=True)
+        if staged is not None and staged.exists():
+            shutil.rmtree(staged)
+        self._startup_assets = None
+
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
@@ -440,9 +535,11 @@ class StartupSynchronization:
         self._runtime_db_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
+            self._prepare_startup_assets()
             # Never truncate a live SQLCipher database or let stale WAL/SHM
             # from the discarded local generation replay onto accepted MAIN.
             if not self._install_authoritative_database_atomically(repo_db):
+                self._rollback_startup_assets()
                 return False
 
             logger.info(f"Runtime database updated from repository: {self._runtime_db_path}")
@@ -487,6 +584,11 @@ class StartupSynchronization:
             return True
         except Exception as e:
             logger.exception(f"Failed to copy runtime data: {e}")
+            try:
+                self._rollback_startup_assets()
+                self._rollback_startup_database_install()
+            except Exception:
+                logger.exception("Startup rollback was incomplete; recovery required")
             return False
 
     def _sync_employee_attachments_from_repository(self) -> None:
