@@ -538,7 +538,7 @@ class ApplicationTopBar(QFrame):
             if "no active editor" in self._editor_text.lower():
                 message = (
                     "You are next in the WRITE queue. No active editor is visible; "
-                    "Git lock verification/handoff is still pending."
+                    "Remote lock verification and handoff are still pending."
                 )
             else:
                 message = (
