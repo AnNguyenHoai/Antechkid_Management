@@ -534,7 +534,7 @@ class ApplicationTopBar(QFrame):
             message = "Saving and synchronizing your changes. Keep the application open."
         elif "waiting" in tx:
             # Queue presence alone does not prove a competing editor exists.
-            # Git may be verifying a lease/queue CAS or retrying handoff.
+            # Remote authority may be verifying lease/queue CAS or retrying handoff.
             if "no active editor" in self._editor_text.lower():
                 message = (
                     "You are next in the WRITE queue. No active editor is visible; "
