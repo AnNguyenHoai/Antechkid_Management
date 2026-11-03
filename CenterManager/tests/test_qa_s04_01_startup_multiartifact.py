@@ -97,9 +97,12 @@ def test_manifest_copy_error_rolls_back_all_artifacts(snapshot, monkeypatch):
     sync, root = snapshot
     import builtins
     real_open = builtins.open
+    injected = {"done": False}
 
     def fail_manifest_write(path, mode="r", *args, **kwargs):
-        if str(path) == str(root / "manifest.json") and mode == "wb":
+        if (str(path) == str(root / "manifest.json") and mode == "wb"
+                and not injected["done"]):
+            injected["done"] = True
             raise OSError("injected manifest install fault")
         return real_open(path, mode, *args, **kwargs)
 
