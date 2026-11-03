@@ -477,7 +477,7 @@ class OutstandingService:
         if view not in (self.VIEW_PERIOD_ACTIVITY, self.VIEW_OPEN_RECEIVABLES, self.VIEW_COURSE_BALANCES):
             raise ValueError(f"Unsupported outstanding view: {view}")
         with self._session_factory() as session:
-            if view == self.VIEW_OPEN_RECEIVABLES:
+            if view in (self.VIEW_OPEN_RECEIVABLES, self.VIEW_COURSE_BALANCES):
                 rows = self._collect_outstanding(
                     session, class_id=None, status_filter=None, search_text=None,
                     course_name=None, student_id=None, resolved_period_start=None,
