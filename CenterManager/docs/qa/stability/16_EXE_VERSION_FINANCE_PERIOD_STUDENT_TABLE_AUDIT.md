@@ -172,3 +172,15 @@ The previous period-overlap view remains labeled as cumulative. A **separate rea
 5. **Reconciliation:** Verify a class spanning multiple FinancePeriods, tuition upfront prepayments, refunds, transfer credits, archived classes, canceled/withdrawn Enrollment, and unknown tuition price with a disposable SQLCipher clone. Compare CSV per Enrollment and confirm `opening + accrued - receipts - adjustments == closing`. Do not merge without exact-head Windows CI and Windows visual DPI UAT.
 
 The old `VIEW_PERIOD_ACTIVITY` has not been relabeled as actual period movements. This is an independent report, invoked explicitly from the Outstanding workspace.
+
+
+## CI #988 — follow-up audit and fixes
+
+At commit `7a84f5ac`, GitHub Actions run https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41587829796 FAILED all three Windows shards with **five deterministic test failures**, none of which reached an actual cloned operational SQLCipher fixture.
+
+1. Architecture inventory tests (shards 1 and 2) require every service Python filename to be in `docs/architecture/EP-ARCH-03_SERVICE_INVENTORY.md`. Registered the new read-only repository-backed `tuition_period_movement_service.py` as `PASS`.
+2. Tuition/accounting boundary test (shard 1) forbids `FinancePeriod` references in newly added tuition service files. The service consumes a bounded pair of calendar dates supplied by the UI and never imports a FinancePeriod model; removed the conflicting terminology in its docstring/error message, preserving isolation of Enrollment tuition semantics.
+3. Dashboard test (shard 2) bypassed the constructor with `__new__` but did not set `_outstanding_service`; initialized the required dependency in the test fixture rather than suppressing production validation.
+4. Settlement guard test (shard 0) expected lower-case `canonical signed` while the intentionally fail-closed production exception started with upper-case `Canonical signed`; fixed the test assertion to match the exact message.
+
+No weakening of ledger settlement checks, per-Enrollment reconciliation, SQLCipher or WRITE protection. This new head needs exact-SHA Windows CI confirmation. No merge until that and real SQLCipher-clone reconciliation/UAT have passed.
