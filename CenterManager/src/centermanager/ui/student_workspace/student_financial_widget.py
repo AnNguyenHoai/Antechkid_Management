@@ -166,7 +166,7 @@ class StudentFinancialWidget(QWidget):
 
         history_card = Card(
             "Payment history",
-            "All active income records through the as-of date (not restricted to a Finance period).",
+            "All active tuition payments through the as-of date (not restricted to a Finance period).",
             parent=self.content,
         )
         self.payment_table = DataTable(
@@ -321,6 +321,7 @@ class StudentFinancialWidget(QWidget):
         try:
             first_page, total = self._income_service.list_incomes(
                 student_id=self._student_id,
+                income_type="Tuition",
                 page=1,
                 per_page=1,
                 finance_period_start=period_start,
@@ -335,6 +336,7 @@ class StudentFinancialWidget(QWidget):
                 return
             items, _ = self._income_service.list_incomes(
                 student_id=self._student_id,
+                income_type="Tuition",
                 page=1,
                 per_page=total,
                 finance_period_start=period_start,
