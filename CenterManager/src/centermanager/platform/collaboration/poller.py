@@ -303,6 +303,16 @@ class CollaborationPoller(QObject):
                     session.username,
                     request_id,
                 )
+            else:
+                # A queue-head that repeatedly fails to acquire must not look
+                # like an indefinite wait for another user. Retain READ and
+                # record the non-sensitive acquisition stage for investigation.
+                diagnostic = getattr(self._cm, "get_waiting_handoff_code", None)
+                code = diagnostic() if callable(diagnostic) else ""
+                logger.warning(
+                    "Automatic WRITE handoff deferred: reason=%s",
+                    code or "UNCLASSIFIED",
+                )
         except Exception:
             logger.exception(
                 "Automatic collaboration handoff failed for %s (request=%s)",
