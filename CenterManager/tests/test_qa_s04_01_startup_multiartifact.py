@@ -293,6 +293,8 @@ def test_real_child_process_exit_preserves_replayable_snapshot(snapshot):
         import os
         import sys
         from pathlib import Path
+        # Child interpreters do not inherit pytest's sys.path modifications.
+        sys.path.insert(0, str(Path.cwd() / "src"))
         from centermanager.platform.sync.startup_install_replay import capture_before_install
         root = Path(sys.argv[1])
         runtime_db = root / "Database" / "center.db"
