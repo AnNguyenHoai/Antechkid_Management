@@ -130,3 +130,11 @@ def test_main_window_is_wired_to_application_top_bar():
     assert "self.app_top_bar" in source
     assert "self.central_stack = QStackedWidget" in source
     assert "status_bar.addPermanentWidget" not in source
+
+
+def test_waiting_without_editor_does_not_claim_another_active_session(app):
+    top_bar = ApplicationTopBar(user_name="UAT")
+    top_bar.set_editor_state("No active editor")
+    top_bar.set_transaction_text("Waiting (pos 1) - GIT_LOCK_ACQUISITION_FAILED")
+    assert top_bar._editor_text == "No active editor"
+    assert "No active editor is visible" in top_bar.guidance_panel.message_label.text() if hasattr(top_bar.guidance_panel, "message_label") else "No active editor is visible" in top_bar.guidance_panel._message
