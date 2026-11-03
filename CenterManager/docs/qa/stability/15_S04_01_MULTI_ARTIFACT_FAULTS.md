@@ -26,3 +26,12 @@ PR remains QA-only and draft; do not merge into production until fix PR removes 
 - Employee assets are copied completely into staging first, then moved into place using same-volume `os.replace` after the current mirror is removed. Backup remains available for exceptions.
 - Removed the two `xfail(strict=True)` markers: partial attachments and partially-written metadata now have normal PASS requirements. Added manifest failure, staging failure and rollback coordination assertions.
 - This implementation handles **caught exceptions**, not arbitrary process termination between renames. A persisted transaction marker and restart replay remains S04-01B, a release blocker. It must be tested with real Windows process kill and SQLCipher. Do not promote PR #547 to production on CI alone.
+
+
+## S04-01B first safety gate — interrupted startup (after #925)
+- Before changing the live runtime DB, startup now durably writes an external `runtime.write-recovery/startup-install.pending.json` marker with a transaction id, intended Git MAIN and DB path. It uses temp-file, flush/fsync, and atomic same-volume rename. The marker is outside the journal fingerprint.
+- On a subsequent process start, a pending marker (including malformed/truncated content) blocks **before** repository clone/connect/fetch or any DB replacement. This prevents mixed-generation data from opening as a clean workspace.
+- Once all install gates pass, the marker is removed only after DB and asset finalizers complete. When a normal caught exception triggers verified rollback of DB, assets and local Git HEAD, the marker can also be cleared. Any failed/incomplete rollback preserves the marker.
+- Regression tests simulate a new EXE process with no in-memory transaction state, malformed marker and normal/incomplete rollback cleanup decisions.
+- **Important limitation:** This is a durable *detection + fail-closed* gate, not autonomous restoration after a hard process kill. A persisted rollback inventory and Windows process-kill/restart UAT are still required to safely recover unattended. Do not delete the pending marker to bypass the gate; first preserve the entire runtime and sibling recovery folder and reconcile its generations.
+- A successful Windows CI does not prove real process kill behavior, power-loss fsync durability or SQLCipher/WAL recovery.
