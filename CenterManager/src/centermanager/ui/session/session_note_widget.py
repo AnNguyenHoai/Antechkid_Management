@@ -6,7 +6,7 @@ Header with title and action buttons (Cancel, Save, Delete).
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QPlainTextEdit, QPushButton, QLabel, QFrame, QMessageBox,
@@ -34,6 +34,13 @@ class SessionNoteWidget(QWidget):
         self._session_id = session_id
         self._note: Optional[SessionNote] = None
         self._is_edit_mode = False
+        self._dirty = False
+        self._populating = False
+        self._save_in_progress = False
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(1200)
+        self._autosave_timer.timeout.connect(self._autosave)
 
         self._setup_ui()
         self._load_note()
@@ -59,7 +66,7 @@ class SessionNoteWidget(QWidget):
         self.cancel_btn.setVisible(False)
         self.cancel_btn.clicked.connect(self._cancel_edit)
 
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("Save now")
         self.save_btn.setFixedWidth(80)
         self.save_btn.setVisible(False)
         self.save_btn.clicked.connect(self._save)
@@ -118,11 +125,13 @@ class SessionNoteWidget(QWidget):
         form.setSpacing(6)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        # Teaching Progress
+        # Session.status is the source of truth for lesson completion.
+        # Keep legacy teaching_progress stored in the DB for compatibility,
+        # but do not ask teachers to enter a second conflicting status.
         self.teaching_combo = QComboBox()
         for val in TeachingProgress.choices():
             self.teaching_combo.addItem(val)
-        form.addRow("Teaching Progress *", self.teaching_combo)
+        self.teaching_combo.setCurrentText(TeachingProgress.COMPLETED.value)
 
         # Class Atmosphere
         self.atmosphere_combo = QComboBox()
@@ -144,11 +153,16 @@ class SessionNoteWidget(QWidget):
 
         form_layout.addLayout(form)
         self.stacked.addWidget(form_widget)
+        self.atmosphere_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.lesson_content_edit.textChanged.connect(self._mark_dirty)
+        self.homework_edit.textChanged.connect(self._mark_dirty)
 
         self.stacked.setCurrentIndex(0)
 
     def _load_note(self) -> None:
-        """Load existing note if any."""
+        """Load existing note if any, never overwriting an unsaved draft."""
+        self._autosave_timer.stop()
+        self._populating = True
         try:
             self._note = self._service.get_note(self._session_id)
             if self._note:
@@ -159,9 +173,13 @@ class SessionNoteWidget(QWidget):
                 self._is_edit_mode = False
                 self._clear_form()
                 self._show_empty()
-        except Exception as e:
+        except Exception:
             logger.exception("Error loading session note")
             self._show_empty()
+        finally:
+            self._populating = False
+            self._dirty = False
+            self._set_save_status("Changes saved")
 
     def _populate_form(self, note: SessionNote) -> None:
         idx = self.teaching_combo.findText(note.teaching_progress)
@@ -174,7 +192,7 @@ class SessionNoteWidget(QWidget):
         self.homework_edit.setPlainText(note.homework or "")
 
     def _clear_form(self) -> None:
-        self.teaching_combo.setCurrentIndex(0)
+        self.teaching_combo.setCurrentText(TeachingProgress.COMPLETED.value)
         self.atmosphere_combo.setCurrentIndex(0)
         self.lesson_content_edit.clear()
         self.homework_edit.clear()
@@ -183,6 +201,7 @@ class SessionNoteWidget(QWidget):
         self.stacked.setCurrentIndex(0)
         self.cancel_btn.setVisible(False)
         self.save_btn.setVisible(False)
+        self.save_status.setVisible(False)
         self.delete_btn.setVisible(False)
         self.create_btn.setVisible(True)
 
@@ -190,46 +209,89 @@ class SessionNoteWidget(QWidget):
         self.stacked.setCurrentIndex(1)
         self.cancel_btn.setVisible(True)
         self.save_btn.setVisible(True)
+        self.save_status.setVisible(True)
         self.delete_btn.setVisible(edit_mode and self._note is not None)
         self.create_btn.setVisible(False)
 
+    def _set_save_status(self, text: str) -> None:
+        self.save_status.setText(text)
+
+    def _mark_dirty(self, *_args) -> None:
+        if self._populating or self._save_in_progress or not self.isEnabled():
+            return
+        self._dirty = True
+        self._set_save_status("Unsaved changes — saving automatically…")
+        self._autosave_timer.start()
+
+    def _autosave(self) -> None:
+        # Disabled historical note widgets, including a disabled parent dialog,
+        # must NEVER issue a database mutation.
+        if self._dirty and self.isEnabled():
+            self._save(interactive=False)
+
+    def flush_pending(self) -> bool:
+        """Flush an editable draft before closing/switching sessions.
+
+        A failed write preserves the draft. The owner dialog must not close
+        silently in this case.
+        """
+        self._autosave_timer.stop()
+        if not self._dirty or not self.isEnabled():
+            return True
+        return self._save(interactive=False)
+
     def _cancel_edit(self) -> None:
-        self._load_note()  # Reload to reset form
+        self._autosave_timer.stop()
+        self._dirty = False
+        self._load_note()
 
-    def _save(self) -> None:
-        teaching = self.teaching_combo.currentText()
+    def _save(self, *, interactive: bool = True) -> bool:
+        if not self.isEnabled():
+            return False
+        if self._save_in_progress:
+            return False
+        self._autosave_timer.stop()
+        # For updates send raw empty strings so optional fields can be cleared.
+        lesson_content = self.lesson_content_edit.toPlainText().strip()
+        homework = self.homework_edit.toPlainText().strip()
         atmosphere = self.atmosphere_combo.currentText()
-        lesson_content = self.lesson_content_edit.toPlainText().strip() or None
-        homework = self.homework_edit.toPlainText().strip() or None
-
+        self._save_in_progress = True
         try:
             if self._is_edit_mode and self._note:
                 self._service.update_note(
                     session_id=self._session_id,
-                    teaching_progress=teaching,
                     class_atmosphere=atmosphere,
                     lesson_content=lesson_content,
                     homework=homework,
                 )
-                QMessageBox.information(self, "Success", "Teaching Note updated.")
             else:
                 self._service.create_note(
                     session_id=self._session_id,
-                    teaching_progress=teaching,
+                    teaching_progress=TeachingProgress.COMPLETED.value,
                     class_atmosphere=atmosphere,
                     lesson_content=lesson_content,
                     homework=homework,
                 )
-                QMessageBox.information(self, "Success", "Teaching Note created.")
                 self._is_edit_mode = True
-
+            self._dirty = False
+            self._set_save_status("Saved automatically")
             self._load_note()
             self.note_saved.emit()
-        except SessionNoteValidationError as e:
-            QMessageBox.warning(self, "Validation Error", str(e))
-        except Exception as e:
-            logger.exception("Error saving note")
-            QMessageBox.critical(self, "Error", "Could not save teaching note.")
+            return True
+        except Exception:
+            # No permission, lost WRITE authority, validation or SQL failure:
+            # do not discard pending edits or claim autosave succeeded.
+            logger.exception("Teaching Note could not be saved")
+            self._dirty = True
+            self._set_save_status("Not saved — check WRITE access; retry Save now")
+            if interactive:
+                QMessageBox.warning(
+                    self, "Teaching Note not saved",
+                    "Changes remain in this form. Check WRITE access and retry.",
+                )
+            return False
+        finally:
+            self._save_in_progress = False
 
     def _delete(self) -> None:
         if not self._note:
@@ -242,6 +304,7 @@ class SessionNoteWidget(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
+                self._autosave_timer.stop()
                 self._service.delete_note(self._session_id)
                 self._note = None
                 self._is_edit_mode = False
@@ -253,7 +316,14 @@ class SessionNoteWidget(QWidget):
                 logger.exception("Error deleting note")
                 QMessageBox.critical(self, "Error", "Could not delete teaching note.")
 
-    def set_session(self, session_id: int) -> None:
-        """Allow external refresh."""
+    def set_session(self, session_id: int) -> bool:
+        """Do not silently discard pending changes during session navigation."""
+        if session_id == self._session_id:
+            if not self._dirty:
+                self._load_note()
+            return True
+        if not self.flush_pending():
+            return False
         self._session_id = session_id
         self._load_note()
+        return True
