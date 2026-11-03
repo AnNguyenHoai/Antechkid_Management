@@ -261,7 +261,16 @@ class FinanceDashboardService:
             empty_methods = self._empty_payment_methods()
             # Missing accounting-period configuration must not erase
             # Enrollment receivables: they are independent business facts.
-            debt_stats = self._get_outstanding_stats(target_date=target)
+            # Historical/lightweight adapters with only the period-scoped
+            # get_outstanding_stats API cannot provide course debt without a
+            # FinancePeriod. Do not invoke that period API with no period.
+            receivables = getattr(
+                self._outstanding_service, "get_receivable_stats", None
+            ) if self._outstanding_service is not None else None
+            debt_stats = (
+                self._get_outstanding_stats(target_date=target)
+                if callable(receivables) else {}
+            )
             return {
                 "period_configured": False,
                 "period_start": None,
