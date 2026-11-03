@@ -533,7 +533,18 @@ class ApplicationTopBar(QFrame):
         elif "finish" in tx or "saving" in tx or "publishing" in tx:
             message = "Saving and synchronizing your changes. Keep the application open."
         elif "waiting" in tx:
-            message = "Another edit session is active. Your request will continue when editing becomes available."
+            # Queue presence alone does not prove a competing editor exists.
+            # Remote authority may be verifying lease/queue CAS or retrying handoff.
+            if "no active editor" in self._editor_text.lower():
+                message = (
+                    "Your WRITE request is queued. No active editor is visible; "
+                    "Remote lock verification and handoff are still pending."
+                )
+            else:
+                message = (
+                    "Your WRITE request is queued. Access will be granted only "
+                    "after remote lock and latest MAIN are verified."
+                )
         elif "failed" in tx or "offline" in tx:
             message = "Changes are not fully synchronized yet. Review the status before continuing."
         elif (mode == "WRITE" or tx == "editing") and self._waiting_request_count > 0:

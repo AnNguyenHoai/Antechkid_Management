@@ -716,9 +716,27 @@ class MainWindow(QMainWindow):
             pos = self._transaction.get_waiting_position()
             getter = getattr(type(self._collaboration_manager), "get_waiting_diagnostic", None)
             detail = self._collaboration_manager.get_waiting_diagnostic() if callable(getter) else ""
-            self.app_top_bar.set_transaction_text(
-                detail or f"Waiting (pos {pos}) - {owner}"
+            handoff_getter = getattr(
+                type(self._collaboration_manager), "get_waiting_handoff_code", None
             )
+            handoff_code = (
+                self._collaboration_manager.get_waiting_handoff_code()
+                if callable(handoff_getter) else ""
+            )
+            # A queue-head request with no current editor is not necessarily
+            # grantable: display the exact non-sensitive handoff stage, not
+            # the misleading "Waiting (pos 1) - None".
+            if detail:
+                waiting_text = detail
+            elif handoff_code:
+                waiting_text = f"Waiting (pos {pos}) - {handoff_code}"
+            elif lock_status.get("state") == "RECLAIMABLE":
+                waiting_text = f"Waiting (pos {pos}) - previous lease expired; verifying lock"
+            elif lock_status.get("state") == "ABSENT":
+                waiting_text = f"Waiting (pos {pos}) - verifying Git lock acquisition"
+            else:
+                waiting_text = f"Waiting (pos {pos}) - {owner or 'verifying remote WRITE authority'}"
+            self.app_top_bar.set_transaction_text(waiting_text)
             # WAITING is already fully projected in the top bar. Avoid a
             # duplicate bottom-row notification that consumes vertical space.
             self.statusBar().clearMessage()
