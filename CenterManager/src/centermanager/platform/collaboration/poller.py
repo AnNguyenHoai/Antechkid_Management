@@ -369,9 +369,17 @@ class CollaborationPoller(QObject):
             self._try_handoff_waiting_request(remote_lock, queue)
             after_handoff = diagnostic_getter() if callable(diagnostic_getter) else ""
 
+            # Critical race: a WRITE request can be enqueued then removed
+            # between two polls, leaving the last observed Git snapshot
+            # identical (empty queue + absent lock). A WAITING transaction
+            # still needs a fresh authoritative observation to reconcile and
+            # cancel the now-missing request. Otherwise the UI stays at pos 1
+            # forever even though Git queue-main has no request.
+            pending_local_request = getattr(self._cm, "_pending_request", None) is not None
             if (self._last_snapshot is None
                     or snapshot.is_changed_from(self._last_snapshot)
-                    or before_handoff != after_handoff):
+                    or before_handoff != after_handoff
+                    or pending_local_request):
                 self._last_snapshot = snapshot
                 self.snapshot_changed.emit(snapshot)
                 if self._event_bus:
