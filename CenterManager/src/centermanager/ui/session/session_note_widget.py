@@ -69,7 +69,7 @@ class SessionNoteWidget(QWidget):
         self.save_btn = QPushButton("Save now")
         self.save_btn.setFixedWidth(80)
         self.save_btn.setVisible(False)
-        self.save_btn.clicked.connect(lambda: self._save(interactive=True))
+        self.save_btn.clicked.connect(lambda _checked=False: self._save(interactive=True))
 
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setFixedWidth(80)
