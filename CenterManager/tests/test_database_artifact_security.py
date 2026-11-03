@@ -56,7 +56,31 @@ def _configure(monkeypatch, paths):
     monkeypatch.setattr(wal_safety, "DatabaseKeyStore", _KeyStore)
 
 
-def test_materialize_runtime_db_keeps_authoritative_git_artifact_encrypted(tmp_path, monkeypatch):
+@pytest.fixture
+def isolated_sqlcipher_runtime_fence():
+    """A synthetic SQLCipher artifact test must not inherit unrelated shard state.
+
+    This test creates a disposable runtime and never opens the actual running
+    CenterManager database. Do not change production maintenance authorization.
+    Fail if an earlier test left any registered DBAPI handle alive.
+    """
+    from centermanager.database.engine import (
+        runtime_db_maintenance_active,
+        runtime_dbapi_connection_count,
+        end_runtime_db_maintenance,
+    )
+    assert runtime_dbapi_connection_count() == 0, (
+        "A prior test leaked a registered runtime DBAPI connection"
+    )
+    if runtime_db_maintenance_active():
+        end_runtime_db_maintenance()
+    yield
+    assert runtime_dbapi_connection_count() == 0, (
+        "SQLCipher artifact test leaked a registered runtime DBAPI connection"
+    )
+
+
+def test_materialize_runtime_db_keeps_authoritative_git_artifact_encrypted(tmp_path, monkeypatch, isolated_sqlcipher_runtime_fence):
     pytest.importorskip("sqlcipher3")
     paths = _paths(tmp_path)
     _configure(monkeypatch, paths)
