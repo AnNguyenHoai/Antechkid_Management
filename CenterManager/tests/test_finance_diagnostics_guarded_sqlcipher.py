@@ -9,6 +9,7 @@ from datetime import date
 
 import pytest
 
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401 - reporting fixture dependency
 from tests.test_e1b2a_post_publish_consistency import reporting  # noqa: F401
 from centermanager.database.mutation_authority import MutationAuthorityError
 from centermanager.repositories.income_repository import IncomeRepository
