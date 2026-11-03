@@ -280,3 +280,44 @@ def test_missing_old_wal_is_removed_on_interrupted_replay(snapshot):
     wal.write_bytes(b"UNACCEPTED-MAIN-WAL")
     assert sync._check_interrupted_startup_install()
     assert not wal.exists()
+
+
+def test_real_child_process_exit_preserves_replayable_snapshot(snapshot):
+    """A separate process hard-exits after creating a marker and half-install."""
+    sync, root = snapshot
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        import os
+        import sys
+        from pathlib import Path
+        from centermanager.platform.sync.startup_install_replay import capture_before_install
+        root = Path(sys.argv[1])
+        runtime_db = root / "Database" / "center.db"
+        marker = root.with_name(root.name + ".write-recovery") / "startup-install.pending.json"
+        capture_before_install(marker, [
+            ("database", runtime_db),
+            ("wal", runtime_db.with_name("center.db-wal")),
+            ("shm", runtime_db.with_name("center.db-shm")),
+            ("journal", runtime_db.with_name("center.db-journal")),
+            ("employees", root / "Attachments" / "Employees"),
+            ("manifest", root / "manifest.json"),
+            ("version", root / "metadata" / "version.json"),
+        ], "a" * 40)
+        runtime_db.write_bytes(b"PARTIALLY-INSTALLED")
+        (root / "Attachments" / "Employees" / "photo.txt").write_bytes(b"PARTIAL")
+        os._exit(71)
+    """)
+    child = subprocess.run(
+        [sys.executable, "-c", script, str(root)],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        timeout=30,
+    )
+    assert child.returncode == 71
+    assert sync._startup_install_marker_path().exists()
+    assert sync._check_interrupted_startup_install()
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
+    assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
