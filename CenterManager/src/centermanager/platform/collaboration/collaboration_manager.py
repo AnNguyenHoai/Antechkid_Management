@@ -116,6 +116,7 @@ class CollaborationManager:
         self._ungranted_lock = False
         self._handoff_in_progress = False
         self._waiting_diagnostic = ""
+        self._waiting_handoff_code = ""
         self._lease_renewal_suspended = False
         self._state_mutex = threading.RLock()
         self._write_handoff_guard: Optional[Callable[[], bool]] = None
@@ -477,21 +478,26 @@ class CollaborationManager:
 
     def _grant_remote_request(self, request_id, *, run_handoff):
         if self._cancel_pending or not self._rollback_ungranted_lock():
+            self._waiting_handoff_code = "ROLLBACK_OR_CANCEL_PENDING"
             return False
         request = self._queue_get_by_session(self._session.session_id)
         head = self._queue_peek()
         if request is None or request.request_id != request_id or head is None or head.request_id != request_id:
+            self._waiting_handoff_code = "QUEUE_HEAD_MISMATCH"
             return False
         remote = self._get_remote_lock_status()
         if remote["state"] == "UNKNOWN":
+            self._waiting_handoff_code = "REMOTE_LOCK_UNKNOWN"
             return False
         owns = getattr(type(self._sync_provider), "owns_lock_observation", None)
         already_acquired = bool(callable(owns) and self._sync_provider.owns_lock_observation(
             remote, self._session.username, self._session.session_id,
         ))
         if remote["state"] == "ACTIVE" and not already_acquired:
+            self._waiting_handoff_code = "ACTIVE_REMOTE_LOCK"
             return False
         if remote["state"] == "GRACE" and remote.get("session_id") != self._session.session_id:
+            self._waiting_handoff_code = "CLOCK_SKEW_GRACE"
             return False
         if not already_acquired and not self._sync_provider.acquire_lock(self._build_lock_data()):
             observed = self._get_remote_lock_status()
@@ -499,6 +505,10 @@ class CollaborationManager:
             if callable(candidate_check) and self._sync_provider.has_pending_lock_candidate(self._session.session_id):
                 self._ungranted_lock = (observed["state"] == "UNKNOWN" or
                     observed.get("session_id") == self._session.session_id)
+            self._waiting_handoff_code = (
+                "GIT_LOCK_CONTENTION" if getattr(self._sync_provider, "last_lock_failure_was_contention", lambda: False)()
+                else "GIT_LOCK_ACQUISITION_FAILED"
+            )
             return False
         self._ungranted_lock = True
         self._lock_acquired = True
@@ -507,6 +517,7 @@ class CollaborationManager:
             # only a still-live head with queue CAS, never a missing/cancelled request.
             head = self._queue_peek()
             if head is None or head.request_id != request_id:
+                self._waiting_handoff_code = "QUEUE_CHANGED_AFTER_LOCK"
                 return False
             if run_handoff and self._write_handoff_guard is not None:
                 # The guard synchronously calls the Qt GUI thread. Never hold
@@ -520,14 +531,17 @@ class CollaborationManager:
                     self._state_mutex.acquire()
                     self._handoff_in_progress = False
                 if not synchronized or self._cancel_pending:
+                    self._waiting_handoff_code = "MAIN_HANDOFF_FAILED"
                     return False
             consume = getattr(type(self._sync_provider), "consume_remote_write_request", None)
             consumed = (self._sync_provider.consume_remote_write_request(request_id, self._session.session_id)
                         if callable(consume) else self._queue_cancel(request))
             if not consumed:
+                self._waiting_handoff_code = "QUEUE_CONSUME_FAILED"
                 return False
             remote = self._get_remote_lock_status()
             if remote["state"] != "ACTIVE" or remote.get("session_id") != self._session.session_id:
+                self._waiting_handoff_code = "OWNERSHIP_VERIFICATION_FAILED"
                 return False
             self._lease_renewal_suspended = False
             self._sync_local_lock()
@@ -536,6 +550,7 @@ class CollaborationManager:
                 return False
             self._ungranted_lock = False
             self._pending_request = None
+            self._waiting_handoff_code = ""
             self._publish_write_granted(request_id, 0)
             return True
         finally:
@@ -935,6 +950,10 @@ class CollaborationManager:
 
     def get_waiting_diagnostic(self) -> str:
         return self._waiting_diagnostic
+
+    def get_waiting_handoff_code(self) -> str:
+        """Non-sensitive, last observed block reason; never a WRITE authority."""
+        return self._waiting_handoff_code
 
     def get_diagnostics(self) -> Dict[str, Any]:
         self._ensure_initialized()
