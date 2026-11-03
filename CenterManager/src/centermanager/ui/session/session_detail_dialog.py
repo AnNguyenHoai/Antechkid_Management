@@ -248,6 +248,7 @@ class SessionDetailDialog(QDialog):
             parent=self
         )
         self.note_widget.note_saved.connect(self._on_note_changed)
+        self.note_widget.dirty_changed.connect(self._update_close_label)
         self.note_widget.note_deleted.connect(self._on_note_changed)
         layout.addWidget(self.note_widget)
 
@@ -301,8 +302,11 @@ class SessionDetailDialog(QDialog):
         return widget
 
     def _load_session(self) -> None:
-        # Never reload a Teaching Note and destroy a pending autosave draft.
-        if hasattr(self, "note_widget") and not self.note_widget.flush_pending():
+        # Refresh is read-only: never save the user's unfinished note.
+        if hasattr(self, "note_widget") and self.note_widget.has_pending_changes():
+            self.note_widget._set_save_status(
+                "Unsaved changes — Save & Close before refreshing"
+            )
             return
         try:
             self._session = self._session_service.get_session(self._session_id)
@@ -419,22 +423,36 @@ class SessionDetailDialog(QDialog):
     def refresh(self) -> None:
         self._load_session()
 
-    def accept(self) -> None:
+    def _update_close_label(self, _dirty: bool = False) -> None:
+        # READ-only history always has a plain Close action.
+        self.close_btn.setText(
+            "Save & Close"
+            if self.note_widget.has_pending_changes() and self.note_widget.isEnabled()
+            else "Close"
+        )
+
+    def closeEvent(self, event) -> None:
+        # Window X must follow the same Save & Close policy as footer Close.
+        if self._save_before_closing():
+            event.accept()
+        else:
+            event.ignore()
+
+    def _save_before_closing(self) -> bool:
         if not self.note_widget.flush_pending():
             QMessageBox.warning(
-                self, "Unsaved Teaching Note",
-                "The note could not be saved. Keep this window open until "
-                "WRITE access is available, or cancel your edits explicitly.",
+                self, "Teaching Note not saved",
+                "The note was not saved. The dialog remains open and your "
+                "draft is preserved. Check WRITE access and choose Save & Close again.",
             )
-            return
-        super().accept()
+            return False
+        return True
+
+    def accept(self) -> None:
+        if self._save_before_closing():
+            super().accept()
 
     def reject(self) -> None:
-        if not self.note_widget.flush_pending():
-            QMessageBox.warning(
-                self, "Unsaved Teaching Note",
-                "The note could not be saved. The window will stay open "
-                "to preserve your edits.",
-            )
-            return
-        super().reject()
+        # Esc follows the same policy; no implicit discard.
+        if self._save_before_closing():
+            super().reject()
