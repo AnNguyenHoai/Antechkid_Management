@@ -35,6 +35,8 @@ def snapshot(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(recovery, "require_replaceable", lambda: None)
+    from centermanager.database import session as session_module
+    monkeypatch.setattr(session_module, "quiesce_runtime_db", lambda: None)
     sync = StartupSynchronization.__new__(StartupSynchronization)
     sync._repo_path = repo
     sync._runtime_db_path = root / "Database" / "center.db"
@@ -160,25 +162,32 @@ def test_failed_session_refresh_rolls_back_all_artifacts(snapshot):
     assert '"platform_version": 1' in (root / "metadata" / "version.json").read_text()
 
 
-def test_process_kill_marker_blocks_second_start_before_network_or_git(snapshot):
-    """A killed process leaves its durable marker; restart must fail closed."""
+def test_interrupted_install_replays_verified_old_files_before_git_start(snapshot):
     sync, root = snapshot
+    (root / "Database" / "center.db-wal").write_bytes(b"OLD-WAL")
     sync._begin_startup_install()
     marker = sync._startup_install_marker_path()
-    assert marker.is_file()
     import json
-    assert json.loads(marker.read_text(encoding="utf-8"))["state"] == "INSTALL_PENDING"
+    record = json.loads(marker.read_text(encoding="utf-8"))
+    assert record["format"] == 2 and record["state"] == "INSTALL_PENDING"
 
-    # New object simulates a new EXE process without in-memory rollback state.
+    (root / "Database" / "center.db").write_bytes(b"HALF-INSTALLED")
+    (root / "Database" / "center.db-wal").unlink()
+    (root / "Attachments" / "Employees" / "photo.txt").write_bytes(b"HALF-ATTACH")
+    (root / "manifest.json").write_text('{"runtime_version": 999}')
+    (root / "metadata" / "version.json").write_text('{"platform_version": ')
     restarted = StartupSynchronization.__new__(StartupSynchronization)
     restarted._runtime_db_path = sync._runtime_db_path
-    restarted._repo_path = sync._repo_path
-    restarted._provider = SimpleNamespace(
-        connect=lambda: (_ for _ in ()).throw(AssertionError("Git must not run"))
-    )
-    assert restarted.run() is False
-    assert "Interrupted startup installation" in restarted.recovery_error
-    assert marker.exists()
+    restarted._paths = sync._paths
+    restarted._runtime_manifest_path = sync._runtime_manifest_path
+    restarted._metadata_dir = sync._metadata_dir
+    assert restarted._check_interrupted_startup_install()
+    assert not marker.exists()
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
+    assert (root / "Database" / "center.db-wal").read_bytes() == b"OLD-WAL"
+    assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
+    assert (root / "manifest.json").read_text() == '{"runtime_version": 1}'
+    assert (root / "metadata" / "version.json").read_text() == '{"platform_version": 1}'
 
 
 def test_successful_install_commit_clears_interruption_marker(snapshot):
@@ -218,4 +227,30 @@ def test_failed_rollback_retains_marker_if_db_generation_still_pending(snapshot)
     sync._begin_startup_install()
     sync._startup_db_install_backup = ("dest", "backup", True, ())
     sync._complete_failed_startup_rollback()
+    assert sync._startup_install_marker_path().exists()
+
+
+def test_interrupted_replay_corrupted_backup_blocks_without_changing_local(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    marker = sync._startup_install_marker_path()
+    import json
+    token = json.loads(marker.read_text(encoding="utf-8"))["transaction_id"]
+    saved_db = marker.parent / "startup-replay" / token / "0" / "__file__"
+    saved_db.write_bytes(b"CORRUPTED-BACKUP")
+    (root / "Database" / "center.db").write_bytes(b"HALF-INSTALLED")
+    assert not sync._check_interrupted_startup_install()
+    assert marker.exists()
+    assert (root / "Database" / "center.db").read_bytes() == b"HALF-INSTALLED"
+
+
+def test_interrupted_replay_refuses_incompatible_runtime_target(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    other = StartupSynchronization.__new__(StartupSynchronization)
+    other._runtime_db_path = sync._runtime_db_path
+    other._paths = SimpleNamespace(attachment_dir=root / "other-attachments")
+    other._runtime_manifest_path = sync._runtime_manifest_path
+    other._metadata_dir = sync._metadata_dir
+    assert not other._check_interrupted_startup_install()
     assert sync._startup_install_marker_path().exists()
