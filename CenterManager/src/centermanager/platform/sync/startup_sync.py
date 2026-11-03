@@ -104,19 +104,14 @@ class StartupSynchronization:
         # 5. Always apply repository database to runtime
         if not self._apply_runtime_database():
             logger.error("Failed to apply repository database to runtime")
-            self._rollback_startup_database_install()
-            self._rollback_startup_git_repository()
-            self._complete_failed_startup_rollback()
+            self._rollback_failed_install_all()
             return False
 
         # 6. Refresh database sessions. This is part of startup correctness,
         # not best-effort logging: a copied DB that cannot be opened must make
         # synchronization fail closed.
         if not self._refresh_database_sessions():
-            self._rollback_startup_database_install()
-            self._rollback_startup_assets()
-            self._rollback_startup_git_repository()
-            self._complete_failed_startup_rollback()
+            self._rollback_failed_install_all()
             return False
 
         try:
@@ -195,6 +190,28 @@ class StartupSynchronization:
             getattr(self, "_accepted_startup_main_oid", None),
         )
         self._startup_pending_install = marker
+
+    def _rollback_failed_install_all(self) -> None:
+        """Attempt every rollback even if one artifact cannot be restored.
+
+        Failure to roll back attachments must not suppress restoration of the
+        SQLCipher database and vice versa. Leave the marker if any fails.
+        """
+        failures = []
+        for name, action in (
+            ("database", self._rollback_startup_database_install),
+            ("assets", self._rollback_startup_assets),
+            ("git", self._rollback_startup_git_repository),
+        ):
+            try:
+                action()
+            except Exception as exc:
+                failures.append(name)
+                logger.exception("Startup %s rollback failed: %s", name, exc)
+        if failures:
+            logger.error("Incomplete startup rollback (%s); pending marker retained", failures)
+            return
+        self._complete_failed_startup_rollback()
 
     def _complete_failed_startup_rollback(self) -> None:
         """Remove pending marker only if every in-process rollback completed.
@@ -674,11 +691,20 @@ class StartupSynchronization:
             return True
         except Exception as e:
             logger.exception(f"Failed to copy runtime data: {e}")
-            try:
-                self._rollback_startup_assets()
-                self._rollback_startup_database_install()
-            except Exception:
-                logger.exception("Startup rollback was incomplete; recovery required")
+            # DB and other assets must each get a rollback attempt even when
+            # the other restoration fails. The pending marker stays on disk.
+            failures = []
+            for name, action in (
+                ("database", self._rollback_startup_database_install),
+                ("assets", self._rollback_startup_assets),
+            ):
+                try:
+                    action()
+                except Exception:
+                    failures.append(name)
+                    logger.exception("Startup %s rollback failed", name)
+            if failures:
+                logger.error("Incomplete startup rollback; recovery required: %s", failures)
             return False
 
     def _sync_employee_attachments_from_repository(self) -> None:
