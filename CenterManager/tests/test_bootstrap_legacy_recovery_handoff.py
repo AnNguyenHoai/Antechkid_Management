@@ -16,6 +16,7 @@ def _bootstrap(monkeypatch, tmp_path, *, journal_error=None):
         runtime_root=tmp_path / "runtime",
         database_dir=tmp_path / "runtime" / "Database",
         metadata_dir=tmp_path / "runtime" / "metadata",
+        config_file=tmp_path / "runtime" / "config.json",
     )
     paths.runtime_root.mkdir()
     events = []
