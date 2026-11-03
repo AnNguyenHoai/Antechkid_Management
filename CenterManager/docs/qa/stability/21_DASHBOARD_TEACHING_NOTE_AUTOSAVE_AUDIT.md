@@ -52,3 +52,18 @@ Observed source:
 
 ## Test coverage
 `test_qa_teaching_note_autosave_dashboard_chart.py` checks create/update with implicit progress, no WRITE in disabled history, failed autosave with retry, clearing optional text, compact axis ticks/tooltips and October screenshot cash/inflow arithmetic. Existing financial ledger tests remain untouched.
+
+
+## Founder revision — replace autosave with Save & Close (2026-11-03)
+
+The founder **rejected automatic timed writes** as unsafe. The final intended behavior in PR #553 supersedes the 1.2-second autosave proposal above:
+
+- **No QTimer, no debounce and no write on field change or time passage.** A dirty form remains an in-memory draft.
+- No separate Save button in Teaching Note. The parent dialog's **Close** footer changes to **Save & Close** only when the editable note has changes. It invokes the existing `SessionNoteService` exactly once and closes only after successful persistence.
+- Window-X and Esc follow the same save gate, not a silent discard. If save is denied or fails, retain the dialog, preserve the full draft, warn the user, and permit retry after valid WRITE authority resumes.
+- On READ-only historical session, widgets are disabled, no dirty changes are accepted, and Close simply closes without a DB write. The backend mutation authority guard remains mandatory.
+- A refresh or session switch does not trigger an automatic persistence: if the note is dirty, it is refused with a visible Save & Close instruction. Explicit Cancel in the note is the **only** user-acknowledged unsaved draft discard path.
+- The hidden legacy `teaching_progress` field continues to exist in the schema, with new completed-session notes storing COMPLETED and updates preserving historical progress.
+- Changed Qt tests assert **no service calls during typing, field changes or event processing**, exactly one call on Close-save, failure preservation, inactive/READ behavior, and historical schema compatibility.
+
+The earlier autosave section describes superseded implementation only. **No timed autosave behavior should ship.** Windows CI and EXE runtime UAT are still required before merge.
