@@ -129,3 +129,21 @@ def test_dashboard_cash_and_bank_are_exactly_the_selected_period_receipts():
     )
     assert sum(bucket["income"] for bucket in comparison.values()) == 35_668_794
     assert sum(bucket["expense"] for bucket in comparison.values()) == 0
+
+
+def test_dashboard_zero_realized_expense_is_not_silently_treated_as_full_ledger():
+    from centermanager.ui.finance_workspace.finance_dashboard_page import (
+        FinanceDashboardPage,
+    )
+    observed = FinanceDashboardPage._dashboard_scope_text({
+        "period_configured": True,
+        "revenue_period": 35_668_794,
+        "expense_period": 0,
+    })
+    assert "Paid/Completed" in observed
+    assert "Check the Expense page for Pending" in observed
+    assert "ALL Enrollment wallets" in observed
+    no_period = FinanceDashboardPage._dashboard_scope_text({
+        "period_configured": False, "revenue_period": 0, "expense_period": 0,
+    })
+    assert "Check the Expense page" not in no_period
