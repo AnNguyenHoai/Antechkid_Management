@@ -371,3 +371,56 @@ def test_corrupted_replay_does_not_release_maintenance_fence(snapshot, monkeypat
     assert not sync._check_interrupted_startup_install()
     assert events == ["fence"]
     assert marker.exists()
+
+
+def test_real_sqlcipher_wal_snapshot_recovers_after_partial_file_swap(workspace):
+    """Windows CI: preserve a real encrypted WAL generation, not fake bytes.
+
+    This exercises the replay layer on an isolated SQLCipher fixture, never
+    on a deployed DB. The separate hard-exit test covers process-state loss.
+    """
+    from tests.test_e1b1_durable_write_recovery import connect
+    from centermanager.platform.sync.startup_install_replay import (
+        capture_before_install, recover_interrupted_install,
+    )
+    db = workspace.journal.database
+    writer = connect(db)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("INSERT INTO recovery_items(value) VALUES ('S04_WAL_COMMITTED')")
+        writer.commit()
+        wal = db.with_name(db.name + "-wal")
+        assert wal.exists() and wal.stat().st_size > 0
+
+        runtime = workspace.paths.runtime_root
+        manifest = runtime / "manifest.json"
+        version = workspace.paths.metadata_dir / "version.json"
+        targets = [
+            ("database", db),
+            ("wal", wal),
+            ("shm", db.with_name(db.name + "-shm")),
+            ("journal", db.with_name(db.name + "-journal")),
+            ("employees", workspace.paths.attachment_dir / "Employees"),
+            ("manifest", manifest),
+            ("version", version),
+        ]
+        marker = workspace.journal.root / "startup-install.pending.json"
+        capture_before_install(marker, targets, "a" * 40)
+    finally:
+        writer.close()
+
+    # Clobber a disposable copy only after all SQLCipher connections close.
+    db.write_bytes(b"INCOMPLETE-SYNTHETIC-INSTALL")
+    recover_interrupted_install(marker, targets)
+    assert not marker.exists()
+    restored = connect(db, readonly=True)
+    try:
+        values = [
+            row[0] for row in
+            restored.execute("SELECT value FROM recovery_items ORDER BY id")
+        ]
+        assert values == ["BASE", "S04_WAL_COMMITTED"]
+        assert restored.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        restored.close()
