@@ -136,6 +136,6 @@ def test_unchanged_empty_git_snapshot_still_reaches_waiting_reconciler(machines)
         # repeated reconciliation work or redundant UI updates.
         manager._pending_request = None
         poller._poll()
-        assert len(observed) == 2
+        assert observed.count() == 2
     finally:
         poller._running = False
