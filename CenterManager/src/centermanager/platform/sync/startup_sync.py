@@ -106,6 +106,7 @@ class StartupSynchronization:
             logger.error("Failed to apply repository database to runtime")
             self._rollback_startup_database_install()
             self._rollback_startup_git_repository()
+            self._complete_failed_startup_rollback()
             return False
 
         # 6. Refresh database sessions. This is part of startup correctness,
@@ -115,6 +116,7 @@ class StartupSynchronization:
             self._rollback_startup_database_install()
             self._rollback_startup_assets()
             self._rollback_startup_git_repository()
+            self._complete_failed_startup_rollback()
             return False
 
         try:
@@ -125,6 +127,7 @@ class StartupSynchronization:
             self._rollback_startup_database_install()
             self._rollback_startup_assets()
             self._rollback_startup_git_repository()
+            self._complete_failed_startup_rollback()
             return False
         self._finalize_startup_database_install()
         self._finalize_startup_assets()
@@ -186,6 +189,19 @@ class StartupSynchronization:
             self._startup_pending_install = marker
         finally:
             temporary.unlink(missing_ok=True)
+
+    def _complete_failed_startup_rollback(self) -> None:
+        """Remove pending marker only if every in-process rollback completed.
+
+        If any DB backup, asset snapshot or Git previous HEAD remains, preserve
+        the marker and block the next boot for explicit recovery.
+        """
+        if (getattr(self, "_startup_db_install_backup", None) is None
+                and getattr(self, "_startup_assets", None) is None
+                and not getattr(self, "_startup_previous_local_oid", None)):
+            self._complete_startup_install()
+        else:
+            logger.error("Startup rollback incomplete; interruption marker retained")
 
     def _complete_startup_install(self) -> None:
         """Clear the barrier only after all startup acceptance gates pass."""
