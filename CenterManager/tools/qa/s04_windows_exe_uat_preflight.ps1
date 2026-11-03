@@ -44,7 +44,7 @@ foreach ($path in $observed) {
   if (Test-Path -LiteralPath $path -PathType Leaf) {
     $item = Get-Item -LiteralPath $path
     $evidence += [PSCustomObject]@{
-      RelativePath = [IO.Path]::GetRelativePath($root, $path)
+      RelativePath = $path.Substring($root.Length).TrimStart('\\', '/')
       Bytes = $item.Length
       SHA256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     }
@@ -54,7 +54,7 @@ $employees = Join-Path $runtime "Attachments\Employees"
 if (Test-Path -LiteralPath $employees) {
   foreach ($item in (Get-ChildItem -LiteralPath $employees -File -Recurse)) {
     $evidence += [PSCustomObject]@{
-      RelativePath = [IO.Path]::GetRelativePath($root, $item.FullName)
+      RelativePath = $item.FullName.Substring($root.Length).TrimStart('\\', '/')
       Bytes = $item.Length
       SHA256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
     }
