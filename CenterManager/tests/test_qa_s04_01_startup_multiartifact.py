@@ -131,3 +131,30 @@ def test_staging_error_leaves_local_workspace_intact(snapshot, monkeypatch):
     assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
     assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
     assert (root / "manifest.json").read_text() == '{"runtime_version": 1}'
+
+
+def test_failed_session_refresh_rolls_back_all_artifacts(snapshot):
+    sync, root = snapshot
+    old = (root / "Database" / "center.db").read_bytes()
+    class Provider:
+        def get_local_main_commit(self):
+            return "1" * 40
+        def _run_git_command(self, args):
+            assert args == ["reset", "--hard", "1" * 40]
+    sync._provider = Provider()
+    sync._startup_previous_local_oid = "1" * 40
+    sync._fetch_remote = lambda: True
+    sync._prepare_authoritative_startup_replacement = lambda: True
+    sync._reset_to_remote = lambda: True
+    sync._preflight_authoritative_database = lambda: True
+    sync._refresh_database_sessions = lambda: False
+    sync._finalize_startup_database_install = lambda: None
+    assert sync._apply_runtime_database()
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-MAIN"
+    sync._rollback_startup_database_install()
+    sync._rollback_startup_assets()
+    sync._rollback_startup_git_repository()
+    assert (root / "Database" / "center.db").read_bytes() == old
+    assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
+    assert '"runtime_version": 1' in (root / "manifest.json").read_text()
+    assert '"platform_version": 1' in (root / "metadata" / "version.json").read_text()
