@@ -30,7 +30,7 @@ def test_capture_ciphertext_tamper_is_rejected_without_changing_live_data(worksp
         journal.assert_replaceable()
 
 
-def test_new_journal_instance_blocks_startup_overwrite_of_committed_unpublished_data(workspace):
+def test_new_journal_instance_preserves_before_git_main_wins_on_restart(workspace):
     begin(workspace)
     mutate(workspace)
     original_values = values(workspace.journal.database)
@@ -45,6 +45,10 @@ def test_new_journal_instance_blocks_startup_overwrite_of_committed_unpublished_
 
     from centermanager.platform.sync.startup_sync import StartupSynchronization
     sync = StartupSynchronization(workspace.provider)
-    assert not sync.run()
-    assert values(workspace.journal.database) == original_values
-    assert restarted_journal.inspect()["status"] == "OPEN"
+    assert sync.run()
+    assert values(workspace.journal.database) == ["BASE"]
+    receipt = restarted_journal.inspect()
+    assert receipt["status"] == "CLEAN"
+    capture = receipt["last_capture"]
+    restarted_journal.verify_capture(capture)
+    assert values(Path(capture) / "center.db") == original_values

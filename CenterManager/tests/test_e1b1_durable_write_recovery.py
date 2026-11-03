@@ -160,7 +160,10 @@ def test_dirty_journal_blocks_destructive_boundary(workspace, path):
     if path == 'startup':
         from centermanager.platform.sync.startup_sync import StartupSynchronization
         startup = StartupSynchronization(w.provider)
-        assert not startup.run() and 'protected' in startup.recovery_error
+        assert startup.run()  # New approved startup policy: verified Git MAIN wins.
+        receipt = w.journal.inspect()
+        assert receipt["status"] == "CLEAN"
+        w.journal.verify_capture(receipt["last_capture"])
     elif path == 'runtime':
         from centermanager.platform.sync.write_handoff_runtime_sync_service import RuntimeSyncService
         assert not RuntimeSyncService._apply_runtime_update(SimpleNamespace())
@@ -179,8 +182,11 @@ def test_dirty_journal_blocks_destructive_boundary(workspace, path):
             w.provider.clone()
     else:
         assert not getattr(w.provider, 'reset_to_remote' if path == 'reset' else 'pull')()
-    assert w.journal.database.read_bytes() == before
-    assert (w.journal.repository / 'unpublished.txt').exists()
+    if path != 'startup':
+        assert w.journal.database.read_bytes() == before
+        assert (w.journal.repository / 'unpublished.txt').exists()
+    else:
+        assert values(w.journal.database) == ['BASE']
 
 
 def test_cancel_retains_data_even_without_dirty_flag(workspace):
@@ -356,8 +362,9 @@ def test_restart_with_changed_remote_owner_remains_protected(workspace):
     assert workspace.provider._push_lock_branch(commit, None)
     assert workspace.provider.remote_lock_status()['session_id'] == 'different-session'
     from centermanager.platform.sync.startup_sync import StartupSynchronization
-    assert not StartupSynchronization(workspace.provider).run()
-    assert values(workspace.journal.database) == ['BASE', 'LOCAL_UNACCEPTED']
+    assert StartupSynchronization(workspace.provider).run()
+    assert values(workspace.journal.database) == ['BASE']
+    # Startup has no authority to revoke another session's WRITE lease.
     assert workspace.provider.remote_lock_status()['session_id'] == 'different-session'
 
 

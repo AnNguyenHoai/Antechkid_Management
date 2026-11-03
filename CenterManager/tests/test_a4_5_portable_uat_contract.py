@@ -46,7 +46,7 @@ def test_startup_sync_requires_authoritative_database_before_success():
     apply_block = source[apply_start:apply_end]
     missing_marker = apply_block.index("if not repo_db.exists():")
     return_false = apply_block.index("return False", missing_marker)
-    copy_marker = apply_block.index("with open(repo_db, 'rb')", return_false)
+    copy_marker = apply_block.index("self._install_authoritative_database_atomically(repo_db)", return_false)
     assert missing_marker < return_false < copy_marker
 
     run_start = source.index("    def run(")

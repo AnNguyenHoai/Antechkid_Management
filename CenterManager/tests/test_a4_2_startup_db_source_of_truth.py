@@ -26,6 +26,18 @@ class _FakeProvider:
     def __init__(self):
         self.calls = []
 
+    def get_fetched_remote_main_commit(self):
+        return "a" * 40
+
+    def observe_remote_main_commit(self):
+        return "a" * 40
+
+    def get_local_main_commit(self):
+        return "a" * 40
+
+    def _run_git_command(self, args):
+        self.calls.append("reset")
+
     def connect(self):
         self.calls.append("connect")
         return True
@@ -56,6 +68,10 @@ def _make_sync(tmp_path, monkeypatch):
     )
     sync = StartupSynchronization(_FakeProvider())
     sync._refresh_database_sessions = lambda: True
+    sync._prepare_authoritative_startup_replacement = lambda: setattr(sync, "_accepted_startup_main_oid", "a" * 40) or True
+    sync._install_authoritative_database_atomically = lambda source: (sync._runtime_db_path.write_bytes(source.read_bytes()) or True)
+    sync._finalize_startup_database_install = lambda: None
+    sync._rollback_startup_database_install = lambda: None
     return sync, paths
 
 
@@ -176,6 +192,7 @@ def test_startup_sync_contract_is_remote_database_source_of_truth():
     ).read_text(encoding="utf-8")
 
     assert 'repo_db = self._repo_path / "database" / "center.db"' in source
-    assert "with open(repo_db, 'rb')" in source
-    assert "with open(self._runtime_db_path, 'wb')" in source
+    assert "self._install_authoritative_database_atomically(repo_db)" in source
+    assert "os.replace(stage, dest)" in source
+    assert "session_module.quiesce_runtime_db()" in source
     assert "return False" in source[source.index("if not repo_db.exists()"):source.index("if not repo_db.exists()") + 250]
