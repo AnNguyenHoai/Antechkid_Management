@@ -136,3 +136,15 @@ Do not confuse the dashboard's live collectible debt with its cash-flow window. 
 ### Outstanding list default behavior
 
 The previous `VIEW_OPEN_RECEIVABLES` default omitted prepaid Enrollment rows entirely, despite a visible 'Trả trước / Dư' status filter. It could also hide paid records needed for wallet audit. The Outstanding list now starts in `VIEW_COURSE_BALANCES` so all configured, unconfigured, paid, owed and prepaid enrollments (subject to the existing settled-inactive visibility default) can be filtered without a FinancePeriod. The other two selectors remain available: still-owed open receivables across all periods, and period-overlap cumulative balances. Class filter discovery now uses the same unbounded course view so historical classes are not silently absent. No Income or Enrollment record is migrated.
+
+
+## CI #975 failure audit and remediation (2026-11-03)
+
+Source run: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41581507712 at `4969ef4f`.
+
+- **Shard 0 (two failures)**: Qt narrow-table tests saw `QHeaderView.ResizeMode.Stretch` on first columns of Monthly Attendance and Outstanding, despite `setStretchLastSection(False)`. Fix: explicitly set `QHeaderView.ResizeMode.Interactive` before sizing columns, preserving horizontal overflow behavior.
+- **Shard 2 (three failures)**: (1) F29 source contract expected the label `Công nợ còn mở (tất cả kỳ)`; restored that secondary-mode label while keeping the new all-course default. (2) legacy dashboard stub permits no Outstanding query without FinancePeriod; production `get_receivable_stats()` remains available for true all-course debt, while old period-only stub is not queried when no period exists. (3) old branding source regression demanded stretched Student Finance columns; updated its assertion to require Interactive widths and explicit scrollbars instead.
+- **Shard 1 PASS.** These five failures do not demonstrate corrupted SQLCipher data or incorrect tuition accrual. Older intermediate CI runs contain overlapping failures.
+- Exact new-head Windows CI and SQLCipher-clone/Windows visual UAT remain mandatory before merge.
+
+No Git credentials, EXE/version authorization, database schema or historical ledger mutations were changed by these fixes.
