@@ -88,3 +88,36 @@ def test_student_finance_uses_course_view_and_all_time_tuition_receipts(qapp):
     assert captured[1]["date_from"] is None
     assert captured[1]["date_to"] == date(2026, 11, 3)
     assert captured[1]["income_type"] == "Tuition"
+
+
+def test_open_receivable_stats_ignore_monthly_finance_period():
+    service = OutstandingService(lambda: _Session())
+    calls = []
+
+    def page(**kwargs):
+        calls.append(kwargs)
+        return [], 0, {"total_outstanding": Decimal("300000"),
+                       "total_students_with_debt": 1}
+
+    service.get_outstanding_page = page
+    stats = service.get_receivable_stats(on_date=date(2026, 11, 3))
+    assert stats["total_outstanding"] == Decimal("300000")
+    assert calls[0]["view"] == OutstandingService.VIEW_OPEN_RECEIVABLES
+    assert calls[0]["as_of_date"] == date(2026, 11, 3)
+
+
+def test_finance_dashboard_uses_receivables_not_selected_month_for_debt():
+    from centermanager.services.finance_dashboard_service import FinanceDashboardService
+    class DebtService:
+        def get_receivable_stats(self, *, on_date=None):
+            assert on_date == date(2026, 11, 3)
+            return {"total_outstanding": Decimal("300000"),
+                    "total_students_with_debt": 1}
+        def get_outstanding_stats(self, **kwargs):
+            raise AssertionError("Period-scoped debt is not collectible debt")
+
+    dashboard = FinanceDashboardService.__new__(FinanceDashboardService)
+    dashboard._outstanding_service = DebtService()
+    assert dashboard._get_outstanding_stats(
+        date(2026, 11, 1), date(2026, 11, 3)
+    )["total_outstanding"] == Decimal("300000")
