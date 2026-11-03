@@ -111,3 +111,29 @@ def test_successful_empty_remote_queue_observation_reconciles_waiting_to_idle():
     )
     MainWindow._reconcile_waiting_transaction(window, snapshot)
     assert calls == ["remote-ack", "cancel", "refresh-ui"]
+
+
+def test_unchanged_empty_git_snapshot_still_reaches_waiting_reconciler(machines):
+    """Enqueue+cancel can happen between polls; a pending UI needs fresh ACK."""
+    manager, _ = machines("local-user")
+    poller = CollaborationPoller(manager)
+    observed = []
+    poller.snapshot_changed.connect(lambda snapshot: observed.append(snapshot))
+    poller._running = True
+    try:
+        poller._poll()
+        assert len(observed) == 1
+        # Simulate local WAITING intent whose short-lived remote request has
+        # already been removed before the next remote observation.
+        manager._pending_request = object()
+        poller._poll()
+        assert len(observed) == 2
+        assert observed[-1].queue.get("requests") == []
+        assert observed[-1].remote_lock["state"] == "ABSENT"
+        # Unchanged remote data without local WAITING should not trigger
+        # repeated reconciliation work or redundant UI updates.
+        manager._pending_request = None
+        poller._poll()
+        assert len(observed) == 2
+    finally:
+        poller._running = False
