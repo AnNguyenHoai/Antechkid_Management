@@ -84,7 +84,7 @@ class ChartWidget(QWidget):
     def setData(self, data: List[Tuple[str, float]], colors: List[str]) -> None:
         self._data = data
         self._colors = colors
-        self.setToolTip("\\n".join(
+        self.setToolTip("\n".join(
             f"{label}: {float(value):,.0f} VND" for label, value in data
         ))
         self.update()
