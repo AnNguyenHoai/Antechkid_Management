@@ -239,7 +239,8 @@ def test_untracked_cleanup_never_runs_without_verified_reconciliation():
 
 def test_startup_copy_failure_after_db_install_does_not_complete(tmp_path, monkeypatch):
     """Fault-injection contract: failed attachment materialization rejects startup."""
-    import centermanager.platform.sync.startup_sync as mod
+    import centermanager.platform.write_recovery as recovery
+    monkeypatch.setattr(recovery, "require_replaceable", lambda: None)
 
     root = tmp_path / "runtime"
     (root / "repository" / "database").mkdir(parents=True)
