@@ -198,3 +198,24 @@ def test_truncated_interruption_marker_still_blocks_startup(snapshot):
     marker.write_text('{"format":', encoding="utf-8")
     assert not sync._check_interrupted_startup_install()
     assert marker.read_text(encoding="utf-8") == '{"format":'
+
+
+def test_complete_failed_rollback_releases_marker_only_when_all_phases_clean(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    sync._startup_assets = ([("pending", "backup", True)], None)
+    sync._startup_previous_local_oid = "a" * 40
+    sync._complete_failed_startup_rollback()
+    assert sync._startup_install_marker_path().exists()
+    sync._startup_assets = None
+    sync._startup_previous_local_oid = None
+    sync._complete_failed_startup_rollback()
+    assert not sync._startup_install_marker_path().exists()
+
+
+def test_failed_rollback_retains_marker_if_db_generation_still_pending(snapshot):
+    sync, root = snapshot
+    sync._begin_startup_install()
+    sync._startup_db_install_backup = ("dest", "backup", True, ())
+    sync._complete_failed_startup_rollback()
+    assert sync._startup_install_marker_path().exists()
