@@ -33,6 +33,7 @@ from centermanager.services.tuition_detail_service import TuitionDetailService
 from centermanager.ui.design_system import SecondaryButton
 from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.finance_workspace.tuition_detail_dialog import TuitionDetailDialog
+from centermanager.ui.finance_workspace.tuition_period_movement_dialog import TuitionPeriodMovementDialog
 from centermanager.ui.shared import DataTable, LoadingWidget, SearchToolbar, TableDensity
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class OutstandingListPage(QWidget):
         self._items: List[OutstandingDTO] = []
         self._target_date = get_clock().today()
         self._period_start: Optional[date] = None
+        self._period_end: Optional[date] = None
         self._period_configured = None
         self._current_page = 1
         self._page_size = 20
@@ -97,6 +99,11 @@ class OutstandingListPage(QWidget):
         self.export_btn.setFixedHeight(34)
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
+
+        self.movement_btn = SecondaryButton("Biến động công nợ kỳ")
+        self.movement_btn.setFixedHeight(34)
+        self.movement_btn.clicked.connect(self._open_movement_report)
+        top_row.addWidget(self.movement_btn)
         top_row.addStretch()
         toolbar_layout.addLayout(top_row)
 
@@ -209,8 +216,11 @@ class OutstandingListPage(QWidget):
         period_configured=None,
         **_kwargs,
     ) -> None:
-        del period_end
         previous_period = self._period_start
+        if period_end is not None:
+            self._period_end = period_end
+        elif period_configured is False:
+            self._period_end = None
         if target_date is not None:
             self._target_date = target_date
         if period_configured is not None:
@@ -412,6 +422,27 @@ class OutstandingListPage(QWidget):
         self.class_combo.blockSignals(class_blocked)
         self._current_page = 1
         self._load_page()
+
+    def _open_movement_report(self) -> None:
+        """Explicit ledger movement window, separate from cumulative balances."""
+        if (self._period_configured is False or self._period_start is None
+                or self._period_end is None):
+            QMessageBox.information(
+                self, "Chưa có kỳ tài chính",
+                "Cần chọn kỳ tài chính có ngày bắt đầu và kết thúc để xem biến động."
+            )
+            return
+        try:
+            TuitionPeriodMovementDialog(
+                self._service,
+                self._period_start,
+                self._period_end,
+                class_id=self.class_combo.currentData(),
+                parent=self,
+            ).exec()
+        except Exception as exc:
+            logger.exception("Tuition period movement report failed")
+            QMessageBox.critical(self, "Lỗi báo cáo biến động", str(exc))
 
     def _export_csv(self) -> None:
         if self._period_configured is False and self._view() == OutstandingService.VIEW_PERIOD_ACTIVITY:
