@@ -4,6 +4,7 @@ FinanceDashboardService - Read-only aggregation service for Finance Dashboard.
 """
 import logging
 from datetime import date
+from decimal import Decimal
 from typing import Dict, List, Any, Optional, Tuple
 
 from centermanager.services.income_service import IncomeService
@@ -241,6 +242,26 @@ class FinanceDashboardService:
             "Other": 0.0,
         }
 
+    def _expense_ledger_scope(self, period_start: date, query_end: date):
+        """Read-only totals; keep recorded/pending distinct from cash paid."""
+        aggregate = getattr(self._expense_service, "sum_expenses", None)
+        if not callable(aggregate):
+            return {}
+        kwargs = dict(
+            finance_period_start=period_start,
+            date_from=period_start,
+            date_to=query_end,
+            realized_only=False,
+        )
+        recorded = aggregate(**kwargs)
+        pending = aggregate(status="Pending", **kwargs)
+        if not all(isinstance(x, (int, float, Decimal)) for x in (recorded, pending)):
+            return {}
+        return {
+            "expense_recorded_period": float(recorded),
+            "expense_pending_period": float(pending),
+        }
+
     def get_dashboard_data(
         self,
         target_date: Optional[date] = None,
@@ -309,6 +330,7 @@ class FinanceDashboardService:
         )
         revenue_period = sum(revenue_by_method.values())
         expense_period = sum(expense_by_method.values())
+        expense_scope = self._expense_ledger_scope(resolved_period_start, query_end)
         stats = self._get_outstanding_stats(
             resolved_period_start,
             target,
@@ -341,6 +363,7 @@ class FinanceDashboardService:
             "revenue_month": revenue_period,
             "expense_today": self.get_expense_today(),
             "expense_period": expense_period,
+            **expense_scope,
             "expense_month": expense_period,
             "net_cash_flow": revenue_period - expense_period,
             "recent_income": recent_income,
