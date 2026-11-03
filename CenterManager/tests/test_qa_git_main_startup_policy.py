@@ -135,6 +135,9 @@ def test_post_install_failure_restores_previous_db_and_sidecar(tmp_path, monkeyp
     startup._runtime_db_path = old
     original = old.read_bytes()
     assert startup._install_authoritative_database_atomically(source)
+    saved = startup._startup_db_install_backup
+    assert saved[1].anchor == old.anchor
+    assert saved[1].is_relative_to(old.parent.parent.parent)
     startup._rollback_startup_database_install()
     assert old.read_bytes() == original
     assert sidecar.read_bytes() == b"synthetic legacy sidecar"
