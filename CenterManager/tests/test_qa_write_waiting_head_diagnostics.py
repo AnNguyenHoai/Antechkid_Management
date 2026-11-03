@@ -69,3 +69,45 @@ def test_grace_never_grants_waiting_queue_head(machines, clock):
         poller._running = False
     assert not waiter.is_writing()
     assert waiter.get_queue()["next"]["request_id"] == request.request_id
+
+
+def test_successful_empty_remote_queue_observation_reconciles_waiting_to_idle():
+    """If Git's authoritative queue is empty, UI cannot keep position 1."""
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from centermanager.ui.main_window import MainWindow
+    from centermanager.platform.collaboration.poller import CollaborationSnapshot
+    from centermanager.services.write_transaction import WriteTransactionState
+
+    calls = []
+    now = datetime.now()
+    tx = SimpleNamespace(
+        state=WriteTransactionState.WAITING,
+        _waiting_request_id="req-local",
+        get_waiting_started_at=lambda: now - timedelta(seconds=15),
+        begin_grant=lambda: calls.append("grant"),
+        on_write_granted=lambda: calls.append("write"),
+        cancel_waiting=lambda message: calls.append("cancel"),
+    )
+    class Collab:
+        def get_session_id(self): return "local-session"
+        def has_verified_waiting_grant(self, request_id): return False
+        def reconcile_waiting_request(self, request_id):
+            calls.append("remote-ack")
+            return True
+
+    window = SimpleNamespace(
+        _transaction=tx,
+        _collaboration_manager=Collab(),
+        statusBar=lambda: SimpleNamespace(showMessage=lambda *args: None),
+        _update_write_buttons=lambda: calls.append("refresh-ui"),
+    )
+    snapshot = CollaborationSnapshot(
+        observation_started_at=now,
+        poll_status="success",
+        is_stale=False,
+        queue={"length": 0, "requests": [], "next": None},
+        remote_lock={"state": "ABSENT", "locked": False},
+    )
+    MainWindow._reconcile_waiting_transaction(window, snapshot)
+    assert calls == ["remote-ack", "cancel", "refresh-ui"]
