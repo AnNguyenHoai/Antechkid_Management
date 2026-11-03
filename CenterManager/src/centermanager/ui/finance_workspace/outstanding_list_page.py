@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -168,6 +169,7 @@ class OutstandingListPage(QWidget):
         # Preserve readable amounts and class names, scroll horizontally on
         # smaller windows instead of shrinking seven finance columns.
         grid = self.data_table.table
+        grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         grid.horizontalHeader().setStretchLastSection(False)
         grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
