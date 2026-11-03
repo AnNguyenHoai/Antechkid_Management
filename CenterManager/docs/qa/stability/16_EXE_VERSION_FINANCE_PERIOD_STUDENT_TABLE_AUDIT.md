@@ -131,3 +131,8 @@ This adjustment does **not** authorize cross-course transfers or credit reassign
 `FinanceDashboardService` previously derived Outstanding Tuition from the selected FinancePeriod's overlapping Enrollment set and returned zero debt if no period was configured, even though the center could have collectible Enrollment receivables. This PR adds `OutstandingService.get_receivable_stats(on_date=...)` backed by `VIEW_OPEN_RECEIVABLES` and uses it for the dashboard's debt KPI. Missing FinancePeriod now leaves Income/Expense period KPIs unavailable/zero but retains **course receivables and debtor counts**. Existing synthetic dashboard stubs using only the legacy method remain supported. The selected-period Income/Expense and Settlement calculation paths are unchanged.
 
 Do not confuse the dashboard's live collectible debt with its cash-flow window. Regression tests prove the debt projection is not constrained by the month and is still available when no FinancePeriod exists.
+
+
+### Outstanding list default behavior
+
+The previous `VIEW_OPEN_RECEIVABLES` default omitted prepaid Enrollment rows entirely, despite a visible 'Trả trước / Dư' status filter. It could also hide paid records needed for wallet audit. The Outstanding list now starts in `VIEW_COURSE_BALANCES` so all configured, unconfigured, paid, owed and prepaid enrollments (subject to the existing settled-inactive visibility default) can be filtered without a FinancePeriod. The other two selectors remain available: still-owed open receivables across all periods, and period-overlap cumulative balances. Class filter discovery now uses the same unbounded course view so historical classes are not silently absent. No Income or Enrollment record is migrated.
