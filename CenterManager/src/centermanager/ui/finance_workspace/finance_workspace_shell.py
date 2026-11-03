@@ -121,11 +121,9 @@ class FinanceWorkspaceShell(QWidget):
             self.header.set_context("Finance Workspace", "Access restricted")
 
     def _has_finance_access(self) -> bool:
-        try:
-            user = get_current_user()
-            return bool(user and (user.has_permission("finance.view") or user.is_admin))
-        except Exception:
-            return False
+        # Access is capability-based for EVERY role, including customized admin
+        # accounts. Match FinanceDiagnosticsService's finance.view guard.
+        return has_capability(Capability.FINANCE_VIEW)
 
     def _can_manage_periods(self) -> bool:
         try:
