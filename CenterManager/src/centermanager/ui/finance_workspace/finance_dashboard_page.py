@@ -64,6 +64,15 @@ class FinanceDashboardPage(QWidget):
 
         self.stats_grid = StatisticGrid()
         container_layout.addWidget(self.stats_grid)
+        scope_help = QLabel(
+            "Income: active receipts; Expense: Paid/Completed only. "
+            "Net: received minus paid in the selected period. "
+            "Tuition debt: current open receivables across ALL Enrollments, "
+            "not just the selected month."
+        )
+        scope_help.setWordWrap(True)
+        scope_help.setStyleSheet("color: #536479; font-size: 12px;")
+        container_layout.addWidget(scope_help)
 
         drilldown_row = QHBoxLayout()
         drilldown_row.setSpacing(SPACING['sm'])
@@ -86,7 +95,7 @@ class FinanceDashboardPage(QWidget):
         container_layout.addLayout(drilldown_row)
 
         self.cash_vs_bank_chart = ChartCard(
-            "Cash vs Bank - Inflow / Outflow (Selected Period)", "bar"
+            "Cash vs Bank - Inflow / Outflow (Selected Period, VND)", "bar"
         )
         container_layout.addWidget(self.cash_vs_bank_chart)
 
@@ -202,12 +211,12 @@ class FinanceDashboardPage(QWidget):
 
         self.stats_grid.set_metrics([
             {"icon": "income", "label": "Income Selected Period", "value": fmt_money(data.get("revenue_period", 0)), "tone": "success"},
-            {"icon": "expense", "label": "Expense Selected Period", "value": fmt_money(data.get("expense_period", 0)), "tone": "danger"},
-            {"icon": "finance", "label": "Net Selected Period", "value": fmt_money(data.get("net_cash_flow", 0)), "tone": "primary"},
-            {"icon": "warning", "label": "Outstanding Tuition", "value": fmt_money(data.get("total_outstanding", 0)), "tone": "warning"},
+            {"icon": "expense", "label": "Paid Expense Selected Period", "value": fmt_money(data.get("expense_period", 0)), "tone": "danger"},
+            {"icon": "finance", "label": "Net Cash Flow Selected Period", "value": fmt_money(data.get("net_cash_flow", 0)), "tone": "primary"},
+            {"icon": "warning", "label": "Outstanding Tuition (all courses)", "value": fmt_money(data.get("total_outstanding", 0)), "tone": "warning"},
             {"icon": "income", "label": "Income Today", "value": fmt_money(data.get("revenue_today", 0)), "tone": "success"},
             {"icon": "expense", "label": "Expense Today", "value": fmt_money(data.get("expense_today", 0)), "tone": "danger"},
-            {"icon": "student", "label": "Students With Debt", "value": str(data.get("students_with_debt", 0)), "tone": "warning"},
+            {"icon": "student", "label": "Students With Debt (all courses)", "value": str(data.get("students_with_debt", 0)), "tone": "warning"},
             {"icon": "warning", "label": "Tuition Not Configured", "value": str(data.get("unconfigured_tuition_count", 0)), "tone": "warning"},
         ], columns=4)
 
