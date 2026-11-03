@@ -48,13 +48,28 @@ class BootstrapManager:
             config = get_config().raw
             paths = get_paths()
 
-            from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+            # Do not apply the destructive-replacement gate here: a legacy
+            # installation without an E1B receipt must first be allowed to
+            # establish a fresh Git MAIN observation and preserve/reconcile its
+            # local workspace. StartupSynchronization owns that transaction.
+            # The old bootstrap precheck rejected it *before* recovery could
+            # run, making upgraded Windows EXEs impossible to start.
+            #
+            # Inspect metadata only: malformed journals remain blocked while
+            # no SQLCipher/Git/local-work mutation is allowed at this stage.
+            from centermanager.platform.write_recovery import (
+                WriteRecoveryJournal, RecoveryRequired,
+            )
             try:
-                require_replaceable(legacy=True)
+                WriteRecoveryJournal(paths).inspect()
             except RecoveryRequired as exc:
+                logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
                 from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(None, "WRITE recovery required", str(exc) +
-                    "\nWith CenterManager stopped, run: python -m centermanager.platform.write_recovery inspect")
+                QMessageBox.critical(
+                    None, "WRITE recovery required",
+                    str(exc) + "\nPreserve the runtime and recovery folder; "
+                    "do not remove either to bypass this guard.",
+                )
                 return False
 
             repo_state = self._repo_manager.detect()
@@ -237,9 +252,15 @@ class BootstrapManager:
             database_version=1,
             minimum_app_version="0.1.0",
         )
-        writer = AtomicFileWriter(paths.runtime_root / "manifest.json")
-        writer.write_json(manifest.to_dict())
-        logger.info("[BOOTSTRAP] Default runtime created")
+        manifest_path = paths.runtime_root / "manifest.json"
+        if manifest_path.exists():
+            # Provisioning may create missing directories, but must never
+            # overwrite a legacy manifest before Git and recovery preflight.
+            logger.info("[BOOTSTRAP] Existing legacy manifest preserved")
+        else:
+            writer = AtomicFileWriter(manifest_path)
+            writer.write_json(manifest.to_dict())
+            logger.info("[BOOTSTRAP] Missing default manifest created")
 
     def _build_runtime_context(self, paths) -> RuntimeContext:
         try:
