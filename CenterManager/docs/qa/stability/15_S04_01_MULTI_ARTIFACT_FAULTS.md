@@ -52,3 +52,9 @@ Tests cover process-restart replay, corruption refusal, runtime mismatch refusal
 - A bare filesystem copy may capture an inconsistent database if another writer exists despite quiescing the local process; verify the WRITE authority guard and snapshot consistency on real SQLCipher fixtures.
 - The preserved backup folder may grow; define retention/cleanup only after safe independent snapshot acceptance, never delete a pending recovery copy.
 - The initial marker format 1 is intentionally not auto-replayed (no verified rollback inventory) and remains manual fail-closed.
+
+
+### Follow-up hardening
+- Added child-process `os._exit(71)` fixture to simulate actual loss of Python process state after writing a durable marker and partial live artifacts, then verify fresh parent replay.
+- Added a centralized `_rollback_failed_install_all` so DB, attachments/metadata and Git rollback are all attempted even if an earlier restoration throws. Partial failure retains the marker and blocks the next startup.
+- Exact-head CI validation remains required. This test does not claim Windows power-loss atomicity.
