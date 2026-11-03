@@ -35,3 +35,12 @@ At Finance Workspace > Diagnostics, As of 03/11/2026, All findings, UI displays:
 - Add Windows SQLCipher/worker-thread integration tests using cloned **synthetic** runtime for admin lacking finance.view, authorized finance role, schema missing one D02 column, maintenance fence error, query_only cleanup, and permission revocation while an async task is pending.
 
 **Conclusion:** screenshot proves diagnostic read ERROR, not an empty list of anomalies or DB corruption. Exact root requires local exception-class evidence or isolated reproduction. No security gates, finance records, or Git MAIN have been changed.
+
+
+## Founder-approved access policy — implemented
+
+**Decision:** any active account holding the persisted `finance.view` capability may access Finance Workspace and Finance Diagnostics, regardless of role name. Role names such as `admin` and `finance` alone do not override a revoked or missing `finance.view`.
+
+Changed `FinanceWorkspaceShell._has_finance_access` to use the same canonical `AuthorizationService.allows(user, Capability.FINANCE_VIEW)` check as `FinanceDiagnosticsService.get_findings` and `FinanceDiagnosticsPage._principal_snapshot`. This removes the conditional admin-only UI bypass. Added regression for permitted/denied admin, finance, teacher, reception, manager, plus inactive users.
+
+This change **does not** alter WRITE, settlement, finance-period-admin permissions or automatically grant rights to any role. The default seeded admin remains authorized because it already has all persisted permissions. If the screenshot error occurs for an account with verified `finance.view`, this access-policy fix alone does NOT repair SQLCipher/schema/SQL query failures; inspect the sanitized client log.
