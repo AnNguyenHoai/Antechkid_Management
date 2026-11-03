@@ -165,6 +165,12 @@ class StartupSynchronization:
             from centermanager.database import session as session_module
             session_module.quiesce_runtime_db()
             recover_interrupted_install(marker, self._startup_replay_targets())
+            # Replay has restored and verified the original files. No live
+            # process is allowed to use them yet (startup/login has not
+            # completed), but the process-global maintenance flag MUST be
+            # released so Git MAIN preflight and SQLCipher validation can run.
+            # The authoritative install will acquire its own fence.
+            session_module.end_runtime_db_maintenance()
             logger.warning(
                 "Interrupted local install restored from verified snapshot; "
                 "normal Git MAIN synchronization is still mandatory"
