@@ -301,6 +301,9 @@ class SessionDetailDialog(QDialog):
         return widget
 
     def _load_session(self) -> None:
+        # Never reload a Teaching Note and destroy a pending autosave draft.
+        if hasattr(self, "note_widget") and not self.note_widget.flush_pending():
+            return
         try:
             self._session = self._session_service.get_session(self._session_id)
             if not self._session:
@@ -414,3 +417,23 @@ class SessionDetailDialog(QDialog):
 
     def refresh(self) -> None:
         self._load_session()
+
+    def accept(self) -> None:
+        if not self.note_widget.flush_pending():
+            QMessageBox.warning(
+                self, "Unsaved Teaching Note",
+                "The note could not be saved. Keep this window open until "
+                "WRITE access is available, or cancel your edits explicitly.",
+            )
+            return
+        super().accept()
+
+    def reject(self) -> None:
+        if not self.note_widget.flush_pending():
+            QMessageBox.warning(
+                self, "Unsaved Teaching Note",
+                "The note could not be saved. The window will stay open "
+                "to preserve your edits.",
+            )
+            return
+        super().reject()
