@@ -117,19 +117,21 @@ def test_unchanged_empty_git_snapshot_still_reaches_waiting_reconciler(machines)
     """Enqueue+cancel can happen between polls; a pending UI needs fresh ACK."""
     manager, _ = machines("local-user")
     poller = CollaborationPoller(manager)
-    observed = []
-    poller.snapshot_changed.connect(lambda snapshot: observed.append(snapshot))
+    # QThread-affine QObject signals can queue Python lambda callbacks until
+    # the Qt event loop spins. QSignalSpy observes the actual signal emission.
+    from PySide6.QtTest import QSignalSpy
+    observed = QSignalSpy(poller.snapshot_changed)
     poller._running = True
     try:
         poller._poll()
-        assert len(observed) == 1
+        assert observed.count() == 1
         # Simulate local WAITING intent whose short-lived remote request has
         # already been removed before the next remote observation.
         manager._pending_request = object()
         poller._poll()
-        assert len(observed) == 2
-        assert observed[-1].queue.get("requests") == []
-        assert observed[-1].remote_lock["state"] == "ABSENT"
+        assert observed.count() == 2
+        assert poller.get_last_snapshot().queue.get("requests") == []
+        assert poller.get_last_snapshot().remote_lock["state"] == "ABSENT"
         # Unchanged remote data without local WAITING should not trigger
         # repeated reconciliation work or redundant UI updates.
         manager._pending_request = None
