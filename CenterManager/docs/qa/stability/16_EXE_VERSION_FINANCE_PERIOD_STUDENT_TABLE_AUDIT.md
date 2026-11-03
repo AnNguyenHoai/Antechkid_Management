@@ -115,3 +115,12 @@ The true period movement formula (opening balance + newly accrued sessions − n
 `test_qa_course_tuition_scope.py` asserts the all-Enrollment read view bypasses FinancePeriod resolution, keeps exact Enrollment identities, forwards the old list adapter without NameError and presents all-time active Tuition history with the selected as-of cutoff. `test_qa_ui_narrow_table_scroll.py` checks visible horizontal scrolling on narrow grids.
 
 Merge gate: Windows CI on exact PR head plus financial comparison against a cloned SQLCipher DB and 100/125/150% DPI visual checks. No live DB or Git MAIN changes.
+
+
+### Per-Enrollment credit isolation — additional finding and implementation
+
+A separate cross-course netting issue was confirmed: `StudentOutstandingSummary.total_outstanding = total_expected - total_paid` is a **signed reconciliation** and may offset debt from Enrollment A with prepaid credit from Enrollment B. Under the center's per-course credit policy this is not a valid collectible-debt number. The underlying `OutstandingDTO` already exposes per-Enrollment `debt_amount` and `prepaid_amount` and the Finance Outstanding stats already sum these **separately**.
+
+This PR changes `StudentOutstandingSummary.debt_amount` and `.prepaid_amount` to aggregate exact Enrollment details independently (only for configured tuition), and changes the Student Financial headline to show **receivable debt without credit offset**. The independent prepaid amount is shown as a separate status when nonzero. `total_outstanding` remains a signed historical/reconciliation amount for backwards compatibility; it must not be used as collectible debt. Existing ledgers/Income/Enrollment records are untouched. Added regression for Enrollment 42 debt 300k plus Enrollment 43 prepaid 150k: collectible debt must be 300k and credit 150k, not net 150k.
+
+This adjustment does **not** authorize cross-course transfers or credit reassignment. Such transfers would require an explicit audited business workflow outside this change.
