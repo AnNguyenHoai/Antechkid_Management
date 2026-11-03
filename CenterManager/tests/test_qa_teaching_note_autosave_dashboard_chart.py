@@ -59,9 +59,10 @@ def test_note_autosave_after_edit_preserves_legacy_progress_without_duplicate_in
     assert notes.calls[-1][0] == "update"
     assert "teaching_progress" not in notes.calls[-1][1]
     assert notes.note.teaching_progress == TeachingProgress.EXCEEDED_PLAN.value
-    assert "Teaching Progress" not in [
-        widget.findChild(type(widget.teaching_combo)).objectName()
-    ]
+    from PySide6.QtWidgets import QLabel
+    assert not any(
+        "Teaching Progress" in label.text() for label in widget.findChildren(QLabel)
+    )
 
 
 def test_autosave_does_not_write_in_historical_readonly_mode(qapp):
