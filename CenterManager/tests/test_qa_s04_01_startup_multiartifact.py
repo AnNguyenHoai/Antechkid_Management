@@ -49,6 +49,7 @@ def snapshot(tmp_path, monkeypatch):
         return True
 
     sync._install_authoritative_database_atomically = install
+    sync._rollback_startup_database_install = lambda: sync._runtime_db_path.write_bytes(b"DB-LOCAL")
     return sync, root
 
 
@@ -61,7 +62,6 @@ def test_successful_snapshot_materializes_matching_main_artifacts(snapshot):
     assert '"platform_version": 2' in (root / "metadata" / "version.json").read_text()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG S04-01: failed attachment copy leaves mixed snapshot")
 def test_fault_during_attachment_copy_restores_old_snapshot(snapshot):
     sync, root = snapshot
     def partial_copy():
@@ -76,7 +76,6 @@ def test_fault_during_attachment_copy_restores_old_snapshot(snapshot):
     assert '"runtime_version": 1' in (root / "manifest.json").read_text()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG S04-01: failed metadata update leaves mixed snapshot")
 def test_fault_during_metadata_update_restores_old_snapshot(snapshot, monkeypatch):
     sync, root = snapshot
     original = __import__("json").dump
@@ -92,3 +91,40 @@ def test_fault_during_metadata_update_restores_old_snapshot(snapshot, monkeypatc
     assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
     assert '"runtime_version": 1' in (root / "manifest.json").read_text()
     assert '"platform_version": 1' in (root / "metadata" / "version.json").read_text()
+
+
+def test_manifest_copy_error_rolls_back_all_artifacts(snapshot, monkeypatch):
+    sync, root = snapshot
+    import builtins
+    real_open = builtins.open
+
+    def fail_manifest_write(path, mode="r", *args, **kwargs):
+        if str(path) == str(root / "manifest.json") and mode == "wb":
+            raise OSError("injected manifest install fault")
+        return real_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fail_manifest_write)
+    assert sync._apply_runtime_database() is False
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
+    assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
+    assert (root / "manifest.json").read_text() == '{"runtime_version": 1}'
+    assert (root / "metadata" / "version.json").read_text() == '{"platform_version": 1}'
+
+
+def test_staging_error_leaves_local_workspace_intact(snapshot, monkeypatch):
+    sync, root = snapshot
+    import shutil
+    real_copytree = shutil.copytree
+
+    def fail_stage(src, dst, *args, **kwargs):
+        if str(src).endswith("repository/Attachments/Employees") or (
+            Path(src).parts[-3:] == ("repository", "Attachments", "Employees")
+        ):
+            raise OSError("injected staging failure")
+        return real_copytree(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copytree", fail_stage)
+    assert sync._apply_runtime_database() is False
+    assert (root / "Database" / "center.db").read_bytes() == b"DB-LOCAL"
+    assert (root / "Attachments" / "Employees" / "photo.txt").read_bytes() == b"PHOTO-LOCAL"
+    assert (root / "manifest.json").read_text() == '{"runtime_version": 1}'
