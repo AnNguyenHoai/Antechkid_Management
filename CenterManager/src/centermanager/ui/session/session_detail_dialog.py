@@ -390,8 +390,9 @@ class SessionDetailDialog(QDialog):
             self.status_icon_label.setStyleSheet("color: #ff9800;")
 
     def _on_note_changed(self) -> None:
+        # SessionNoteWidget already holds the successfully saved record.
+        # Avoid a redundant reload that could clear a newer local draft.
         self._update_summary()
-        self.note_widget._load_note()
         self.session_updated.emit()
 
     def _on_highlight_changed(self) -> None:
