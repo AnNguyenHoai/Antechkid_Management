@@ -59,10 +59,11 @@ def capture_before_install(marker, targets, accepted_oid):
     folder.mkdir(parents=True, exist_ok=False)
     inventory = []
     for index, (label, target) in enumerate(targets):
-        target = Path(target).resolve()
-        kind = "directory" if target.is_dir() else "file" if target.is_file() else "missing"
+        target = Path(target)
         if target.is_symlink():
             raise InterruptedInstallError("Symlink in startup workspace.")
+        target = target.resolve()
+        kind = "directory" if target.is_dir() else "file" if target.is_file() else "missing"
         saved = folder / str(index)
         hashes = {}
         if kind != "missing":
