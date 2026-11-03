@@ -152,8 +152,15 @@ class StudentFinancialWidget(QWidget):
             empty_message="Tuition details will appear when the student has a configured enrollment.",
             parent=class_card,
         )
-        self.detail_data_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.detail_data_table.table.horizontalHeader().setStretchLastSection(False)
+        # A five-column enrollment balance must remain legible in the narrow
+        # Student Detail tab: do not compress columns to fit the viewport.
+        detail_grid = self.detail_data_table.table
+        detail_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        detail_grid.horizontalHeader().setStretchLastSection(False)
+        detail_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        detail_grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for col, width in enumerate((200, 125, 125, 155, 125)):
+            detail_grid.setColumnWidth(col, width)
         class_card.add_widget(self.detail_data_table)
         layout.addWidget(class_card)
 
@@ -177,8 +184,13 @@ class StudentFinancialWidget(QWidget):
             empty_message="Payments for this finance period will appear here.",
             parent=history_card,
         )
-        self.payment_table.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.payment_table.table.horizontalHeader().setStretchLastSection(False)
+        history_grid = self.payment_table.table
+        history_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        history_grid.horizontalHeader().setStretchLastSection(False)
+        history_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        history_grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for col, width in enumerate((110, 190, 130, 140, 140, 160)):
+            history_grid.setColumnWidth(col, width)
         history_card.add_widget(self.payment_table)
         layout.addWidget(history_card, 1)
 
