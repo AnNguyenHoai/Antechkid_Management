@@ -134,7 +134,7 @@ def test_invalid_period_refuses_unsafe_opening():
 def test_settlement_reader_is_required_not_silently_ignored():
     svc = make_svc([contract(1)], {}, {})
     svc._outstanding._repository_provider.incomes = lambda _: object()
-    with pytest.raises(RuntimeError, match="canonical signed"):
+    with pytest.raises(RuntimeError, match="Canonical signed"):
         svc.build(period_start=NOV_START, period_end=NOV_END)
 
 
