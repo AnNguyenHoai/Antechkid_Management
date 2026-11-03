@@ -158,3 +158,56 @@ def test_dialog_csv_contains_signed_components_and_exact_enrollment(qapp):
     assert "Enrollment" in dialog.to_csv()
     assert "-25" in dialog.to_csv()
     dialog.close()
+
+
+def test_monthly_cutover_uses_prior_closing_as_next_opening():
+    """Contract never resets when a month changes; dates are inclusive."""
+    enrollment = contract(1)
+    class FlexibleIncome:
+        def __init__(self):
+            self.events = [
+                component(date(2026, 10, 31), 100),
+                component(date(2026, 11, 1), 75),
+                component(date(2026, 11, 30), 25),
+                component(date(2026, 12, 1), 50),
+            ]
+        def list_active_tuition_settlement_components(self, eid, *, as_of_date):
+            return [x for x in self.events if x.effective_date <= as_of_date]
+    income = FlexibleIncome()
+    provider = SimpleNamespace(
+        enrollments=lambda _: SimpleNamespace(
+            list_for_outstanding=lambda **kw: ([enrollment], 1)
+        ),
+        incomes=lambda _: income,
+    )
+    daily_earned = {
+        date(2026, 10, 31): 500,
+        date(2026, 11, 30): 900,
+        date(2026, 12, 31): 1300,
+    }
+    source = SimpleNamespace(
+        _session_factory=FakeSession,
+        _repository_provider=provider,
+        _calculate_accrued=lambda session, contract, *, as_of_date:
+            (Decimal(daily_earned[as_of_date]), True),
+    )
+    svc = TuitionPeriodMovementService(source)
+    nov = svc.build(period_start=date(2026, 11, 1), period_end=date(2026, 11, 30))
+    dec = svc.build(period_start=date(2026, 12, 1), period_end=date(2026, 12, 31))
+    assert nov.rows[0].opening == 400
+    assert nov.rows[0].received == 100
+    assert nov.rows[0].closing == 700
+    assert dec.rows[0].opening == nov.rows[0].closing
+    assert dec.rows[0].received == 50
+    assert dec.rows[0].closing == 1050
+
+
+def test_unknown_settlement_type_fails_closed():
+    svc = make_svc(
+        [contract(1)],
+        {(1, OCT_END): (Decimal(0), True),
+         (1, NOV_END): (Decimal(0), True)},
+        {1: [component(NOV_START, 5, "UNKNOWN_LEDGER_TYPE")]},
+    )
+    with pytest.raises(RuntimeError, match="Unsupported tuition settlement"):
+        svc.build(period_start=NOV_START, period_end=NOV_END)
