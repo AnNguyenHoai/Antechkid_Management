@@ -104,7 +104,7 @@ class OutstandingListPage(QWidget):
         filter_row.setSpacing(SPACING["sm"])
         self.view_combo = QComboBox()
         self.view_combo.addItem("Tất cả khóa (số dư lũy kế)", OutstandingService.VIEW_COURSE_BALANCES)
-        self.view_combo.addItem("Chỉ còn nợ (tất cả kỳ)", OutstandingService.VIEW_OPEN_RECEIVABLES)
+        self.view_combo.addItem("Công nợ còn mở (tất cả kỳ)", OutstandingService.VIEW_OPEN_RECEIVABLES)
         self.view_combo.addItem("Enrollment giao kỳ (số dư lũy kế)", OutstandingService.VIEW_PERIOD_ACTIVITY)
         self.view_combo.currentIndexChanged.connect(self._view_changed)
         filter_row.addWidget(QLabel("Chế độ:"))
