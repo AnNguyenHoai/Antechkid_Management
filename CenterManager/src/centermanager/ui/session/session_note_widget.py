@@ -69,7 +69,7 @@ class SessionNoteWidget(QWidget):
         self.save_btn = QPushButton("Save now")
         self.save_btn.setFixedWidth(80)
         self.save_btn.setVisible(False)
-        self.save_btn.clicked.connect(self._save)
+        self.save_btn.clicked.connect(lambda: self._save(interactive=True))
 
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setFixedWidth(80)
@@ -241,6 +241,14 @@ class SessionNoteWidget(QWidget):
         return self._save(interactive=False)
 
     def _cancel_edit(self) -> None:
+        if self._dirty:
+            choice = QMessageBox.question(
+                self, "Discard unsaved changes?",
+                "Some edits have not been saved. Discard them?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                return
         self._autosave_timer.stop()
         self._dirty = False
         self._load_note()
@@ -258,14 +266,14 @@ class SessionNoteWidget(QWidget):
         self._save_in_progress = True
         try:
             if self._is_edit_mode and self._note:
-                self._service.update_note(
+                saved_note = self._service.update_note(
                     session_id=self._session_id,
                     class_atmosphere=atmosphere,
                     lesson_content=lesson_content,
                     homework=homework,
                 )
             else:
-                self._service.create_note(
+                saved_note = self._service.create_note(
                     session_id=self._session_id,
                     teaching_progress=TeachingProgress.COMPLETED.value,
                     class_atmosphere=atmosphere,
@@ -273,9 +281,13 @@ class SessionNoteWidget(QWidget):
                     homework=homework,
                 )
                 self._is_edit_mode = True
+            # A completed database write is authoritative. Avoid an immediate
+            # second fetch that could fail and overwrite the current draft.
+            self._note = saved_note
+            self._is_edit_mode = True
             self._dirty = False
-            self._set_save_status("Saved automatically")
-            self._load_note()
+            self._set_save_status("Saved")
+            self._show_form(edit_mode=True)
             self.note_saved.emit()
             return True
         except Exception:
