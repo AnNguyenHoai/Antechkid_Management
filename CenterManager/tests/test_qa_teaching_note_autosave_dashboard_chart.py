@@ -1,9 +1,8 @@
-"""Safety regressions for editable teaching-note autosave and dashboard charts."""
+"""Save-on-close Teaching Note safety and Finance Dashboard presentation."""
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt
-
 from centermanager.ui.session.session_note_widget import SessionNoteWidget
+from centermanager.ui.session.session_detail_dialog import SessionDetailDialog
 from centermanager.models.session_note import TeachingProgress
 from centermanager.ui.shared.chart_card import format_compact_amount, ChartWidget
 from centermanager.services.finance_dashboard_service import FinanceDashboardService
@@ -39,65 +38,73 @@ class FakeNotes:
         return self.note
 
 
-def test_note_autosave_after_edit_preserves_legacy_progress_without_duplicate_input(qapp):
+def test_typing_does_not_write_until_explicit_close_save(qapp):
     notes = FakeNotes()
     widget = SessionNoteWidget(notes, session_id=10)
     widget._show_form()
     widget.lesson_content_edit.setPlainText("Algorithms")
-    assert widget._dirty
-    widget._autosave_timer.stop()
-    widget._autosave()
+    widget.homework_edit.setPlainText("Practice")
+    widget.atmosphere_combo.setCurrentIndex(1)
+    qapp.processEvents()
+    assert widget.has_pending_changes()
+    assert notes.calls == []  # No debounce timer or hidden background writes.
+    assert not hasattr(widget, "_autosave_timer")
+    assert not hasattr(widget, "save_btn")
+    assert widget.flush_pending()  # Called ONLY by parent Save & Close.
     assert len(notes.calls) == 1
     assert notes.calls[0][0] == "create"
     assert notes.calls[0][1]["teaching_progress"] == TeachingProgress.COMPLETED.value
-    assert not widget._dirty
-    # Existing stored legacy progress must NOT be overwritten on later edits.
-    notes.note.teaching_progress = TeachingProgress.EXCEEDED_PLAN.value
-    widget._load_note()
-    widget.homework_edit.setPlainText("Practice")
+    assert not widget.has_pending_changes()
+    from PySide6.QtWidgets import QLabel
+    assert not any("Teaching Progress" in label.text() for label in widget.findChildren(QLabel))
+
+
+def test_update_preserves_legacy_progress_and_waits_until_close(qapp):
+    notes = FakeNotes()
+    notes.note = SimpleNamespace(
+        teaching_progress=TeachingProgress.EXCEEDED_PLAN.value,
+        class_atmosphere="GOOD", lesson_content="Old", homework="Old homework",
+    )
+    widget = SessionNoteWidget(notes, session_id=4)
+    widget.homework_edit.setPlainText("New homework")
+    qapp.processEvents()
+    assert not notes.calls
     assert widget.flush_pending()
     assert notes.calls[-1][0] == "update"
     assert "teaching_progress" not in notes.calls[-1][1]
     assert notes.note.teaching_progress == TeachingProgress.EXCEEDED_PLAN.value
-    from PySide6.QtWidgets import QLabel
-    assert not any(
-        "Teaching Progress" in label.text() for label in widget.findChildren(QLabel)
-    )
 
 
-def test_autosave_does_not_write_in_historical_readonly_mode(qapp):
+def test_readonly_history_close_never_writes(qapp):
     notes = FakeNotes()
     widget = SessionNoteWidget(notes, session_id=7)
     widget._show_form()
-    widget.lesson_content_edit.setPlainText("Draft")
     widget.setEnabled(False)
-    widget._autosave()
-    assert notes.calls == []
     assert widget.flush_pending()
     assert notes.calls == []
+    assert not widget.has_pending_changes()
 
 
-def test_failed_autosave_keeps_draft_for_retry_when_write_returns(qapp):
+def test_failed_save_on_close_preserves_draft_and_blocks_switch(qapp):
     notes = FakeNotes(fail=True)
     widget = SessionNoteWidget(notes, session_id=11)
     widget._show_form()
     widget.homework_edit.setPlainText("Do not lose this draft")
-    widget._autosave_timer.stop()
-    widget._autosave()
-    assert widget._dirty
+    qapp.processEvents()
+    assert notes.calls == []
+    assert not widget.flush_pending()
+    assert widget.has_pending_changes()
     assert "Not saved" in widget.save_status.text()
     assert widget.homework_edit.toPlainText() == "Do not lose this draft"
-    assert not widget.flush_pending()
     assert not widget.set_session(12)
     assert widget._session_id == 11
     notes.fail = False
     assert widget.flush_pending()
-    assert widget._session_id == 11
-    assert not widget._dirty
+    assert not widget.has_pending_changes()
     assert notes.note.homework == "Do not lose this draft"
 
 
-def test_editing_existing_note_can_clear_content_with_empty_string(qapp):
+def test_save_on_close_can_clear_existing_text(qapp):
     notes = FakeNotes()
     notes.note = SimpleNamespace(
         teaching_progress="COMPLETED", class_atmosphere="GOOD",
@@ -106,9 +113,38 @@ def test_editing_existing_note_can_clear_content_with_empty_string(qapp):
     widget = SessionNoteWidget(notes, session_id=1)
     widget.lesson_content_edit.clear()
     widget.homework_edit.clear()
+    assert notes.calls == []
     assert widget.flush_pending()
     assert notes.calls[-1][1]["lesson_content"] == ""
     assert notes.calls[-1][1]["homework"] == ""
+
+
+def test_parent_close_gate_calls_save_only_on_close(qapp, monkeypatch):
+    notes = FakeNotes()
+    widget = SessionNoteWidget(notes, session_id=33)
+    widget._show_form()
+    widget.lesson_content_edit.setPlainText("Save on close")
+    parent = SimpleNamespace(note_widget=widget)
+    assert notes.calls == []
+    assert SessionDetailDialog._save_before_closing(parent)
+    assert len(notes.calls) == 1
+
+
+def test_parent_close_gate_rejects_write_failure(qapp, monkeypatch):
+    notes = FakeNotes(fail=True)
+    widget = SessionNoteWidget(notes, session_id=35)
+    widget._show_form()
+    widget.homework_edit.setPlainText("Preserve draft")
+    parent = SimpleNamespace(note_widget=widget)
+    shown = []
+    monkeypatch.setattr(
+        "centermanager.ui.session.session_detail_dialog.QMessageBox.warning",
+        lambda *args: shown.append(args),
+    )
+    assert not SessionDetailDialog._save_before_closing(parent)
+    assert shown
+    assert widget.has_pending_changes()
+    assert widget.homework_edit.toPlainText() == "Preserve draft"
 
 
 def test_dashboard_chart_compact_ticks_do_not_truncate_large_vnd_amounts(qapp):
