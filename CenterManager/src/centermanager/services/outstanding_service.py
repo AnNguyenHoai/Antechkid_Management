@@ -587,6 +587,21 @@ class OutstandingService:
             balance_state=balance_state,
         )
 
+    def get_receivable_stats(self, *, on_date: Optional[date] = None) -> Dict[str, int]:
+        """All still-owed Enrollment balances as of date, regardless of FinancePeriod.
+
+        Finance Dashboard's tuition-debt KPI must not inherit the period
+        window used by cash/bank Income and Expense reporting.
+        """
+        _, _, stats = self.get_outstanding_page(
+            on_date=on_date,
+            as_of_date=on_date,
+            view=self.VIEW_OPEN_RECEIVABLES,
+            offset=0,
+            limit=1,
+        )
+        return stats
+
     def get_outstanding_stats(
         self,
         period_start: Optional[date] = None,
