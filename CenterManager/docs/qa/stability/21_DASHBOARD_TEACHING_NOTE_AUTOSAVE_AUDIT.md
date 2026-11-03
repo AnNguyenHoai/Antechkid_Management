@@ -67,3 +67,13 @@ The founder **rejected automatic timed writes** as unsafe. The final intended be
 - Changed Qt tests assert **no service calls during typing, field changes or event processing**, exactly one call on Close-save, failure preservation, inactive/READ behavior, and historical schema compatibility.
 
 The earlier autosave section describes superseded implementation only. **No timed autosave behavior should ship.** Windows CI and EXE runtime UAT are still required before merge.
+
+
+## CI #1044 failure audit and fixes
+
+Windows CI: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41675342803 at `318302c8`.
+
+- **Shard 2:** 1 FAILED, 1112 PASS: `test_finance_shell_reuses_application_event_bus` constructed `FinanceDashboardPage`, where the newly added scope explanation uses `QLabel` but the module omitted its import. **Fixed production import**.
+- **Shard 0:** 2 FAILED, 1070 PASS: `test_finance_dashboard_accepts_legacy_null_expense_description` hit the **same missing QLabel import**. `test_finance_dashboard_uses_shared_controls_and_balanced_chart_row` asserted the old literal KPI labels `Expense Selected Period` and `Outstanding Tuition`. **Updated the existing layout source contract** to assert `Paid Expense Selected Period` and `Outstanding Tuition (all courses)`, matching the explicit scope distinction; retained the underlying exact monetary calculations.
+- **Shard 1:** no completed pytest summary; watchdog emitted `Timeout` during SQLAlchemy `Base.metadata.create_all(engine)` in E1B-2A SQLCipher fixture. The timeout stack alone does not prove a data, schema, or guard defect, and it is **not** one of the two deterministic Dashboard failures. Treat separately if it recurs, rather than changing SQLCipher/WRITE safety without evidence.
+- Re-run exact-head CI. PR remains Draft pending green Windows CI and UAT for Save & Close with WRITE loss, historical read-only and dialog X/Esc. No finance ledger changes or production DB mutation is part of this corrective patch.
