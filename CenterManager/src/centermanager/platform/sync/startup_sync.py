@@ -38,6 +38,11 @@ class StartupSynchronization:
     def run(self) -> bool:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
+        # A previous process may have died between individually atomic
+        # filesystem renames.  Neither Git reset nor journal reconciliation
+        # may run until an incomplete installation is explicitly recovered.
+        if not self._check_interrupted_startup_install():
+            return False
 
         # 1. Ensure repository exists
         if not self._repo_path.exists() or not (self._repo_path / ".git").exists():
@@ -99,15 +104,14 @@ class StartupSynchronization:
         # 5. Always apply repository database to runtime
         if not self._apply_runtime_database():
             logger.error("Failed to apply repository database to runtime")
-            self._rollback_startup_database_install()
-            self._rollback_startup_git_repository()
+            self._rollback_failed_install_all()
             return False
 
         # 6. Refresh database sessions. This is part of startup correctness,
         # not best-effort logging: a copied DB that cannot be opened must make
         # synchronization fail closed.
         if not self._refresh_database_sessions():
-            self._rollback_startup_database_install()
+            self._rollback_failed_install_all()
             return False
 
         try:
@@ -116,11 +120,124 @@ class StartupSynchronization:
         except Exception:
             logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
             self._rollback_startup_database_install()
+            self._rollback_startup_assets()
+            self._rollback_startup_git_repository()
+            self._complete_failed_startup_rollback()
             return False
         self._finalize_startup_database_install()
+        self._finalize_startup_assets()
+        self._complete_startup_install()
         self._startup_previous_local_oid = None
         logger.info("Startup synchronization completed successfully")
         return True
+
+    def _startup_install_marker_path(self) -> Path:
+        """Location never included in the runtime journal fingerprint."""
+        runtime_root = self._runtime_db_path.parent.parent.resolve()
+        return (
+            runtime_root.with_name(runtime_root.name + ".write-recovery")
+            / "startup-install.pending.json"
+        )
+
+    def _startup_replay_targets(self):
+        db = self._runtime_db_path
+        return (
+            ("database", db),
+            ("wal", db.with_name(db.name + "-wal")),
+            ("shm", db.with_name(db.name + "-shm")),
+            ("journal", db.with_name(db.name + "-journal")),
+            ("employees", self._paths.attachment_dir / "Employees"),
+            ("manifest", self._runtime_manifest_path),
+            ("version", self._metadata_dir / "version.json"),
+        )
+
+    def _check_interrupted_startup_install(self) -> bool:
+        marker = self._startup_install_marker_path()
+        if not marker.exists():
+            return True
+        from centermanager.platform.sync.startup_install_replay import (
+            recover_interrupted_install, InterruptedInstallError,
+        )
+        try:
+            # No production engine or Git publication is allowed here. A
+            # recovered old snapshot remains temporary until fetch and exact
+            # Git MAIN install succeed later in run().
+            from centermanager.database import session as session_module
+            session_module.quiesce_runtime_db()
+            recover_interrupted_install(marker, self._startup_replay_targets())
+            # Replay has restored and verified the original files. No live
+            # process is allowed to use them yet (startup/login has not
+            # completed), but the process-global maintenance flag MUST be
+            # released so Git MAIN preflight and SQLCipher validation can run.
+            # The authoritative install will acquire its own fence.
+            session_module.end_runtime_db_maintenance()
+            logger.warning(
+                "Interrupted local install restored from verified snapshot; "
+                "normal Git MAIN synchronization is still mandatory"
+            )
+            return True
+        except (InterruptedInstallError, OSError, RuntimeError):
+            self.recovery_error = (
+                "Interrupted startup installation could not be verified or "
+                "recovered. Preserve runtime and .write-recovery; startup blocked."
+            )
+            logger.exception("%s", self.recovery_error)
+            return False
+
+    def _begin_startup_install(self) -> None:
+        """Persist original DB/WAL/asset bytes before any live replacement."""
+        from centermanager.platform.sync.startup_install_replay import capture_before_install
+        from centermanager.database import session as session_module
+        # Preexisting WAL must not change while its bytes are captured.
+        session_module.quiesce_runtime_db()
+        marker = self._startup_install_marker_path()
+        capture_before_install(
+            marker, self._startup_replay_targets(),
+            getattr(self, "_accepted_startup_main_oid", None),
+        )
+        self._startup_pending_install = marker
+
+    def _rollback_failed_install_all(self) -> None:
+        """Attempt every rollback even if one artifact cannot be restored.
+
+        Failure to roll back attachments must not suppress restoration of the
+        SQLCipher database and vice versa. Leave the marker if any fails.
+        """
+        failures = []
+        for name, action in (
+            ("database", self._rollback_startup_database_install),
+            ("assets", self._rollback_startup_assets),
+            ("git", self._rollback_startup_git_repository),
+        ):
+            try:
+                action()
+            except Exception as exc:
+                failures.append(name)
+                logger.exception("Startup %s rollback failed: %s", name, exc)
+        if failures:
+            logger.error("Incomplete startup rollback (%s); pending marker retained", failures)
+            return
+        self._complete_failed_startup_rollback()
+
+    def _complete_failed_startup_rollback(self) -> None:
+        """Remove pending marker only if every in-process rollback completed.
+
+        If any DB backup, asset snapshot or Git previous HEAD remains, preserve
+        the marker and block the next boot for explicit recovery.
+        """
+        if (getattr(self, "_startup_db_install_backup", None) is None
+                and getattr(self, "_startup_assets", None) is None
+                and not getattr(self, "_startup_previous_local_oid", None)):
+            self._complete_startup_install()
+        else:
+            logger.error("Startup rollback incomplete; interruption marker retained")
+
+    def _complete_startup_install(self) -> None:
+        """Clear the barrier only after all startup acceptance gates pass."""
+        marker = getattr(self, "_startup_pending_install", None)
+        if marker is not None:
+            marker.unlink()
+            self._startup_pending_install = None
 
     def _rollback_startup_git_repository(self) -> None:
         """Restore prior tracked Git generation after a failed startup install.
@@ -428,6 +545,96 @@ class StartupSynchronization:
             backup.unlink(missing_ok=True)
         self._startup_db_install_backup = None
 
+    def _prepare_startup_assets(self) -> None:
+        """Stage MAIN assets and retain an immutable, non-runtime rollback copy.
+
+        This handles ordinary exceptions. A killed process needs a separate
+        durable interrupted-install protocol (S04-01B).
+        """
+        import uuid
+        token = uuid.uuid4().hex
+        employees = self._paths.attachment_dir / "Employees"
+        version = self._metadata_dir / "version.json"
+        manifest = self._runtime_manifest_path
+        targets = (employees, manifest, version)
+        copies = []
+        try:
+            for dest in targets:
+                # Each backup must be on the same volume as its destination,
+                # and outside WriteRecoveryJournal's workspace fingerprint.
+                runtime_parent = dest.parent
+                while runtime_parent.name not in {"runtime", "Runtime"} and runtime_parent != runtime_parent.parent:
+                    runtime_parent = runtime_parent.parent
+                if runtime_parent == runtime_parent.parent:
+                    runtime_parent = self._runtime_db_path.parent.parent
+                rollback = (
+                    runtime_parent.with_name(runtime_parent.name + ".write-recovery")
+                    / "startup-assets" / token / dest.name
+                )
+                exists = dest.exists()
+                if exists:
+                    rollback.parent.mkdir(parents=True, exist_ok=True)
+                    if dest.is_dir():
+                        shutil.copytree(dest, rollback)
+                    else:
+                        shutil.copy2(dest, rollback)
+                copies.append((dest, rollback, exists))
+            # Ensure source attachments are completely readable before the
+            # already-validated database can be installed.
+            repo_employees = self._repo_path / "Attachments" / "Employees"
+            if repo_employees.exists():
+                staged_employees = (
+                    employees.parent.parent.with_name(employees.parent.parent.name + ".write-recovery")
+                    / "startup-assets" / token / "staged-employees"
+                )
+                staged_employees.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(repo_employees, staged_employees)
+            else:
+                staged_employees = None
+            self._startup_assets = (copies, staged_employees)
+        except Exception:
+            logger.exception("Unable to stage startup assets; live workspace remains unchanged")
+            raise
+
+    def _rollback_startup_assets(self) -> None:
+        saved = getattr(self, "_startup_assets", None)
+        if saved is None:
+            return
+        copies, _ = saved
+        failures = []
+        for dest, backup, existed in reversed(copies):
+            try:
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                elif dest.exists():
+                    dest.unlink()
+                if existed:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    if backup.is_dir():
+                        shutil.copytree(backup, dest)
+                    else:
+                        shutil.copy2(backup, dest)
+            except Exception as exc:
+                failures.append((str(dest), str(exc)))
+                logger.exception("Startup asset rollback failed for %s", dest)
+        if failures:
+            raise RuntimeError("Startup assets could not all be restored: " + repr(failures))
+        self._finalize_startup_assets()
+
+    def _finalize_startup_assets(self) -> None:
+        saved = getattr(self, "_startup_assets", None)
+        if saved is None:
+            return
+        copies, staged = saved
+        for _, backup, _ in copies:
+            if backup.is_dir():
+                shutil.rmtree(backup)
+            else:
+                backup.unlink(missing_ok=True)
+        if staged is not None and staged.exists():
+            shutil.rmtree(staged)
+        self._startup_assets = None
+
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
@@ -440,9 +647,12 @@ class StartupSynchronization:
         self._runtime_db_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
+            self._prepare_startup_assets()
+            self._begin_startup_install()
             # Never truncate a live SQLCipher database or let stale WAL/SHM
             # from the discarded local generation replay onto accepted MAIN.
             if not self._install_authoritative_database_atomically(repo_db):
+                self._rollback_startup_assets()
                 return False
 
             logger.info(f"Runtime database updated from repository: {self._runtime_db_path}")
@@ -487,6 +697,20 @@ class StartupSynchronization:
             return True
         except Exception as e:
             logger.exception(f"Failed to copy runtime data: {e}")
+            # DB and other assets must each get a rollback attempt even when
+            # the other restoration fails. The pending marker stays on disk.
+            failures = []
+            for name, action in (
+                ("database", self._rollback_startup_database_install),
+                ("assets", self._rollback_startup_assets),
+            ):
+                try:
+                    action()
+                except Exception:
+                    failures.append(name)
+                    logger.exception("Startup %s rollback failed", name)
+            if failures:
+                logger.error("Incomplete startup rollback; recovery required: %s", failures)
             return False
 
     def _sync_employee_attachments_from_repository(self) -> None:
@@ -498,9 +722,14 @@ class StartupSynchronization:
         repo_root = self._repo_path / "Attachments" / "Employees"
         runtime_root = self._paths.attachment_dir / "Employees"
         try:
+            staged = getattr(self, "_startup_assets", None)
+            staged_source = staged[1] if staged is not None else None
             if runtime_root.exists():
                 shutil.rmtree(runtime_root)
-            if repo_root.exists():
+            if staged_source is not None:
+                runtime_root.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staged_source, runtime_root)
+            elif repo_root.exists():
                 runtime_root.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(repo_root, runtime_root)
                 logger.info(
