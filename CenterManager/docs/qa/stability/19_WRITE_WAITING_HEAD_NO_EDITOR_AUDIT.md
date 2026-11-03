@@ -70,3 +70,10 @@ Workflow: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/4162
 - **Shard 2:** `test_editing_transition_feedback_pr_e::test_animation_is_presentation_only_and_preserves_write_signals` enforces absence of substring `git ` in the *entire* presentation-only Application Shell source. The new wait guidance introduced this word in user-facing copy/comment, violating the UI boundary source-level test. Reworded as 'remote lock verification and handoff', with no Git operations imported or performed by Application Shell.
 - The regression tests for real bare-Git acquisition failure/retry, GRACE and reconciliation are retained. No change to lease grace, queue CAS, write grant or MAIN acceptance criteria.
 - Re-run exact-head Windows CI before merge. Old EXE may still WAIT until it is rebuilt from validated code; a clear grant requires authoritative Git lock and MAIN verification.
+
+
+## Windows CI #1024 — single obsolete guidance expectation (2026-11-03)
+
+[Run #1024](https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41631626831): Windows shards 0 and 1 PASS. Shard 2: 1 failed, 1,079 passed, 1 skipped. The only failure was `test_header_information_architecture_phase2f::test_guidance_follows_existing_mode_and_transaction_projections` expecting literal `Another edit session` after setting `Waiting (pos 2) - Other user` without setting any remote editor. The actual top bar's editor state remains `No active editor`, so saying another session is active would be false.
+
+Fix: test now checks that WAITING with no observed editor does not claim a competing editor; it separately sets the editor state and verifies queued guidance without the no-editor assertion. The UI copy no longer says `You are next` based only on WAITING, since a queue position may be greater than one or temporarily unverified. These changes do not alter Git lock CAS, request queue consumption, E1B recovery, WRITE handoff or publication authority. Latest-head Windows CI and Windows EXE UAT remain required before merge.
