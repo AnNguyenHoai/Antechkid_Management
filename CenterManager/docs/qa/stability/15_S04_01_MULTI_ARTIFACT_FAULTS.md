@@ -66,3 +66,11 @@ CI: https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/4156558193
 - Shard 0: one independent setup error in existing `test_authorized_write_student_service_and_permission_floor`. `materialize_runtime_database_to_repository` called validation while a process-wide maintenance fence was active, yielding `RuntimeDatabaseMaintenanceError: Runtime database is temporarily unavailable during backup restore`, wrapped as `DatabaseArtifactSecurityError`. This test fixture predates S04 and does not execute startup replay. CI #930 passed this suite, so a shared-state order/leak or sporadic test environment gate remains a hypothesis, not a proven production defect. Do not disable SQLCipher validation or alter WRITE gates to make it pass. Reproduce on repeat CI and isolate the owning fixture before any fix.
 - Shard 1: PASS.
 - New head requires exact-SHA CI. Keep PR draft pending confirmed full-suite pass and real Windows SQLCipher UAT.
+
+
+## CI #942 — repeating shard-0 global maintenance fence (Nov 3)
+Run https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41569325528 at `bb2f214c`: shards 1 and 2 PASS, shard 0 has one error in `test_e1b2b_local_mutation_authority::test_authorized_write_student_service_and_permission_floor` **during the `reporting` fixture setup**. `materialize_runtime_database_to_repository` calls SQLCipher validation while `_runtime_db_maintenance` is already true and guarded DBAPI creation fails with `RuntimeDatabaseMaintenanceError`. This exception is wrapped by the artifact validator as a generic authentication error, but it is NOT evidence of an incorrect SQLCipher key.
+
+The fixture `workspace` creates a new isolated temporary encrypted DB but production's runtime maintenance gate is process-global. A preceding fault test in the same long-lived pytest shard can leave it set. The test-only fixture boundary now checks the number of tracked native DBAPI connections is zero before resetting a stale gate. If connections remain, the test fails rather than hiding a real lock leak. No production gate, encryption or SQLCipher validator was changed.
+
+Child subprocess import fix from prior commit is verified by shard 2 PASS. Validate exact-head repeat CI before considering QA gate complete.
