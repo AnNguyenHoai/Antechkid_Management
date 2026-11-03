@@ -9,7 +9,7 @@ This service never modifies Income, tuition adjustments, transfers, or DB.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -53,10 +53,16 @@ class TuitionPeriodReport:
         return {
             "opening": sum((row.opening for row in configured), ZERO),
             "accrued": sum((row.accrued for row in configured), ZERO),
-            "received": sum((row.received for row in self.rows), ZERO),
-            "adjustments": sum((row.adjustments for row in self.rows), ZERO),
+            "received": sum((row.received for row in configured), ZERO),
+            "adjustments": sum((row.adjustments for row in configured), ZERO),
             "closing": sum((row.closing for row in configured), ZERO),
             "unconfigured": len(self.rows) - len(configured),
+            "unresolved_received": sum(
+                (row.received for row in self.rows if not row.configured), ZERO
+            ),
+            "unresolved_adjustments": sum(
+                (row.adjustments for row in self.rows if not row.configured), ZERO
+            ),
             # Track collectible debt and prepaid independently at end of period.
             "receivable": sum((max(row.closing, ZERO) for row in configured), ZERO),
             "prepaid": sum((max(-row.closing, ZERO) for row in configured), ZERO),
@@ -73,8 +79,8 @@ class TuitionPeriodMovementService:
               class_id: Optional[int] = None,
               student_id: Optional[int] = None) -> TuitionPeriodReport:
         if (not isinstance(period_start, date) or not isinstance(period_end, date)
-                or isinstance(period_start, __import__("datetime").datetime)
-                or isinstance(period_end, __import__("datetime").datetime)
+                or isinstance(period_start, datetime)
+                or isinstance(period_end, datetime)
                 or period_start > period_end or period_start <= date.min):
             raise ValueError("A valid closed FinancePeriod with a preceding day is required")
         opening_date = period_start - timedelta(days=1)
