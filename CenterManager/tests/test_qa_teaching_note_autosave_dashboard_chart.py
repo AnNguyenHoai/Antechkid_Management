@@ -147,6 +147,45 @@ def test_parent_close_gate_rejects_write_failure(qapp, monkeypatch):
     assert widget.homework_edit.toPlainText() == "Preserve draft"
 
 
+def test_close_label_reflects_pending_note_and_read_only(qapp):
+    notes = FakeNotes()
+    widget = SessionNoteWidget(notes, session_id=36)
+    widget._show_form()
+    class Label:
+        def __init__(self):
+            self.text = ""
+        def setText(self, value):
+            self.text = value
+    close_btn = Label()
+    parent = SimpleNamespace(note_widget=widget, close_btn=close_btn)
+    SessionDetailDialog._update_close_label(parent)
+    assert close_btn.text == "Close"
+    widget.lesson_content_edit.setPlainText("Note saved only when closing")
+    SessionDetailDialog._update_close_label(parent)
+    assert close_btn.text == "Save & Close"
+    assert notes.calls == []
+    widget.setEnabled(False)
+    SessionDetailDialog._update_close_label(parent)
+    assert close_btn.text == "Close"
+
+
+def test_window_x_attempts_same_save_gate(qapp):
+    class Event:
+        def __init__(self):
+            self.accepted = None
+        def accept(self):
+            self.accepted = True
+        def ignore(self):
+            self.accepted = False
+    blocked = SimpleNamespace(_save_before_closing=lambda: False)
+    e = Event()
+    SessionDetailDialog.closeEvent(blocked, e)
+    assert e.accepted is False
+    allowed = SimpleNamespace(_save_before_closing=lambda: True)
+    SessionDetailDialog.closeEvent(allowed, e)
+    assert e.accepted is True
+
+
 def test_dashboard_chart_compact_ticks_do_not_truncate_large_vnd_amounts(qapp):
     assert format_compact_amount(24_968_794) == "25.0M"
     assert format_compact_amount(10_700_000) == "10.7M"
