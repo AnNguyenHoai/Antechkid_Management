@@ -55,8 +55,13 @@ def test_guidance_follows_existing_mode_and_transaction_projections(app):
     top.set_transaction_text("Editing")
     assert "Finish editing" in top.guidance_panel.label.text()
 
+    # WAITING is not proof another editor holds the remote lock.
     top.set_transaction_text("Waiting (pos 2) - Other user")
-    assert "Another edit session" in top.guidance_panel.label.text()
+    assert "No active editor is visible" in top.guidance_panel.label.text()
+    top.set_editor_state("Other user is editing")
+    guidance = top.guidance_panel.label.text()
+    assert "queued" in guidance
+    assert "No active editor is visible" not in guidance
 
     top.set_mode("CONFLICT", "danger")
     top.set_transaction_text("Data changed on another computer")
