@@ -19,6 +19,7 @@ from centermanager.ui.shared import DataTable, FilterSummaryBar, LoadingWidget, 
 from centermanager.ui.finance_workspace.action_state import can_mutate
 from centermanager.ui.finance_workspace.expense_form_dialog import ExpenseFormDialog
 from centermanager.ui.finance_workspace.expense_detail_dialog import ExpenseDetailDialog
+from centermanager.ui.finance_workspace.expense_reimburse_dialog import ExpenseReimburseDialog
 from centermanager.platform.collaboration import CollaborationManager
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class ExpenseListPage(QWidget):
         self._expenses = []
         self._total_rows = 0
         self._filtered_amount = 0
+        self._realized_amount = 0
         self._current_page = 1
         self._page_size = 20
         self._sort_by = "payment_date"
@@ -84,15 +86,16 @@ class ExpenseListPage(QWidget):
         filters.addWidget(QLabel("Danh mục:")); filters.addWidget(self.category_combo)
 
         self.method_combo = QComboBox()
-        self.method_combo.addItem("Tất cả wallet", "")
-        self.method_combo.addItem("Cash", "CASH")
-        self.method_combo.addItem("Bank", "BANK")
+        self.method_combo.addItem("Tất cả nguồn chi", "")
+        self.method_combo.addItem("CASH CÔNG TY", "CASH")
+        self.method_combo.addItem("BANK CÔNG TY", "BANK")
+        self.method_combo.addItem("TK CÁ NHÂN (chưa hoàn trả)", "PERSONAL")
         self.method_combo.currentIndexChanged.connect(self._filters_changed)
-        filters.addWidget(QLabel("Wallet:")); filters.addWidget(self.method_combo)
+        filters.addWidget(QLabel("Nguồn chi:")); filters.addWidget(self.method_combo)
 
         self.status_combo = QComboBox()
         self.status_combo.addItem("Tất cả trạng thái", "")
-        self.status_combo.addItem("ĐÃ HOÀN TRẢ", "Completed")
+        self.status_combo.addItem("ĐÃ CHI / ĐÃ HOÀN TRẢ", "Completed")
         self.status_combo.addItem("CHƯA HOÀN TRẢ", "Pending")
         self.status_combo.currentIndexChanged.connect(self._filters_changed)
         filters.addWidget(QLabel("Trạng thái:")); filters.addWidget(self.status_combo)
@@ -113,7 +116,7 @@ class ExpenseListPage(QWidget):
             {"key": "category", "label": "Danh mục", "sortable": True},
             {"key": "description", "label": "Nội dung", "sortable": True},
             {"key": "amount", "label": "Số tiền", "sortable": True},
-            {"key": "payment_method", "label": "Wallet", "sortable": True},
+            {"key": "payment_method", "label": "Nguồn chi", "sortable": True},
             {"key": "paid_by", "label": "Người chi", "sortable": True},
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
@@ -128,6 +131,15 @@ class ExpenseListPage(QWidget):
             parent=self,
         )
         layout.addWidget(self.summary_bar)
+        # BUG-003: separate the cash-flow total (same definition as the
+        # Dashboard "Paid Expense") from rows not yet counted as outflow.
+        self.cashflow_label = QLabel(self)
+        self.cashflow_label.setWordWrap(True)
+        self.cashflow_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; "
+            f"padding: 0 {SPACING['md']}px {SPACING['sm']}px {SPACING['md']}px;"
+        )
+        layout.addWidget(self.cashflow_label)
         self.loading = LoadingWidget(); self.loading.setVisible(False); layout.addWidget(self.loading)
         self._search_debounce = QTimer(self)
         self._search_debounce.setSingleShot(True)
@@ -222,10 +234,10 @@ class ExpenseListPage(QWidget):
 
     def _load_page(self) -> None:
         if self._period_configured is False:
-            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._populate_table(); return
+            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._realized_amount = 0; self._populate_table(); return
         kwargs = self._filter_kwargs()
         if kwargs["date_from"] > kwargs["date_to"]:
-            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._populate_table(); return
+            self._expenses = []; self._total_rows = 0; self._filtered_amount = 0; self._realized_amount = 0; self._populate_table(); return
         items, total = self._service.list_expenses(
             **kwargs,
             finance_period_start=self._period_start,
@@ -246,17 +258,54 @@ class ExpenseListPage(QWidget):
             **kwargs,
             finance_period_start=self._period_start,
         )
+        if kwargs.get("status") == "Pending":
+            self._realized_amount = 0
+        else:
+            realized_kwargs = dict(kwargs, status=None)
+            self._realized_amount = self._service.sum_expenses(
+                **realized_kwargs,
+                finance_period_start=self._period_start,
+                realized_only=True,
+            )
         self._populate_table()
 
     def _populate_table(self) -> None:
         data = [{
             "payment_date": exp.payment_date.strftime("%d/%m/%Y"), "category": exp.category,
             "description": (exp.description or "")[:50] + ("..." if len(exp.description or "") > 50 else ""),
-            "amount": f"{exp.amount:,.0f}", "payment_method": exp.payment_method,
-            "paid_by": exp.paid_by or "-", "status": exp.status,
+            "amount": f"{exp.amount:,.0f}", "payment_method": self._wallet_label(exp),
+            "paid_by": exp.paid_by or "-", "status": self._status_label(exp),
         } for exp in self._expenses]
         self.data_table.set_server_data(data, self._total_rows, page=self._current_page, page_size=self._page_size)
         self.summary_bar.set_summary(self._total_rows, self._filtered_amount)
+        not_counted = max(float(self._filtered_amount or 0) - float(self._realized_amount or 0), 0.0)
+        self.cashflow_label.setText(
+            f"Đã chi – tính vào dòng tiền (khớp Dashboard): {float(self._realized_amount or 0):,.0f} VND · "
+            f"Chưa tính vào dòng tiền (TK cá nhân chờ hoàn trả / khoản cũ cần xem lại): {not_counted:,.0f} VND"
+        )
+
+    @staticmethod
+    def _is_personal_pending(exp) -> bool:
+        return getattr(exp, "funding_source", None) == "PERSONAL" and exp.status == "Pending"
+
+    @staticmethod
+    def _wallet_label(exp) -> str:
+        method = exp.payment_method
+        if ExpenseService.is_personal_method(method):
+            return "TK CÁ NHÂN"
+        label = {"CASH": "CASH CÔNG TY", "BANK": "BANK CÔNG TY"}.get(method, method)
+        if getattr(exp, "funding_source", None) == "PERSONAL":
+            return f"{label} (hoàn trả)"
+        return label
+
+    @staticmethod
+    def _status_label(exp) -> str:
+        funding = getattr(exp, "funding_source", None)
+        if funding == "PERSONAL":
+            return "CHƯA HOÀN TRẢ" if exp.status == "Pending" else "ĐÃ HOÀN TRẢ"
+        if funding == "COMPANY":
+            return "ĐÃ CHI"
+        return exp.status
 
     def _on_page_requested(self, page: int, page_size: int) -> None:
         self._current_page, self._page_size = page, page_size
@@ -304,7 +353,23 @@ class ExpenseListPage(QWidget):
         menu.addAction("Xem", lambda: self._show_detail_dialog(exp.id))
         edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id)); edit_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
         delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id)); delete_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_DELETE))
+        if self._is_personal_pending(exp):
+            reimburse_action = menu.addAction("Hoàn trả…", lambda: self._show_reimburse_dialog(exp))
+            reimburse_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
         menu.exec(pos)
+
+    def _show_reimburse_dialog(self, exp) -> None:
+        if not self._ensure_action(Capability.FINANCE_EXPENSE_UPDATE, "reimburse"):
+            return
+        dialog = ExpenseReimburseDialog(
+            self._service,
+            exp.id,
+            amount=float(exp.amount),
+            incurred_date=getattr(exp, "incurred_date", None) or exp.payment_date,
+            parent=self,
+        )
+        if dialog.exec() == ExpenseReimburseDialog.DialogCode.Accepted:
+            self.refresh()
 
     def _ensure_action(self, capability, action: str) -> bool:
         if not self._can(capability):

@@ -149,9 +149,14 @@ def test_realized_write_forms_offer_only_cash_and_bank_wallet_values():
         "src/centermanager/ui/finance_workspace/expense_form_dialog.py"
     ).read_text(encoding="utf-8")
 
+    assert 'addItem("Cash", "CASH")' in income_source
+    assert 'addItem("Bank", "BANK")' in income_source
+    # FEAT-001: expenses choose a company wallet or a personal advance; the
+    # personal value is never a realized wallet (it is posted on reimbursement).
+    assert 'addItem("CASH CÔNG TY", "CASH")' in expense_source
+    assert 'addItem("BANK CÔNG TY", "BANK")' in expense_source
+    assert 'addItem("TK CÁ NHÂN", "PERSONAL")' in expense_source
     for source in (income_source, expense_source):
-        assert 'addItem("Cash", "CASH")' in source
-        assert 'addItem("Bank", "BANK")' in source
         assert 'addItem("Other", "Other")' not in source
         assert "resolve_wallet" in source
 

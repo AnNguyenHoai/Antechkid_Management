@@ -58,8 +58,9 @@ def test_expense_ui_projects_edit_delete_from_write_capability_and_period_state(
 
 def test_expense_form_uses_canonical_payment_contract():
     source = Path("src/centermanager/ui/finance_workspace/expense_form_dialog.py").read_text(encoding="utf-8")
-    assert 'addItem("Cash", "CASH")' in source
-    assert 'addItem("Bank", "BANK")' in source
+    assert 'addItem("CASH CÔNG TY", "CASH")' in source
+    assert 'addItem("BANK CÔNG TY", "BANK")' in source
+    assert 'addItem("TK CÁ NHÂN", "PERSONAL")' in source
     assert 'addItem("Other", "Other")' not in source
     assert "currentData()" in source
 

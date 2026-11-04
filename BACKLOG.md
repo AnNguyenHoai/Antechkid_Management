@@ -13,6 +13,9 @@
 | TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | IN_REVIEW (#560, PR #561) | — |
 | TECH-003 | Làm sạch & cập nhật hệ thống tài liệu | Maintenance | P2 | IN_REVIEW (#562) | — |
 | QA-003 | Rà soát luồng dữ liệu Finance Workspace | QA | P1 | WAITING_PO (#564) | — |
+| FEAT-001 | Nguồn chi ví công ty / TK cá nhân + hoàn trả | Feature | P1 | IN_REVIEW (#567) | — |
+| BUG-002 | Chuẩn hóa trạng thái/nguồn chi của chi phí cũ | Bug | P1 | IN_REVIEW (#566) | FEAT-001 |
+| BUG-003 | Tách tổng Đã chi / chưa tính dòng tiền ở danh sách Chi | Bug | P2 | IN_REVIEW (#568) | FEAT-001 |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -120,6 +123,34 @@
 - **Verification evidence:** 9 điểm bất thường (8 xác nhận bằng code, 1 giả thuyết). Nguyên nhân khả năng cao: chi phí mang trạng thái cũ `ĐÃ/CHƯA HOÀN TRẢ` không thuộc tập realized (`Completed`/`Paid`) nên bị loại khỏi tiền ra (F1, F4); tổng ở danh sách Chi dùng định nghĩa khác Dashboard (F2); hoàn học phí ghi là Income âm nên không hiện là tiền ra (F3). Dữ liệu test: 12.050.000 VND chi → Dashboard 0. **Chưa kiểm chứng trên DB thật** — cần chạy truy vấn trong báo cáo.
 - **PO acceptance:** Chưa
 - **Task đề xuất (chưa tạo, chờ PO duyệt):** BUG-002 (P1) chuẩn hóa trạng thái cũ; FEAT-001 (P1) định nghĩa lại trạng thái Chi; BUG-003 (P2) tách tổng đã chi/chưa chi ở danh sách; FEAT-002 (P2) hiển thị hoàn học phí là tiền ra; BUG-004 (P2) lọc Chi theo `finance_period_id`; BUG-005 (P3) đồng hồ nghiệp vụ + bảng Recent Expense.
+
+## FEAT-001 — Nguồn chi ví công ty / TK cá nhân + hoàn trả
+
+- **Type:** Feature · **Priority:** P1 · **Status:** IN_REVIEW · **Issue:** #567
+- **Source:** PO 2026-11-04 (từ QA-003 F4) · **Quyết định:** D-008
+- **Business problem:** Trạng thái "ĐÃ/CHƯA HOÀN TRẢ" bị dùng như "đã chi/chưa chi" nên chi bằng tài khoản công ty có thể không được tính là tiền ra.
+- **Expected outcome:** Chi bằng CASH/BANK CÔNG TY tính ngay vào tiền chi. Chi bằng TK CÁ NHÂN là CHƯA HOÀN TRẢ; khi công ty trả lại, chọn ví công ty + ngày hoàn trả → ĐÃ HOÀN TRẢ và tính vào tiền chi theo ngày hoàn trả.
+- **Scope:** `Expense.funding_source`, `incurred_date`; `ExpenseService` (phân loại, chặn chuyển trạng thái sai, `reimburse_expense`); form Chi; danh sách Chi (nhãn, nút Hoàn trả); hộp thoại hoàn trả; cập nhật Domain Spec §6.
+- **Acceptance criteria:** xem Issue #567.
+- **Implementation reference:** nhánh `feat/fin-expense-funding-source` (PR, xem Issue)
+- **Verification evidence:** 16 test mới trong `tests/test_fin_expense_funding_source.py` (service trên SQLite thật + migration). Không chạy được local (môi trường không cài được SQLAlchemy/PySide6) → dựa vào CI.
+- **PO acceptance:** Chưa
+
+## BUG-002 — Chuẩn hóa trạng thái/nguồn chi của chi phí cũ
+
+- **Type:** Bug · **Priority:** P1 · **Status:** IN_REVIEW · **Issue:** #566
+- **Source:** QA-003 F1 · **Quyết định:** D-008 (chỉ sửa dữ liệu ở kỳ chưa quyết toán)
+- **Scope:** Migration `1e10a043`. Dòng thuộc kỳ CONFIRMED giữ nguyên. Dòng "TK cá nhân + đã hoàn trả" cũ không có ví hoàn trả → dùng quy tắc alias sẵn có của hệ thống (CASH), **PO cần rà lại**. Chi công ty "Pending" cũ → để nguyên, cần xem thủ công.
+- **Verification evidence:** Mô phỏng SQL trên SQLite: dòng kỳ đã chốt không đổi, chạy lại lần 2 không đổi thêm (idempotent). Test migration Alembic thật: chờ CI.
+- **PO acceptance:** Chưa
+
+## BUG-003 — Tách tổng Đã chi / chưa tính dòng tiền ở danh sách Chi
+
+- **Type:** Bug · **Priority:** P2 · **Status:** IN_REVIEW · **Issue:** #568
+- **Source:** QA-003 F2
+- **Scope:** Danh sách Chi hiển thị thêm "Đã chi – tính vào dòng tiền (khớp Dashboard)" và "Chưa tính vào dòng tiền".
+- **Verification evidence:** Test `test_list_cash_flow_total_matches_dashboard_definition`. Chờ CI.
+- **PO acceptance:** Chưa
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git
 
