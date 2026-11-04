@@ -136,7 +136,7 @@
 - **Scope:** `Expense.funding_source`, `incurred_date`; `ExpenseService` (phân loại, chặn chuyển trạng thái sai, `reimburse_expense`); form Chi; danh sách Chi (nhãn, nút Hoàn trả); hộp thoại hoàn trả; cập nhật Domain Spec §6.
 - **Acceptance criteria:** xem Issue #567.
 - **Implementation reference:** PR #569, commit `b04a3e9`, merge `18b6826`
-- **Verification evidence:** CI PR (run 41765228412): 3.211 passed, 7 skipped, 0 failed; 16/16 test mới trong `tests/test_fin_expense_funding_source.py` pass (service trên SQLite thật + migration Alembic thật). CI `main_repos` sau merge (run 41767126182): đang chạy tại thời điểm ghi — kết quả sẽ được bổ sung. Chưa kiểm thử thủ công trên ứng dụng Windows — cần PO kiểm tra 4 kịch bản: chi BANK CÔNG TY, chi TK CÁ NHÂN, Hoàn trả…, so tổng danh sách với Dashboard.
+- **Verification evidence:** CI PR (run 41765228412): 3.211 passed, 7 skipped, 0 failed; 16/16 test mới trong `tests/test_fin_expense_funding_source.py` pass (service trên SQLite thật + migration Alembic thật). CI `main_repos` sau merge (run 41767126182): success — 3.211 passed, 7 skipped, 0 failed. Chưa kiểm thử thủ công trên ứng dụng Windows — cần PO kiểm tra 4 kịch bản: chi BANK CÔNG TY, chi TK CÁ NHÂN, Hoàn trả…, so tổng danh sách với Dashboard.
 - **PO acceptance:** Chưa
 
 ## BUG-002 — Chuẩn hóa trạng thái/nguồn chi của chi phí cũ
