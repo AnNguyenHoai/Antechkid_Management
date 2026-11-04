@@ -12,6 +12,7 @@
 | TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git | Maintenance | P2 | IN_REVIEW (#558) | — |
 | TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | IN_REVIEW (#560, PR #561) | — |
 | TECH-003 | Làm sạch & cập nhật hệ thống tài liệu | Maintenance | P2 | IN_REVIEW (#562) | — |
+| QA-003 | Rà soát luồng dữ liệu Finance Workspace | QA | P1 | WAITING_PO (#564) | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -107,6 +108,18 @@
   - **Tổng: 3.176 passed, 7 skipped, 0 failed.** Không có test fail nên không phát sinh task.
 - **Hạn chế:** Không tải được file JUnit XML (bộ lưu trữ artifact bị chặn từ phiên này), nên chưa liệt kê được lý do của 7 test skipped.
 - **PO acceptance:** Accepted — PO, 2026-11-04 ("Accept SEC-001, QA-001")
+
+## QA-003 — Rà soát luồng dữ liệu Finance Workspace
+
+- **Type:** QA · **Priority:** P1 · **Status:** WAITING_PO
+- **Source:** PO, 2026-11-04 ("dashboard đang sai thông tin cập nhật tiền ra") · **Issue:** #564
+- **Business problem:** Số liệu tiền ra trên Dashboard Finance không đúng với thực tế.
+- **Scope:** Rà soát luồng dữ liệu (không sửa code), liệt kê bất thường, đề xuất task.
+- **Acceptance criteria:** Báo cáo phân loại rõ xác nhận / giả thuyết, có vị trí code; danh sách task đề xuất.
+- **Implementation reference:** `CenterManager/docs/finance/QA-003_FINANCE_FLOW_REVIEW.md`
+- **Verification evidence:** 9 điểm bất thường (8 xác nhận bằng code, 1 giả thuyết). Nguyên nhân khả năng cao: chi phí mang trạng thái cũ `ĐÃ/CHƯA HOÀN TRẢ` không thuộc tập realized (`Completed`/`Paid`) nên bị loại khỏi tiền ra (F1, F4); tổng ở danh sách Chi dùng định nghĩa khác Dashboard (F2); hoàn học phí ghi là Income âm nên không hiện là tiền ra (F3). Dữ liệu test: 12.050.000 VND chi → Dashboard 0. **Chưa kiểm chứng trên DB thật** — cần chạy truy vấn trong báo cáo.
+- **PO acceptance:** Chưa
+- **Task đề xuất (chưa tạo, chờ PO duyệt):** BUG-002 (P1) chuẩn hóa trạng thái cũ; FEAT-001 (P1) định nghĩa lại trạng thái Chi; BUG-003 (P2) tách tổng đã chi/chưa chi ở danh sách; FEAT-002 (P2) hiển thị hoàn học phí là tiền ra; BUG-004 (P2) lọc Chi theo `finance_period_id`; BUG-005 (P3) đồng hồ nghiệp vụ + bảng Recent Expense.
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git
 
