@@ -79,8 +79,9 @@ class StartupSynchronization:
             logger.error("Fetch failed, remote unavailable. Cannot proceed.")
             return False
 
-        # A local WRITE receipt may be absent or unresolved after an EXE upgrade.
-        # Remote MAIN wins only after fresh Git proof and a durable local capture.
+        # Local edits are intentionally discarded on process restart.
+        # Remote MAIN must still be independently observed and exactly pinned
+        # before any reset or runtime replacement is attempted.
         if not self._prepare_authoritative_startup_replacement():
             return False
 
@@ -116,7 +117,10 @@ class StartupSynchronization:
 
         try:
             from centermanager.platform.write_recovery import WriteRecoveryJournal
-            WriteRecoveryJournal().record_synchronized()
+            WriteRecoveryJournal().record_authoritative_restart(
+                accepted_main=self._accepted_startup_main_oid,
+                observe_main=self._provider.observe_remote_main_commit,
+            )
         except Exception:
             logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
             self._rollback_startup_database_install()
@@ -257,20 +261,14 @@ class StartupSynchronization:
             logger.exception("Startup Git rollback failed: retain recovery artifacts; do not proceed")
 
     def _prepare_authoritative_startup_replacement(self) -> bool:
-        """Approve Git-MAIN-wins startup without silently discarding local work.
+        """Approve discard-on-restart only after independently verifying Git MAIN.
 
-        Fetch and independently observe exact accepted MAIN before touching the
-        local repository or DB.  When legacy/unaccepted data exist, preserve a
-        verified recovery capture and issue the existing RECONCILED receipt.
-        This never pushes local data or changes remote WRITE ownership.
+        Local unaccepted edits are not replayed and never pushed here. The
+        existing atomic-install rollback protects database replacement; a new
+        CLEAN receipt is recorded only after installation succeeds.
         """
-        from centermanager.platform.write_recovery import (
-            WriteRecoveryJournal, RecoveryRequired,
-        )
-        journal = WriteRecoveryJournal()
+        from centermanager.platform.write_recovery import RecoveryRequired
         try:
-            # Git MAIN wins at process startup, never while this process still
-            # owns an active local editor/mutation gate.
             from centermanager.database.mutation_authority import gate_for
             gate = gate_for()
             with gate.lock:
@@ -278,47 +276,19 @@ class StartupSynchronization:
                     raise RecoveryRequired(
                         "Cannot replace runtime while a local WRITE editor remains active."
                     )
-            # Always pin the accepted ref even for an already-clean workspace.
-            # Otherwise a second fetch/reset may silently install another MAIN.
             accepted = self._provider.get_fetched_remote_main_commit()
             observed = self._provider.observe_remote_main_commit()
-            if not accepted or not observed or accepted != observed:
+            if not accepted or accepted != observed:
                 raise RecoveryRequired(
-                    "Git MAIN cannot be independently verified; local work was not replaced."
+                    "Git MAIN cannot be independently verified; local database was not replaced."
                 )
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
-            try:
-                journal.assert_replaceable(legacy=True)
-                return True
-            except RecoveryRequired:
-                pass
-            existing = journal.inspect()
-            if existing is not None:
-                base = existing.get("base_main_oid")
-                if not base:
-                    raise RecoveryRequired("Recovery base is missing; preserve local data.")
-            else:
-                # For a legacy workspace, its current local commit is the
-                # only defensible base for a newly created recovery receipt.
-                base = self._provider.get_local_main_commit()
-                if not base:
-                    raise RecoveryRequired("Legacy local Git base is unavailable.")
-            journal.reconcile(
-                base_oid=base,
-                accepted_main=accepted,
-                observe_main=self._provider.observe_remote_main_commit,
-            )
-            journal.assert_replaceable()
-            self._startup_reconciled_unaccepted_local = True
-            logger.warning(
-                "Startup: captured unaccepted local workspace; Git MAIN %s will replace it",
-                accepted,
-            )
+            logger.info("Startup discard-on-restart: verified Git MAIN %s", accepted)
             return True
         except Exception as exc:
             self.recovery_error = str(exc)
-            logger.exception("Git-authoritative startup preflight blocked safely")
+            logger.exception("Git-authoritative startup verification blocked safely")
             return False
 
     def _preserve_missing_repository_runtime(self) -> bool:
