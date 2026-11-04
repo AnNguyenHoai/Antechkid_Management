@@ -724,6 +724,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
             )
             if commit_sha and self._push_queue_branch(commit_sha, expected_oid):
                 return True
+            if getattr(self, '_last_queue_publication_outcome', None) == 'UNKNOWN':
+                # A timed-out publication can have succeeded remotely. Never
+                # write a second candidate when the exact remote ref is unknown.
+                logger.warning('Shared queue mutation stopped: remote outcome UNKNOWN')
+                return False
         return False
 
     def remote_queue_status(self) -> Dict[str, Any]:
