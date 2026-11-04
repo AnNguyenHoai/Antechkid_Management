@@ -61,7 +61,7 @@ class BootstrapManager:
                 WriteRecoveryJournal, RecoveryRequired,
             )
             try:
-                WriteRecoveryJournal(paths).inspect()
+                journal_document = WriteRecoveryJournal(paths).inspect()
             except RecoveryRequired as exc:
                 logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
                 from PySide6.QtWidgets import QMessageBox
@@ -71,6 +71,13 @@ class BootstrapManager:
                     "do not remove either to bypass this guard.",
                 )
                 return False
+
+            # TECH-008: pre-edit snapshots are only reachable through the
+            # in-memory WriteTransaction that created them, so any snapshot
+            # present at startup is an orphan. The single-instance lock is
+            # already held. Retention is skipped while recovery may be needed.
+            from centermanager.platform.snapshot_retention import prune_orphaned_snapshots
+            prune_orphaned_snapshots(getattr(paths, "snapshots_dir", None), journal_document)
 
             repo_state = self._repo_manager.detect()
             logger.info(f"[BOOTSTRAP] Repository state: {repo_state.value}")
