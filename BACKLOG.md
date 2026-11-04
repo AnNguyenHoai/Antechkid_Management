@@ -10,7 +10,8 @@
 | ID | Tiêu đề | Loại | Ưu tiên | Trạng thái | Phụ thuộc |
 |---|---|---|---|---|---|
 | TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | Maintenance | P1 | WAITING_PO | — |
-| TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git & giới hạn snapshot | Maintenance | P2 | ANALYZED | TECH-001 |
+| TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git | Maintenance | P2 | IN_REVIEW (#558) | — |
+| TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | ANALYZED — chờ PO duyệt | TECH-002 |
 | TECH-003 | Làm sạch & sắp xếp lại tài liệu (`docs/` 270 file, file tạm ở gốc repo) | Maintenance | P2 | ANALYZED | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
@@ -43,16 +44,33 @@
 - **PO acceptance:** Chưa
 - **Notes:** Nhánh `main` cũ vẫn còn. Xóa nhánh là thao tác phá hủy, chỉ làm khi PO yêu cầu.
 
-## TECH-002 — Đưa dữ liệu runtime giả ra khỏi Git & giới hạn snapshot
+## TECH-002 — Đưa dữ liệu runtime giả ra khỏi Git
 
-- **Type:** Maintenance · **Priority:** P2 · **Status:** ANALYZED
-- **Source:** Audit 2026-11-04
-- **Business problem:** Trên `main_repos` vẫn track 795 file dưới `CenterManager/runtime/`: 771 snapshot `pre_edit_*.db` (~206 MB), `Config/config.json` (dù `.gitignore` đã chặn — file đã track từ trước nên vẫn còn), heartbeat, 1 file CV mẫu. Dữ liệu là giả (PO xác nhận) nên không phải sự cố bảo mật, nhưng làm repo nặng và tạo thói quen commit dữ liệu runtime.
-- **Expected outcome:** Repo nguồn chỉ chứa source và fixture có chủ đích.
-- **Scope:** `git rm --cached` các file runtime (không xóa lịch sử, không force-push); bổ sung `.gitignore` cho `runtime/snapshots/`, `runtime/collaboration/`, `runtime/attachments/`; kiểm tra luồng nào để snapshot không bị dọn và có cần chính sách giữ N bản.
-- **Acceptance criteria:** `git ls-files CenterManager/runtime` chỉ còn placeholder được duyệt; CI xanh; test chứng minh số snapshot không tăng vô hạn.
-- **Dependencies:** TECH-001 (để thay đổi vào đúng nhánh). · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
-- **Notes:** Rewrite lịch sử để giảm dung lượng là việc riêng, cần PO ủy quyền.
+- **Type:** Maintenance · **Priority:** P2 · **Status:** IN_REVIEW
+- **Source:** Audit 2026-11-04 · PO duyệt 2026-11-04 · **Issue:** #558
+- **Business problem:** `main_repos` track 795 file dưới `CenterManager/runtime/`: 771 snapshot `pre_edit_*.db` (~206 MB), `Config/config.json` + `Config/auto_report_state.json`, 17 heartbeat, 1 file CV mẫu, và một gitlink hỏng `runtime/repository` (mode 160000, không có `.gitmodules`). Dữ liệu giả (PO xác nhận).
+- **Expected outcome:** Repo nguồn không còn trạng thái runtime của máy dev.
+- **Scope (đã thu hẹp, xem Notes):** `git rm --cached` các file trên (không xóa lịch sử, không force-push); thêm `.gitignore` cho `runtime/repository/`, `runtime/snapshots/`, `runtime/attachments/`, `runtime/collaboration/heartbeat/`; sửa test gitlink đang chạy sai đường dẫn; thêm test hồi quy.
+- **Acceptance criteria:** `git ls-files CenterManager/runtime` chỉ còn `manifest.json`, `metadata/version.json`, `collaboration/lock.json`; không còn gitlink; CI `Pytest Suite` xanh.
+- **Dependencies:** — · **Implementation reference:** nhánh `chore/tech-002-untrack-runtime`, PR (xem Issue #558)
+- **Verification evidence (local):** Chạy trực tiếp logic 2 test trên index đã stage: cả hai PASS. Test gitlink đã sửa phát hiện đúng gitlink trên trạng thái cũ (trước đây luôn pass vì `git ls-files` chạy sai thư mục). Full pytest không chạy được ở môi trường này (PyPI bị chặn) → dựa vào CI.
+- **PO acceptance:** Chưa
+- **Notes:**
+  - Giữ lại `manifest.json`, `metadata/version.json`, `collaboration/lock.json` vì `build_release.py` copy chúng vào gói phát hành như template. Hai file đầu chứa trạng thái máy dev (`platform_version 214`, `owner`, `session_id`) — nếu gỡ, `MetadataInitializer` sẽ tạo mặc định `platform_version: 1`, làm thay đổi hành vi bản phát hành → cần PO/kiến trúc quyết định riêng.
+  - Phần "giới hạn snapshot" tách sang TECH-008 vì chạm vào luồng recovery.
+  - Rewrite lịch sử để giảm dung lượng repo là việc riêng, cần PO ủy quyền.
+
+## TECH-008 — Dọn snapshot mồ côi trong `runtime/snapshots/`
+
+- **Type:** Bug · **Priority:** P2 · **Status:** ANALYZED — chờ PO duyệt
+- **Source:** Phân tích trong TECH-002 (2026-11-04)
+- **Business problem:** Mỗi lần bắt đầu sửa dữ liệu, `WriteTransaction._create_snapshot()` copy toàn bộ DB vào `runtime/snapshots/`. Đường dẫn snapshot chỉ được giữ trong bộ nhớ (`self._snapshot_path`) và chỉ bị xóa khi publish thành công, hủy hoặc retry release thành công. Không bị xóa khi: ứng dụng bị tắt/crash trong lúc EDITING, giao dịch ở FAILED, hoặc RECOVERY_REQUIRED (cố ý giữ). Không có cơ chế dọn khi khởi động. Sau khi khởi động lại, không đoạn code nào đọc lại các snapshot cũ → chúng chỉ chiếm đĩa (máy dev đã tích 771 bản ~206 MB). Mỗi bản là bản sao đầy đủ DB nên dung lượng tăng theo kích thước DB thật.
+- **Root cause:** Đã xác nhận bằng đọc code (`services/write_transaction.py`); chưa tái hiện bằng chạy thật.
+- **Expected outcome:** Số snapshot trên đĩa có giới hạn mà không làm mất dữ liệu cần cho khôi phục.
+- **Scope đề xuất:** Khi khởi động (trước khi có giao dịch nào), xóa snapshot không thuộc giao dịch đang hoạt động, **trừ khi** workspace đang ở trạng thái cần recovery; giữ tối đa N bản mới nhất (đề xuất N = 5) làm lưới an toàn.
+- **Acceptance criteria:** Test: tạo nhiều snapshot mồ côi → khởi động → chỉ còn ≤ N; khi có recovery journal đang mở → không xóa gì; CI xanh.
+- **Dependencies:** TECH-002 · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
+- **Câu hỏi cho PO:** đồng ý N = 5 và quy tắc "không dọn khi đang cần recovery"?
 
 ## TECH-003 — Làm sạch & sắp xếp lại tài liệu
 
