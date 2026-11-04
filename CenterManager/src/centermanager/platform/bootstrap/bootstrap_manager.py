@@ -55,22 +55,18 @@ class BootstrapManager:
             # The old bootstrap precheck rejected it *before* recovery could
             # run, making upgraded Windows EXEs impossible to start.
             #
-            # Inspect metadata only: malformed journals remain blocked while
-            # no SQLCipher/Git/local-work mutation is allowed at this stage.
+            # Discard-on-restart policy: an old/invalid local WRITE receipt
+            # does not authorize publication and must not prevent an otherwise
+            # verified Git MAIN startup. StartupSynchronization independently
+            # proves MAIN before it replaces any local bytes.
             from centermanager.platform.write_recovery import (
                 WriteRecoveryJournal, RecoveryRequired,
             )
             try:
                 journal_document = WriteRecoveryJournal(paths).inspect()
             except RecoveryRequired as exc:
-                logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(
-                    None, "WRITE recovery required",
-                    str(exc) + "\nPreserve the runtime and recovery folder; "
-                    "do not remove either to bypass this guard.",
-                )
-                return False
+                logger.warning("[BOOTSTRAP] Local WRITE journal will be superseded only after verified MAIN install: %s", exc)
+                journal_document = {"status": "OPEN"}  # Skip orphan retention on uncertain state.
 
             # TECH-008: pre-edit snapshots are only reachable through the
             # in-memory WriteTransaction that created them, so any snapshot
