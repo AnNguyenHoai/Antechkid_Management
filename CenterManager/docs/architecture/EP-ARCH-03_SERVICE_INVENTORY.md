@@ -35,6 +35,7 @@ This inventory is the committed architecture classification for application serv
 | `enrollment_transfer_service.py` | PASS | repository-owned | — |
 | `expense_service.py` | PASS | repository-owned | — |
 | `expense_timeline_service.py` | PASS | repository-owned | — |
+| `finance_attachment_service.py` | PASS | `RepositoryProvider.finance_attachments/incomes/expenses` + service-owned immutable voucher files | — |
 | `finance_dashboard_service.py` | NON_REPOSITORY | application-service aggregation | — |
 | `finance_diagnostics_service.py` | PASS | repository-owned attribution reads and query-only connection guard | — |
 | `finance_period_service.py` | PASS | repository-owned | — |
@@ -177,6 +178,7 @@ Both services are `PASS` and are not migration backlog. Database persistence/que
 - Both services are promoted to `PASS`; no concrete repository construction or direct session persistence/query operation remains in the application-service layer.
 
 ## EP-ARCH-03.38 Expense repository boundary
+- `finance_attachment_service.py` — **FinanceAttachmentService** (FEAT-003) stores voucher metadata through `RepositoryProvider.finance_attachments(...)` and checks Income/Expense existence through `RepositoryProvider.incomes/expenses(...)`; it owns validation, authorization, audit and the immutable content-addressed voucher files on disk.
 - `expense_service.py` — **ExpenseService** uses `RepositoryProvider.expenses(...)`; validation, authorization, transaction completion, and expense timeline orchestration remain service-owned while database persistence/query operations remain repository-owned.
 - `expense_timeline_service.py` — **ExpenseTimelineService** uses `RepositoryProvider.expense_timeline(...)`; event construction/serialization remains service-owned while database persistence and refresh are repository-owned.
 - Both services are promoted to `PASS`; no concrete repository construction or direct session persistence/query operation remains in the application-service layer.

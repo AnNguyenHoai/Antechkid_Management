@@ -40,6 +40,7 @@ _POST_PRJ_REQUIRED_COLUMNS = {
     },
     "class_fee_history": {"changed_by"},
     "expenses": {"funding_source", "incurred_date"},
+    "finance_attachments": {"entity_type", "entity_id", "stored_path", "sha256", "deleted_at"},
 }
 
 

@@ -44,6 +44,7 @@ class AdminDataResetRepository:
         "incomes",
         "expenses",
         "expense_timeline_events",
+        "finance_attachments",
         "finance_periods",
         "financial_settlements",
         "tuition_adjustments",

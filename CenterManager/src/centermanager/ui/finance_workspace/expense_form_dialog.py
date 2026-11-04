@@ -22,7 +22,8 @@ class ExpenseFormDialog(QDialog):
         expense_service: ExpenseService,
         expense_id: Optional[int] = None,
         initial_payment_date: Optional[date] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
+        attachment_service=None,
     ):
         super().__init__(parent)
         self._service = expense_service
@@ -33,6 +34,8 @@ class ExpenseFormDialog(QDialog):
         self._loaded_description: Optional[str] = None
         # Funding source of the loaded row; None = new expense or legacy row.
         self._loaded_funding: Optional[str] = None
+        self._attachment_service = attachment_service
+        self.voucher_widget = None
 
         self.setWindowTitle("Edit Expense" if self._is_edit else "Add Expense")
         self.setMinimumWidth(480)
@@ -108,6 +111,14 @@ class ExpenseFormDialog(QDialog):
         form.addRow("Note", self.note_edit)
 
         layout.addLayout(form)
+
+        if self._attachment_service is not None:
+            # FEAT-004: optional accounting vouchers (D-009).
+            from centermanager.ui.finance_workspace.voucher_attachment_widget import VoucherAttachmentWidget
+            self.voucher_widget = VoucherAttachmentWidget(
+                self._attachment_service, "EXPENSE", self._expense_id, parent=self
+            )
+            layout.addWidget(self.voucher_widget)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -249,7 +260,7 @@ class ExpenseFormDialog(QDialog):
                     note=note,
                 )
             else:
-                self._service.create_expense(
+                created = self._service.create_expense(
                     category=category,
                     description=description,
                     amount=amount,
@@ -259,9 +270,21 @@ class ExpenseFormDialog(QDialog):
                     status=status,
                     note=note or None,
                 )
+                self._commit_vouchers(getattr(created, "id", None))
             self.accept()
         except ExpenseValidationError as exc:
             QMessageBox.warning(self, "Validation Error", str(exc))
         except Exception as exc:
             logger.exception("Save expense error")
             QMessageBox.critical(self, "Error", str(exc))
+
+    def _commit_vouchers(self, expense_id) -> None:
+        if self.voucher_widget is None or expense_id is None:
+            return
+        errors = self.voucher_widget.commit_pending(expense_id)
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Chứng từ",
+                "Khoản chi đã được lưu nhưng một số chứng từ chưa đính kèm được:\n" + "\n".join(errors),
+            )

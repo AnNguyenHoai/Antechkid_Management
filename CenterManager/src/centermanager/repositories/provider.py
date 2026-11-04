@@ -22,6 +22,7 @@ from centermanager.repositories.student_repository import StudentRepository
 from centermanager.repositories.assessment_repository import AssessmentRepository
 from centermanager.repositories.report_repository import ReportRepository
 from centermanager.repositories.expense_repository import ExpenseRepository
+from centermanager.repositories.finance_attachment_repository import FinanceAttachmentRepository
 from centermanager.repositories.expense_timeline_repository import ExpenseTimelineRepository
 from centermanager.repositories.income_repository import IncomeRepository
 from centermanager.repositories.teacher_repository import TeacherRepository
@@ -66,6 +67,7 @@ class RepositoryProvider(Protocol):
     def assessments(self, session: Session) -> AssessmentRepository: ...
     def reports(self, session: Session) -> ReportRepository: ...
     def expenses(self, session: Session) -> ExpenseRepository: ...
+    def finance_attachments(self, session: Session) -> FinanceAttachmentRepository: ...
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository: ...
     def incomes(self, session: Session) -> IncomeRepository: ...
     def teachers(self, session: Session) -> TeacherRepository: ...
@@ -106,6 +108,7 @@ class SqlAlchemyRepositoryProvider:
     def assessments(self, session: Session) -> AssessmentRepository: return AssessmentRepository(session)
     def reports(self, session: Session) -> ReportRepository: return ReportRepository(session)
     def expenses(self, session: Session) -> ExpenseRepository: return ExpenseRepository(session)
+    def finance_attachments(self, session: Session) -> FinanceAttachmentRepository: return FinanceAttachmentRepository(session)
     def expense_timeline(self, session: Session) -> ExpenseTimelineRepository: return ExpenseTimelineRepository(session)
     def incomes(self, session: Session) -> IncomeRepository: return IncomeRepository(session)
     def teachers(self, session: Session) -> TeacherRepository: return TeacherRepository(session)

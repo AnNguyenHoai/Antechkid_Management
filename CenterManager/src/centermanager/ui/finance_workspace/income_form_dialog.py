@@ -41,8 +41,11 @@ class IncomeFormDialog(QDialog):
         income_id: Optional[int] = None,
         initial_payment_date: Optional[date] = None,
         parent: Optional[QWidget] = None,
+        attachment_service=None,
     ) -> None:
         super().__init__(parent)
+        self._attachment_service = attachment_service
+        self.voucher_widget = None
         self._income_service = income_service
         self._student_service = student_service
         self._class_service = class_service
@@ -170,6 +173,14 @@ class IncomeFormDialog(QDialog):
         form.addRow("Ghi chú", self.note_edit)
 
         layout.addLayout(form)
+
+        if self._attachment_service is not None:
+            # FEAT-004: optional accounting vouchers (D-009).
+            from centermanager.ui.finance_workspace.voucher_attachment_widget import VoucherAttachmentWidget
+            self.voucher_widget = VoucherAttachmentWidget(
+                self._attachment_service, "INCOME", self._income_id, parent=self
+            )
+            layout.addWidget(self.voucher_widget)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -632,7 +643,7 @@ class IncomeFormDialog(QDialog):
                         raise IncomeValidationError(
                             "Vui lòng nhập lý do giảm giá / tuition credit."
                         )
-                    self._income_service.create_tuition_payment_with_credit(
+                    created = self._income_service.create_tuition_payment_with_credit(
                         student_id=int(student_id),
                         class_id=int(class_id),
                         enrollment_id=int(enrollment_id),
@@ -646,7 +657,7 @@ class IncomeFormDialog(QDialog):
                         note=create_note,
                     )
                 else:
-                    self._income_service.create_income(
+                    created = self._income_service.create_income(
                         student_id=student_id,
                         class_id=class_id,
                         enrollment_id=enrollment_id,
@@ -658,9 +669,23 @@ class IncomeFormDialog(QDialog):
                         received_by=received_by or None,
                         note=create_note,
                     )
+                if isinstance(created, tuple):
+                    created = created[0]
+                self._commit_vouchers(getattr(created, "id", None))
             self.accept()
         except IncomeValidationError as exc:
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
         except Exception:
             logger.exception("Error saving income")
             QMessageBox.critical(self, "Lỗi", "Đã xảy ra lỗi không mong muốn.")
+
+    def _commit_vouchers(self, income_id) -> None:
+        if self.voucher_widget is None or income_id is None:
+            return
+        errors = self.voucher_widget.commit_pending(income_id)
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Chứng từ",
+                "Khoản thu đã được lưu nhưng một số chứng từ chưa đính kèm được:\n" + "\n".join(errors),
+            )

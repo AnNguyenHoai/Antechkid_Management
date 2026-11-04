@@ -1164,6 +1164,34 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return legacy
         return canonical
 
+    def _sync_finance_attachments_to_repository(self) -> int:
+        """Copy new finance vouchers runtime -> repository (FEAT-003, D-009).
+
+        Vouchers are immutable and content-addressed (``<sha256>.<ext>``), so
+        the sync is incremental: only files missing from the repository are
+        copied; nothing is ever deleted or overwritten. Cost is a directory
+        walk plus the size of new files, never the total voucher volume.
+        """
+        runtime_root = self._repo_path.parent / "Attachment" / "Finance"
+        repo_root = self._repo_path / "Attachments" / "Finance"
+        if not runtime_root.is_dir():
+            return 0
+        copied = 0
+        for source in runtime_root.rglob("*"):
+            if not source.is_file() or source.name.startswith("."):
+                continue
+            target = repo_root / source.relative_to(runtime_root)
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(f".{target.name}.tmp")
+            shutil.copy2(source, temporary)
+            os.replace(temporary, target)
+            copied += 1
+        if copied:
+            logger.info("Finance vouchers staged for publish: %d new file(s)", copied)
+        return copied
+
     def _sync_employee_attachments_to_repository(self) -> None:
         """Mirror runtime Employee attachments into the repository working tree.
 
@@ -1210,6 +1238,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # before staging. The runtime copy is local UI state; the repository
             # copy is the cross-machine source of truth.
             self._sync_employee_attachments_to_repository()
+            self._sync_finance_attachments_to_repository()
 
             # Stage business files
             self._run_git_command(["add", "-A"])
@@ -1293,6 +1322,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
             # Synchronize Employee documents into the repository before the
             # publish-only staging boundary.
             self._sync_employee_attachments_to_repository()
+            self._sync_finance_attachments_to_repository()
 
             # Fail closed before staging: the authoritative DB and its signed
             # identity must agree with the workspace key and pinned generation.
