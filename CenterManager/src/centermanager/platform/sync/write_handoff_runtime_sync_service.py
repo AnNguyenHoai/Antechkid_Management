@@ -340,11 +340,10 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
                     logger.exception(
                         "Authoritative DB installed but runtime metadata version update failed"
                     )
-                    return False
+                    raise
 
             if not sessions_refreshed:
-                logger.error("Runtime materialization finished without refreshed DB sessions")
-                return False
+                raise RuntimeError("Runtime materialization finished without refreshed DB sessions")
             # The repository DB is allowed to differ after authorized Alembic.
             # Re-observe MAIN, verify the migrated runtime and seal its receipt
             # before cleanup of the previous DB/sidecars.
