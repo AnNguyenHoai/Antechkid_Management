@@ -573,6 +573,42 @@ class WriteRecoveryJournal:
             fields['accepted_local_files'] = self._local_files()
         self.update(**fields)
 
+    def record_authoritative_restart(self, *, accepted_main, observe_main):
+        """Issue a fresh CLEAN receipt after a verified Git MAIN installation.
+
+        The operator accepts discarding all previous unpublished local edits
+        on restart. This method never publishes or grants WRITE, and must run
+        only after the atomic startup database install and session refresh.
+        Unknown remote state, a dirty repository or a WAL always blocks.
+        """
+        if not accepted_main or observe_main() != accepted_main:
+            raise RecoveryRequired('Git MAIN changed or cannot be verified after installation.')
+        local = self._git('rev-parse', 'HEAD')
+        upstream = self._git('rev-parse', '@{upstream}')
+        repo_db = self.repository / 'database' / 'center.db'
+        if (local != accepted_main or upstream != accepted_main
+                or not self.database.is_file() or not repo_db.is_file()
+                or self._wal_pending()
+                or _hash(self.database) != _hash(repo_db)
+                or self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired(
+                'Installed runtime does not exactly match verified Git MAIN; '
+                'old recovery receipt was retained.'
+            )
+        receipt = dict(
+            format=1, runtime=str(self.runtime), repository=str(self.repository),
+            database=str(self.database), repository_id=self._repository_id(),
+            status='CLEAN', publication='VERIFIED', release='VERIFIED',
+            base_main_oid=accepted_main, published_oid=accepted_main,
+            published_runtime_sha256=_hash(self.database),
+            accepted_local_files=self._local_files(),
+            session_id='startup-' + uuid.uuid4().hex,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        # Install the new receipt last: a crash before this write leaves the
+        # previous receipt in place, and startup can repeat from fresh MAIN.
+        _json(self.journal, receipt)
+
     def record_synchronized(self):
         """Refresh an existing verified/reconciled receipt after remote install.
 
