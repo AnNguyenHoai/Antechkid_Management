@@ -15,7 +15,7 @@ Task contract: founder's E1B-1 R01–R05 prompt (no Issue number supplied).
 | Finish save / materialization | `finish_editing` validates finishing authority/base, invokes save callback, pending version, `artifact_security.materialize_runtime_database_to_repository` | Existing authority/Finance/version guards retained. Journal remains OPEN/pending through every intermediate failure. |
 | Signed repository artifact | `artifact_security.py` validates ciphertext/key and signs stable database identity, hash and monotonic artifact generation; pair installation rolls back on failure | Reused unchanged. Recovery capture is explicitly local evidence, not a newly accepted signed MAIN identity; original signed sidecar and local pin are retained. |
 | Git stage/commit/push | `GitSynchronizationProvider::publish_only` checks expected MAIN, stages/hash-checks business files, commits, single CAS push, pins identity. Reply may be lost after remote acceptance. | Durable PUBLISHING plus full pre-push preservation. True return alone does not clean: require fresh remote OID = local OID, current runtime snapshot = repository DB, and repository bytes = committed DB with clean working tree. UNKNOWN remains pending. |
-| Release/cleanup | Publish success can precede verified exact-session release. Snapshot deletion/reset originally loses all process-local history. | PUBLISHED with VERIFIED publication; CLEAN only after confirmed release. Journal and captures are never deleted automatically. Release uncertainty is distinct from data publication. |
+| Release/cleanup | Publish success can precede verified exact-session release. Snapshot deletion/reset originally loses all process-local history. | PUBLISHED with VERIFIED publication; CLEAN only after confirmed release. Journal is never deleted automatically. Captures follow the TECH-011 retention policy (below). Release uncertainty is distinct from data publication. |
 | Cancel | Dirty force-cancel restores old raw snapshot, deletes it after release. Dirty flag can omit committed operations. | For journaled sessions preserve current encrypted DB and Git artifacts even when dirty flag is false; mark CANCELLED, release through existing exact-session protocol, retain original workspace, require explicit reconciliation. No automatic rollback/merge. |
 | Lease loss/idle/shutdown | Stale editing preserves memory only; manager shutdown may release lease but no durable local record existed. 30m idle logic relies on dirty flag. | Journal survives lease expiry/release/shutdown and blocks subsequent replacement. Existing 60s/600s/20s/30m policies unchanged. |
 
@@ -118,3 +118,12 @@ Synthetic key handling is injected for cross-platform deterministic tests; no pr
 10. **Controlled Emergency Revocation:** remains disabled until fencing, mutation guards, recovery/operator contracts and multi-client UAT pass.
 
 No production database/lock modifications, schema migration, time-policy changes, force revoke, auto-merge or new WRITE authority.
+
+## TECH-011 — Capture scope and retention (PO decision D-010, 2026-11-04)
+
+Superseding the original "captures are never deleted" rule:
+
+- **Scope.** A capture does not copy `.git/objects` content (the directory is kept, so the captured repository still resolves `HEAD`/refs) and does not copy content-addressed finance vouchers `Finance/<yyyy>/<mm>/<sha256>.<ext>` (immutable, already versioned in Git). Every other business file, the WAL-complete DB snapshot, metadata, exports and reports are still copied and hash-verified.
+- **Fingerprint.** Immutable vouchers are fingerprinted as `immutable:<size>`; their name is their SHA-256.
+- **Retention.** After `begin()` creates the base capture, captures are pruned: kept are the newest 20 sessions, the current session, the journal's `last_capture`, every capture whose manifest/session cannot be read, and every capture of a session whose final status in `history/` is not `CLEAN`. Only captures of older `CLEAN` sessions are removed. Retention failure is logged and never blocks editing.
+- **Trade-off accepted by PO:** an unaccepted local Git commit is preserved through its working-tree files and DB snapshot, not its commit objects.
