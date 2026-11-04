@@ -196,6 +196,9 @@ class WriteRecoveryJournal:
                         and self._git('rev-parse', 'HEAD') in {document.get('published_oid'), self._git('rev-parse', '@{upstream}')}
                         and not self._git('status', '--porcelain', '--untracked-files=all')):
                     return
+            # Do not weaken the refusal: emit a privacy-safe reason vector so
+            # another handoff UI refresh failure can be diagnosed precisely.
+            self.log_clean_mismatch('assert_replaceable', document)
             raise RecoveryRequired('Unpublished or uncertain WRITE data is protected. Stop synchronization; inspect and preserve recovery, then explicitly reconcile the saved base with accepted MAIN.')
         if legacy and not self.database.exists() and self.repository.exists():
             if not (self.repository / '.git').exists():
@@ -213,6 +216,51 @@ class WriteRecoveryJournal:
                     or self._git('status', '--porcelain', '--untracked-files=all')
                     or self._git('rev-parse', 'HEAD') != self._git('rev-parse', '@{upstream}')):
                 raise RecoveryRequired('Legacy workspace has no recovery receipt and may contain local work. Preserve it and reconcile explicitly before synchronization.')
+
+    def log_clean_mismatch(self, phase, document=None):
+        """Log *which* accepted invariant changed without leaking business data.
+
+        The receipt is never updated here. Diagnostics are best-effort; Git
+        connectivity failures are reported as UNKNOWN, not mistaken for CLEAN.
+        """
+        try:
+            document = self.inspect() if document is None else document
+            if not isinstance(document, dict):
+                logger.warning('Recovery mismatch phase=%s receipt=missing', phase)
+                return
+            current = self._local_files()
+            expected = document.get('accepted_local_files') or {}
+            added = set(current) - set(expected)
+            removed = set(expected) - set(current)
+            changed = {key for key in set(current) & set(expected)
+                       if current[key] != expected[key]}
+            # Do not log full paths: names can contain student identities.
+            def categories(keys):
+                return {category: sum(k.startswith(category + '/') for k in keys)
+                        for category in ('database', 'metadata', 'attachments',
+                                         'legacy-attachments', 'reports', 'exports')}
+            db_match = self.database.is_file() and (
+                _hash(self.database) == document.get('published_runtime_sha256'))
+            wal_pending = self._wal_pending()
+            repository_match = self._repository_id() == document.get('repository_id')
+            head = self._git('rev-parse', 'HEAD')
+            upstream = self._git('rev-parse', '@{upstream}')
+            git_status_clean = not bool(
+                self._git('status', '--porcelain', '--untracked-files=all'))
+            logger.warning(
+                'Recovery mismatch phase=%s status=%s publication=%s '
+                'db_hash_match=%s wal_pending=%s local_files_match=%s '
+                'added=%s removed=%s changed=%s repository_match=%s '
+                'head_accepted=%s head_upstream=%s git_clean=%s',
+                phase, document.get('status'), document.get('publication'),
+                db_match, wal_pending, not (added or removed or changed),
+                categories(added), categories(removed), categories(changed),
+                repository_match, head == document.get('published_oid'),
+                head == upstream, git_status_clean,
+            )
+        except Exception as exc:
+            logger.warning('Recovery mismatch phase=%s diagnostics_unknown=%s',
+                           phase, type(exc).__name__)
 
     def begin_report_artifact_update(self):
         """Admit a rebuildable report operation, without resolving pending work."""
