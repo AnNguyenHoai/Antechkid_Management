@@ -21,8 +21,8 @@
 | BUG-005 | Dashboard dùng đồng hồ nghiệp vụ; bảng Recent Expense cùng quy tắc KPI | Bug | P3 | NEW — chờ PO duyệt | — |
 | QA-004 | Audit đính kèm chứng từ Thu/Chi (dung lượng & hiệu suất) | QA | P1 | WAITING_PO (#572) | — |
 | BUG-006 | Tài liệu nhân viên có thể bị xóa khỏi repo khi publish (lệch `Attachment`/`Attachments`) | Bug | P1 | IN_REVIEW (#574, PR #575) | — |
-| TECH-011 | Bản sao khôi phục (captures) tăng không giới hạn: ≥3 bản sao toàn bộ workspace mỗi lần lưu | Maintenance | P1 | ANALYZED — chờ PO quyết định chính sách giữ (đổi hợp đồng E1B-1) | — |
-| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần + tối ưu write recovery) | Feature | P1 | READY (PO duyệt sửa recovery 2026-11-04) — BLOCKED bởi TECH-011 | BUG-006, TECH-011 |
+| TECH-011 | Bản sao khôi phục (captures) tăng không giới hạn: ≥3 bản sao toàn bộ workspace mỗi lần lưu | Maintenance | P1 | IN_REVIEW (#576, PR #577) — D-010 | — |
+| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần) | Feature | P1 | READY (PO duyệt 2026-11-04) | BUG-006, TECH-011 |
 | FEAT-004 | UI đính kèm/xem chứng từ Thu/Chi | Feature | P1 | ANALYZED | FEAT-003 |
 | TECH-009 | Giám sát dung lượng chứng từ/repo + ngưỡng cảnh báo | Improvement | P2 | NEW | FEAT-003 |
 | TECH-010 | Đồng bộ tài liệu nhân viên tăng dần | Improvement | P2 | NEW | BUG-006 |
