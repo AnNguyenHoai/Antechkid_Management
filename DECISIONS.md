@@ -24,3 +24,11 @@
 ## D-005 — Dữ liệu trong repo nguồn là dữ liệu giả
 - **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO xác nhận)
 - **Nội dung:** Snapshot/attachment/config trong repo nguồn là dữ liệu test; dữ liệu thật ở repo private `Antechkid_CenterManager_DatabaseOfficial`. Không coi là sự cố lộ dữ liệu. Không rewrite lịch sử Git vì lý do bảo mật.
+
+## D-006 — Giữ 3 file template runtime trong repo nguồn
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
+- **Nội dung:** `runtime/manifest.json`, `runtime/metadata/version.json`, `runtime/collaboration/lock.json` tiếp tục được track vì `build_release.py` dùng làm template cho gói phát hành. Không thay đổi hành vi bản phát hành trong TECH-002.
+
+## D-007 — Chính sách giữ snapshot
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
+- **Nội dung:** Khi khởi động giữ tối đa 5 snapshot `pre_edit_*.db` mới nhất; không dọn khi recovery journal cho thấy có thể cần khôi phục (TECH-008).
