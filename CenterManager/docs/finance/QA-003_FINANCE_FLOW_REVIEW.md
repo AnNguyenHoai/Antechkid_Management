@@ -51,7 +51,7 @@ Không có dòng giải thích nào trên trang danh sách → người dùng th
 
 - Form Chi chỉ có hai trạng thái: `ĐÃ HOÀN TRẢ → Completed (tính tiền ra)`, `CHƯA HOÀN TRẢ → Pending (không tính)`. "Hoàn trả" nghĩa là *đã trả lại cho người ứng tiền*, không phải *trung tâm đã chi*.
 - Dữ liệu test có dòng `TÀI KHOẢN CÔNG TY` + `CHƯA HOÀN TRẢ` 10.000.000 VND: tiền đã ra từ tài khoản công ty nhưng không được tính là tiền ra.
-- Alias ví: `TÀI KHOẢN CÁ NHÂN` được map sang ví **Cash** (`core/wallet.py:26`) — đây là giả định, chưa có quy tắc nghiệp vụ xác nhận.
+- Alias ví: `TÀI KHOẢN CÁ NHÂN` được map sang ví **Cash** (`core/wallet.py:28`) — đây là giả định, chưa có quy tắc nghiệp vụ xác nhận.
 - Dashboard gọi là "Paid Expense", danh sách gọi là "ĐÃ HOÀN TRẢ" → cùng một khái niệm, hai tên.
 
 ### F5 — [XN · Thấp] Bảng "Recent Expense" trên Dashboard có cả dòng Pending
