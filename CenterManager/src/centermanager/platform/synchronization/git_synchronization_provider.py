@@ -680,7 +680,31 @@ class GitSynchronizationProvider(SynchronizationProvider):
             )
             return True
         except Exception as exc:
-            logger.info("Shared queue CAS update lost a race: %s", exc)
+            # A timeout/HTTP 500 is *not* evidence of a CAS race. Git may
+            # have accepted the push before its response was lost. Observe
+            # the authoritative ref before retrying or failing.
+            try:
+                observed = self._remote_queue_oid()
+            except Exception as verify_exc:
+                logger.warning(
+                    "Shared queue publication outcome UNKNOWN; remote cannot be "
+                    "verified (push=%s, observe=%s)",
+                    type(exc).__name__, type(verify_exc).__name__,
+                )
+                self._last_queue_publication_outcome = "UNKNOWN"
+                return False
+            if observed == commit_sha:
+                self._last_queue_publication_outcome = "VERIFIED"
+                logger.info("Shared queue push response lost; exact remote OID verifies acceptance")
+                return True
+            if observed != expected_oid:
+                self._last_queue_publication_outcome = "CONTENTION"
+                logger.info("Shared queue CAS contention confirmed by changed remote OID")
+            else:
+                self._last_queue_publication_outcome = "GIT_FAILURE"
+                logger.warning(
+                    "Shared queue push failed without a CAS race: %s", type(exc).__name__
+                )
             return False
 
     def _mutate_remote_queue(self, mutator, retries: int = 5) -> bool:
@@ -700,6 +724,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
             )
             if commit_sha and self._push_queue_branch(commit_sha, expected_oid):
                 return True
+            if getattr(self, '_last_queue_publication_outcome', None) == 'UNKNOWN':
+                # A timed-out publication can have succeeded remotely. Never
+                # write a second candidate when the exact remote ref is unknown.
+                logger.warning('Shared queue mutation stopped: remote outcome UNKNOWN')
+                return False
         return False
 
     def remote_queue_status(self) -> Dict[str, Any]:

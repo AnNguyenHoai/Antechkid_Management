@@ -191,11 +191,14 @@ class WriteRecoveryJournal:
             elif document['status'] in {'CLEAN', 'PUBLISHED'} and document.get('publication') == 'VERIFIED':
                 if (self.database.is_file() and not self._wal_pending()
                         and document.get('published_runtime_sha256') == _hash(self.database)
-                        and document.get('accepted_local_files') == self._local_files()
+                        and self._receipt_stable_files(document.get('accepted_local_files')) == self._receipt_stable_files(self._local_files())
                         and document['repository_id'] == self._repository_id()
                         and self._git('rev-parse', 'HEAD') in {document.get('published_oid'), self._git('rev-parse', '@{upstream}')}
                         and not self._git('status', '--porcelain', '--untracked-files=all')):
                     return
+            # Do not weaken the refusal: emit a privacy-safe reason vector so
+            # another handoff UI refresh failure can be diagnosed precisely.
+            self.log_clean_mismatch('assert_replaceable', document)
             raise RecoveryRequired('Unpublished or uncertain WRITE data is protected. Stop synchronization; inspect and preserve recovery, then explicitly reconcile the saved base with accepted MAIN.')
         if legacy and not self.database.exists() and self.repository.exists():
             if not (self.repository / '.git').exists():
@@ -213,6 +216,53 @@ class WriteRecoveryJournal:
                     or self._git('status', '--porcelain', '--untracked-files=all')
                     or self._git('rev-parse', 'HEAD') != self._git('rev-parse', '@{upstream}')):
                 raise RecoveryRequired('Legacy workspace has no recovery receipt and may contain local work. Preserve it and reconcile explicitly before synchronization.')
+
+    def log_clean_mismatch(self, phase, document=None):
+        """Log *which* accepted invariant changed without leaking business data.
+
+        The receipt is never updated here. Diagnostics are best-effort; Git
+        connectivity failures are reported as UNKNOWN, not mistaken for CLEAN.
+        """
+        try:
+            document = self.inspect() if document is None else document
+            if not isinstance(document, dict):
+                logger.warning('Recovery mismatch phase=%s receipt=missing', phase)
+                return
+            current = self._local_files()
+            expected = document.get('accepted_local_files') or {}
+            current = self._receipt_stable_files(current)
+            expected = self._receipt_stable_files(expected)
+            added = set(current) - set(expected)
+            removed = set(expected) - set(current)
+            changed = {key for key in set(current) & set(expected)
+                       if current[key] != expected[key]}
+            # Do not log full paths: names can contain student identities.
+            def categories(keys):
+                return {category: sum(k.startswith(category + '/') for k in keys)
+                        for category in ('database', 'metadata', 'attachments',
+                                         'legacy-attachments', 'reports', 'exports')}
+            db_match = self.database.is_file() and (
+                _hash(self.database) == document.get('published_runtime_sha256'))
+            wal_pending = self._wal_pending()
+            repository_match = self._repository_id() == document.get('repository_id')
+            head = self._git('rev-parse', 'HEAD')
+            upstream = self._git('rev-parse', '@{upstream}')
+            git_status_clean = not bool(
+                self._git('status', '--porcelain', '--untracked-files=all'))
+            logger.warning(
+                'Recovery mismatch phase=%s status=%s publication=%s '
+                'db_hash_match=%s wal_pending=%s local_files_match=%s '
+                'added=%s removed=%s changed=%s repository_match=%s '
+                'head_accepted=%s head_upstream=%s git_clean=%s',
+                phase, document.get('status'), document.get('publication'),
+                db_match, wal_pending, not (added or removed or changed),
+                categories(added), categories(removed), categories(changed),
+                repository_match, head == document.get('published_oid'),
+                head == upstream, git_status_clean,
+            )
+        except Exception as exc:
+            logger.warning('Recovery mismatch phase=%s diagnostics_unknown=%s',
+                           phase, type(exc).__name__)
 
     def begin_report_artifact_update(self):
         """Admit a rebuildable report operation, without resolving pending work."""
@@ -255,8 +305,8 @@ class WriteRecoveryJournal:
                 raise RecoveryRequired('Only derived report paths can refresh a clean local receipt.')
         current = self._local_files()
         previous = before['accepted_local_files']
-        if ({k: v for k, v in current.items() if k not in allowed} !=
-                {k: v for k, v in previous.items() if k not in allowed}
+        if ({k: v for k, v in self._receipt_stable_files(current).items() if k not in allowed} !=
+                {k: v for k, v in self._receipt_stable_files(previous).items() if k not in allowed}
                 or self._wal_pending()
                 or _hash(self.database) != before['published_runtime_sha256']
                 or self._repository_id() != before['repository_id']
@@ -370,6 +420,18 @@ class WriteRecoveryJournal:
                 'legacy-attachments': self.runtime / 'Attachments',
                 'exports': getattr(self.paths, 'export_dir', self.runtime / 'Export'),
                 'reports': getattr(self.paths, 'reports_dir', self.runtime / 'Reports')}
+
+    @staticmethod
+    def _receipt_stable_files(files):
+        """Ignore only volatile SQLite sidecars when comparing CLEAN receipts.
+
+        SQLite readers can create/remove the shared-memory index without any
+        business mutation. WAL *contents* are NOT accepted by this exemption:
+        callers separately require _wal_pending() == False, and the complete
+        fingerprint/captures still preserve both sidecars.
+        """
+        return {k: v for k, v in (files or {}).items()
+                if k not in {'database/center.db-shm', 'database/center.db-wal'}}
 
     def _local_files(self):
         return {k: v for k, v in self.fingerprint().items() if not k.startswith('repository/')}

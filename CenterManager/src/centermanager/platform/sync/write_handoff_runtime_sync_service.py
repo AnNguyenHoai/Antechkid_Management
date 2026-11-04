@@ -125,6 +125,22 @@ class _WriteHandoffUiRefreshBarrier(QObject):
                     if callable(current_refresh):
                         current_refresh()
 
+            # Refreshing a view must not silently invalidate the CLEAN
+            # recovery boundary. Catch it here, not later in journal.begin()
+            # after the distributed lock was granted.
+            from centermanager.platform.write_recovery import (
+                RecoveryRequired, WriteRecoveryJournal,
+            )
+            journal = WriteRecoveryJournal()
+            try:
+                journal.assert_replaceable()
+            except RecoveryRequired:
+                journal.log_clean_mismatch('post-write-handoff-ui-refresh')
+                logger.error(
+                    'WRITE handoff UI refresh modified the accepted runtime; '
+                    'EDITING is denied until the producer is identified.'
+                )
+                return False
             logger.info("WRITE handoff UI projection refreshed from authoritative runtime")
             return True
         except Exception:
