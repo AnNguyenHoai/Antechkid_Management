@@ -35,20 +35,14 @@ class StartupSynchronization:
         self._runtime_manifest_path = self._paths.runtime_root / "manifest.json"
         self._metadata_dir = self._paths.metadata_dir
 
-    def run(self) -> bool:
-        """Execute startup synchronization."""
-        logger.info("Startup synchronization starting")
-        # Only a genuinely empty first-time install may receive a new CLEAN
-        # receipt after the app's explicitly authorized Alembic migration.
-        # Existing DBs, Git worktrees and journals must keep their recovery
-        # provenance; absence of a receipt alone proves nothing.
-        from centermanager.platform.write_recovery import WriteRecoveryJournal
-        _journal = WriteRecoveryJournal()
-        # Distinguish a virgin workstation from an old local workspace.
-        # Empty recovery directories and rebuildable PDF exports are not
-        # authoritative data. Never adopt a leftover DB, WAL, attachment,
-        # recovery receipt/capture or nonempty preexisting Git worktree.
-        roots = _journal._workspace_roots()
+    def _fresh_install_eligible(self, journal) -> bool:
+        """Only grant startup provenance to a workspace with no prior data.
+
+        Existing PDFs are derived/rebuildable, whereas any DB/WAL,
+        attachment, Git working tree or recovery capture is protected.
+        """
+        roots = journal._workspace_roots()
+
         def has_material(root, *, allow_placeholders=False):
             root = Path(root)
             if not root.exists():
@@ -63,13 +57,14 @@ class StartupSynchronization:
                 )
                 for item in root.rglob('*')
             )
+
         has_repository = (
             self._repo_path.is_symlink() or
             (self._repo_path.exists() and (
                 not self._repo_path.is_dir() or any(self._repo_path.iterdir())
             ))
         )
-        recovery_material = has_material(_journal.root)
+        recovery_material = has_material(journal.root)
         business_material = any(
             has_material(roots[name], allow_placeholders=True)
             for name in ('database', 'attachments', 'legacy-attachments')
@@ -86,6 +81,18 @@ class StartupSynchronization:
             fresh_install, self._runtime_db_path.exists(), has_repository,
             recovery_material, business_material,
         )
+        return fresh_install
+
+    def run(self) -> bool:
+        """Execute startup synchronization."""
+        logger.info("Startup synchronization starting")
+        # Only a genuinely empty first-time install may receive a new CLEAN
+        # receipt after the app's explicitly authorized Alembic migration.
+        # Existing DBs, Git worktrees and journals must keep their recovery
+        # provenance; absence of a receipt alone proves nothing.
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        _journal = WriteRecoveryJournal()
+        fresh_install = self._fresh_install_eligible(_journal)
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
         # may run until an incomplete installation is explicitly recovered.
