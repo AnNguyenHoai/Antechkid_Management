@@ -44,11 +44,23 @@ class StartupSynchronization:
         # provenance; absence of a receipt alone proves nothing.
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         _journal = WriteRecoveryJournal()
+        # No previous business artifacts or orphaned captures may be
+        # silently attested as clean simply because center.db is absent.
+        roots = _journal._workspace_roots()
+        old_business_artifacts = any(
+            Path(roots[name]).exists() and any(
+                item.is_file() or item.is_symlink()
+                for item in Path(roots[name]).rglob('*')
+            )
+            for name in ('database', 'attachments', 'legacy-attachments',
+                         'exports', 'reports')
+        )
         fresh_install = (
             not self._runtime_db_path.exists()
             and (not self._repo_path.exists() or
                  (self._repo_path.is_dir() and not any(self._repo_path.iterdir())))
-            and not _journal.journal.exists()
+            and not _journal.root.exists()
+            and not old_business_artifacts
         )
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
