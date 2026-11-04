@@ -276,6 +276,34 @@ class WriteRecoveryJournal:
                     files[name + '/' + path.relative_to(root).as_posix()] = _hash(path)
         return files
 
+    @staticmethod
+    def _preservation_stable_files(name, files):
+        """Only authoritative worktree and critical Git state must be stable.
+
+        Git synchronization and lease renewal may update FETCH_HEAD, objects,
+        reflogs, lock-main/queue-main refs and remote tracking refs *while* the
+        post-publish recovery capture copies the repository. Those are Git
+        transport/control-plane bytes, not a local business DB change.
+        Copy and hash them into the capture, but do not let their concurrent
+        churn trigger a spurious RECOVERY_REQUIRED after a verified MAIN push.
+
+        HEAD, index, packed-refs, local business branches and all non-.git
+        worktree files remain strictly checked. No paths outside the .git
+        metadata namespace are exempted.
+        """
+        if name != 'repository':
+            return files
+        stable_git_paths = {'.git/HEAD', '.git/index', '.git/config', '.git/packed-refs'}
+        def stable(path):
+            if not path.startswith('.git/'):
+                return True
+            if path in stable_git_paths:
+                return True
+            if path.startswith('.git/refs/heads/'):
+                return path not in {'.git/refs/heads/lock-main', '.git/refs/heads/queue-main'}
+            return False
+        return {path: digest for path, digest in files.items() if stable(path)}
+
     def preserve(self, reason):
         """Add a verified, immutable capture. Failure never changes the live DB."""
         from centermanager.database.wal_safety import runtime_database_publication_snapshot
@@ -303,7 +331,21 @@ class WriteRecoveryJournal:
                 shutil.copytree(source, capture / name)
                 after = {p.relative_to(source).as_posix(): _hash(p) for p in source.rglob('*') if p.is_file()}
                 copied = {p.relative_to(capture / name).as_posix(): _hash(p) for p in (capture / name).rglob('*') if p.is_file()}
-                if before != after or before != copied:
+                stable_before = self._preservation_stable_files(name, before)
+                stable_after = self._preservation_stable_files(name, after)
+                stable_copied = self._preservation_stable_files(name, copied)
+                if stable_before != stable_after or stable_before != stable_copied:
+                    # Only hashed path labels are logged; never leak user data
+                    # contents, remote URLs, database keys or file bytes.
+                    mismatched = sorted(
+                        path for path in (stable_before.keys() | stable_after.keys() | stable_copied.keys())
+                        if not (stable_before.get(path) == stable_after.get(path) == stable_copied.get(path))
+                    )
+                    import logging
+                    logging.getLogger(__name__).error(
+                        "Preservation changed critical %s files: %s",
+                        name, mismatched[:8],
+                    )
                     raise RecoveryRequired('Workspace changed during preservation. Retain all copies; retry with CenterManager stopped.')
         if encrypted:
             # Existing user-bound DPAPI ciphertext only. Never export the key.

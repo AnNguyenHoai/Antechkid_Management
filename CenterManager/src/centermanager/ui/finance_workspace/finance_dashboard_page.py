@@ -209,14 +209,26 @@ class FinanceDashboardPage(QWidget):
             "Net: receipts minus paid expenses in the selected period. "
             "Tuition debt: open balances across ALL Enrollment wallets."
         )
-        if data.get("period_configured", True) and (
+        if "expense_recorded_period" in data:
+            recorded = data["expense_recorded_period"]
+            pending = data.get("expense_pending_period", 0)
+            paid = data.get("expense_period", 0)
+            info += (
+                f" Expense ledger this period: recorded {recorded:,.0f} VND; "
+                f"Pending {pending:,.0f} VND; paid {paid:,.0f} VND."
+            )
+            if paid == 0 and recorded > 0:
+                info += (
+                    " Recorded expenses are not counted as cash outflow "
+                    "until marked Paid/Completed. Review Expense status and dates."
+                )
+            elif paid == 0 and recorded == 0:
+                info += " No active expense rows have the selected payment dates."
+        elif data.get("period_configured", True) and (
             data.get("revenue_period", 0) > 0
             and data.get("expense_period", 0) == 0
         ):
-            info += (
-                " No Paid/Completed expense was counted for this period. "
-                "Check the Expense page for Pending entries or incorrect dates."
-            )
+            info += " No paid expense counted; review Expense status and dates."
         return info
 
     def _update_kpis(self, data: dict) -> None:

@@ -216,9 +216,9 @@ def test_dashboard_zero_realized_expense_is_not_silently_treated_as_full_ledger(
         "expense_period": 0,
     })
     assert "Paid/Completed" in observed
-    assert "Check the Expense page for Pending" in observed
+    assert "review Expense status and dates" in observed.lower() or "review expense status and dates" in observed.lower()
     assert "ALL Enrollment wallets" in observed
     no_period = FinanceDashboardPage._dashboard_scope_text({
         "period_configured": False, "revenue_period": 0, "expense_period": 0,
     })
-    assert "Check the Expense page" not in no_period
+    assert "No paid expense counted" not in no_period
