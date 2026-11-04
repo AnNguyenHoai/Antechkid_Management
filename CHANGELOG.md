@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Changed
+- 2026-11-04 — QA-004: audit đính kèm chứng từ Thu/Chi (`CenterManager/docs/finance/QA-004_FINANCE_VOUCHER_ATTACHMENT_AUDIT.md`). Không đổi code. (Issue #572)
 - 2026-11-04 — Đã merge vào `main_repos`: TECH-002 (#559), TECH-008 (#561), TECH-003 (#563), QA-003 (#565), FEAT-001/BUG-002/BUG-003 (#569). CI sau merge (run 41767126182): 3.211 passed, 7 skipped, 0 failed. Các task chuyển WAITING_PO, chờ PO nghiệm thu. (Issue #570)
 - 2026-11-04 — FEAT-001/BUG-002/BUG-003: nguồn chi ví công ty / TK cá nhân, thao tác hoàn trả, migration chuẩn hóa chi phí cũ (kỳ chưa chốt), tách tổng Đã chi ở danh sách Chi. (Issues #566–#568) — chờ CI và PO nghiệm thu.
 - 2026-11-04 — QA-003: báo cáo rà soát luồng dữ liệu Finance (`CenterManager/docs/finance/QA-003_FINANCE_FLOW_REVIEW.md`). Không đổi code. (Issue #564)
