@@ -8,7 +8,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,6 +23,64 @@ from centermanager.core.git_locator import locate_git
 
 class RecoveryRequired(RuntimeError):
     pass
+
+
+logger = logging.getLogger(__name__)
+
+# TECH-011 (PO decision D-010): captures keep the newest N edit sessions plus
+# every session whose final journal status is not CLEAN.
+CAPTURE_RETENTION_SESSIONS = 20
+
+# Content-addressed, never-rewritten finance vouchers: ``<sha256>.<ext>``.
+# They are already versioned in Git, so captures reference them instead of
+# copying them and fingerprints use size instead of re-reading the bytes.
+_IMMUTABLE_ATTACHMENT_NAME = re.compile(r'^[0-9a-f]{64}\.(pdf|png|jpg|jpeg)$')
+
+
+def _is_immutable_attachment(root_name, relative):
+    parts = relative.split('/')
+    if root_name == 'attachments':
+        in_tree = len(parts) > 1 and parts[0] == 'Finance'
+    elif root_name == 'repository':
+        in_tree = len(parts) > 2 and parts[0] == 'Attachments' and parts[1] == 'Finance'
+    else:
+        in_tree = False
+    return in_tree and bool(_IMMUTABLE_ATTACHMENT_NAME.match(parts[-1]))
+
+
+def _excluded_from_capture(root_name, relative):
+    """Files a capture does not copy (TECH-011).
+
+    ``.git/objects`` content is excluded; the directory itself is kept so the
+    captured repository still resolves HEAD/refs (``git rev-parse HEAD``).
+    The captured working tree keeps every business file, including the DB.
+    """
+    if root_name == 'repository' and relative.startswith('.git/objects/'):
+        return True
+    return _is_immutable_attachment(root_name, relative)
+
+
+def _capture_ignore(root_name, source):
+    source = Path(source)
+
+    def ignore(directory, names):
+        base = Path(directory)
+        ignored = []
+        for child in names:
+            relative = (base / child).relative_to(source).as_posix()
+            if _excluded_from_capture(root_name, relative):
+                ignored.append(child)
+        return ignored
+    return ignore
+
+
+def _capture_hashes(root_name, root):
+    root = Path(root)
+    return {
+        path.relative_to(root).as_posix(): _hash(path)
+        for path in root.rglob('*')
+        if path.is_file() and not _excluded_from_capture(root_name, path.relative_to(root).as_posix())
+    }
 
 
 def _hash(path):
@@ -224,6 +284,65 @@ class WriteRecoveryJournal:
         _json(self.journal, document)
         self.preserve('base')
         self.update(status='OPEN')
+        try:
+            self.prune_captures()
+        except Exception:
+            # Retention is disk hygiene; it must never block editing.
+            logger.exception('Recovery capture retention failed; captures retained')
+
+    def prune_captures(self, keep_sessions=CAPTURE_RETENTION_SESSIONS):
+        """Delete captures of old CLEAN sessions (TECH-011, PO decision D-010).
+
+        Kept unconditionally: captures of the newest ``keep_sessions``
+        sessions, of the current session, the journal's ``last_capture``,
+        captures whose manifest/session cannot be read, and every capture of a
+        session whose final journal status (from ``history/``) is not CLEAN.
+        """
+        captures_dir = self.root / 'captures'
+        if not captures_dir.is_dir():
+            return 0
+        current = self.inspect() or {}
+        current_session = current.get('session_id')
+        last_capture = current.get('last_capture')
+        last_capture = Path(last_capture).resolve() if last_capture else None
+        final_status = {}
+        history = self.root / 'history'
+        if history.is_dir():
+            for entry in history.glob('*.json'):
+                try:
+                    document = json.loads(entry.read_text(encoding='utf-8'))
+                except Exception:
+                    continue
+                if isinstance(document, dict) and document.get('session_id'):
+                    final_status[document['session_id']] = document.get('status')
+        sessions = {}
+        for capture in captures_dir.iterdir():
+            if not capture.is_dir() or capture.is_symlink():
+                continue
+            try:
+                manifest = json.loads((capture / 'manifest.json').read_text(encoding='utf-8'))
+                session_id = (manifest.get('journal') or {}).get('session_id')
+            except Exception:
+                continue
+            if not session_id:
+                continue
+            sessions.setdefault(session_id, []).append((capture.stat().st_mtime, capture))
+        ordered = sorted(sessions, key=lambda sid: max(m for m, _ in sessions[sid]), reverse=True)
+        recent = set(ordered[:keep_sessions])
+        deleted = 0
+        for session_id in ordered:
+            if session_id in recent or session_id == current_session:
+                continue
+            if final_status.get(session_id) != 'CLEAN':
+                continue
+            for _, capture in sessions[session_id]:
+                if last_capture is not None and capture.resolve() == last_capture:
+                    continue
+                shutil.rmtree(capture)
+                deleted += 1
+        if deleted:
+            logger.info('Recovery capture retention removed %d capture(s) of CLEAN sessions', deleted)
+        return deleted
 
     def update(self, **fields):
         document = self.inspect()
@@ -272,6 +391,12 @@ class WriteRecoveryJournal:
                         relative in {'.git/HEAD', '.git/index', '.git/config', '.git/packed-refs'}
                         or relative.startswith('.git/refs/heads/')
                     ):
+                        continue
+                    if _is_immutable_attachment(name, relative):
+                        # Content-addressed and never rewritten: the name is
+                        # the SHA-256, so size detects truncation without
+                        # re-reading every voucher on each write (QA-004 F3).
+                        files[name + '/' + relative] = 'immutable:%d' % path.stat().st_size
                         continue
                     files[name + '/' + path.relative_to(root).as_posix()] = _hash(path)
         return files
@@ -325,12 +450,12 @@ class WriteRecoveryJournal:
                 continue  # Only the maintenance-fenced WAL-complete snapshot is authoritative.
             if Path(source).exists():
                 source = Path(source)
-                before = {p.relative_to(source).as_posix(): _hash(p) for p in source.rglob('*') if p.is_file()}
+                before = _capture_hashes(name, source)
                 if any(p.is_symlink() for p in source.rglob('*')):
                     raise RecoveryRequired('Symlink requires manual preservation.')
-                shutil.copytree(source, capture / name)
-                after = {p.relative_to(source).as_posix(): _hash(p) for p in source.rglob('*') if p.is_file()}
-                copied = {p.relative_to(capture / name).as_posix(): _hash(p) for p in (capture / name).rglob('*') if p.is_file()}
+                shutil.copytree(source, capture / name, ignore=_capture_ignore(name, source))
+                after = _capture_hashes(name, source)
+                copied = _capture_hashes(name, capture / name)
                 stable_before = self._preservation_stable_files(name, before)
                 stable_after = self._preservation_stable_files(name, after)
                 stable_copied = self._preservation_stable_files(name, copied)
