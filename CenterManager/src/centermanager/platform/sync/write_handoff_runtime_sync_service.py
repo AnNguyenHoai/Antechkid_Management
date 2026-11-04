@@ -174,9 +174,15 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         """
         from centermanager.database import session as session_module
 
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        from centermanager.platform.write_recovery import (
+            WriteRecoveryJournal, require_replaceable, RecoveryRequired,
+        )
         try:
             require_replaceable()
+            receipt_before = WriteRecoveryJournal().inspect()
+            if (receipt_before is None or receipt_before.get("status") != "CLEAN"
+                    or receipt_before.get("publication") != "VERIFIED"):
+                raise RecoveryRequired("WRITE handoff requires a verified CLEAN pre-install receipt.")
         except RecoveryRequired as exc:
             logger.error("Runtime replacement blocked: %s", exc)
             return False
@@ -298,6 +304,60 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
                 runtime_db,
             )
 
+            # Preserve existing metadata-version behavior, but do it only after the
+            # authoritative DB has been installed and runtime sessions rebuilt.
+            if repo_manifest.exists():
+                try:
+                    with repo_manifest.open("r", encoding="utf-8") as handle:
+                        manifest_data = json.load(handle)
+                    runtime_version = manifest_data.get("runtime_version")
+                    if runtime_version is not None:
+                        meta_version_path = paths.metadata_dir / "version.json"
+                        meta_version_path.parent.mkdir(parents=True, exist_ok=True)
+                        if meta_version_path.exists():
+                            with meta_version_path.open("r", encoding="utf-8") as handle:
+                                meta_data = json.load(handle)
+                        else:
+                            meta_data = {}
+                        meta_data["platform_version"] = runtime_version
+                        meta_data.pop("pending_version", None)
+                        meta_tmp = meta_version_path.with_name(
+                            f".{meta_version_path.name}.handoff-{uuid.uuid4().hex}.tmp"
+                        )
+                        try:
+                            with meta_tmp.open("w", encoding="utf-8") as handle:
+                                json.dump(meta_data, handle, indent=2, ensure_ascii=False)
+                                handle.flush()
+                                os.fsync(handle.fileno())
+                            os.replace(meta_tmp, meta_version_path)
+                        finally:
+                            meta_tmp.unlink(missing_ok=True)
+                        logger.info(
+                            "Metadata version.json updated to platform_version=%s",
+                            runtime_version,
+                        )
+                except Exception:
+                    logger.exception(
+                        "Authoritative DB installed but runtime metadata version update failed"
+                    )
+                    raise
+
+            if not sessions_refreshed:
+                raise RuntimeError("Runtime materialization finished without refreshed DB sessions")
+            # The repository DB is allowed to differ after authorized Alembic.
+            # Re-observe MAIN, verify the migrated runtime and seal its receipt
+            # before cleanup of the previous DB/sidecars.
+            provider = self._sync_manager.provider() if self._sync_manager else None
+            if provider is None:
+                raise RuntimeError("WRITE handoff provider unavailable for receipt verification")
+            accepted_main = provider.get_local_main_commit()
+            journal = WriteRecoveryJournal()
+            journal.record_verified_handoff_install(
+                before=receipt_before,
+                accepted_main=accepted_main,
+                observe_main=provider.observe_remote_main_commit,
+            )
+
         except Exception:
             logger.exception("Atomic authoritative runtime materialization failed")
 
@@ -348,49 +408,6 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         for _, backup in preserved_sidecars:
             backup.unlink(missing_ok=True)
 
-        # Preserve existing metadata-version behavior, but do it only after the
-        # authoritative DB has been installed and runtime sessions rebuilt.
-        if repo_manifest.exists():
-            try:
-                with repo_manifest.open("r", encoding="utf-8") as handle:
-                    manifest_data = json.load(handle)
-                runtime_version = manifest_data.get("runtime_version")
-                if runtime_version is not None:
-                    meta_version_path = paths.metadata_dir / "version.json"
-                    meta_version_path.parent.mkdir(parents=True, exist_ok=True)
-                    if meta_version_path.exists():
-                        with meta_version_path.open("r", encoding="utf-8") as handle:
-                            meta_data = json.load(handle)
-                    else:
-                        meta_data = {}
-                    meta_data["platform_version"] = runtime_version
-                    meta_data.pop("pending_version", None)
-                    meta_tmp = meta_version_path.with_name(
-                        f".{meta_version_path.name}.handoff-{uuid.uuid4().hex}.tmp"
-                    )
-                    try:
-                        with meta_tmp.open("w", encoding="utf-8") as handle:
-                            json.dump(meta_data, handle, indent=2, ensure_ascii=False)
-                            handle.flush()
-                            os.fsync(handle.fileno())
-                        os.replace(meta_tmp, meta_version_path)
-                    finally:
-                        meta_tmp.unlink(missing_ok=True)
-                    logger.info(
-                        "Metadata version.json updated to platform_version=%s",
-                        runtime_version,
-                    )
-            except Exception:
-                logger.exception(
-                    "Authoritative DB installed but runtime metadata version update failed"
-                )
-                return False
-
-        if not sessions_refreshed:
-            logger.error("Runtime materialization finished without refreshed DB sessions")
-            return False
-        from centermanager.platform.write_recovery import WriteRecoveryJournal
-        WriteRecoveryJournal().record_synchronized()
         return True
 
     def execute_write_handoff_sync(self) -> bool:

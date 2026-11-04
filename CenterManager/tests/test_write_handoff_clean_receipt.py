@@ -1,4 +1,4 @@
-"""WRITE handoff must reseal only the prevalidated CLEAN state before editing."""
+"""Handoff must use the receipt already committed by the install barrier."""
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,10 +16,13 @@ class Journal:
         self.fail = fail
         self.calls = []
 
-    def refresh_verified_bootstrap_migration(self, *, provider, before):
-        self.calls.append(("reseal", provider, before))
+    def assert_replaceable(self):
+        self.calls.append(("verify",))
         if self.fail:
-            raise RuntimeError("MAIN changed")
+            raise RuntimeError("receipt checksum mismatch")
+
+    def inspect(self):
+        return {"status": "CLEAN", "published_oid": "accepted-main"}
 
     def begin(self, session_id, base_oid, authority):
         self.calls.append(("begin", session_id, base_oid, authority))
@@ -47,13 +50,13 @@ def test_handoff_does_not_begin_before_verified_receipt(
     if has_clean_receipt:
         manager._pre_handoff_clean_receipt = {"status": "CLEAN"}
 
-    assert manager._begin_recovery_journal() is (not fail)
+    assert manager._begin_recovery_journal() is (not (fail and has_clean_receipt))
     names = [call[0] for call in journal.calls]
-    if fail:
-        assert names == ["reseal"]
+    if fail and has_clean_receipt:
+        assert names == ["verify"]
         assert manager.state is WriteTransactionState.RECOVERY_REQUIRED
     elif has_clean_receipt:
-        assert names == ["reseal", "begin"]
+        assert names == ["verify", "begin"]
         assert manager._pre_handoff_clean_receipt is None
     else:
         assert names == ["begin"]

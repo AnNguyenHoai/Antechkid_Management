@@ -80,6 +80,30 @@ def _service(monkeypatch, paths, writer=None):
         fence["active"] = False
 
     service._refresh_db_sessions = refresh
+
+    # The handoff now requires a prevalidated CLEAN receipt and freshly
+    # observed MAIN before it may replace the runtime DB. These tests focus
+    # on WAL isolation, quiesce ordering and rollback, not journal parsing.
+    import centermanager.platform.write_recovery as recovery
+    receipt = {"status": "CLEAN", "publication": "VERIFIED"}
+    provider = SimpleNamespace(
+        get_local_main_commit=lambda: "accepted-main",
+        observe_remote_main_commit=lambda: "accepted-main",
+    )
+    service._sync_manager = SimpleNamespace(provider=lambda: provider)
+
+    class VerifiedJournal:
+        def inspect(self):
+            return dict(receipt)
+
+        def record_verified_handoff_install(self, *, before, accepted_main, observe_main):
+            assert before == receipt
+            assert accepted_main == "accepted-main"
+            assert observe_main() == accepted_main
+            order.append("receipt")
+
+    monkeypatch.setattr(recovery, "require_replaceable", lambda: None)
+    monkeypatch.setattr(recovery, "WriteRecoveryJournal", VerifiedJournal)
     return service, fence, order
 
 
@@ -200,3 +224,53 @@ def test_refresh_failure_rolls_back_and_rejects_handoff(tmp_path, monkeypatch):
     assert refresh_calls["count"] == 2
     assert fence["active"] is False
     assert _read_values(runtime_db) == ["OLD_B"]
+
+
+def test_receipt_failure_rolls_back_db_before_discarding_backup(tmp_path, monkeypatch):
+    """Even after migration+refresh, failed journal attestation must roll back."""
+    paths = _paths(tmp_path)
+    repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+    _make_plain_db(repo_db, ["NEW_MAIN"])
+    runtime_db = paths.database_dir / "center.db"
+    _make_plain_db(runtime_db, ["PREVIOUS_ACCEPTED"])
+    service, fence, order = _service(monkeypatch, paths)
+
+    import centermanager.platform.write_recovery as recovery
+
+    class RejectReceipt:
+        def inspect(self):
+            return {"status": "CLEAN", "publication": "VERIFIED"}
+
+        def record_verified_handoff_install(self, **kwargs):
+            order.append("receipt-rejected")
+            raise recovery.RecoveryRequired("MAIN moved during receipt validation")
+
+    monkeypatch.setattr(recovery, "WriteRecoveryJournal", RejectReceipt)
+
+    assert service._apply_runtime_update() is False
+    assert "receipt-rejected" in order
+    assert order.index("migrate") < order.index("receipt-rejected")
+    assert order.count("refresh") == 2  # new sessions + rollback sessions
+    assert fence["active"] is False
+    assert _read_values(runtime_db) == ["PREVIOUS_ACCEPTED"]
+
+
+def test_unverified_receipt_stops_before_database_mutation(tmp_path, monkeypatch):
+    paths = _paths(tmp_path)
+    repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+    _make_plain_db(repo_db, ["NEW_MAIN"])
+    runtime_db = paths.database_dir / "center.db"
+    _make_plain_db(runtime_db, ["PREVIOUS_ACCEPTED"])
+    service, fence, order = _service(monkeypatch, paths)
+
+    import centermanager.platform.write_recovery as recovery
+
+    class UnacceptedJournal:
+        def inspect(self):
+            return {"status": "OPEN", "publication": "UNKNOWN"}
+
+    monkeypatch.setattr(recovery, "WriteRecoveryJournal", UnacceptedJournal)
+    assert service._apply_runtime_update() is False
+    assert order == []
+    assert fence["active"] is False
+    assert _read_values(runtime_db) == ["PREVIOUS_ACCEPTED"]
