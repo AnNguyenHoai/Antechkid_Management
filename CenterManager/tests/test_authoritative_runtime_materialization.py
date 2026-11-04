@@ -80,6 +80,30 @@ def _service(monkeypatch, paths, writer=None):
         fence["active"] = False
 
     service._refresh_db_sessions = refresh
+
+    # The handoff now requires a prevalidated CLEAN receipt and freshly
+    # observed MAIN before it may replace the runtime DB. These tests focus
+    # on WAL isolation, quiesce ordering and rollback, not journal parsing.
+    import centermanager.platform.write_recovery as recovery
+    receipt = {"status": "CLEAN", "publication": "VERIFIED"}
+    provider = SimpleNamespace(
+        get_local_main_commit=lambda: "accepted-main",
+        observe_remote_main_commit=lambda: "accepted-main",
+    )
+    service._sync_manager = SimpleNamespace(provider=lambda: provider)
+
+    class VerifiedJournal:
+        def inspect(self):
+            return dict(receipt)
+
+        def record_verified_handoff_install(self, *, before, accepted_main, observe_main):
+            assert before == receipt
+            assert accepted_main == "accepted-main"
+            assert observe_main() == accepted_main
+            order.append("receipt")
+
+    monkeypatch.setattr(recovery, "require_replaceable", lambda: None)
+    monkeypatch.setattr(recovery, "WriteRecoveryJournal", VerifiedJournal)
     return service, fence, order
 
 
