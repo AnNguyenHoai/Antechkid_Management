@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Changed
+- 2026-11-04 — QA-003: báo cáo rà soát luồng dữ liệu Finance (`CenterManager/docs/finance/QA-003_FINANCE_FLOW_REVIEW.md`). Không đổi code. (Issue #564)
 - 2026-11-04 — TECH-003: lưu trữ 74 báo cáo sprint và tài liệu lỗi thời vào `docs/archive/`, dọn gốc repo, cập nhật `docs/README.md` và `CenterManager/README.md`. (Issue #562) — chờ CI và PO nghiệm thu.
 - 2026-11-04 — PO nghiệm thu TECH-001; ghi quyết định D-006 (giữ template runtime), D-007 (giữ 5 snapshot).
 - 2026-11-04 — TECH-002: gỡ 792 file runtime giả và gitlink `runtime/repository` khỏi Git (file local giữ nguyên); bổ sung `.gitignore`; sửa test gitlink chạy sai đường dẫn, thêm test hồi quy. (Issue #558) — chờ CI và PO nghiệm thu.
