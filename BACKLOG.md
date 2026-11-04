@@ -9,13 +9,16 @@
 
 | ID | Tiêu đề | Loại | Ưu tiên | Trạng thái | Phụ thuộc |
 |---|---|---|---|---|---|
-| TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git | Maintenance | P2 | IN_REVIEW (#558) | — |
-| TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | IN_REVIEW (#560, PR #561) | — |
-| TECH-003 | Làm sạch & cập nhật hệ thống tài liệu | Maintenance | P2 | IN_REVIEW (#562) | — |
-| QA-003 | Rà soát luồng dữ liệu Finance Workspace | QA | P1 | WAITING_PO (#564) | — |
-| FEAT-001 | Nguồn chi ví công ty / TK cá nhân + hoàn trả | Feature | P1 | IN_REVIEW (#567) | — |
-| BUG-002 | Chuẩn hóa trạng thái/nguồn chi của chi phí cũ | Bug | P1 | IN_REVIEW (#566) | FEAT-001 |
-| BUG-003 | Tách tổng Đã chi / chưa tính dòng tiền ở danh sách Chi | Bug | P2 | IN_REVIEW (#568) | FEAT-001 |
+| TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git | Maintenance | P2 | WAITING_PO (#558, PR #559) | — |
+| TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | WAITING_PO (#560, PR #561) | — |
+| TECH-003 | Làm sạch & cập nhật hệ thống tài liệu | Maintenance | P2 | WAITING_PO (#562, PR #563) | — |
+| QA-003 | Rà soát luồng dữ liệu Finance Workspace | QA | P1 | WAITING_PO (#564, PR #565) | — |
+| FEAT-001 | Nguồn chi ví công ty / TK cá nhân + hoàn trả | Feature | P1 | WAITING_PO (#567, PR #569) | — |
+| BUG-002 | Chuẩn hóa trạng thái/nguồn chi của chi phí cũ | Bug | P1 | WAITING_PO (#566, PR #569) | FEAT-001 |
+| BUG-003 | Tách tổng Đã chi / chưa tính dòng tiền ở danh sách Chi | Bug | P2 | WAITING_PO (#568, PR #569) | FEAT-001 |
+| FEAT-002 | Hiển thị hoàn học phí là tiền ra trên Dashboard | Feature | P2 | NEW — chờ PO duyệt | — |
+| BUG-004 | Chi lọc kỳ theo `finance_period_id` (spec R2) | Bug | P2 | NEW — chờ PO duyệt | — |
+| BUG-005 | Dashboard dùng đồng hồ nghiệp vụ; bảng Recent Expense cùng quy tắc KPI | Bug | P3 | NEW — chờ PO duyệt | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -50,14 +53,14 @@
 
 ## TECH-002 — Đưa dữ liệu runtime giả ra khỏi Git
 
-- **Type:** Maintenance · **Priority:** P2 · **Status:** IN_REVIEW
+- **Type:** Maintenance · **Priority:** P2 · **Status:** WAITING_PO
 - **Source:** Audit 2026-11-04 · PO duyệt 2026-11-04 · **Issue:** #558
 - **Business problem:** `main_repos` track 795 file dưới `CenterManager/runtime/`: 771 snapshot `pre_edit_*.db` (~206 MB), `Config/config.json` + `Config/auto_report_state.json`, 17 heartbeat, 1 file CV mẫu, và một gitlink hỏng `runtime/repository` (mode 160000, không có `.gitmodules`). Dữ liệu giả (PO xác nhận).
 - **Expected outcome:** Repo nguồn không còn trạng thái runtime của máy dev.
 - **Scope (đã thu hẹp, xem Notes):** `git rm --cached` các file trên (không xóa lịch sử, không force-push); thêm `.gitignore` cho `runtime/repository/`, `runtime/snapshots/`, `runtime/attachments/`, `runtime/collaboration/heartbeat/`; sửa test gitlink đang chạy sai đường dẫn; thêm test hồi quy.
 - **Acceptance criteria:** `git ls-files CenterManager/runtime` chỉ còn `manifest.json`, `metadata/version.json`, `collaboration/lock.json`; không còn gitlink; CI `Pytest Suite` xanh.
-- **Dependencies:** — · **Implementation reference:** nhánh `chore/tech-002-untrack-runtime`, PR (xem Issue #558)
-- **Verification evidence (local):** Chạy trực tiếp logic 2 test trên index đã stage: cả hai PASS. Test gitlink đã sửa phát hiện đúng gitlink trên trạng thái cũ (trước đây luôn pass vì `git ls-files` chạy sai thư mục). Full pytest không chạy được ở môi trường này (PyPI bị chặn) → dựa vào CI.
+- **Dependencies:** — · **Implementation reference:** PR #559, merge `7940d11`
+- **Verification evidence (local):** Chạy trực tiếp logic 2 test trên index đã stage: cả hai PASS. Test gitlink đã sửa phát hiện đúng gitlink trên trạng thái cũ (trước đây luôn pass vì `git ls-files` chạy sai thư mục). CI `main_repos` sau merge (`7940d11`, run 41760078859): success.
 - **PO acceptance:** Chưa
 - **Notes:**
   - Giữ lại `manifest.json`, `metadata/version.json`, `collaboration/lock.json` vì `build_release.py` copy chúng vào gói phát hành như template — PO quyết định giữ nguyên (D-006).
@@ -66,7 +69,7 @@
 
 ## TECH-008 — Dọn snapshot mồ côi trong `runtime/snapshots/`
 
-- **Type:** Bug · **Priority:** P2 · **Status:** IN_REVIEW
+- **Type:** Bug · **Priority:** P2 · **Status:** WAITING_PO
 - **Source:** Phân tích trong TECH-002 (2026-11-04) · PO duyệt 2026-11-04 · **Issue:** #560
 - **Business problem:** Mỗi lần bắt đầu sửa dữ liệu, `WriteTransaction._create_snapshot()` copy toàn bộ DB vào `runtime/snapshots/`. Đường dẫn snapshot chỉ được giữ trong bộ nhớ (`self._snapshot_path`) và chỉ bị xóa khi publish thành công, hủy hoặc retry release thành công. Không bị xóa khi: ứng dụng bị tắt/crash trong lúc EDITING, giao dịch ở FAILED, hoặc RECOVERY_REQUIRED (cố ý giữ). Không có cơ chế dọn khi khởi động. Sau khi khởi động lại, không đoạn code nào đọc lại các snapshot cũ → chúng chỉ chiếm đĩa (máy dev đã tích 771 bản ~206 MB). Mỗi bản là bản sao đầy đủ DB nên dung lượng tăng theo kích thước DB thật.
 - **Root cause:** Đã xác nhận bằng đọc code (`services/write_transaction.py`); chưa tái hiện bằng chạy thật.
@@ -74,13 +77,13 @@
 - **Scope đề xuất:** Khi khởi động (trước khi có giao dịch nào), xóa snapshot không thuộc giao dịch đang hoạt động, **trừ khi** workspace đang ở trạng thái cần recovery; giữ tối đa N bản mới nhất (đề xuất N = 5) làm lưới an toàn.
 - **Acceptance criteria:** Test: tạo nhiều snapshot mồ côi → khởi động → chỉ còn ≤ N; khi có recovery journal đang mở → không xóa gì; CI xanh.
 - **Quyết định PO:** N = 5; không dọn khi đang cần khôi phục.
-- **Dependencies:** — · **Implementation reference:** PR #561 (`fix/tech-008-snapshot-retention`)
-- **Verification evidence:** Local: 17 test mới pass (stub import, không có PySide6). Full suite: chờ CI.
+- **Dependencies:** — · **Implementation reference:** PR #561, merge `d2d9d7a`
+- **Verification evidence:** Local: 17 test mới pass (stub import, không có PySide6). CI PR (run 41760277126) và CI `main_repos` sau merge (run 41763954959): success.
 - **PO acceptance:** Chưa
 
 ## TECH-003 — Làm sạch & cập nhật hệ thống tài liệu
 
-- **Type:** Maintenance · **Priority:** P2 · **Status:** IN_REVIEW
+- **Type:** Maintenance · **Priority:** P2 · **Status:** WAITING_PO
 - **Source:** PO, 2026-11-04 · **Issue:** #562
 - **Business problem:** `CenterManager/docs/` có 270 file, 111 file nằm ngay thư mục gốc, phần lớn là báo cáo sprint/task. `docs/PROJECT_CONTEXT.md` (Sprint 0.1) và `docs/CHANGELOG.md` (Sprint 0.5) lỗi thời. Gốc repo có file tạm, bản dump repomix (~4,5 MB), DLL, thư mục prototype cũ.
 - **Expected outcome:** Người mới biết ngay tài liệu nào là hiện hành; tài liệu lịch sử được lưu trữ riêng.
@@ -91,8 +94,8 @@
   - Gốc repo: xóa `TEMP_DOC4`, `TEMP_POST_PR182`, 2 `repomix-output.txt`; thêm `.gitignore` chặn repomix; chuyển `EP-FIN-11-REPORT.md`, `libcrypto-1_1-x64.dll`, `InterCommunicationCenter/`, `CenterManager_DeployDriveTest/`, `centermanager-redesign/`, `Note/` vào `archive/`.
   - Giữ nguyên vị trí mọi tài liệu mà test hoặc `AGENTS.md` tham chiếu.
 - **Acceptance criteria:** `docs/` gốc chỉ còn tài liệu hiện hành + tài liệu bị test ghim; không có link Markdown tương đối gãy; `docs/README.md` có bản đồ + archive; CI xanh.
-- **Dependencies:** — · **Implementation reference:** nhánh `docs/tech-003-docs-cleanup` (PR, xem Issue #562)
-- **Verification evidence (local):** Kiểm tra link Markdown tương đối: 0 link gãy (trước và sau). 53 test đọc tài liệu chạy được không cần Qt: pass; 1 test lỗi do thiếu thư viện trong môi trường (không liên quan). Full suite: chờ CI.
+- **Dependencies:** — · **Implementation reference:** PR #563, merge `8581da6`
+- **Verification evidence (local):** Kiểm tra link Markdown tương đối: 0 link gãy (trước và sau). 53 test đọc tài liệu chạy được không cần Qt: pass; 1 test lỗi do thiếu thư viện trong môi trường (không liên quan). CI `main_repos` sau merge (run 41763983314): success.
 - **PO acceptance:** Chưa
 - **Ngoài phạm vi:** viết lại nội dung `docs/ARCHITECTURE.md`, `Deployment_Docs/`, hợp đồng domain.
 
@@ -119,38 +122,63 @@
 - **Business problem:** Số liệu tiền ra trên Dashboard Finance không đúng với thực tế.
 - **Scope:** Rà soát luồng dữ liệu (không sửa code), liệt kê bất thường, đề xuất task.
 - **Acceptance criteria:** Báo cáo phân loại rõ xác nhận / giả thuyết, có vị trí code; danh sách task đề xuất.
-- **Implementation reference:** `CenterManager/docs/finance/QA-003_FINANCE_FLOW_REVIEW.md`
+- **Implementation reference:** `CenterManager/docs/finance/QA-003_FINANCE_FLOW_REVIEW.md` (PR #565, merge `d776bac`)
 - **Verification evidence:** 9 điểm bất thường (8 xác nhận bằng code, 1 giả thuyết). Nguyên nhân khả năng cao: chi phí mang trạng thái cũ `ĐÃ/CHƯA HOÀN TRẢ` không thuộc tập realized (`Completed`/`Paid`) nên bị loại khỏi tiền ra (F1, F4); tổng ở danh sách Chi dùng định nghĩa khác Dashboard (F2); hoàn học phí ghi là Income âm nên không hiện là tiền ra (F3). Dữ liệu test: 12.050.000 VND chi → Dashboard 0. **Chưa kiểm chứng trên DB thật** — cần chạy truy vấn trong báo cáo.
 - **PO acceptance:** Chưa
-- **Task đề xuất (chưa tạo, chờ PO duyệt):** BUG-002 (P1) chuẩn hóa trạng thái cũ; FEAT-001 (P1) định nghĩa lại trạng thái Chi; BUG-003 (P2) tách tổng đã chi/chưa chi ở danh sách; FEAT-002 (P2) hiển thị hoàn học phí là tiền ra; BUG-004 (P2) lọc Chi theo `finance_period_id`; BUG-005 (P3) đồng hồ nghiệp vụ + bảng Recent Expense.
+- **Task phát sinh:** BUG-002, FEAT-001, BUG-003 (đã làm, PR #569); FEAT-002, BUG-004, BUG-005 (NEW, chờ PO duyệt).
 
 ## FEAT-001 — Nguồn chi ví công ty / TK cá nhân + hoàn trả
 
-- **Type:** Feature · **Priority:** P1 · **Status:** IN_REVIEW · **Issue:** #567
+- **Type:** Feature · **Priority:** P1 · **Status:** WAITING_PO · **Issue:** #567
 - **Source:** PO 2026-11-04 (từ QA-003 F4) · **Quyết định:** D-008
 - **Business problem:** Trạng thái "ĐÃ/CHƯA HOÀN TRẢ" bị dùng như "đã chi/chưa chi" nên chi bằng tài khoản công ty có thể không được tính là tiền ra.
 - **Expected outcome:** Chi bằng CASH/BANK CÔNG TY tính ngay vào tiền chi. Chi bằng TK CÁ NHÂN là CHƯA HOÀN TRẢ; khi công ty trả lại, chọn ví công ty + ngày hoàn trả → ĐÃ HOÀN TRẢ và tính vào tiền chi theo ngày hoàn trả.
 - **Scope:** `Expense.funding_source`, `incurred_date`; `ExpenseService` (phân loại, chặn chuyển trạng thái sai, `reimburse_expense`); form Chi; danh sách Chi (nhãn, nút Hoàn trả); hộp thoại hoàn trả; cập nhật Domain Spec §6.
 - **Acceptance criteria:** xem Issue #567.
-- **Implementation reference:** nhánh `feat/fin-expense-funding-source` (PR, xem Issue)
-- **Verification evidence:** 16 test mới trong `tests/test_fin_expense_funding_source.py` (service trên SQLite thật + migration). Không chạy được local (môi trường không cài được SQLAlchemy/PySide6) → dựa vào CI.
+- **Implementation reference:** PR #569, commit `b04a3e9`, merge `18b6826`
+- **Verification evidence:** CI PR (run 41765228412): 3.211 passed, 7 skipped, 0 failed; 16/16 test mới trong `tests/test_fin_expense_funding_source.py` pass (service trên SQLite thật + migration Alembic thật). CI `main_repos` sau merge (run 41767126182): đang chạy tại thời điểm ghi — kết quả sẽ được bổ sung. Chưa kiểm thử thủ công trên ứng dụng Windows — cần PO kiểm tra 4 kịch bản: chi BANK CÔNG TY, chi TK CÁ NHÂN, Hoàn trả…, so tổng danh sách với Dashboard.
 - **PO acceptance:** Chưa
 
 ## BUG-002 — Chuẩn hóa trạng thái/nguồn chi của chi phí cũ
 
-- **Type:** Bug · **Priority:** P1 · **Status:** IN_REVIEW · **Issue:** #566
+- **Type:** Bug · **Priority:** P1 · **Status:** WAITING_PO · **Issue:** #566
 - **Source:** QA-003 F1 · **Quyết định:** D-008 (chỉ sửa dữ liệu ở kỳ chưa quyết toán)
 - **Scope:** Migration `1e10a043`. Dòng thuộc kỳ CONFIRMED giữ nguyên. Dòng "TK cá nhân + đã hoàn trả" cũ không có ví hoàn trả → dùng quy tắc alias sẵn có của hệ thống (CASH), **PO cần rà lại**. Chi công ty "Pending" cũ → để nguyên, cần xem thủ công.
-- **Verification evidence:** Mô phỏng SQL trên SQLite: dòng kỳ đã chốt không đổi, chạy lại lần 2 không đổi thêm (idempotent). Test migration Alembic thật: chờ CI.
+- **Verification evidence:** Mô phỏng SQL trên SQLite: dòng kỳ đã chốt không đổi, chạy lại lần 2 không đổi thêm (idempotent). Test migration Alembic thật pass trên CI (run 41765228412). **Chưa chạy trên DB production** — sau khi cập nhật ứng dụng, PO cần rà lại: dòng TK cá nhân đã hoàn trả cũ (đã gán ví CASH) và dòng chi công ty `Pending` cũ (để nguyên, `funding_source` NULL). Implementation reference: PR #569.
 - **PO acceptance:** Chưa
 
 ## BUG-003 — Tách tổng Đã chi / chưa tính dòng tiền ở danh sách Chi
 
-- **Type:** Bug · **Priority:** P2 · **Status:** IN_REVIEW · **Issue:** #568
+- **Type:** Bug · **Priority:** P2 · **Status:** WAITING_PO · **Issue:** #568
 - **Source:** QA-003 F2
 - **Scope:** Danh sách Chi hiển thị thêm "Đã chi – tính vào dòng tiền (khớp Dashboard)" và "Chưa tính vào dòng tiền".
-- **Verification evidence:** Test `test_list_cash_flow_total_matches_dashboard_definition`. Chờ CI.
+- **Verification evidence:** Test `test_list_cash_flow_total_matches_dashboard_definition` pass trên CI (run 41765228412). Implementation reference: PR #569.
 - **PO acceptance:** Chưa
+
+## FEAT-002 — Hiển thị hoàn học phí là tiền ra trên Dashboard
+
+- **Type:** Feature · **Priority:** P2 · **Status:** NEW — chờ PO duyệt
+- **Source:** QA-003 F3
+- **Business problem:** Hoàn học phí được ghi là Income âm nên làm giảm "Income" thay vì hiện ở tiền ra / Cash Out / Bank Out.
+- **Expected outcome:** Dashboard trình bày khoản hoàn như dòng tiền ra mà không đổi cách ghi sổ (số dư ví giữ nguyên).
+- **Cần PO quyết định:** hiển thị hoàn tiền thành KPI riêng hay gộp vào "tiền ra".
+- **Acceptance criteria / Implementation reference / Evidence:** — · **PO acceptance:** Chưa
+
+## BUG-004 — Chi lọc kỳ theo `finance_period_id`
+
+- **Type:** Bug · **Priority:** P2 · **Status:** NEW — chờ PO duyệt
+- **Source:** QA-003 F6
+- **Business problem:** Thu lọc kỳ theo kỳ đã lưu, Chi lọc theo khoảng `payment_date` → lệch nhau nếu cấu hình kỳ bị sửa sau khi có dữ liệu (spec R2).
+- **Acceptance criteria:** Cùng một kỳ, Thu và Chi dùng chung định danh kỳ; test hồi quy khi đổi cấu hình kỳ.
+- **Implementation reference / Evidence:** — · **PO acceptance:** Chưa
+
+## BUG-005 — Dashboard dùng đồng hồ nghiệp vụ; bảng Recent Expense cùng quy tắc KPI
+
+- **Type:** Bug · **Priority:** P3 · **Status:** NEW — chờ PO duyệt
+- **Source:** QA-003 F5, F7
+- **Business problem:** Dashboard dùng `date.today()` thay vì `get_clock()`; bảng Recent Expense có cả dòng chưa tính dòng tiền trong khi KPI thì không.
+- **Acceptance criteria:** Dashboard theo `get_clock()`; bảng Recent Expense phân biệt rõ hoặc chỉ hiện dòng đã chi.
+- **Implementation reference / Evidence:** — · **PO acceptance:** Chưa
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git
 
