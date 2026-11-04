@@ -615,6 +615,36 @@ class WriteRecoveryJournal:
         self.assert_replaceable()
         logger.info('Fresh-install WRITE recovery receipt initialized after schema migration')
 
+    def refresh_verified_bootstrap_migration(self, *, provider, before):
+        """Refresh a previously CLEAN receipt after authorized startup Alembic.
+
+        The caller verified the receipt before ensure_schema() and runs this
+        immediately afterwards, before login. No pending/legacy receipt may
+        be promoted to CLEAN by this operation.
+        """
+        if (not isinstance(before, dict) or before.get('status') != 'CLEAN'
+                or before.get('publication') != 'VERIFIED'
+                or self.inspect() != before):
+            raise RecoveryRequired('Bootstrap schema receipt changed or was never CLEAN.')
+        oid = before.get('published_oid')
+        if (not oid or provider.observe_remote_main_commit() != oid or
+                self._git('rev-parse', 'HEAD') != oid or
+                self._git('rev-parse', '@{upstream}') != oid or
+                self._repository_id() != before.get('repository_id') or
+                self._git('status', '--porcelain', '--untracked-files=all') or
+                not self.database.is_file() or self._wal_pending()):
+            raise RecoveryRequired('Cannot attest the authoritative schema migration.')
+        updated_files = self._local_files()
+        db_hash = _hash(self.database)
+        if (before.get('published_runtime_sha256') != db_hash or
+                before.get('accepted_local_files') != updated_files):
+            self.update(
+                published_runtime_sha256=db_hash,
+                accepted_local_files=updated_files,
+            )
+            self.assert_replaceable()
+            logger.info('Verified CLEAN receipt updated after bootstrap schema migration')
+
     def record_synchronized(self):
         """Refresh an existing verified/reconciled receipt after remote install.
 
