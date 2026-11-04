@@ -49,15 +49,39 @@ def test_release_entrypoint_remains_run_py():
 
 def test_runtime_repository_is_not_a_gitlink():
     """The runtime template must not contain a stale nested-repository gitlink."""
-    repo_root = ROOT.parent
+    # Pathspecs are relative to cwd, so run from the CenterManager project root
+    # where runtime/ actually lives.
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "--", "runtime/repository"],
-        cwd=repo_root,
+        ["git", "ls-files", "--stage", "--", "runtime"],
+        cwd=ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
     assert "160000 " not in result.stdout
+
+
+# TECH-002: only these runtime template files may be tracked; everything else
+# under runtime/ is machine-local state (snapshots, attachments, heartbeats,
+# config/secrets, nested repositories).
+TRACKED_RUNTIME_TEMPLATE_FILES = {
+    "runtime/collaboration/lock.json",
+    "runtime/manifest.json",
+    "runtime/metadata/version.json",
+}
+
+
+def test_runtime_tracks_only_template_files():
+    result = subprocess.run(
+        ["git", "ls-files", "--", "runtime"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    assert tracked, "git ls-files returned nothing; test must run inside the repository checkout"
+    assert tracked == TRACKED_RUNTIME_TEMPLATE_FILES
 
 
 def test_runtime_directory_contract_is_shared_with_release_builder():

@@ -43,6 +43,11 @@ runtime/cache/
 runtime/temp/
 runtime/reports/
 runtime/repository/.git/
+# TECH-002: machine-local runtime state must never be tracked.
+runtime/repository/
+runtime/snapshots/
+runtime/attachments/
+runtime/collaboration/heartbeat/
 
 # Production rehearsal evidence can contain a full database snapshot.
 # Keep it local/off-repository and archive it only in the approved release evidence store.
