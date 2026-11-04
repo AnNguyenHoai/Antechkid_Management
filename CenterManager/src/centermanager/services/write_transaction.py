@@ -233,12 +233,18 @@ class WriteTransactionManager:
             authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
             receipt = self._pre_handoff_clean_receipt
             if receipt is not None:
-                # The exact CLEAN state was accepted before requesting WRITE.
-                # Handoff may reinstall and migrate the authoritative MAIN DB,
-                # changing its bytes before any user mutations are permitted.
-                journal.refresh_verified_bootstrap_migration(
-                    provider=provider, before=receipt
-                )
+                # The handoff layer (before it discards the previous DB)
+                # already validated MAIN and sealed the migrated runtime.
+                # Never reseal here: that would validate the old pre-handoff
+                # receipt against a newly accepted database generation.
+                journal.assert_replaceable()
+                accepted = journal.inspect()
+                if (accepted is None or accepted.get('status') != 'CLEAN'
+                        or accepted.get('published_oid') != self._base_main_commit):
+                    from centermanager.platform.write_recovery import RecoveryRequired
+                    raise RecoveryRequired(
+                        'WRITE handoff receipt does not match its pinned MAIN commit.'
+                    )
                 self._pre_handoff_clean_receipt = None
             journal.begin(self._collab_manager.get_session_id(), self._base_main_commit, authority)
             self._recovery_journal = journal
