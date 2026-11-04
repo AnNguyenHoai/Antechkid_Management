@@ -38,6 +38,30 @@ class StartupSynchronization:
     def run(self) -> bool:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
+        # Only a genuinely empty first-time install may receive a new CLEAN
+        # receipt after the app's explicitly authorized Alembic migration.
+        # Existing DBs, Git worktrees and journals must keep their recovery
+        # provenance; absence of a receipt alone proves nothing.
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        _journal = WriteRecoveryJournal()
+        # No previous business artifacts or orphaned captures may be
+        # silently attested as clean simply because center.db is absent.
+        roots = _journal._workspace_roots()
+        old_business_artifacts = any(
+            Path(roots[name]).exists() and any(
+                item.is_file() or item.is_symlink()
+                for item in Path(roots[name]).rglob('*')
+            )
+            for name in ('database', 'attachments', 'legacy-attachments',
+                         'exports', 'reports')
+        )
+        fresh_install = (
+            not self._runtime_db_path.exists()
+            and (not self._repo_path.exists() or
+                 (self._repo_path.is_dir() and not any(self._repo_path.iterdir())))
+            and not _journal.root.exists()
+            and not old_business_artifacts
+        )
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
         # may run until an incomplete installation is explicitly recovered.
@@ -128,6 +152,11 @@ class StartupSynchronization:
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
+        if fresh_install:
+            # This in-process proof is consumed immediately after ensure_schema.
+            # Never persist a marker that could outlive a crash or EXE update.
+            self._provider._fresh_install_main_oid = self._accepted_startup_main_oid
+            logger.info("Fresh install: deferring CLEAN receipt until schema verification")
         logger.info("Startup synchronization completed successfully")
         return True
 

@@ -573,6 +573,78 @@ class WriteRecoveryJournal:
             fields['accepted_local_files'] = self._local_files()
         self.update(**fields)
 
+    def record_verified_fresh_install(self, *, provider, accepted_main):
+        """Record the first receipt after this process installs and migrates MAIN.
+
+        Caller must hold ephemeral fresh-install provenance from startup; this
+        is not a repair mechanism for pre-existing or unaccepted local work.
+        Migration is an authorized bootstrap operation, so the runtime DB
+        need not have the same byte hash as the repository's pre-migration DB.
+        """
+        if self.journal.exists():
+            raise RecoveryRequired('Existing WRITE journal cannot be replaced by fresh-install receipt.')
+        if (not accepted_main or
+                getattr(provider, '_fresh_install_main_oid', None) != accepted_main):
+            raise RecoveryRequired('Fresh-install startup proof is unavailable.')
+        if provider.observe_remote_main_commit() != accepted_main:
+            raise RecoveryRequired('Git MAIN changed after startup; first WRITE remains blocked.')
+        if (not self.database.is_file() or self._wal_pending() or
+                self._git('rev-parse', 'HEAD') != accepted_main or
+                self._git('rev-parse', '@{upstream}') != accepted_main or
+                self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired('Fresh-install runtime is not stable at its accepted MAIN base.')
+        repo_db = self.repository / 'database' / 'center.db'
+        if not repo_db.is_file():
+            raise RecoveryRequired('Accepted MAIN has no repository database.')
+        # Alembic migration has already completed and its physical schema has
+        # been verified by ensure_schema(). No application user/editor exists.
+        receipt = dict(
+            format=1, runtime=str(self.runtime), repository=str(self.repository),
+            database=str(self.database), repository_id=self._repository_id(),
+            session_id='fresh-install-' + uuid.uuid4().hex,
+            base_main_oid=accepted_main, published_oid=accepted_main,
+            status='CLEAN', publication='VERIFIED', release='VERIFIED',
+            published_runtime_sha256=_hash(self.database),
+            accepted_local_files=self._local_files(),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _json(self.journal, receipt)
+        # Receipt is now tied to exact runtime bytes; never leave the startup
+        # capability available for a second bootstrap attempt.
+        delattr(provider, '_fresh_install_main_oid')
+        self.assert_replaceable()
+        logger.info('Fresh-install WRITE recovery receipt initialized after schema migration')
+
+    def refresh_verified_bootstrap_migration(self, *, provider, before):
+        """Refresh a previously CLEAN receipt after authorized startup Alembic.
+
+        The caller verified the receipt before ensure_schema() and runs this
+        immediately afterwards, before login. No pending/legacy receipt may
+        be promoted to CLEAN by this operation.
+        """
+        if (not isinstance(before, dict) or before.get('status') != 'CLEAN'
+                or before.get('publication') != 'VERIFIED'
+                or self.inspect() != before):
+            raise RecoveryRequired('Bootstrap schema receipt changed or was never CLEAN.')
+        oid = before.get('published_oid')
+        if (not oid or provider.observe_remote_main_commit() != oid or
+                self._git('rev-parse', 'HEAD') != oid or
+                self._git('rev-parse', '@{upstream}') != oid or
+                self._repository_id() != before.get('repository_id') or
+                self._git('status', '--porcelain', '--untracked-files=all') or
+                not self.database.is_file() or self._wal_pending()):
+            raise RecoveryRequired('Cannot attest the authoritative schema migration.')
+        updated_files = self._local_files()
+        db_hash = _hash(self.database)
+        if (before.get('published_runtime_sha256') != db_hash or
+                before.get('accepted_local_files') != updated_files):
+            self.update(
+                published_runtime_sha256=db_hash,
+                accepted_local_files=updated_files,
+            )
+            self.assert_replaceable()
+            logger.info('Verified CLEAN receipt updated after bootstrap schema migration')
+
     def record_synchronized(self):
         """Refresh an existing verified/reconciled receipt after remote install.
 
