@@ -41,3 +41,14 @@
   3. Khi hoàn trả: người dùng chọn ví công ty; khoản chi tính vào tiền chi theo **ngày hoàn trả**; ngày chi gốc được lưu.
   4. Dữ liệu cũ: chỉ sửa dữ liệu trong DB ở các kỳ chưa quyết toán (CONFIRMED giữ nguyên).
 - **Hệ quả:** Domain Spec §6 (Expense funding source) và R3 được cập nhật.
+
+## D-009 — Chứng từ Thu/Chi và đồng bộ tài liệu
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
+- **Nội dung:** Chứng từ tùy chọn; PDF/PNG/JPG, tối đa 5 MB/file và 5 file/khoản; ~100–200 chứng từ/tháng; kỳ đã quyết toán vẫn cho bổ sung chứng từ; không mã hóa file; lưu vô thời hạn; tài liệu học sinh/giáo viên đồng bộ giữa các máy theo quyền tài khoản.
+- **Hệ quả:** Không lưu file trong SQLite; file bất biến đặt tên theo SHA-256; xóa = ẩn metadata. Xem `CenterManager/docs/finance/QA-004_FINANCE_VOUCHER_ATTACHMENT_AUDIT.md`.
+
+## D-010 — Phạm vi và thời hạn giữ bản sao khôi phục (captures)
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
+- **Nội dung:** Capture không chép nội dung `.git/objects` và chứng từ bất biến (đặt tên theo SHA-256); giữ capture của 20 phiên gần nhất và mọi phiên chưa CLEAN, xóa capture của phiên CLEAN cũ hơn. Thay thế quy tắc "không bao giờ xóa capture" của E1B-1.
+- **Đánh đổi:** commit Git cục bộ chưa được chấp nhận được bảo toàn qua file working tree + snapshot DB, không qua commit object.
+- **Thực hiện:** TECH-011 (Issue #576, PR #577).
