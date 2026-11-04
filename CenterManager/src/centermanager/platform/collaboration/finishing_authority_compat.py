@@ -40,17 +40,19 @@ def install_finishing_authority_compat(collaboration_manager_cls: type) -> None:
         # The base validator checks the lease, but its generic local-stale
         # compatibility path cannot see the remote FINISHING deadline because
         # the remote branch returns before the local lock-stale evaluation.
-        # Read the remote authority directly so an expired FINISHING deadline
-        # cannot be reported as a valid write authority while the lease itself
-        # is still alive.
+        # Reuse the base validator's operation-local observation. Older/custom
+        # validators without that evidence retain the remote-read fallback.
         if getattr(self, "_sync_provider", None) is not None:
             if not result.get("valid", False):
                 # Preserve stronger failures from the authoritative remote
                 # validator (owner mismatch, expired lease, unavailable sync).
                 return result
             try:
-                remote_status = self._sync_provider.remote_lock_status()
-                deadline = _parse_datetime(remote_status.get("finishing_deadline"))
+                if result.get("finishing_deadline_authoritative") is True:
+                    deadline = _parse_datetime(result.get("remote_finishing_deadline"))
+                else:
+                    remote_status = self._sync_provider.remote_lock_status()
+                    deadline = _parse_datetime(remote_status.get("finishing_deadline"))
                 if deadline is None:
                     return result
 

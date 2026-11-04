@@ -686,8 +686,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def _mutate_remote_queue(self, mutator, retries: int = 5) -> bool:
         for _ in range(max(1, retries)):
             expected_oid = self._remote_queue_oid()
-            if expected_oid:
-                self._fetch_queue_branch()
+            # Read that exact immutable object locally when available. The
+            # reader fetches on a miss; every retry still observes remote anew.
             payload = self._read_queue_from_oid(expected_oid)
             requests = self._filter_live_queue_requests(payload.get("requests", []))
             changed, requests = mutator(requests)
@@ -813,8 +813,7 @@ class GitSynchronizationProvider(SynchronizationProvider):
         try:
             expected_oid = self._remote_lock_oid()
             if expected_oid is not None:
-                # Fetch lock branch to ensure parent OID is available locally
-                self._fetch_lock_branch()
+                # The exact-OID reader fetches only if the object is missing.
                 remote_lock = self._read_lock_from_oid(expected_oid)
                 if self._is_lock_valid(remote_lock):
                     owner = remote_lock.get("owner", "unknown")
@@ -944,9 +943,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 logger.warning("No remote lock to renew")
                 return False
 
-            # Fetch lock branch to ensure parent OID is available locally
-            self._fetch_lock_branch()
-
+            # Keep the fresh remote OID check, but reuse its immutable local
+            # object. A newer, unknown object is fetched by the reader.
             remote_lock = self._read_lock_from_oid(expected_oid)
             if not remote_lock.get("locked", False):
                 logger.warning("Remote lock is not locked")
