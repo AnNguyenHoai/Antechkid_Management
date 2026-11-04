@@ -45,4 +45,4 @@ Phiên bản hiện tại: `1.0.0-rc1` (release candidate).
 
 1. Quan hệ giữa `BACKLOG.md` và GitHub Issues (xem `D-002`).
 2. Định hướng dài hạn desktop hay web (xem `D-003`) — Project Instructions đang mô tả "Web Application".
-3. Các thư mục `InterCommunicationCenter/`, `CenterManager_DeployDriveTest/`, `centermanager-redesign/` còn cần giữ không?
+3. ~~Các thư mục prototype cũ còn cần giữ không?~~ → đã chuyển vào `archive/` (TECH-003).

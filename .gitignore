@@ -1,0 +1,2 @@
+# Generated full-repository dumps (e.g. repomix) must not be committed.
+repomix-output*.txt

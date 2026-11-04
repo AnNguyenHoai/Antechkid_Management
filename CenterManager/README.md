@@ -1,6 +1,8 @@
 # CenterManager
 
-CenterManager là ứng dụng desktop vận hành trung tâm giáo dục của AnTechKids, được tổ chức theo mô hình **Workspace Platform** thay vì một màn hình quản lý học sinh đơn lẻ.
+CenterManager là ứng dụng desktop Windows vận hành trung tâm giáo dục của AnTechKids, được tổ chức theo mô hình **Workspace Platform** thay vì một màn hình quản lý học sinh đơn lẻ.
+
+Phiên bản hiện tại: xem `VERSION` (`1.0.0-rc1` tại thời điểm cập nhật 2026-11-04). Backlog, quyết định và bối cảnh sản phẩm: `BACKLOG.md`, `DECISIONS.md`, `PRODUCT_CONTEXT.md` ở gốc repository.
 
 ## Các workspace chính
 
@@ -24,7 +26,9 @@ CenterManager hiện sử dụng:
 - Service / Repository architecture;
 - repository-provider boundaries ở các khu vực đã chuẩn hóa;
 - Platform layer cho bootstrap, runtime context, collaboration và synchronization;
-- Git-backed synchronization/edit-session khi được cấu hình;
+- Git-backed synchronization/edit-session khi được cấu hình (repo dữ liệu private riêng);
+- SQLCipher bắt buộc cho production, khóa bảo vệ bằng Windows DPAPI; credential Git lưu dạng `DPAPI:v2`;
+- Protected Data Service (`AnTechKidsData` Windows service) cô lập DB/khóa/backup khỏi tài khoản Windows của nhân viên;
 - pytest + architecture regression gates trên GitHub Actions.
 
 Xem `docs/ARCHITECTURE.md` để biết kiến trúc implementation hiện tại.
@@ -54,6 +58,9 @@ Tài liệu liên quan:
 - [Current Architecture](docs/ARCHITECTURE.md)
 - [Database Design](docs/DATABASE_DESIGN.md)
 - [Workspace Architecture V2](docs/Bussiness/ARCHITECTURE_V2.md)
+- [Security profile](docs/SECURITY_MEDIUM_PROFILE.md)
+- [Protected Data Service](docs/SEC_02_PROTECTED_DATA_SERVICE.md)
+- [Bản đồ tài liệu](docs/README.md) — tài liệu nào là hiện hành, tài liệu lịch sử nằm ở `docs/archive/`
 
 ## Collaboration / dữ liệu runtime
 
@@ -99,7 +106,9 @@ Task-specific requirements nằm trong GitHub Issue; approved domain specs vẫn
 
 ## CI
 
-`.github/workflows/pytest-suite.yml` chạy full pytest suite trên Windows/Python 3.10 cho push/PR vào `main_repos`, bao gồm architecture tests và test artifacts.
+`.github/workflows/pytest-suite.yml` chạy full pytest suite trên Windows/Python 3.10, chia 3 shard, cho push/PR vào `main_repos`, bao gồm architecture tests và test artifacts. Baseline 2026-11-04: 3.176 passed, 7 skipped, 0 failed.
+
+`.github/workflows/windows-prototype-release.yml` build gói Windows khi gắn tag phát hành.
 
 ## License
 

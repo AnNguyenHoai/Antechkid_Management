@@ -9,10 +9,9 @@
 
 | ID | Tiêu đề | Loại | Ưu tiên | Trạng thái | Phụ thuộc |
 |---|---|---|---|---|---|
-| TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | Maintenance | P1 | WAITING_PO | — |
 | TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git | Maintenance | P2 | IN_REVIEW (#558) | — |
-| TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | ANALYZED — chờ PO duyệt | TECH-002 |
-| TECH-003 | Làm sạch & sắp xếp lại tài liệu (`docs/` 270 file, file tạm ở gốc repo) | Maintenance | P2 | ANALYZED | — |
+| TECH-008 | Dọn snapshot mồ côi trong `runtime/snapshots/` | Bug | P2 | IN_REVIEW (#560, PR #561) | — |
+| TECH-003 | Làm sạch & cập nhật hệ thống tài liệu | Maintenance | P2 | IN_REVIEW (#562) | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -21,6 +20,7 @@
 
 | ID | Tiêu đề | Trạng thái | Lý do |
 |---|---|---|---|
+| TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | DONE | Default branch = `main_repos`; PO accept 2026-11-04 |
 | SEC-001 | Thu hồi GitHub token trong `config.json` | DONE | PO thu hồi token; PO accept 2026-11-04 |
 | QA-001 | Ghi nhận baseline CI của `main_repos` | DONE | 3.176 passed / 7 skipped / 0 failed; PO accept 2026-11-04 |
 | SEC-002 | Lộ dữ liệu cá nhân trên repo public | CANCELLED | PO xác nhận dữ liệu giả; repo dữ liệu thật private (đã kiểm tra) |
@@ -33,7 +33,7 @@
 
 ## TECH-001 — Đồng bộ nhánh mặc định `main` với `main_repos`
 
-- **Type:** Maintenance · **Priority:** P1 · **Status:** WAITING_PO
+- **Type:** Maintenance · **Priority:** P1 · **Status:** DONE
 - **Source:** Audit 2026-11-04
 - **Business problem:** Nhánh mặc định `main` dừng ở `32cd46c` (2026-09-29) trong khi phát triển thực tế ở `main_repos`; clone mặc định lấy mã cũ.
 - **Expected outcome:** Clone mặc định trả về mã đang phát triển.
@@ -41,7 +41,7 @@
 - **Acceptance criteria:** `git clone` không chỉ định nhánh lấy được commit mới nhất của nhánh tích hợp.
 - **Dependencies:** — · **Implementation reference:** GitHub Settings (PO thực hiện)
 - **Verification evidence:** 2026-11-04: GitHub API `GET /repos/AnNguyenHoai/Antechkid_Management` trả `default_branch = main_repos`.
-- **PO acceptance:** Chưa
+- **PO acceptance:** Accepted — PO, 2026-11-04
 - **Notes:** Nhánh `main` cũ vẫn còn. Xóa nhánh là thao tác phá hủy, chỉ làm khi PO yêu cầu.
 
 ## TECH-002 — Đưa dữ liệu runtime giả ra khỏi Git
@@ -56,31 +56,41 @@
 - **Verification evidence (local):** Chạy trực tiếp logic 2 test trên index đã stage: cả hai PASS. Test gitlink đã sửa phát hiện đúng gitlink trên trạng thái cũ (trước đây luôn pass vì `git ls-files` chạy sai thư mục). Full pytest không chạy được ở môi trường này (PyPI bị chặn) → dựa vào CI.
 - **PO acceptance:** Chưa
 - **Notes:**
-  - Giữ lại `manifest.json`, `metadata/version.json`, `collaboration/lock.json` vì `build_release.py` copy chúng vào gói phát hành như template. Hai file đầu chứa trạng thái máy dev (`platform_version 214`, `owner`, `session_id`) — nếu gỡ, `MetadataInitializer` sẽ tạo mặc định `platform_version: 1`, làm thay đổi hành vi bản phát hành → cần PO/kiến trúc quyết định riêng.
+  - Giữ lại `manifest.json`, `metadata/version.json`, `collaboration/lock.json` vì `build_release.py` copy chúng vào gói phát hành như template — PO quyết định giữ nguyên (D-006).
   - Phần "giới hạn snapshot" tách sang TECH-008 vì chạm vào luồng recovery.
   - Rewrite lịch sử để giảm dung lượng repo là việc riêng, cần PO ủy quyền.
 
 ## TECH-008 — Dọn snapshot mồ côi trong `runtime/snapshots/`
 
-- **Type:** Bug · **Priority:** P2 · **Status:** ANALYZED — chờ PO duyệt
-- **Source:** Phân tích trong TECH-002 (2026-11-04)
+- **Type:** Bug · **Priority:** P2 · **Status:** IN_REVIEW
+- **Source:** Phân tích trong TECH-002 (2026-11-04) · PO duyệt 2026-11-04 · **Issue:** #560
 - **Business problem:** Mỗi lần bắt đầu sửa dữ liệu, `WriteTransaction._create_snapshot()` copy toàn bộ DB vào `runtime/snapshots/`. Đường dẫn snapshot chỉ được giữ trong bộ nhớ (`self._snapshot_path`) và chỉ bị xóa khi publish thành công, hủy hoặc retry release thành công. Không bị xóa khi: ứng dụng bị tắt/crash trong lúc EDITING, giao dịch ở FAILED, hoặc RECOVERY_REQUIRED (cố ý giữ). Không có cơ chế dọn khi khởi động. Sau khi khởi động lại, không đoạn code nào đọc lại các snapshot cũ → chúng chỉ chiếm đĩa (máy dev đã tích 771 bản ~206 MB). Mỗi bản là bản sao đầy đủ DB nên dung lượng tăng theo kích thước DB thật.
 - **Root cause:** Đã xác nhận bằng đọc code (`services/write_transaction.py`); chưa tái hiện bằng chạy thật.
 - **Expected outcome:** Số snapshot trên đĩa có giới hạn mà không làm mất dữ liệu cần cho khôi phục.
 - **Scope đề xuất:** Khi khởi động (trước khi có giao dịch nào), xóa snapshot không thuộc giao dịch đang hoạt động, **trừ khi** workspace đang ở trạng thái cần recovery; giữ tối đa N bản mới nhất (đề xuất N = 5) làm lưới an toàn.
 - **Acceptance criteria:** Test: tạo nhiều snapshot mồ côi → khởi động → chỉ còn ≤ N; khi có recovery journal đang mở → không xóa gì; CI xanh.
-- **Dependencies:** TECH-002 · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
-- **Câu hỏi cho PO:** đồng ý N = 5 và quy tắc "không dọn khi đang cần recovery"?
+- **Quyết định PO:** N = 5; không dọn khi đang cần khôi phục.
+- **Dependencies:** — · **Implementation reference:** PR #561 (`fix/tech-008-snapshot-retention`)
+- **Verification evidence:** Local: 17 test mới pass (stub import, không có PySide6). Full suite: chờ CI.
+- **PO acceptance:** Chưa
 
-## TECH-003 — Làm sạch & sắp xếp lại tài liệu
+## TECH-003 — Làm sạch & cập nhật hệ thống tài liệu
 
-- **Type:** Maintenance · **Priority:** P2 · **Status:** ANALYZED (PO đã yêu cầu ghi vào backlog)
-- **Source:** PO, 2026-11-04
-- **Business problem:** `CenterManager/docs/` có 270 file, phần lớn là báo cáo từng sprint/task. Một số file "hiện hành" đã lỗi thời: `PROJECT_CONTEXT.md` (Sprint 0.1), `CHANGELOG.md` (dừng ở Sprint 0.5). Ở gốc repo có file tạm/không thuộc source: `TEMP_DOC4`, `TEMP_POST_PR182`, `EP-FIN-11-REPORT.md`, `repomix-output.txt` (2,1 MB; thêm 1 bản trong `CenterManager/`), `libcrypto-1_1-x64.dll`. Thư mục phụ: `InterCommunicationCenter/`, `CenterManager_DeployDriveTest/`, `centermanager-redesign/`, `Note/`.
+- **Type:** Maintenance · **Priority:** P2 · **Status:** IN_REVIEW
+- **Source:** PO, 2026-11-04 · **Issue:** #562
+- **Business problem:** `CenterManager/docs/` có 270 file, 111 file nằm ngay thư mục gốc, phần lớn là báo cáo sprint/task. `docs/PROJECT_CONTEXT.md` (Sprint 0.1) và `docs/CHANGELOG.md` (Sprint 0.5) lỗi thời. Gốc repo có file tạm, bản dump repomix (~4,5 MB), DLL, thư mục prototype cũ.
 - **Expected outcome:** Người mới biết ngay tài liệu nào là hiện hành; tài liệu lịch sử được lưu trữ riêng.
-- **Scope:** Lập danh mục `docs/` theo nhóm (hiện hành / hợp đồng domain / lịch sử); chuyển báo cáo sprint vào `docs/archive/`; đánh dấu "Superseded" cho file lỗi thời; PO quyết định giữ/xóa từng file ở gốc repo; cập nhật đường dẫn trong `AGENTS.md` nếu có file di chuyển.
-- **Acceptance criteria:** Có `docs/README.md` liệt kê tài liệu hiện hành; không còn file tạm ở gốc repo; các tham chiếu trong `AGENTS.md`/`AI_COLLABORATION_PROTOCOL.md` vẫn đúng; CI xanh (một số test có thể đọc file docs).
-- **Dependencies:** — · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
+- **Đã làm:**
+  - `git mv` 74 báo cáo sprint/task vào `docs/archive/sprint-reports/`; `docs/FINANCE/`, `docs/Software/`, Sprint 0.x context/changelog, `docs/config.json` (mẫu cũ có email cá nhân) vào `docs/archive/legacy/`.
+  - `docs/PROJECT_CONTEXT.md`, `docs/CHANGELOG.md` thành file trỏ tới bản hiện hành ở gốc repo.
+  - Cập nhật `docs/README.md` (thêm nhóm quản lý sản phẩm, bảo mật/vận hành, danh sách tài liệu bị test ghim đường dẫn, vị trí archive, quy tắc lưu báo cáo mới) và `CenterManager/README.md` (phiên bản, SQLCipher/DPAPI, Protected Data Service, CI 3 shard + baseline).
+  - Gốc repo: xóa `TEMP_DOC4`, `TEMP_POST_PR182`, 2 `repomix-output.txt`; thêm `.gitignore` chặn repomix; chuyển `EP-FIN-11-REPORT.md`, `libcrypto-1_1-x64.dll`, `InterCommunicationCenter/`, `CenterManager_DeployDriveTest/`, `centermanager-redesign/`, `Note/` vào `archive/`.
+  - Giữ nguyên vị trí mọi tài liệu mà test hoặc `AGENTS.md` tham chiếu.
+- **Acceptance criteria:** `docs/` gốc chỉ còn tài liệu hiện hành + tài liệu bị test ghim; không có link Markdown tương đối gãy; `docs/README.md` có bản đồ + archive; CI xanh.
+- **Dependencies:** — · **Implementation reference:** nhánh `docs/tech-003-docs-cleanup` (PR, xem Issue #562)
+- **Verification evidence (local):** Kiểm tra link Markdown tương đối: 0 link gãy (trước và sau). 53 test đọc tài liệu chạy được không cần Qt: pass; 1 test lỗi do thiếu thư viện trong môi trường (không liên quan). Full suite: chờ CI.
+- **PO acceptance:** Chưa
+- **Ngoài phạm vi:** viết lại nội dung `docs/ARCHITECTURE.md`, `Deployment_Docs/`, hợp đồng domain.
 
 ## QA-001 — Ghi nhận baseline CI của `main_repos`
 
@@ -118,7 +128,7 @@
 ## TECH-007 — Thống nhất phiên bản Python
 
 - **Type:** Maintenance · **Priority:** P3 · **Status:** NEW
-- **Business problem:** CI và build dùng Python 3.10; `Note/Note.md` hướng dẫn cài bằng Python 3.14 → máy dev và bản phát hành có thể chạy khác nhau.
+- **Business problem:** CI và build dùng Python 3.10; `archive/Note/Note.md` (ghi chú cũ) hướng dẫn cài bằng Python 3.14; `DEVELOPMENT_GUIDE.md` đã ghi 3.10 → máy dev và bản phát hành có thể chạy khác nhau.
 - **Scope:** Chọn một phiên bản, ghi vào README/CI.
 - **Acceptance criteria:** CI và hướng dẫn dev cùng phiên bản; CI xanh.
 - **Dependencies:** — · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa

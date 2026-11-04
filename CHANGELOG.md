@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Changed
+- 2026-11-04 — TECH-003: lưu trữ 74 báo cáo sprint và tài liệu lỗi thời vào `docs/archive/`, dọn gốc repo, cập nhật `docs/README.md` và `CenterManager/README.md`. (Issue #562) — chờ CI và PO nghiệm thu.
+- 2026-11-04 — PO nghiệm thu TECH-001; ghi quyết định D-006 (giữ template runtime), D-007 (giữ 5 snapshot).
 - 2026-11-04 — TECH-002: gỡ 792 file runtime giả và gitlink `runtime/repository` khỏi Git (file local giữ nguyên); bổ sung `.gitignore`; sửa test gitlink chạy sai đường dẫn, thêm test hồi quy. (Issue #558) — chờ CI và PO nghiệm thu.
 - 2026-11-04 — Ghi nhận PO nghiệm thu SEC-001, QA-001; TECH-001 chờ nghiệm thu (default branch đã là `main_repos`); D-002 ACCEPTED. (Issue #556)
 
