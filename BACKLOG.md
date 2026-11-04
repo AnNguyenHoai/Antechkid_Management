@@ -20,12 +20,12 @@
 | BUG-004 | Chi lọc kỳ theo `finance_period_id` (spec R2) | Bug | P2 | NEW — chờ PO duyệt | — |
 | BUG-005 | Dashboard dùng đồng hồ nghiệp vụ; bảng Recent Expense cùng quy tắc KPI | Bug | P3 | NEW — chờ PO duyệt | — |
 | QA-004 | Audit đính kèm chứng từ Thu/Chi (dung lượng & hiệu suất) | QA | P1 | WAITING_PO (#572) | — |
-| BUG-006 | Tài liệu nhân viên có thể bị xóa khỏi repo khi publish (lệch `Attachment`/`Attachments`) | Bug | P1 | NEW — chờ PO duyệt | — |
-| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần) | Feature | P1 | NEW — chờ PO chốt câu hỏi QA-004 | QA-004 |
-| FEAT-004 | UI đính kèm/xem chứng từ Thu/Chi | Feature | P1 | NEW — chờ PO chốt câu hỏi QA-004 | FEAT-003 |
+| BUG-006 | Tài liệu nhân viên có thể bị xóa khỏi repo khi publish (lệch `Attachment`/`Attachments`) | Bug | P1 | IN_REVIEW (#574, PR #575) | — |
+| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần + tối ưu write recovery) | Feature | P1 | ANALYZED — chờ PO duyệt thiết kế (chạm write recovery) | BUG-006 |
+| FEAT-004 | UI đính kèm/xem chứng từ Thu/Chi | Feature | P1 | ANALYZED | FEAT-003 |
 | TECH-009 | Giám sát dung lượng chứng từ/repo + ngưỡng cảnh báo | Improvement | P2 | NEW | FEAT-003 |
 | TECH-010 | Đồng bộ tài liệu nhân viên tăng dần | Improvement | P2 | NEW | BUG-006 |
-| FEAT-005 | Đồng bộ tài liệu học sinh/giáo viên giữa các máy | Feature | P3 | NEW — cần PO xác nhận nhu cầu | — |
+| FEAT-005 | Đồng bộ tài liệu học sinh/giáo viên giữa các máy, xem theo quyền | Feature | P2 | ANALYZED — PO xác nhận cần (D-009) | FEAT-003 |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -194,16 +194,17 @@
 - **Business problem:** Kế toán cần chứng từ cho từng khoản thu/chi; cần đánh giá ảnh hưởng dung lượng DB và hiệu suất trước khi làm.
 - **Implementation reference:** `CenterManager/docs/finance/QA-004_FINANCE_VOUCHER_ATTACHMENT_AUDIT.md`
 - **Verification evidence:** Kết luận chính: không lưu BLOB trong SQLite (DB bị commit nguyên file mỗi lần ghi); lưu file ngoài DB, đặt tên theo SHA-256, đồng bộ tăng dần; ước tính repo tăng ~0,3–0,9 GB/năm nếu nén ảnh (100–300 chứng từ/tháng). Phát hiện phụ: F1 tài liệu học sinh/giáo viên không đồng bộ giữa các máy; F2 lệch đường dẫn có thể xóa tài liệu nhân viên khỏi repo khi publish (XN bằng code, chưa tái hiện).
-- **PO acceptance:** Chưa · **Cần PO trả lời:** 7 câu hỏi ở mục 6 của báo cáo.
+- **PO acceptance:** Chưa · PO đã trả lời 7 câu hỏi (D-009). Bổ sung F3: write recovery băm toàn bộ tệp đính kèm mỗi lần ghi → FEAT-003 cần tối ưu, chờ PO duyệt.
 
 ## BUG-006 — Tài liệu nhân viên có thể bị xóa khỏi repo khi publish
 
-- **Type:** Bug · **Priority:** P1 · **Status:** NEW — chờ PO duyệt
+- **Type:** Bug · **Priority:** P1 · **Status:** IN_REVIEW · **Issue:** #574 · **PR:** #575
 - **Source:** QA-004 F2
 - **Business problem:** Upload/khởi động dùng `runtime/Attachment/Employees`; publish lại chép từ `runtime/Attachments/Employees` và xóa thư mục đích trong repo trước → có thể xóa toàn bộ tài liệu nhân viên trên repo dữ liệu.
 - **Root cause:** Xác nhận bằng đọc code (`employee_document_service.py:26`, `startup_sync.py:723`, `git_synchronization_provider.py:1152`); chưa tái hiện trên máy thật.
 - **Acceptance criteria:** Publish và khởi động dùng cùng một thư mục; test hồi quy: upload → publish → repo có file; không bao giờ xóa repo mirror khi nguồn không tồn tại.
 - **Cần làm trước:** PO/người có quyền kiểm tra repo dữ liệu thật còn đủ `Attachments/Employees` không.
+- **Verification evidence:** 4 test mới (`tests/test_bug_006_employee_attachment_publish_path.py`) pass trên logic trích xuất local; full suite chờ CI.
 - **PO acceptance:** Chưa
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git

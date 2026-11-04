@@ -32,6 +32,12 @@ Lưu ở `runtime/Attachment/...`, không nằm trong repo dữ liệu và khôn
 - Nếu thư mục số nhiều không tồn tại → publish **xóa toàn bộ `Attachments/Employees` trong repo** ("repository mirror cleared"); máy khác khi khởi động sẽ xóa luôn bản local của họ. Nếu thư mục số nhiều còn sót từ bản cũ → publish đẩy lên nội dung cũ.
 - Đề xuất task riêng **BUG-006 (P1)**; cần kiểm tra repo dữ liệu thật xem `Attachments/Employees` còn đầy đủ không trước khi sửa.
 
+### F3 — [XN · Cao] Cơ chế khôi phục ghi (write recovery) băm toàn bộ tệp đính kèm nhiều lần mỗi lần ghi
+- `WriteRecoveryJournal.fingerprint()` (`platform/write_recovery.py:258`) đọc và tính SHA-256 **mọi file** trong `runtime/repository` và `runtime/Attachment` (cả bản trong repo lẫn bản runtime).
+- Được gọi qua `_local_files()` ở `published()`, `released()`, `record_synchronized()` và khi kiểm tra `assert_replaceable()` — tức nhiều lần trong mỗi lần ghi/đồng bộ.
+- Hiện tại ít file nên không thấy chậm. Với ~0,3–0,6 GB chứng từ/năm (x2 vì có cả bản runtime và bản repo), mỗi lần ghi sẽ đọc lại hàng GB → **chậm dần theo thời gian**, đặc biệt trên ổ HDD.
+- Hệ quả thiết kế: chứng từ phải là file **bất biến, đặt tên theo SHA-256** để cơ chế khôi phục có thể kiểm tra bằng tên + kích thước thay vì đọc lại nội dung. Việc này **chạm vào lớp write recovery** (vùng nhạy cảm) → cần PO duyệt riêng.
+
 ## 4. Ảnh hưởng dung lượng & hiệu suất — chứng từ Thu/Chi
 
 | Thành phần | Nếu lưu BLOB trong DB | Nếu lưu file ngoài DB (khuyến nghị) |
@@ -63,7 +69,23 @@ GitHub chặn file > 100 MB và khuyến nghị giữ repo dưới ~1 GB (nên d
 6. **Giám sát:** trang Diagnostics hiện tổng dung lượng chứng từ và repo; cảnh báo ở 500 MB / 1 GB.
 7. **Hiệu suất UI:** danh sách Thu/Chi chỉ hiện số lượng chứng từ (đếm theo lô, không tải file); file chỉ mở khi người dùng bấm xem.
 
-## 6. Câu hỏi cần PO chốt trước khi làm
+## 6. Quyết định của PO (2026-11-04, D-009)
+
+| # | Câu hỏi | Trả lời |
+|---|---|---|
+| 1 | Bắt buộc hay tùy chọn | **Tùy chọn** |
+| 2 | Loại file, giới hạn | **PDF, PNG, JPG; 5 MB/file; tối đa 5 file/khoản** |
+| 3 | Khối lượng | **100–200 chứng từ/tháng** → ~0,3–0,6 GB/năm nếu nén ảnh; ~3,6–7,2 GB/năm nếu không nén |
+| 4 | Kỳ đã quyết toán | **Vẫn cho bổ sung** chứng từ (không đổi số tiền) |
+| 5 | Mã hóa file | **Không** |
+| 6 | Thời hạn lưu | **Vô thời hạn** → không xóa vật lý; xóa = ẩn (soft delete) |
+| 7 | Đồng bộ tài liệu học sinh/giáo viên | **Có, theo quyền của tài khoản** |
+
+Lưu ý cho câu 7: với repo dữ liệu dùng chung hiện tại, file đồng bộ sẽ **có mặt trên mọi máy**; "theo quyền" chỉ kiểm soát được việc **xem/mở trong ứng dụng**. Nếu cần máy không có quyền thì không có file, phải mã hóa hoặc tách repo — cần PO xác nhận.
+
+Với 5 MB × 5 file và lưu vô thời hạn: repo dữ liệu sẽ vượt ~1 GB sau khoảng 2–3 năm dù đã nén → TECH-009 (giám sát) và TECH-005 (kiến trúc lưu trữ dài hạn) cần được lên lịch.
+
+## 6b. Câu hỏi ban đầu
 
 1. Chứng từ **bắt buộc** hay **tùy chọn** khi lưu khoản thu/chi? Bắt buộc với loại nào?
 2. Loại file chấp nhận và giới hạn dung lượng mỗi file (đề xuất PDF/JPG/PNG, 5 MB, tối đa 5 file/giao dịch)?
@@ -78,7 +100,7 @@ GitHub chặn file > 100 MB và khuyến nghị giữ repo dưới ~1 GB (nên d
 | Đề xuất | Nội dung | Ưu tiên |
 |---|---|---|
 | BUG-006 | Sửa lỗi đường dẫn `Attachment`/`Attachments` khi publish tài liệu nhân viên (F2); kiểm tra repo dữ liệu thật trước | P1 |
-| FEAT-003 | Lưu trữ chứng từ Thu/Chi: bảng metadata, lưu file bất biến theo SHA-256, đồng bộ tăng dần, giới hạn & nén | P1 |
+| FEAT-003 | Lưu trữ chứng từ Thu/Chi: bảng metadata, lưu file bất biến theo SHA-256, đồng bộ tăng dần, giới hạn & nén; write recovery kiểm tra file bất biến bằng tên + kích thước (F3) | P1 |
 | FEAT-004 | UI đính kèm/xem chứng từ trong form và chi tiết Thu/Chi, hộp thoại Hoàn trả | P1 |
 | TECH-009 | Giám sát dung lượng chứng từ/repo trong Diagnostics + ngưỡng cảnh báo | P2 |
 | TECH-010 | Đồng bộ tài liệu nhân viên tăng dần thay vì xóa-chép toàn bộ mỗi publish | P2 |
