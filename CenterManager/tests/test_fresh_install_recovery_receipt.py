@@ -86,3 +86,45 @@ def test_no_false_clean_receipt(tmp_path, existing, proof, remote, wal, dirty):
         assert journal.journal.read_text(encoding="utf-8") == "old-journal"
     else:
         assert not journal.journal.exists()
+
+
+def test_second_startup_reseals_only_preverified_clean_receipt(tmp_path):
+    journal = make_journal(tmp_path)
+    prior = {
+        "format": 1, "runtime": str(journal.runtime), "status": "CLEAN",
+        "publication": "VERIFIED", "published_oid": "accepted-main",
+        "repository_id": "verified-repo-id",
+        "published_runtime_sha256": "before-schema-hash",
+        "accepted_local_files": {"database/center.db": "before-schema-hash"},
+    }
+    journal.journal.write_text(json.dumps(prior), encoding="utf-8")
+    provider = SimpleNamespace(observe_remote_main_commit=lambda: "accepted-main")
+    journal.refresh_verified_bootstrap_migration(provider=provider, before=prior)
+    after = json.loads(journal.journal.read_text(encoding="utf-8"))
+    assert after["status"] == "CLEAN"
+    assert after["publication"] == "VERIFIED"
+    assert after["published_runtime_sha256"] != "before-schema-hash"
+    assert after["accepted_local_files"] == {"database/center.db": "migrated-hash"}
+
+
+@pytest.mark.parametrize("prior_status,remote", [
+    ("OPEN", "accepted-main"),
+    ("PUBLISHING", "accepted-main"),
+    ("CLEAN", None),
+    ("CLEAN", "changed-main"),
+])
+def test_second_startup_does_not_promote_unsafe_receipt(tmp_path, prior_status, remote):
+    journal = make_journal(tmp_path)
+    prior = {
+        "format": 1, "runtime": str(journal.runtime), "status": prior_status,
+        "publication": "VERIFIED", "published_oid": "accepted-main",
+        "repository_id": "verified-repo-id",
+        "published_runtime_sha256": "before-schema-hash",
+        "accepted_local_files": {},
+    }
+    old = json.dumps(prior)
+    journal.journal.write_text(old, encoding="utf-8")
+    provider = SimpleNamespace(observe_remote_main_commit=lambda: remote)
+    with pytest.raises(RecoveryRequired):
+        journal.refresh_verified_bootstrap_migration(provider=provider, before=prior)
+    assert json.loads(journal.journal.read_text(encoding="utf-8")) == prior
