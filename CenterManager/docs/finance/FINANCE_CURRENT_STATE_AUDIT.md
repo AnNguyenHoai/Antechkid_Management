@@ -4,7 +4,7 @@
 
 ## Authority and scope
 
-`docs/finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md` governs accounting, Wallet and Settlement. Its tuition-per-FinancePeriod sections were **superseded** by the approved `FINANCE_WALLET_V2_TUITION_BOUNDARY.md`: FinancePeriod is accounting time; tuition is based on the Enrollment contract, billable Sessions and Tuition Accrual. The older `docs/FINANCE_1_1_DATA_INTEGRITY_OUTSTANDING_CONTRACT.md` and 2026-09-23 audits are historical evidence, not current tuition policy. Do not encode their per-class or per-period fee formulas in new diagnostics.
+`docs/finance/FINANCE_WALLET_V2_DOMAIN_SPEC.md` governs accounting, Wallet and Settlement. Its tuition-per-FinancePeriod sections were **superseded** by the approved `FINANCE_WALLET_V2_TUITION_BOUNDARY.md`: FinancePeriod is accounting time; tuition is based on the Enrollment contract, billable Sessions and Tuition Accrual. The older `docs/archive/sprint-reports/FINANCE_1_1_DATA_INTEGRITY_OUTSTANDING_CONTRACT.md` and 2026-09-23 audits are historical evidence, not current tuition policy. Do not encode their per-class or per-period fee formulas in new diagnostics.
 
 This phase reads models, services, repositories, migrations and representative tests. It adds no detector, UI, schema change, remediation or production data access. See `FINANCE_INTEGRITY_FINDINGS.md` for open risks and `FINANCE_DIAGNOSTICS_RULE_CATALOG.md` for the subsequent implementation gate.
 
