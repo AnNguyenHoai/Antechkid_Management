@@ -37,6 +37,7 @@ from centermanager.models.teacher_assignment import TeacherAssignment
 from centermanager.models.class_timeline_event import ClassTimelineEvent, ClassTimelineEventType
 from centermanager.models.income import Income
 from centermanager.models.expense import Expense
+from centermanager.models.finance_attachment import FinanceAttachment
 from centermanager.models.expense_timeline_event import ExpenseTimelineEvent
 from centermanager.models.finance_period import FinancePeriod, FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
@@ -53,6 +54,6 @@ __all__ = [
     "EmployeeScheduleAssignment", "EmployeeWorkingTimeEntry", "EmployeeWorkRegistration",
     "EmployeeWorkRegistrationPeriod", "Teacher", "TeacherDocument", "TeacherTimelineEvent",
     "TeacherTimelineEventType", "TeacherAssignment", "ClassTimelineEvent", "ClassTimelineEventType",
-    "Income", "Expense", "ExpenseTimelineEvent", "FinancePeriod", "FinancePeriodDefinition",
+    "Income", "Expense", "FinanceAttachment", "ExpenseTimelineEvent", "FinancePeriod", "FinancePeriodDefinition",
     "FinancialSettlement", "ClassFeeHistory", "Attendance", "AttendanceStatus", "ReportCache",
 ]

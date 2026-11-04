@@ -29,9 +29,11 @@ class ExpenseListPage(QWidget):
     expense_selected = Signal(int)
 
     def __init__(self, expense_service: ExpenseService, collaboration_manager: CollaborationManager,
-                 notification_service=None, parent: Optional[QWidget] = None) -> None:
+                 notification_service=None, parent: Optional[QWidget] = None,
+                 attachment_service=None) -> None:
         super().__init__(parent)
         self._service = expense_service
+        self._attachment_service = attachment_service
         self._collaboration_manager = collaboration_manager
         self._notification_service = notification_service
         self._expenses = []
@@ -353,10 +355,30 @@ class ExpenseListPage(QWidget):
         menu.addAction("Xem", lambda: self._show_detail_dialog(exp.id))
         edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(exp.id)); edit_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
         delete_action = menu.addAction("Xóa", lambda: self._delete_expense(exp.id)); delete_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_DELETE))
+        if self._attachment_service is not None:
+            menu.addAction("Chứng từ…", lambda: self._show_voucher_dialog(exp.id))
         if self._is_personal_pending(exp):
             reimburse_action = menu.addAction("Hoàn trả…", lambda: self._show_reimburse_dialog(exp))
             reimburse_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
         menu.exec(pos)
+
+    def _can_attach_voucher(self) -> bool:
+        # D-009: vouchers may be added even in settled periods; they never
+        # change an amount. WRITE mode and an expense capability still apply.
+        return any(
+            can_mutate(write_enabled=self._write_enabled, capability=capability, domain_allowed=True)
+            for capability in (Capability.FINANCE_EXPENSE_CREATE, Capability.FINANCE_EXPENSE_UPDATE)
+        )
+
+    def _show_voucher_dialog(self, expense_id: int) -> None:
+        from centermanager.ui.finance_workspace.voucher_attachment_widget import VoucherAttachmentDialog
+        can_modify = self._can_attach_voucher()
+        if can_modify and self._collaboration_manager is not None and not self._collaboration_manager.ensure_write():
+            can_modify = False
+        VoucherAttachmentDialog(
+            self._attachment_service, "EXPENSE", expense_id,
+            title="Chứng từ khoản chi", can_modify=can_modify, parent=self,
+        ).exec()
 
     def _show_reimburse_dialog(self, exp) -> None:
         if not self._ensure_action(Capability.FINANCE_EXPENSE_UPDATE, "reimburse"):
@@ -389,6 +411,7 @@ class ExpenseListPage(QWidget):
             self._service,
             initial_payment_date=self._default_transaction_date(),
             parent=self,
+            attachment_service=self._attachment_service,
         )
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted:
             self._current_page = 1
@@ -397,7 +420,10 @@ class ExpenseListPage(QWidget):
     def _show_edit_dialog(self, expense_id: int) -> None:
         if not self._ensure_action(Capability.FINANCE_EXPENSE_UPDATE, "edit"):
             return
-        dialog = ExpenseFormDialog(self._service, expense_id=expense_id, parent=self)
+        dialog = ExpenseFormDialog(
+            self._service, expense_id=expense_id, parent=self,
+            attachment_service=self._attachment_service,
+        )
         if dialog.exec() == ExpenseFormDialog.DialogCode.Accepted: self.refresh()
 
     def _show_detail_dialog(self, expense_id: int) -> None:

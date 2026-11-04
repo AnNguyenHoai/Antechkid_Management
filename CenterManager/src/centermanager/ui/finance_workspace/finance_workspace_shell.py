@@ -54,6 +54,7 @@ class FinanceWorkspaceShell(QWidget):
         settlement_service=None,
         finance_period_service=None,
         diagnostics_service=None,
+        attachment_service=None,
     ) -> None:
         super().__init__(parent)
         self._income_service = income_service
@@ -101,6 +102,20 @@ class FinanceWorkspaceShell(QWidget):
             session_factory = getattr(self._income_service, "_session_factory", None)
             if session_factory is not None:
                 self._diagnostics_service = FinanceDiagnosticsService(session_factory)
+
+        # FEAT-003/004: optional accounting vouchers (D-009).
+        self._attachment_service = attachment_service
+        if self._attachment_service is None:
+            session_factory = getattr(self._income_service, "_session_factory", None)
+            if session_factory is not None:
+                from centermanager.core.paths import get_paths
+                from centermanager.services.finance_attachment_service import FinanceAttachmentService
+
+                self._attachment_service = FinanceAttachmentService(
+                    session_factory, get_paths().attachment_dir
+                )
+        if self._attachment_service is not None and hasattr(self._attachment_service, "set_event_bus"):
+            self._attachment_service.set_event_bus(self._event_bus)
 
         self._income_service._event_bus = self._event_bus
         if hasattr(self._expense_service, "set_event_bus"):
@@ -194,12 +209,14 @@ class FinanceWorkspaceShell(QWidget):
             self._class_service,
             self._collaboration_manager,
             self._notification_service,
+            attachment_service=self._attachment_service,
         )
         self.content_stack.addWidget(self.income_page)
         self.expense_page = ExpenseListPage(
             self._expense_service,
             self._collaboration_manager,
             self._notification_service,
+            attachment_service=self._attachment_service,
         )
         self.content_stack.addWidget(self.expense_page)
         self.outstanding_page = OutstandingListPage(

@@ -51,8 +51,10 @@ class IncomeListPage(QWidget):
         collaboration_manager: CollaborationManager,
         notification_service=None,
         parent: Optional[QWidget] = None,
+        attachment_service=None,
     ) -> None:
         super().__init__(parent)
+        self._attachment_service = attachment_service
         self._income_service = income_service
         self._student_service = student_service
         self._class_service = class_service
@@ -420,6 +422,8 @@ class IncomeListPage(QWidget):
         income = self._incomes[row]
         menu = QMenu(self)
         menu.addAction("Xem", lambda: self._show_detail_dialog(income.id))
+        if self._attachment_service is not None:
+            menu.addAction("Chứng từ…", lambda: self._show_voucher_dialog(income.id))
 
         if income.status == Income.STATUS_ACTIVE:
             edit_action = menu.addAction("Sửa", lambda: self._show_edit_dialog(income.id))
@@ -445,6 +449,23 @@ class IncomeListPage(QWidget):
             return False
         return True
 
+    def _can_attach_voucher(self) -> bool:
+        # D-009: vouchers may be added even in settled periods.
+        return any(
+            can_mutate(write_enabled=self._write_enabled, capability=capability, domain_allowed=True)
+            for capability in (Capability.FINANCE_INCOME_CREATE, Capability.FINANCE_INCOME_UPDATE)
+        )
+
+    def _show_voucher_dialog(self, income_id: int) -> None:
+        from centermanager.ui.finance_workspace.voucher_attachment_widget import VoucherAttachmentDialog
+        can_modify = self._can_attach_voucher()
+        if can_modify and self._collaboration_manager is not None and not self._collaboration_manager.ensure_write():
+            can_modify = False
+        VoucherAttachmentDialog(
+            self._attachment_service, "INCOME", income_id,
+            title="Chứng từ khoản thu", can_modify=can_modify, parent=self,
+        ).exec()
+
     def _show_add_dialog(self) -> None:
         if not self._ensure_action(Capability.FINANCE_INCOME_CREATE, "add"):
             return
@@ -454,6 +475,7 @@ class IncomeListPage(QWidget):
             self._class_service,
             initial_payment_date=self._default_transaction_date(),
             parent=self,
+            attachment_service=self._attachment_service,
         )
         if dialog.exec() == IncomeFormDialog.DialogCode.Accepted:
             self._current_page = 1
@@ -468,6 +490,7 @@ class IncomeListPage(QWidget):
             self._class_service,
             income_id=income_id,
             parent=self,
+            attachment_service=self._attachment_service,
         )
         if dialog.exec() == IncomeFormDialog.DialogCode.Accepted:
             self.refresh()
