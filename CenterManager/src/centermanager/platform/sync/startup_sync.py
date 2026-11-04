@@ -375,11 +375,10 @@ class StartupSynchronization:
             # Do not let provider.reset_to_remote() fetch a different generation
             # after a recovery capture has already pinned the accepted commit.
             self._provider._run_git_command(["reset", "--hard", accepted])
-            if getattr(self, "_startup_reconciled_unaccepted_local", False):
-                # Untracked legacy artifacts cannot be left in the accepted
-                # repository. Existing reconciliation has preserved their
-                # exact bytes (including repo worktree) in a verified capture.
-                self._provider._run_git_command(["clean", "-fd"])
+            # Under the explicit discard-on-restart policy, untracked local
+            # worktree files are not accepted data. They must not be mistaken
+            # for Git MAIN files when recording the clean receipt.
+            self._provider._run_git_command(["clean", "-fd"])
             actual = self._provider.get_local_main_commit()
             if actual != accepted:
                 logger.error("Startup reset did not install the pinned MAIN commit")
@@ -607,8 +606,8 @@ class StartupSynchronization:
 
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
-        from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+        # Git MAIN was independently verified and pinned earlier in run().
+        # Local WRITE journal state does not veto the operator's discard policy.
         repo_db = self._repo_path / "database" / "center.db"
         if not repo_db.exists():
             logger.error(f"Repository database not found: {repo_db}")
