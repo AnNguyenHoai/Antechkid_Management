@@ -161,6 +161,15 @@ def main() -> int:
         engine = create_production_engine(echo=False)
         session_factory = sessionmaker(bind=engine)
 
+        # A previously CLEAN receipt certifies the DB before migration.
+        # Record that exact pre-Alembic state now; only this uninterrupted
+        # bootstrap can certify subsequent schema changes before login.
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        startup_journal = WriteRecoveryJournal()
+        schema_receipt_before = startup_journal.inspect()
+        if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
+            startup_journal.assert_replaceable()
+
         ensure_schema()
         logger.info("[STARTUP] Schema ensured")
 
@@ -170,9 +179,12 @@ def main() -> int:
         # initial CLEAN receipt after Alembic has verified the schema.
         fresh_main = getattr(sync_provider, "_fresh_install_main_oid", None)
         if fresh_main is not None:
-            from centermanager.platform.write_recovery import WriteRecoveryJournal
-            WriteRecoveryJournal().record_verified_fresh_install(
+            startup_journal.record_verified_fresh_install(
                 provider=sync_provider, accepted_main=fresh_main
+            )
+        elif schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
+            startup_journal.refresh_verified_bootstrap_migration(
+                provider=sync_provider, before=schema_receipt_before
             )
 
         permission_service = PermissionService(session_factory)
