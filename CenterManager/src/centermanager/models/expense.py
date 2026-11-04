@@ -12,6 +12,14 @@ from centermanager.models.mixins import TimestampMixin
 class Expense(Base, TimestampMixin):
     __tablename__ = "expenses"
 
+    # Funding source (FEAT-001). COMPANY: paid from a company wallet and
+    # realized immediately. PERSONAL: an employee advanced the money; it is
+    # not a company outflow until reimbursed from a company wallet.
+    FUNDING_COMPANY = "COMPANY"
+    FUNDING_PERSONAL = "PERSONAL"
+    # payment_method placeholder for a not-yet-reimbursed personal advance.
+    PERSONAL_PAYMENT_METHOD = "PERSONAL"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -27,6 +35,12 @@ class Expense(Base, TimestampMixin):
         index=True,
     )
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # NULL = legacy row not classified by migration 1e10a043 (closed period or
+    # manual review); behaves exactly as before.
+    funding_source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Date the employee spent the money (PERSONAL). After reimbursement,
+    # payment_date is the reimbursement (realization) date.
+    incurred_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:

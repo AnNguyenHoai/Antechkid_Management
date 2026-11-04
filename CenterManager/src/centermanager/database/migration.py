@@ -39,6 +39,7 @@ _POST_PRJ_REQUIRED_COLUMNS = {
         "withdrawn_from_session",
     },
     "class_fee_history": {"changed_by"},
+    "expenses": {"funding_source", "incurred_date"},
 }
 
 

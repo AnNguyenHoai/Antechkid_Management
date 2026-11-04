@@ -32,3 +32,12 @@
 ## D-007 — Chính sách giữ snapshot
 - **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
 - **Nội dung:** Khi khởi động giữ tối đa 5 snapshot `pre_edit_*.db` mới nhất; không dọn khi recovery journal cho thấy có thể cần khôi phục (TECH-008).
+
+## D-008 — Mô hình nguồn chi và hoàn trả
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO)
+- **Nội dung:**
+  1. Chi bằng ví công ty (CASH CÔNG TY / BANK CÔNG TY) tính ngay vào tiền chi; bỏ trạng thái "kế hoạch/chưa chi"; không cho ngày tương lai.
+  2. Chi bằng TK CÁ NHÂN là CHƯA HOÀN TRẢ, chưa tính vào chi của công ty.
+  3. Khi hoàn trả: người dùng chọn ví công ty; khoản chi tính vào tiền chi theo **ngày hoàn trả**; ngày chi gốc được lưu.
+  4. Dữ liệu cũ: chỉ sửa dữ liệu trong DB ở các kỳ chưa quyết toán (CONFIRMED giữ nguyên).
+- **Hệ quả:** Domain Spec §6 (Expense funding source) và R3 được cập nhật.

@@ -6,7 +6,7 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
     QComboBox, QPlainTextEdit, QPushButton,
-    QHBoxLayout, QMessageBox, QWidget
+    QHBoxLayout, QMessageBox, QWidget, QLabel
 )
 
 from centermanager.core.clock import get_clock
@@ -31,6 +31,8 @@ class ExpenseFormDialog(QDialog):
         self._initial_payment_date = initial_payment_date or get_clock().today()
         self._loaded_category: Optional[str] = None
         self._loaded_description: Optional[str] = None
+        # Funding source of the loaded row; None = new expense or legacy row.
+        self._loaded_funding: Optional[str] = None
 
         self.setWindowTitle("Edit Expense" if self._is_edit else "Add Expense")
         self.setMinimumWidth(480)
@@ -66,10 +68,13 @@ class ExpenseFormDialog(QDialog):
         self.amount_spin.setRange(0.01, 999999999.99)
         form.addRow("Amount *", self.amount_spin)
 
+        # FEAT-001: company wallets are realized immediately; a personal
+        # account is an employee advance ("CHƯA HOÀN TRẢ") until reimbursed.
         self.method_combo = QComboBox()
-        self.method_combo.addItem("Cash", "CASH")
-        self.method_combo.addItem("Bank", "BANK")
-        form.addRow("Wallet *", self.method_combo)
+        self.method_combo.addItem("CASH CÔNG TY", "CASH")
+        self.method_combo.addItem("BANK CÔNG TY", "BANK")
+        self.method_combo.addItem("TK CÁ NHÂN", "PERSONAL")
+        form.addRow("Nguồn chi *", self.method_combo)
 
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
@@ -82,10 +87,20 @@ class ExpenseFormDialog(QDialog):
         self.paid_by_edit.setPlaceholderText("Who paid?")
         form.addRow("Paid By", self.paid_by_edit)
 
+        # Status is derived from the funding source; it is only editable for
+        # legacy rows that the migration could not classify.
         self.status_combo = QComboBox()
-        self.status_combo.addItem("ĐÃ HOÀN TRẢ", "Completed")
+        self.status_combo.addItem("ĐÃ CHI / ĐÃ HOÀN TRẢ", "Completed")
         self.status_combo.addItem("CHƯA HOÀN TRẢ", "Pending")
-        form.addRow("Status", self.status_combo)
+        self.status_combo.setEnabled(False)
+        form.addRow("Trạng thái", self.status_combo)
+
+        self.funding_hint = QLabel(self)
+        self.funding_hint.setWordWrap(True)
+        self.funding_hint.setStyleSheet("color: #536479; font-size: 12px;")
+        form.addRow("", self.funding_hint)
+        self.method_combo.currentIndexChanged.connect(self._on_method_changed)
+        self._on_method_changed()
 
         self.note_edit = QPlainTextEdit()
         self.note_edit.setPlaceholderText("Optional note")
@@ -106,6 +121,32 @@ class ExpenseFormDialog(QDialog):
 
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def _on_method_changed(self, *_args) -> None:
+        method = self.method_combo.currentData()
+        if self._is_edit and self._loaded_funding is None:
+            # Legacy/unclassified row (or still loading): keep the stored
+            # status selectable and do not derive it from the wallet.
+            self.funding_hint.setText(
+                "Khoản chi cũ chưa được phân loại nguồn chi; kiểm tra trạng thái trước khi lưu."
+            )
+            return
+        if method == "PERSONAL":
+            self._select_status("Pending")
+            self.funding_hint.setText(
+                "Nhân viên ứng tiền: CHƯA HOÀN TRẢ, chưa tính vào tiền chi của công ty. "
+                "Dùng thao tác Hoàn trả ở danh sách Chi khi công ty trả lại tiền."
+            )
+        elif method in ("CASH", "BANK"):
+            self._select_status("Completed")
+            self.funding_hint.setText("Chi bằng ví công ty: tính ngay vào tiền chi.")
+        else:
+            self.funding_hint.setText("")
+
+    def _select_status(self, value: str) -> None:
+        index = self.status_combo.findData(value)
+        if index >= 0:
+            self.status_combo.setCurrentIndex(index)
 
     @staticmethod
     def _canonical_status(value: str) -> str:
@@ -129,9 +170,14 @@ class ExpenseFormDialog(QDialog):
 
             self.desc_edit.setPlainText(exp.description or "")
             self.amount_spin.setValue(exp.amount)
+            self._loaded_funding = getattr(exp, "funding_source", None)
+            self.status_combo.setEnabled(self._loaded_funding is None)
             try:
-                wallet = resolve_wallet(exp.payment_method).value
-                idx2 = self.method_combo.findData(wallet)
+                if ExpenseService.is_personal_method(exp.payment_method):
+                    idx2 = self.method_combo.findData("PERSONAL")
+                else:
+                    wallet = resolve_wallet(exp.payment_method).value
+                    idx2 = self.method_combo.findData(wallet)
             except WalletMappingError:
                 self.method_combo.addItem(
                     f"Legacy value requires selection: {exp.payment_method}",
@@ -143,9 +189,19 @@ class ExpenseFormDialog(QDialog):
             qdate = QDate(exp.payment_date.year, exp.payment_date.month, exp.payment_date.day)
             self.date_edit.setDate(qdate)
             self.paid_by_edit.setText(exp.paid_by or "")
+            if self._loaded_funding is not None:
+                self._on_method_changed()
             idx3 = self.status_combo.findData(self._canonical_status(exp.status))
             if idx3 >= 0:
                 self.status_combo.setCurrentIndex(idx3)
+            if self._loaded_funding == "PERSONAL" and exp.status == "Pending":
+                # The company wallet is chosen only when reimbursing.
+                self.method_combo.setEnabled(False)
+            elif self._loaded_funding is not None:
+                # A classified row cannot switch between company and personal.
+                personal_index = self.method_combo.findData("PERSONAL")
+                if personal_index >= 0:
+                    self.method_combo.removeItem(personal_index)
             self.note_edit.setPlainText(exp.note or "")
         except Exception:
             logger.exception("Load expense error")
@@ -164,7 +220,7 @@ class ExpenseFormDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Wallet required",
-                "Select CASH or BANK before saving this transaction.",
+                "Chọn nguồn chi (CASH CÔNG TY, BANK CÔNG TY hoặc TK CÁ NHÂN) trước khi lưu.",
             )
             return
         payment_date = self.date_edit.date().toPython()

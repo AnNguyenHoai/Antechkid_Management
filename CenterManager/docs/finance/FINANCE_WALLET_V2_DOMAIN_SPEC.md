@@ -172,7 +172,7 @@ For the current application, `business_date` defaults to the local application d
 - Moving an existing Income into the future MUST fail validation.
 - Creating a future-dated realized/completed Expense MUST fail validation.
 - Moving a realized Expense into the future MUST fail validation.
-- A pending/planned Expense MAY use a future date only if it is explicitly modeled as non-realized and therefore excluded from Wallet balance, Settlement and realized Dashboard totals.
+- ~~A pending/planned Expense MAY use a future date~~ — superseded by §6 Expense funding source (PO decision 2026-11-04, D-008): there is no planned company Expense; a personal advance also may not be future-dated.
 - Future scheduled tuition or expected payments are not Income. If required later, they must use a separate planned/receivable domain model.
 
 ### Read-model consequence
@@ -423,6 +423,20 @@ Canonical accounting states:
 - `COMPLETED`: realized; included in Wallet/Settlement outflow.
 
 Legacy `Paid` is normalized to `COMPLETED`.
+
+#### Expense funding source (FEAT-001, PO decision 2026-11-04, D-008)
+
+| Funding source | How it is recorded | State | Wallet / date |
+|---|---|---|---|
+| `COMPANY` — paid from CASH CÔNG TY / BANK CÔNG TY | Created realized | `COMPLETED` only ("ĐÃ CHI") | Chosen company wallet; `payment_date ≤ business_date` |
+| `PERSONAL` — employee advance (TK CÁ NHÂN) | Created non-realized | `PENDING` ("CHƯA HOÀN TRẢ") | `payment_method = PERSONAL` (not a Wallet); `incurred_date = payment_date ≤ business_date` |
+| `PERSONAL`, reimbursed | `reimburse_expense` | `COMPLETED` ("ĐÃ HOÀN TRẢ") | Company wallet chosen at reimbursement; `payment_date` = reimbursement date (must be open period, `≥ incurred_date`, `≤ business_date`); `incurred_date` keeps the spend date |
+
+Rules:
+
+- A company Expense cannot be `PENDING`; a personal Expense cannot be created or edited into `COMPLETED` except through reimbursement.
+- Funding source never changes after creation.
+- Rows with `funding_source = NULL` are legacy rows that migration `1e10a043` did not classify (inside a CONFIRMED Settlement period, or an old planned company Expense); they keep their stored state until reviewed.
 
 ### Mutation after realization
 

@@ -33,10 +33,20 @@ class ExpenseNotFoundError(Exception):
 class ExpenseService:
     """Expense application service.
 
-    Pending records are planned/non-realized outflows. Completed records are
-    realized ledger postings and therefore require a unique canonical
-    FinancePeriod, may not be future-dated, and cannot mutate a closed period.
+    Funding source (FEAT-001, PO decision 2026-11-04):
+
+    * COMPANY (CASH/BANK company wallet): realized immediately (``Completed``).
+    * PERSONAL (employee advance): ``Pending`` ("CHƯA HOÀN TRẢ") and not a
+      company outflow until :meth:`reimburse_expense` posts it from a company
+      wallet on the reimbursement date ("ĐÃ HOÀN TRẢ").
+    * Legacy rows with no ``funding_source`` keep their previous behavior.
+
+    Completed records are realized ledger postings and therefore require a
+    unique canonical FinancePeriod, may not be future-dated, and cannot mutate
+    a closed period.
     """
+
+    PERSONAL_METHOD_ALIASES = ("PERSONAL", "TÀI KHOẢN CÁ NHÂN", "TK CÁ NHÂN")
 
     def __init__(self, session_factory: Any, timeline_service: ExpenseTimelineService,
                  permission_service: PermissionService,
@@ -81,6 +91,8 @@ class ExpenseService:
             "paid_by": expense.paid_by,
             "status": expense.status,
             "note": expense.note,
+            "funding_source": expense.funding_source,
+            "incurred_date": expense.incurred_date.isoformat() if expense.incurred_date else None,
             "deleted_at": expense.deleted_at.isoformat() if expense.deleted_at else None,
         }
 
@@ -142,6 +154,52 @@ class ExpenseService:
             raise ExpenseValidationError("Invalid expense status.")
         return value
 
+    @classmethod
+    def is_personal_method(cls, method: Optional[str]) -> bool:
+        if not isinstance(method, str):
+            return False
+        normalized = method.strip().casefold()
+        return normalized in {alias.casefold() for alias in cls.PERSONAL_METHOD_ALIASES}
+
+    def _classify_new_expense(self, payment_method: str, status: Optional[str]):
+        """Return (funding_source, payment_method, status) for a new Expense."""
+        if self.is_personal_method(payment_method):
+            if status is not None and self._validate_status(status) != "Pending":
+                raise ExpenseValidationError(
+                    "Khoản chi bằng TK cá nhân được ghi là CHƯA HOÀN TRẢ; "
+                    "dùng thao tác Hoàn trả khi công ty trả lại tiền."
+                )
+            return Expense.FUNDING_PERSONAL, Expense.PERSONAL_PAYMENT_METHOD, "Pending"
+        wallet = self._validate_payment_method(payment_method)
+        if status is not None and self._validate_status(status) != "Completed":
+            raise ExpenseValidationError(
+                "Khoản chi bằng ví công ty luôn được tính là đã chi (Completed)."
+            )
+        return Expense.FUNDING_COMPANY, wallet, "Completed"
+
+    def _validate_funding_update(self, expense: Expense) -> None:
+        """Enforce the funding-source state machine after field updates."""
+        if expense.funding_source == Expense.FUNDING_COMPANY:
+            if self.is_personal_method(expense.payment_method):
+                raise ExpenseValidationError("Không thể đổi khoản chi ví công ty sang TK cá nhân.")
+            if expense.status != "Completed":
+                raise ExpenseValidationError("Khoản chi bằng ví công ty luôn được tính là đã chi (Completed).")
+        elif expense.funding_source == Expense.FUNDING_PERSONAL:
+            if expense.status == "Pending":
+                if expense.payment_method != Expense.PERSONAL_PAYMENT_METHOD:
+                    raise ExpenseValidationError(
+                        "Khoản chi TK cá nhân chưa hoàn trả không có ví công ty; dùng thao tác Hoàn trả."
+                    )
+            elif self.is_personal_method(expense.payment_method):
+                raise ExpenseValidationError("Khoản chi đã hoàn trả phải có ví công ty (CASH/BANK).")
+        elif self.is_personal_method(expense.payment_method):
+            raise ExpenseValidationError("Không thể đổi khoản chi cũ sang TK cá nhân.")
+
+    def _validate_update_payment_method(self, method: str) -> str:
+        if self.is_personal_method(method):
+            return Expense.PERSONAL_PAYMENT_METHOD
+        return self._validate_payment_method(method)
+
     def _resolve_posting_period_id(self, session, payment_date: date, status: str) -> Optional[int]:
         if status == "Completed" and payment_date > get_clock().today():
             raise ExpenseValidationError("Completed expense cannot have a future payment date.")
@@ -166,16 +224,17 @@ class ExpenseService:
 
     @require_permission("finance.expense.create")
     def create_expense(self, category: str, description: str, amount: float, payment_method: str,
-                       payment_date: date, paid_by: Optional[str] = None, status: str = "Completed",
+                       payment_date: date, paid_by: Optional[str] = None, status: Optional[str] = None,
                        note: Optional[str] = None) -> Expense:
         category = self._validate_category(category)
         description = self._normalize_text(description)
         if not description:
             raise ExpenseValidationError("Description is required")
         amount = self._validate_amount(amount)
-        payment_method = self._validate_payment_method(payment_method)
+        funding_source, payment_method, status = self._classify_new_expense(payment_method, status)
         payment_date = self._validate_payment_date(payment_date)
-        status = self._validate_status(status)
+        if funding_source == Expense.FUNDING_PERSONAL and payment_date > get_clock().today():
+            raise ExpenseValidationError("Ngày chi bằng TK cá nhân không được ở tương lai.")
         paid_by = self._normalize_text(paid_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
         with self._session_factory() as session:
@@ -185,7 +244,9 @@ class ExpenseService:
             repo = self._repository_provider.expenses(session)
             expense = Expense(category=category, description=description, amount=amount, payment_method=payment_method,
                               payment_date=payment_date, finance_period_id=period_id,
-                              paid_by=paid_by, status=status, note=note)
+                              paid_by=paid_by, status=status, note=note,
+                              funding_source=funding_source,
+                              incurred_date=payment_date if funding_source == Expense.FUNDING_PERSONAL else None)
             repo.add(expense)
             repo.flush()
             self._record_audit(
@@ -319,7 +380,7 @@ class ExpenseService:
 
             changes = []
             updates = [("category", category, self._validate_category), ("description", description, self._normalize_text),
-                       ("amount", amount, self._validate_amount), ("payment_method", payment_method, self._validate_payment_method),
+                       ("amount", amount, self._validate_amount), ("payment_method", payment_method, self._validate_update_payment_method),
                        ("payment_date", payment_date, self._validate_payment_date), ("paid_by", paid_by, self._normalize_text),
                        ("status", status, self._validate_status), ("note", note, self._normalize_text)]
             for field, value, validator in updates:
@@ -334,6 +395,11 @@ class ExpenseService:
             if not changes:
                 return expense
 
+            self._validate_funding_update(expense)
+            if expense.funding_source == Expense.FUNDING_PERSONAL and expense.status == "Pending":
+                if expense.payment_date > get_clock().today():
+                    raise ExpenseValidationError("Ngày chi bằng TK cá nhân không được ở tương lai.")
+                expense.incurred_date = expense.payment_date
             new_period_id = self._resolve_posting_period_id(session, expense.payment_date, expense.status)
             if expense.status == "Completed":
                 self._ensure_date_mutable(session, expense.payment_date)
@@ -352,6 +418,54 @@ class ExpenseService:
             self._log_timeline_best_effort(expense_id=expense.id, event_type="ExpenseUpdated", title="Expense Updated",
                                            description="; ".join(changes), metadata={"changes": changes})
             self._publish_finance_change("updated", expense.id)
+            return expense
+
+    @require_permission("finance.expense.update")
+    def reimburse_expense(self, expense_id: int, wallet: str, reimbursement_date: date) -> Expense:
+        """Post a personal advance as a company outflow ("ĐÃ HOÀN TRẢ").
+
+        The company wallet used to repay the employee becomes the Expense
+        wallet and the reimbursement date becomes the realized payment date;
+        the original spend date stays in ``incurred_date``.
+        """
+        if self.is_personal_method(wallet):
+            raise ExpenseValidationError("Hoàn trả phải chọn ví công ty (CASH hoặc BANK).")
+        wallet = self._validate_payment_method(wallet)
+        reimbursement_date = self._validate_payment_date(reimbursement_date)
+        with self._session_factory() as session:
+            repo = self._repository_provider.expenses(session)
+            expense = repo.get_by_id_including_deleted(expense_id)
+            if not expense or expense.deleted_at is not None:
+                raise ExpenseNotFoundError(f"Expense {expense_id} not found or deleted")
+            if expense.funding_source != Expense.FUNDING_PERSONAL or expense.status != "Pending":
+                raise ExpenseValidationError("Chỉ khoản chi TK cá nhân ở trạng thái CHƯA HOÀN TRẢ mới được hoàn trả.")
+            incurred = expense.incurred_date or expense.payment_date
+            if reimbursement_date < incurred:
+                raise ExpenseValidationError("Ngày hoàn trả không được trước ngày chi.")
+            before = self._audit_snapshot(expense)
+            period_id = self._resolve_posting_period_id(session, reimbursement_date, "Completed")
+            self._ensure_date_mutable(session, reimbursement_date)
+            expense.incurred_date = incurred
+            expense.payment_method = wallet
+            expense.payment_date = reimbursement_date
+            expense.status = "Completed"
+            expense.finance_period_id = period_id
+            self._record_audit(
+                session,
+                expense,
+                "REIMBURSE",
+                old_values=before,
+                new_values=self._audit_snapshot(expense),
+            )
+            session.commit()
+            repo.refresh(expense)
+            self._log_timeline_best_effort(
+                expense_id=expense.id, event_type="ExpenseReimbursed", title="Expense Reimbursed",
+                description=f"Hoàn trả {expense.amount:,.0f} VND từ {wallet} ngày {reimbursement_date.isoformat()}",
+                metadata={"wallet": wallet, "reimbursement_date": reimbursement_date.isoformat(),
+                          "incurred_date": incurred.isoformat()},
+            )
+            self._publish_finance_change("reimbursed", expense.id)
             return expense
 
     @require_permission("finance.expense.delete")
