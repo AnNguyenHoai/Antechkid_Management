@@ -46,7 +46,8 @@ class StartupSynchronization:
         _journal = WriteRecoveryJournal()
         fresh_install = (
             not self._runtime_db_path.exists()
-            and not self._repo_path.exists()
+            and (not self._repo_path.exists() or
+                 (self._repo_path.is_dir() and not any(self._repo_path.iterdir())))
             and not _journal.journal.exists()
         )
         # A previous process may have died between individually atomic
