@@ -44,23 +44,47 @@ class StartupSynchronization:
         # provenance; absence of a receipt alone proves nothing.
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         _journal = WriteRecoveryJournal()
-        # No previous business artifacts or orphaned captures may be
-        # silently attested as clean simply because center.db is absent.
+        # Distinguish a virgin workstation from an old local workspace.
+        # Empty recovery directories and rebuildable PDF exports are not
+        # authoritative data. Never adopt a leftover DB, WAL, attachment,
+        # recovery receipt/capture or nonempty preexisting Git worktree.
         roots = _journal._workspace_roots()
-        old_business_artifacts = any(
-            Path(roots[name]).exists() and any(
-                item.is_file() or item.is_symlink()
-                for item in Path(roots[name]).rglob('*')
+        def has_material(root, *, allow_placeholders=False):
+            root = Path(root)
+            if not root.exists():
+                return False
+            if root.is_symlink() or not root.is_dir():
+                return True
+            return any(
+                item.is_symlink() or (
+                    item.is_file() and not (
+                        allow_placeholders and item.name in {'.gitkeep', '.keep'}
+                    )
+                )
+                for item in root.rglob('*')
             )
-            for name in ('database', 'attachments', 'legacy-attachments',
-                         'exports', 'reports')
+        has_repository = (
+            self._repo_path.is_symlink() or
+            (self._repo_path.exists() and (
+                not self._repo_path.is_dir() or any(self._repo_path.iterdir())
+            ))
+        )
+        recovery_material = has_material(_journal.root)
+        business_material = any(
+            has_material(roots[name], allow_placeholders=True)
+            for name in ('database', 'attachments', 'legacy-attachments')
         )
         fresh_install = (
             not self._runtime_db_path.exists()
-            and (not self._repo_path.exists() or
-                 (self._repo_path.is_dir() and not any(self._repo_path.iterdir())))
-            and not _journal.root.exists()
-            and not old_business_artifacts
+            and not has_repository
+            and not recovery_material
+            and not business_material
+        )
+        logger.info(
+            "Fresh-install eligibility: eligible=%s db_present=%s "
+            "repository_material=%s recovery_material=%s business_material=%s",
+            fresh_install, self._runtime_db_path.exists(), has_repository,
+            recovery_material, business_material,
         )
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
