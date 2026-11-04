@@ -164,6 +164,17 @@ def main() -> int:
         ensure_schema()
         logger.info("[STARTUP] Schema ensured")
 
+        # A first-time installation can legitimately migrate the freshly
+        # downloaded MAIN database before login. Only this same-process
+        # bootstrap, never an existing legacy runtime, can establish its
+        # initial CLEAN receipt after Alembic has verified the schema.
+        fresh_main = getattr(sync_provider, "_fresh_install_main_oid", None)
+        if fresh_main is not None:
+            from centermanager.platform.write_recovery import WriteRecoveryJournal
+            WriteRecoveryJournal().record_verified_fresh_install(
+                provider=sync_provider, accepted_main=fresh_main
+            )
+
         permission_service = PermissionService(session_factory)
 
         # Credential verification happens before collaboration identity exists,
