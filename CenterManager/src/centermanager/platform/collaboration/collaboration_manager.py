@@ -314,12 +314,17 @@ class CollaborationManager:
         self._lock_acquired = False
         self._is_writing = False
 
-    def _sync_local_lock(self) -> None:
-        """Sync local lock file with remote state."""
+    def _sync_local_lock(self, lock_status: Optional[Dict[str, Any]] = None) -> None:
+        """Project a fresh observation, or read remote state for standalone callers.
+
+        Supplied observations belong only to the current validation operation;
+        they are never cached across operations or used instead of a CAS.
+        """
         if self._sync_provider is None:
             return
         try:
-            lock_status = self._get_remote_lock_status()
+            if lock_status is None:
+                lock_status = self._get_remote_lock_status()
             if lock_status.get("state") == "UNKNOWN":
                 return False
             if lock_status.get("locked", False):
@@ -481,8 +486,9 @@ class CollaborationManager:
         if self._cancel_pending or not self._rollback_ungranted_lock():
             self._waiting_handoff_code = "ROLLBACK_OR_CANCEL_PENDING"
             return False
-        request = self._queue_get_by_session(self._session.session_id)
-        head = self._queue_peek()
+        requests = self._queue_requests()
+        request = next((item for item in requests if item.session_id == self._session.session_id), None)
+        head = requests[0] if requests else None
         if request is None or request.request_id != request_id or head is None or head.request_id != request_id:
             self._waiting_handoff_code = "QUEUE_HEAD_MISMATCH"
             return False
@@ -1027,7 +1033,7 @@ class CollaborationManager:
                 remote_session=remote_status.get("session_id")
                 if remote_session != session.session_id:
                     result["reason"]=f"Remote owner mismatch: {remote_session} vs {session.session_id}"; return result
-                self._sync_local_lock()
+                self._sync_local_lock(remote_status)
                 lease_expires_at=remote_status.get("lease_expires_at")
                 if self._is_lease_valid(lease_expires_at): result["lease_valid"]=True
                 else: result["reason"]="Remote lock lease expired or missing"; return result
@@ -1036,6 +1042,10 @@ class CollaborationManager:
                 result["generation"]=int(remote_status.get("lock_generation",0) or 0)
                 result["generation_authoritative"]=True
                 result["owner"]=remote_status.get("owner")
+                # The compatibility layer validates the deadline from this
+                # same observation rather than reading a second generation.
+                result["remote_finishing_deadline"]=remote_status.get("finishing_deadline")
+                result["finishing_deadline_authoritative"]=True
             except Exception as e:
                 logger.warning(f"Remote lock validation failed: {e}"); result["reason"]=f"Remote validation error: {e}"; return result
         else:

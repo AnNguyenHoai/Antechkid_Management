@@ -1,7 +1,11 @@
 """Thread-safety boundary for Git-backed collaboration providers."""
 
+import logging
 import threading
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def install_git_command_serialization(provider_cls: Any) -> None:
@@ -29,8 +33,30 @@ def install_git_command_serialization(provider_cls: Any) -> None:
         if lock is None:
             lock = threading.RLock()
             self._git_command_lock = lock
-        with lock:
-            return original_run_git_command(self, *args, **kwargs)
+        started = time.perf_counter()
+        acquired = None
+        outcome = "error"
+        # Never include argv, URLs, paths, user data or exception text in PERF.
+        command_args = args[0] if args else kwargs.get("args", ())
+        command = command_args[0] if command_args else "other"
+        if command not in {"fetch", "push", "ls-remote", "show", "reset", "commit", "commit-tree"}:
+            command = "other"
+        try:
+            with lock:
+                acquired = time.perf_counter()
+                result = original_run_git_command(self, *args, **kwargs)
+                outcome = "returned"
+                return result
+        finally:
+            finished = time.perf_counter()
+            run_started = acquired if acquired is not None else finished
+            logger.debug(
+                "PERF git command=%s lock_wait_ms=%.1f run_ms=%.1f outcome=%s",
+                command,
+                (run_started - started) * 1000,
+                (finished - run_started) * 1000,
+                outcome,
+            )
 
     provider_cls.__init__ = init_with_command_lock
     provider_cls._run_git_command = serialized_run_git_command

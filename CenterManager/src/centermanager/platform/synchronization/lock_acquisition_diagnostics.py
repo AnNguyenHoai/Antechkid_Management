@@ -102,7 +102,7 @@ def install_lock_acquisition_diagnostics(provider_cls) -> None:
         try:
             expected_oid = self._remote_lock_oid()
             if expected_oid is not None:
-                self._fetch_lock_branch()
+                # Read the freshly observed OID; fetch only on a local miss.
                 remote_lock = self._read_lock_from_oid(expected_oid)
                 observation = observe_lock(remote_lock, oid=expected_oid, now=datetime.now())
                 if observation["state"] == "UNKNOWN":
