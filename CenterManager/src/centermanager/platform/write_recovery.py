@@ -645,6 +645,48 @@ class WriteRecoveryJournal:
             self.assert_replaceable()
             logger.info('Verified CLEAN receipt updated after bootstrap schema migration')
 
+    def record_verified_handoff_install(self, *, before, accepted_main, observe_main):
+        """Accept an authoritative MAIN install after its authorized Alembic migration.
+
+        An already verified CLEAN receipt is required: this does not recover
+        or accept any unpublished local editing. The new runtime may differ
+        bytewise from repository/center.db only because the handoff installed
+        that exact validated MAIN DB and migrated it under the maintenance
+        permit. Call before deleting the old runtime/sidecar rollback copies.
+        """
+        if (not isinstance(before, dict)
+                or before.get('status') != 'CLEAN'
+                or before.get('publication') != 'VERIFIED'
+                or self.inspect() != before):
+            raise RecoveryRequired('WRITE handoff requires an unchanged, verified CLEAN receipt.')
+        if not accepted_main or observe_main() != accepted_main:
+            raise RecoveryRequired('Git MAIN changed or cannot be verified during WRITE handoff.')
+        if (not self.database.is_file() or self._wal_pending()
+                or not (self.repository / 'database' / 'center.db').is_file()
+                or self._repository_id() != before.get('repository_id')
+                or self._git('rev-parse', 'HEAD') != accepted_main
+                or self._git('rev-parse', '@{upstream}') != accepted_main
+                or self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired('Installed WRITE handoff DB is not pinned to accepted Git MAIN.')
+        # Commit the new attested checksum only after every acceptance check.
+        # The caller retains the old runtime DB until this succeeds.
+        old = before
+        try:
+            self.update(
+                status='CLEAN', publication='VERIFIED',
+                published_oid=accepted_main,
+                published_runtime_sha256=_hash(self.database),
+                accepted_local_files=self._local_files(),
+            )
+            self.assert_replaceable()
+        except Exception:
+            # Do not leave a receipt describing a DB that the caller will roll
+            # back. Restore the pre-handoff receipt if this method wrote one.
+            if self.inspect() != old:
+                _json(self.journal, old)
+            raise
+        logger.info('WRITE handoff CLEAN receipt verified after authorized schema migration')
+
     def record_synchronized(self):
         """Refresh an existing verified/reconciled receipt after remote install.
 
