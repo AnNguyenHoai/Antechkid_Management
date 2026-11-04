@@ -38,6 +38,16 @@ Lưu ở `runtime/Attachment/...`, không nằm trong repo dữ liệu và khôn
 - Hiện tại ít file nên không thấy chậm. Với ~0,3–0,6 GB chứng từ/năm (x2 vì có cả bản runtime và bản repo), mỗi lần ghi sẽ đọc lại hàng GB → **chậm dần theo thời gian**, đặc biệt trên ổ HDD.
 - Hệ quả thiết kế: chứng từ phải là file **bất biến, đặt tên theo SHA-256** để cơ chế khôi phục có thể kiểm tra bằng tên + kích thước thay vì đọc lại nội dung. Việc này **chạm vào lớp write recovery** (vùng nhạy cảm) → cần PO duyệt riêng.
 
+### F4 — [XN · Cao, đã tồn tại độc lập với chứng từ] Mỗi lần ghi tạo ít nhất 3 bản sao toàn bộ workspace và không bao giờ xóa
+- `WriteRecoveryJournal.preserve()` (`platform/write_recovery.py:307`) chép **toàn bộ** `runtime/repository` (kể cả thư mục `.git` chứa mọi phiên bản DB đã tải về), DB, metadata, **tất cả tệp đính kèm**, Export, Reports vào `runtime.write-recovery/captures/<uuid>/`.
+- Được gọi ở: bắt đầu sửa (`begin` → `preserve('base')`), trước publish (`write_transaction.py:871`), sau publish (`published` → `preserve('published')`), khi hủy, khi hòa giải → **≥ 3 bản sao mỗi lần bấm Lưu**.
+- Theo hợp đồng E1B-1 (`docs/collaboration/E1B1_DURABLE_WRITE_RECOVERY.md:18`): *captures không bao giờ bị xóa tự động* → thư mục `runtime.write-recovery` tăng không giới hạn trên mọi máy.
+- Với chứng từ: mỗi lần lưu sẽ chép lại toàn bộ chứng từ (bản runtime + bản repo) ×3. Ví dụ 0,5 GB chứng từ → ~3 GB ghi đĩa và giữ lại **mỗi lần lưu**. Không khả thi nếu không đổi.
+- **Cần đo trên máy thật** (PowerShell, thư mục cạnh `runtime`):
+  `"{0:N0} MB" -f ((Get-ChildItem .\runtime.write-recovery -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)`
+- Đề xuất **TECH-011 (P1)**: (a) capture không chép `.git/objects` và file bất biến đặt tên theo SHA-256 (đã có sẵn trong repo/Git — chỉ ghi tham chiếu tên + kích thước); (b) chính sách giữ capture (ví dụ giữ capture của N phiên gần nhất và mọi capture của phiên chưa CLEAN). Điểm (b) **thay đổi hợp đồng an toàn E1B-1** → cần PO quyết định.
+- **FEAT-003 phụ thuộc TECH-011**: chưa nên bật upload chứng từ trước khi xử lý F4.
+
 ## 4. Ảnh hưởng dung lượng & hiệu suất — chứng từ Thu/Chi
 
 | Thành phần | Nếu lưu BLOB trong DB | Nếu lưu file ngoài DB (khuyến nghị) |
@@ -104,4 +114,5 @@ Với 5 MB × 5 file và lưu vô thời hạn: repo dữ liệu sẽ vượt ~1
 | FEAT-004 | UI đính kèm/xem chứng từ trong form và chi tiết Thu/Chi, hộp thoại Hoàn trả | P1 |
 | TECH-009 | Giám sát dung lượng chứng từ/repo trong Diagnostics + ngưỡng cảnh báo | P2 |
 | TECH-010 | Đồng bộ tài liệu nhân viên tăng dần thay vì xóa-chép toàn bộ mỗi publish | P2 |
+| TECH-011 | Giới hạn bản sao khôi phục (captures): bỏ `.git/objects` + file bất biến, chính sách giữ (F4) | P1 |
 | FEAT-005 | Đồng bộ tài liệu học sinh/giáo viên giữa các máy (nếu PO cần, F1) | P3 |

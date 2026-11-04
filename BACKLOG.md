@@ -21,7 +21,8 @@
 | BUG-005 | Dashboard dùng đồng hồ nghiệp vụ; bảng Recent Expense cùng quy tắc KPI | Bug | P3 | NEW — chờ PO duyệt | — |
 | QA-004 | Audit đính kèm chứng từ Thu/Chi (dung lượng & hiệu suất) | QA | P1 | WAITING_PO (#572) | — |
 | BUG-006 | Tài liệu nhân viên có thể bị xóa khỏi repo khi publish (lệch `Attachment`/`Attachments`) | Bug | P1 | IN_REVIEW (#574, PR #575) | — |
-| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần + tối ưu write recovery) | Feature | P1 | ANALYZED — chờ PO duyệt thiết kế (chạm write recovery) | BUG-006 |
+| TECH-011 | Bản sao khôi phục (captures) tăng không giới hạn: ≥3 bản sao toàn bộ workspace mỗi lần lưu | Maintenance | P1 | ANALYZED — chờ PO quyết định chính sách giữ (đổi hợp đồng E1B-1) | — |
+| FEAT-003 | Lưu trữ chứng từ Thu/Chi (metadata + file bất biến + đồng bộ tăng dần + tối ưu write recovery) | Feature | P1 | READY (PO duyệt sửa recovery 2026-11-04) — BLOCKED bởi TECH-011 | BUG-006, TECH-011 |
 | FEAT-004 | UI đính kèm/xem chứng từ Thu/Chi | Feature | P1 | ANALYZED | FEAT-003 |
 | TECH-009 | Giám sát dung lượng chứng từ/repo + ngưỡng cảnh báo | Improvement | P2 | NEW | FEAT-003 |
 | TECH-010 | Đồng bộ tài liệu nhân viên tăng dần | Improvement | P2 | NEW | BUG-006 |
@@ -194,7 +195,7 @@
 - **Business problem:** Kế toán cần chứng từ cho từng khoản thu/chi; cần đánh giá ảnh hưởng dung lượng DB và hiệu suất trước khi làm.
 - **Implementation reference:** `CenterManager/docs/finance/QA-004_FINANCE_VOUCHER_ATTACHMENT_AUDIT.md`
 - **Verification evidence:** Kết luận chính: không lưu BLOB trong SQLite (DB bị commit nguyên file mỗi lần ghi); lưu file ngoài DB, đặt tên theo SHA-256, đồng bộ tăng dần; ước tính repo tăng ~0,3–0,9 GB/năm nếu nén ảnh (100–300 chứng từ/tháng). Phát hiện phụ: F1 tài liệu học sinh/giáo viên không đồng bộ giữa các máy; F2 lệch đường dẫn có thể xóa tài liệu nhân viên khỏi repo khi publish (XN bằng code, chưa tái hiện).
-- **PO acceptance:** Chưa · PO đã trả lời 7 câu hỏi (D-009). Bổ sung F3: write recovery băm toàn bộ tệp đính kèm mỗi lần ghi → FEAT-003 cần tối ưu, chờ PO duyệt.
+- **PO acceptance:** Chưa · PO đã trả lời 7 câu hỏi (D-009). Bổ sung F3 (băm toàn bộ tệp mỗi lần ghi — PO duyệt sửa) và F4 (mỗi lần lưu tạo ≥3 bản sao toàn bộ workspace, không bao giờ xóa → TECH-011, chờ PO quyết định).
 
 ## BUG-006 — Tài liệu nhân viên có thể bị xóa khỏi repo khi publish
 
