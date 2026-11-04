@@ -84,6 +84,7 @@ class WriteTransactionManager:
         # Internal editing flag
         self._is_editing = False
         self._recovery_journal = None
+        self._pre_handoff_clean_receipt = None
         self._generate_reports = None
         self._report_warning = ""
         self._mutation_gate = None
@@ -209,6 +210,7 @@ class WriteTransactionManager:
         self._is_editing = False
         self._stale_editing_reason = ""
         self._recovery_journal = None
+        self._pre_handoff_clean_receipt = None
         resume_lease = getattr(self._collab_manager, "resume_write_lease_renewal", None)
         if callable(resume_lease):
             resume_lease()
@@ -229,6 +231,15 @@ class WriteTransactionManager:
             provider = self._collab_manager._sync_provider
             token = getattr(provider, "_owned_lock_token", None)
             authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
+            receipt = self._pre_handoff_clean_receipt
+            if receipt is not None:
+                # The exact CLEAN state was accepted before requesting WRITE.
+                # Handoff may reinstall and migrate the authoritative MAIN DB,
+                # changing its bytes before any user mutations are permitted.
+                journal.refresh_verified_bootstrap_migration(
+                    provider=provider, before=receipt
+                )
+                self._pre_handoff_clean_receipt = None
             journal.begin(self._collab_manager.get_session_id(), self._base_main_commit, authority)
             self._recovery_journal = journal
             return True
@@ -527,9 +538,14 @@ class WriteTransactionManager:
             logger.warning(self._last_start_error)
             return False
 
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
+        from centermanager.platform.write_recovery import WriteRecoveryJournal, require_replaceable, RecoveryRequired
         try:
             require_replaceable()
+            receipt = WriteRecoveryJournal().inspect()
+            self._pre_handoff_clean_receipt = (
+                receipt if receipt is not None and receipt.get("status") == "CLEAN"
+                else None
+            )
         except RecoveryRequired as exc:
             self._last_start_error = str(exc)
             self._state = WriteTransactionState.RECOVERY_REQUIRED

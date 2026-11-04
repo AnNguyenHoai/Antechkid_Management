@@ -35,6 +35,54 @@ class StartupSynchronization:
         self._runtime_manifest_path = self._paths.runtime_root / "manifest.json"
         self._metadata_dir = self._paths.metadata_dir
 
+    def _fresh_install_eligible(self, journal) -> bool:
+        """Only grant startup provenance to a workspace with no prior data.
+
+        Existing PDFs are derived/rebuildable, whereas any DB/WAL,
+        attachment, Git working tree or recovery capture is protected.
+        """
+        roots = journal._workspace_roots()
+
+        def has_material(root, *, allow_placeholders=False):
+            root = Path(root)
+            if not root.exists():
+                return False
+            if root.is_symlink() or not root.is_dir():
+                return True
+            return any(
+                item.is_symlink() or (
+                    item.is_file() and not (
+                        allow_placeholders and item.name in {'.gitkeep', '.keep'}
+                    )
+                )
+                for item in root.rglob('*')
+            )
+
+        has_repository = (
+            self._repo_path.is_symlink() or
+            (self._repo_path.exists() and (
+                not self._repo_path.is_dir() or any(self._repo_path.iterdir())
+            ))
+        )
+        recovery_material = has_material(journal.root)
+        business_material = any(
+            has_material(roots[name], allow_placeholders=True)
+            for name in ('database', 'attachments', 'legacy-attachments')
+        )
+        fresh_install = (
+            not self._runtime_db_path.exists()
+            and not has_repository
+            and not recovery_material
+            and not business_material
+        )
+        logger.info(
+            "Fresh-install eligibility: eligible=%s db_present=%s "
+            "repository_material=%s recovery_material=%s business_material=%s",
+            fresh_install, self._runtime_db_path.exists(), has_repository,
+            recovery_material, business_material,
+        )
+        return fresh_install
+
     def run(self) -> bool:
         """Execute startup synchronization."""
         logger.info("Startup synchronization starting")
@@ -44,24 +92,7 @@ class StartupSynchronization:
         # provenance; absence of a receipt alone proves nothing.
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         _journal = WriteRecoveryJournal()
-        # No previous business artifacts or orphaned captures may be
-        # silently attested as clean simply because center.db is absent.
-        roots = _journal._workspace_roots()
-        old_business_artifacts = any(
-            Path(roots[name]).exists() and any(
-                item.is_file() or item.is_symlink()
-                for item in Path(roots[name]).rglob('*')
-            )
-            for name in ('database', 'attachments', 'legacy-attachments',
-                         'exports', 'reports')
-        )
-        fresh_install = (
-            not self._runtime_db_path.exists()
-            and (not self._repo_path.exists() or
-                 (self._repo_path.is_dir() and not any(self._repo_path.iterdir())))
-            and not _journal.root.exists()
-            and not old_business_artifacts
-        )
+        fresh_install = self._fresh_install_eligible(_journal)
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
         # may run until an incomplete installation is explicitly recovered.
