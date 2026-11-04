@@ -8,10 +8,9 @@
 - **Đề xuất:** `BACKLOG.md`, `PRODUCT_CONTEXT.md`, `ARCHITECTURE.md` (bản tóm tắt), `DECISIONS.md`, `CHANGELOG.md`, `TASKS/` ở gốc repo là lớp quản lý sản phẩm. Chi tiết kỹ thuật và hợp đồng domain vẫn ở `CenterManager/docs/` và có thẩm quyền trong phạm vi của chúng.
 
 ## D-002 — Quan hệ giữa `BACKLOG.md` và GitHub Issues
-- **Ngày:** 2026-11-04 · **Trạng thái:** PROPOSED — **cần PO quyết định**
-- **Bối cảnh:** Repo đã có quy trình: GitHub Issue là hợp đồng task, PR là luồng review (`AGENTS.md`, `AI_COLLABORATION_PROTOCOL.md`; đã tới PR #554). Project Instructions yêu cầu `BACKLOG.md` là nguồn sự thật. Hai nơi theo dõi song song dễ lệch nhau.
-- **Phương án:** (A) `BACKLOG.md` là danh mục ưu tiên & trạng thái nghiệm thu; mỗi task khi READY tạo một Issue, ghi số Issue vào cột tham chiếu; chi tiết triển khai sống trong Issue/PR. (B) Chỉ dùng GitHub Issues + labels, bỏ `BACKLOG.md`. (C) Chỉ dùng `BACKLOG.md`.
-- **Đề xuất:** A.
+- **Ngày:** 2026-11-04 · **Trạng thái:** ACCEPTED (PO, 2026-11-04)
+- **Quyết định:** `BACKLOG.md` là danh mục ưu tiên và trạng thái nghiệm thu. **Trước khi làm** một task phải tạo GitHub Issue (hợp đồng task theo `AGENTS.md`) và ghi số Issue vào backlog. **Làm xong** thì đóng Issue và cập nhật backlog.
+- **Lưu ý:** Đóng Issue nghĩa là phần thực hiện đã hoàn tất; task chỉ chuyển DONE khi PO nghiệm thu rõ ràng.
 
 ## D-003 — Định hướng nền tảng: desktop hay web
 - **Ngày:** 2026-11-04 · **Trạng thái:** PROPOSED — cần PO quyết định

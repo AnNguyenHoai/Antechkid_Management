@@ -1,17 +1,17 @@
 # BACKLOG — CenterManager
 
 > Khởi tạo 2026-11-04 từ audit nhánh `main_repos` @ `ac9e96d`, cập nhật theo phản hồi PO cùng ngày.
-> Chỉ PO được chuyển task sang **DONE**. Chưa task nào được duyệt triển khai.
+> Chỉ PO được chuyển task sang **DONE**.
+> Quy trình (D-002): trước khi làm task tạo GitHub Issue; làm xong đóng Issue và cập nhật backlog. Trạng thái DONE vẫn cần PO nghiệm thu.
 > Lưu ý: bản audit đầu tiên chạy nhầm trên nhánh mặc định `main` (cũ, 2026-09-29). Các phát hiện sai do nhánh cũ đã được đóng ở mục "Đã đóng".
 
 ## Bảng tổng hợp — đang mở
 
 | ID | Tiêu đề | Loại | Ưu tiên | Trạng thái | Phụ thuộc |
 |---|---|---|---|---|---|
-| TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | Maintenance | P1 | ANALYZED | — |
+| TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | Maintenance | P1 | WAITING_PO | — |
 | TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git & giới hạn snapshot | Maintenance | P2 | ANALYZED | TECH-001 |
-| TECH-003 | Làm sạch & sắp xếp lại tài liệu (`docs/` 270 file, file tạm ở gốc repo) | Maintenance | P2 | ANALYZED | D-002 |
-| QA-001 | Ghi nhận baseline CI của `main_repos` | QA | P2 | WAITING_PO | — |
+| TECH-003 | Làm sạch & sắp xếp lại tài liệu (`docs/` 270 file, file tạm ở gốc repo) | Maintenance | P2 | ANALYZED | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -20,7 +20,8 @@
 
 | ID | Tiêu đề | Trạng thái | Lý do |
 |---|---|---|---|
-| SEC-001 | Thu hồi GitHub token trong `config.json` | WAITING_PO | PO báo đã thu hồi; chờ PO xác nhận đóng |
+| SEC-001 | Thu hồi GitHub token trong `config.json` | DONE | PO thu hồi token; PO accept 2026-11-04 |
+| QA-001 | Ghi nhận baseline CI của `main_repos` | DONE | 3.176 passed / 7 skipped / 0 failed; PO accept 2026-11-04 |
 | SEC-002 | Lộ dữ liệu cá nhân trên repo public | CANCELLED | PO xác nhận dữ liệu giả; repo dữ liệu thật private (đã kiểm tra) |
 | SEC-003 | Bỏ khóa mã hóa hard-code | CANCELLED | Đã có trên `main_repos`: `DPAPI:v2`, `ENC:v1` chỉ còn để migrate |
 | SEC-004 | Buộc đổi mật khẩu admin mặc định | CANCELLED | Đã có trên `main_repos` (`force_password_change=True`, log không chứa mật khẩu); PO đã đổi mật khẩu |
@@ -31,13 +32,16 @@
 
 ## TECH-001 — Đồng bộ nhánh mặc định `main` với `main_repos`
 
-- **Type:** Maintenance · **Priority:** P1 · **Status:** ANALYZED
+- **Type:** Maintenance · **Priority:** P1 · **Status:** WAITING_PO
 - **Source:** Audit 2026-11-04
-- **Business problem:** Nhánh mặc định `main` dừng ở `32cd46c` (2026-09-29) trong khi phát triển thực tế ở `main_repos` (PR #554, 2026-11-04). Ai clone mặc định — người hay AI — sẽ làm việc trên mã cũ hơn hơn 5 tuần. Chính bản audit đầu tiên đã bị dẫn sai vì điều này.
+- **Business problem:** Nhánh mặc định `main` dừng ở `32cd46c` (2026-09-29) trong khi phát triển thực tế ở `main_repos`; clone mặc định lấy mã cũ.
 - **Expected outcome:** Clone mặc định trả về mã đang phát triển.
-- **Scope (PO chọn 1):** (A) Đổi default branch trên GitHub sang `main_repos`; (B) fast-forward `main` lên `main_repos` và giữ đồng bộ; (C) xóa `main` nếu không còn dùng (phá hủy — cần PO ủy quyền).
+- **Scope:** Phương án (A) — đổi default branch trên GitHub sang `main_repos`. PO đã thực hiện 2026-11-04.
 - **Acceptance criteria:** `git clone` không chỉ định nhánh lấy được commit mới nhất của nhánh tích hợp.
-- **Dependencies:** — · **Implementation reference:** — (thao tác GitHub Settings, PO thực hiện hoặc cấp quyền) · **Verification evidence:** — · **PO acceptance:** Chưa
+- **Dependencies:** — · **Implementation reference:** GitHub Settings (PO thực hiện)
+- **Verification evidence:** 2026-11-04: GitHub API `GET /repos/AnNguyenHoai/Antechkid_Management` trả `default_branch = main_repos`.
+- **PO acceptance:** Chưa
+- **Notes:** Nhánh `main` cũ vẫn còn. Xóa nhánh là thao tác phá hủy, chỉ làm khi PO yêu cầu.
 
 ## TECH-002 — Đưa dữ liệu runtime giả ra khỏi Git & giới hạn snapshot
 
@@ -58,11 +62,11 @@
 - **Expected outcome:** Người mới biết ngay tài liệu nào là hiện hành; tài liệu lịch sử được lưu trữ riêng.
 - **Scope:** Lập danh mục `docs/` theo nhóm (hiện hành / hợp đồng domain / lịch sử); chuyển báo cáo sprint vào `docs/archive/`; đánh dấu "Superseded" cho file lỗi thời; PO quyết định giữ/xóa từng file ở gốc repo; cập nhật đường dẫn trong `AGENTS.md` nếu có file di chuyển.
 - **Acceptance criteria:** Có `docs/README.md` liệt kê tài liệu hiện hành; không còn file tạm ở gốc repo; các tham chiếu trong `AGENTS.md`/`AI_COLLABORATION_PROTOCOL.md` vẫn đúng; CI xanh (một số test có thể đọc file docs).
-- **Dependencies:** D-002 (xác định vai trò bộ file gốc vs docs). · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
+- **Dependencies:** — · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
 
 ## QA-001 — Ghi nhận baseline CI của `main_repos`
 
-- **Type:** QA · **Priority:** P2 · **Status:** WAITING_PO
+- **Type:** QA · **Priority:** P2 · **Status:** DONE
 - **Source:** Audit 2026-11-04
 - **Business problem:** Cần một mốc kết quả test thật trước mọi thay đổi tiếp theo.
 - **Scope:** Ghi kết quả workflow `Pytest Suite` cho `ac9e96d`.
@@ -74,7 +78,7 @@
   - shard 2: 1127 passed, 5 skipped
   - **Tổng: 3.176 passed, 7 skipped, 0 failed.** Không có test fail nên không phát sinh task.
 - **Hạn chế:** Không tải được file JUnit XML (bộ lưu trữ artifact bị chặn từ phiên này), nên chưa liệt kê được lý do của 7 test skipped.
-- **PO acceptance:** Chưa
+- **PO acceptance:** Accepted — PO, 2026-11-04 ("Accept SEC-001, QA-001")
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git
 
@@ -103,12 +107,12 @@
 
 ---
 
-## SEC-001 — Thu hồi GitHub token trong `config.json` (WAITING_PO)
+## SEC-001 — Thu hồi GitHub token trong `config.json` (DONE)
 
-- **Type:** Maintenance · **Priority:** P0 · **Status:** WAITING_PO
+- **Type:** Maintenance · **Priority:** P0 · **Status:** DONE
 - **Business problem:** `CenterManager/runtime/Config/config.json` (vẫn còn trên cả `main` và `main_repos`) chứa bundle `ENC:v1:` giải mã được bằng khóa legacy trong `core/crypto.py`; bên trong có một GitHub PAT `ghp_…`.
 - **Verification evidence:** Audit giải mã để xác minh, không in giá trị token. PO xác nhận 2026-11-04 token đã thu hồi; token mới dùng DPAPI và lưu ở repo riêng. Audit không tự kiểm tra token còn hiệu lực hay không (không dùng thông tin xác thực của người khác).
-- **PO acceptance:** Chờ PO xác nhận đóng task.
+- **PO acceptance:** Accepted — PO, 2026-11-04 ("Accept SEC-001, QA-001")
 - **Notes:** File này sẽ được gỡ khỏi Git trong TECH-002.
 
 ## SEC-002, SEC-003, SEC-004, BUG-001, QA-002 — CANCELLED

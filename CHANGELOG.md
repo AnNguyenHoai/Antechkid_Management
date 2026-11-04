@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Changed
+- 2026-11-04 — Ghi nhận PO nghiệm thu SEC-001, QA-001; TECH-001 chờ nghiệm thu (default branch đã là `main_repos`); D-002 ACCEPTED. (Issue #556)
+
 ### Added
 - 2026-11-04 — Khởi tạo hệ thống quản lý sản phẩm: `BACKLOG.md`, `PRODUCT_CONTEXT.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `CHANGELOG.md`. Chỉ tài liệu, **không thay đổi code ứng dụng**. (PR #555)
 
