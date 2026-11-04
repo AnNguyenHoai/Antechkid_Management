@@ -122,12 +122,17 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
     original_connect = provider_cls.connect
     original_clone = provider_cls.clone
 
-    def clone_idempotent(self, progress_callback=None):
-        from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+    def clone_idempotent(self, progress_callback=None, *, preclone_capture=None):
         self._repository_url = sanitize_repository_url(getattr(self, "_repository_url", "") or "")
         repo_path = getattr(self, "_repo_path", None)
         if getattr(self, "_repo", None) is not None and repo_path is not None and (repo_path / ".git").exists():
+            # A pre-clone preservation token is only valid for an absent
+            # repository. Never silently ignore it on the idempotent path.
+            if preclone_capture is not None:
+                from centermanager.platform.write_recovery import RecoveryRequired
+                raise RecoveryRequired("Preclone capture cannot authorize an existing repository.")
+            from centermanager.platform.write_recovery import require_replaceable
+            require_replaceable()
             if not _reconcile_origin(self):
                 logger.error("Existing repository origin could not be reconciled")
                 return False
@@ -135,7 +140,10 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
             if progress_callback:
                 progress_callback("clone", "Repository already exists", 100)
             return True
-        return original_clone(self, progress_callback=progress_callback)
+        # Delegate capture validation to the original provider. Its narrow
+        # preclone exception verifies the captured workspace before clone.
+        return original_clone(self, progress_callback=progress_callback,
+                              preclone_capture=preclone_capture)
 
     provider_cls.clone = clone_idempotent
 
