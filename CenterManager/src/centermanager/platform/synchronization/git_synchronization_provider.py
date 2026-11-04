@@ -1143,27 +1143,57 @@ class GitSynchronizationProvider(SynchronizationProvider):
             logger.error(f"Push-only failed: {e}")
             raise PushFailedError(f"Push failed: {e}")
 
+    def _runtime_employee_attachments_root(self) -> Path:
+        """Return the runtime Employee attachment tree to publish.
+
+        BUG-006: the runtime contract (A2/A4.6) is the singular
+        ``runtime/Attachment``; uploads and startup materialization use it.
+        The plural ``runtime/Attachments`` is only read for legacy installs
+        that have not materialized the canonical tree yet.
+        """
+        runtime = self._repo_path.parent
+        canonical = runtime / "Attachment" / "Employees"
+        legacy = runtime / "Attachments" / "Employees"
+        if canonical.exists():
+            return canonical
+        if legacy.exists():
+            logger.warning(
+                "Publishing Employee attachments from legacy runtime path %s; "
+                "canonical %s does not exist.", legacy, canonical,
+            )
+            return legacy
+        return canonical
+
     def _sync_employee_attachments_to_repository(self) -> None:
         """Mirror runtime Employee attachments into the repository working tree.
 
         Employee documents are business data and must travel with the database.
-        Deleting/replacing the repository mirror first also propagates deletions.
+        Deleting/replacing the repository mirror first also propagates deletions
+        made inside the runtime tree. A missing runtime tree is never treated as
+        "everything was deleted": the repository mirror is preserved (BUG-006).
         """
-        runtime_root = self._repo_path.parent / "Attachments" / "Employees"
+        runtime_root = self._runtime_employee_attachments_root()
         repo_root = self._repo_path / "Attachments" / "Employees"
         try:
+            if not runtime_root.exists():
+                repo_root.parent.mkdir(parents=True, exist_ok=True)
+                if repo_root.exists() and any(repo_root.iterdir()):
+                    logger.warning(
+                        "Runtime Employee attachments %s are missing; repository "
+                        "mirror %s preserved instead of being cleared.",
+                        runtime_root, repo_root,
+                    )
+                else:
+                    logger.info("No runtime Employee attachments to publish.")
+                return
             if repo_root.exists():
                 shutil.rmtree(repo_root)
-            if runtime_root.exists():
-                repo_root.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(runtime_root, repo_root)
-                logger.info(
-                    "Employee attachments staged from runtime: %s -> %s",
-                    runtime_root, repo_root,
-                )
-            else:
-                repo_root.parent.mkdir(parents=True, exist_ok=True)
-                logger.info("No runtime Employee attachments; repository mirror cleared.")
+            repo_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(runtime_root, repo_root)
+            logger.info(
+                "Employee attachments staged from runtime: %s -> %s",
+                runtime_root, repo_root,
+            )
         except Exception:
             logger.exception("Failed to synchronize Employee attachments to repository")
             raise
