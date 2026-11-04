@@ -191,7 +191,7 @@ class WriteRecoveryJournal:
             elif document['status'] in {'CLEAN', 'PUBLISHED'} and document.get('publication') == 'VERIFIED':
                 if (self.database.is_file() and not self._wal_pending()
                         and document.get('published_runtime_sha256') == _hash(self.database)
-                        and document.get('accepted_local_files') == self._local_files()
+                        and self._receipt_stable_files(document.get('accepted_local_files')) == self._receipt_stable_files(self._local_files())
                         and document['repository_id'] == self._repository_id()
                         and self._git('rev-parse', 'HEAD') in {document.get('published_oid'), self._git('rev-parse', '@{upstream}')}
                         and not self._git('status', '--porcelain', '--untracked-files=all')):
@@ -230,6 +230,8 @@ class WriteRecoveryJournal:
                 return
             current = self._local_files()
             expected = document.get('accepted_local_files') or {}
+            current = self._receipt_stable_files(current)
+            expected = self._receipt_stable_files(expected)
             added = set(current) - set(expected)
             removed = set(expected) - set(current)
             changed = {key for key in set(current) & set(expected)
@@ -303,8 +305,8 @@ class WriteRecoveryJournal:
                 raise RecoveryRequired('Only derived report paths can refresh a clean local receipt.')
         current = self._local_files()
         previous = before['accepted_local_files']
-        if ({k: v for k, v in current.items() if k not in allowed} !=
-                {k: v for k, v in previous.items() if k not in allowed}
+        if ({k: v for k, v in self._receipt_stable_files(current).items() if k not in allowed} !=
+                {k: v for k, v in self._receipt_stable_files(previous).items() if k not in allowed}
                 or self._wal_pending()
                 or _hash(self.database) != before['published_runtime_sha256']
                 or self._repository_id() != before['repository_id']
@@ -418,6 +420,18 @@ class WriteRecoveryJournal:
                 'legacy-attachments': self.runtime / 'Attachments',
                 'exports': getattr(self.paths, 'export_dir', self.runtime / 'Export'),
                 'reports': getattr(self.paths, 'reports_dir', self.runtime / 'Reports')}
+
+    @staticmethod
+    def _receipt_stable_files(files):
+        """Ignore only volatile SQLite sidecars when comparing CLEAN receipts.
+
+        SQLite readers can create/remove the shared-memory index without any
+        business mutation. WAL *contents* are NOT accepted by this exemption:
+        callers separately require _wal_pending() == False, and the complete
+        fingerprint/captures still preserve both sidecars.
+        """
+        return {k: v for k, v in (files or {}).items()
+                if k not in {'database/center.db-shm', 'database/center.db-wal'}}
 
     def _local_files(self):
         return {k: v for k, v in self.fingerprint().items() if not k.startswith('repository/')}
