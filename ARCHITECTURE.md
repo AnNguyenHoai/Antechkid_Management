@@ -15,7 +15,7 @@
 | Phân quyền | RBAC theo capability, bcrypt, khóa sau nhiều lần đăng nhập sai, buộc đổi mật khẩu admin mặc định |
 | Đóng gói | PyInstaller → ZIP portable kèm Git |
 | CI | `pytest-suite.yml`: toàn bộ test trên Windows, 3 shard, chạy mỗi push/PR vào `main_repos`; `windows-prototype-release.yml` khi gắn tag |
-| Quy mô | `src/`: 524 file / ~84k dòng · `tests/`: 564 file / ~2.700 hàm test · `docs/`: 270 file |
+| Quy mô | `src/`: 524 file / ~84k dòng · `tests/`: 564 file / ~2.700 hàm test (3.176 test case sau tham số hóa; CI ngày 2026-11-04: toàn bộ pass) · `docs/`: 270 file |
 
 ## 2. Phân lớp
 

@@ -11,7 +11,7 @@
 | TECH-001 | Đồng bộ nhánh mặc định `main` với `main_repos` | Maintenance | P1 | ANALYZED | — |
 | TECH-002 | Đưa dữ liệu runtime giả ra khỏi Git & giới hạn snapshot | Maintenance | P2 | ANALYZED | TECH-001 |
 | TECH-003 | Làm sạch & sắp xếp lại tài liệu (`docs/` 270 file, file tạm ở gốc repo) | Maintenance | P2 | ANALYZED | D-002 |
-| QA-001 | Ghi nhận baseline CI của `main_repos` | QA | P2 | NEW | — |
+| QA-001 | Ghi nhận baseline CI của `main_repos` | QA | P2 | WAITING_PO | — |
 | TECH-005 | Giới hạn kiến trúc đồng bộ Git | Improvement | P3 | NEW — để sau theo PO | D-003 |
 | TECH-006 | Tách các hàm quá dài | Refactor | P3 | NEW | — |
 | TECH-007 | Thống nhất phiên bản Python (CI 3.10, ghi chú dev 3.14) | Maintenance | P3 | NEW | — |
@@ -62,11 +62,19 @@
 
 ## QA-001 — Ghi nhận baseline CI của `main_repos`
 
-- **Type:** QA · **Priority:** P2 · **Status:** NEW
-- **Business problem:** Audit chưa xem được kết quả CI (phiên audit không có quyền GitHub API; môi trường audit bị chặn PyPI nên không chạy được test local).
-- **Scope:** Lấy kết quả `Pytest Suite` cho `ac9e96d` (3 shard): số pass/fail/skip, thời gian chạy; ghi vào `TASKS/QA-001.md`.
+- **Type:** QA · **Priority:** P2 · **Status:** WAITING_PO
+- **Source:** Audit 2026-11-04
+- **Business problem:** Cần một mốc kết quả test thật trước mọi thay đổi tiếp theo.
+- **Scope:** Ghi kết quả workflow `Pytest Suite` cho `ac9e96d`.
 - **Acceptance criteria:** Có số liệu thật, kèm link run; mỗi test fail (nếu có) có task tương ứng.
-- **Dependencies:** Quyền đọc GitHub Actions. · **Implementation reference:** — · **Verification evidence:** — · **PO acceptance:** Chưa
+- **Dependencies:** — · **Implementation reference:** PR #555
+- **Verification evidence:** Run [41751812981](https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/41751812981) (push `main_repos`, 2026-11-04 08:07, 16m58s) — kết luận `success`. Đọc từ log từng job:
+  - shard 0: 1066 passed, 2 skipped
+  - shard 1: 983 passed
+  - shard 2: 1127 passed, 5 skipped
+  - **Tổng: 3.176 passed, 7 skipped, 0 failed.** Không có test fail nên không phát sinh task.
+- **Hạn chế:** Không tải được file JUnit XML (bộ lưu trữ artifact bị chặn từ phiên này), nên chưa liệt kê được lý do của 7 test skipped.
+- **PO acceptance:** Chưa
 
 ## TECH-005 — Giới hạn kiến trúc đồng bộ Git
 
