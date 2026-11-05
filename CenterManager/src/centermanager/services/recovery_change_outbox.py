@@ -171,7 +171,8 @@ def record_for_active_write(
     for key, value in list(normalized_args.items()):
         if value is None and key.lower() in {
             "student_id", "income_id", "expense_id", "enrollment_id",
-            "class_id", "session_id", "finance_period_id",
+            "class_id", "session_id", "finance_period_id", "teacher_id",
+            "assessment_id", "parent_id", "note_id", "highlight_id",
         }:
             normalized_args[key] = entity_id
     actor = get_current_user()
