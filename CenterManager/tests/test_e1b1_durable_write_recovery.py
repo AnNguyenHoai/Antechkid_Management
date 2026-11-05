@@ -569,3 +569,63 @@ def test_recovery_state_projects_readonly_actionable_ui():
     view.finish_edit_btn.setVisible.assert_called_once_with(False)
     status.showMessage.assert_called_once_with(view._transaction.last_start_error)
     view._editing_idle_timer.stop.assert_called_once()
+
+
+def test_rv03_remote_a_plus_ten_preserves_unaccepted_sqlcipher_then_boots_main(workspace, tmp_path):
+    """Real local Git remote, real encrypted SQLCipher and an immutable review case.
+
+    No remote publication of the local unaccepted edit, no database auto merge,
+    and no clean startup deleting the previous per-incident review evidence.
+    """
+    from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+    from centermanager.platform.sync.startup_sync import StartupSynchronization
+
+    w = workspace
+    begin(w)
+    mutate(w)
+    assert values(w.journal.database) == ["BASE", "LOCAL_UNACCEPTED"]
+    # The independent client only advances Git MAIN with unrelated commits.
+    # Remote's authoritative database intentionally stays at BASE.
+    other = tmp_path / "remote-writer"
+    subprocess.run(
+        ["git", "clone", "-b", "main", str(w.remote), str(other)],
+        check=True, capture_output=True, text=True,
+    )
+    git(other, "config", "user.name", "Synthetic Remote Writer")
+    git(other, "config", "user.email", "synthetic@example.invalid")
+    for n in range(10):
+        (other / "remote_progress.txt").write_text(str(n), encoding="utf-8")
+        git(other, "add", "remote_progress.txt")
+        git(other, "commit", "-m", "synthetic remote advancement %d" % n)
+    git(other, "push", "origin", "main")
+    latest_main = git(other, "rev-parse", "HEAD")
+    assert latest_main != w.base
+    assert w.provider.observe_remote_main_commit() == latest_main
+
+    startup = StartupSynchronization(w.provider)
+    assert startup.run()
+    assert git(other, "rev-parse", "HEAD") == latest_main
+    assert w.provider.observe_remote_main_commit() == latest_main
+    assert git(w.journal.repository, "rev-parse", "HEAD") == latest_main
+
+    # Only BASE is installed from authoritative MAIN. The unaccepted work is
+    # still recoverable from the signed WAL-consistent protected capture.
+    assert values(w.journal.database) == ["BASE"]
+    cases = RecoveryCaseRegistry(w.journal).list_cases()
+    assert len(cases) == 1
+    case = cases[0]
+    assert case["status"] == "PENDING_REVIEW"
+    assert case["publication"] == "UNVERIFIED"
+    assert case["base_main_oid"] == w.base
+    assert case["observed_main_oid"] == latest_main
+    assert case["change_log_coverage"] == "UNKNOWN"
+    snapshot = Path(case["capture_ref"])
+    assert w.journal.verify_capture(snapshot)["files"]["center.db"] == case["capture_db_sha256"]
+    assert values(snapshot / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+
+    # The second startup must not generate an additional case or erase A.
+    assert StartupSynchronization(w.provider).run()
+    again = RecoveryCaseRegistry(w.journal).list_cases()
+    assert len(again) == 1 and again[0] == case
+    assert values(snapshot / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    assert values(w.journal.database) == ["BASE"]
