@@ -6,6 +6,7 @@ import logging
 from datetime import date
 from typing import Optional, List, Callable, Any
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.employee import Employee
 from centermanager.models.role import RoleDefinitions
 from centermanager.models.user import User
@@ -218,7 +219,9 @@ class EmployeeService:
                 employment_status=status, hire_date=hire_date or get_clock().today(),
                 user_id=user_id,
             )
-            repo.add(e); s.commit(); repo.refresh(e); return e
+            repo.add(e)
+            record_for_active_write(s, module="employee", action="CREATE", entity_type="Employee", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.id})
+            s.commit(); mirror_after_successful_commit(s); repo.refresh(e); return e
 
     def create_employee_with_account(
         self, full_name: str, username: str, role_name: str, *,
@@ -272,7 +275,9 @@ class EmployeeService:
                 position=self._text(position), employment_status=status,
                 hire_date=hire_date or get_clock().today(), user_id=user.id,
             )
-            repo.add(employee); s.commit(); repo.refresh(employee)
+            repo.add(employee)
+            record_for_active_write(s, module="employee", action="CREATE_WITH_ACCOUNT", entity_type="Employee", entity_id=employee.id, entity_object=employee, summary_args={"employee_id": employee.id})
+            s.commit(); mirror_after_successful_commit(s); repo.refresh(employee)
             employee._temporary_password = temp_password
             employee._account_username = username
             return employee
@@ -296,7 +301,8 @@ class EmployeeService:
             if not self._is_employee_account(user):
                 raise EmployeeValidationError("Administrator accounts cannot be linked to an employee profile.")
             employee.user_id = user_id
-            s.commit(); repo.refresh(employee); return employee
+            record_for_active_write(s, module="employee", action="LINK_USER", entity_type="Employee", entity_id=employee.id, entity_object=employee, summary_args={"employee_id": employee.id})
+            s.commit(); mirror_after_successful_commit(s); repo.refresh(employee); return employee
 
     def get_employee(self, employee_id: int, user: Optional[User] = None) -> Employee:
         return self.get_employee_for_user(employee_id, user)
@@ -314,7 +320,8 @@ class EmployeeService:
                 raise EmployeeNotFoundError(f"Employee {employee_id} not found.")
             e.employment_status = self._validate_status(status)
             e.termination_date = termination_date
-            s.commit(); self._repository_provider.employees(s).refresh(e); return e
+            record_for_active_write(s, module="employee", action="CHANGE_STATUS", entity_type="Employee", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.id})
+            s.commit(); mirror_after_successful_commit(s); self._repository_provider.employees(s).refresh(e); return e
 
     def update_employee(self, employee_id: int, **data) -> Employee:
         actor = self._require_user(None)
@@ -348,4 +355,5 @@ class EmployeeService:
             if "hire_date" in data:
                 self._require_capability(actor, self.UPDATE)
                 e.hire_date = data["hire_date"]
-            s.commit(); repo.refresh(e); return e
+            record_for_active_write(s, module="employee", action="UPDATE", entity_type="Employee", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.id})
+            s.commit(); mirror_after_successful_commit(s); repo.refresh(e); return e
