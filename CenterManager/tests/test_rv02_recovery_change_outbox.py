@@ -347,3 +347,12 @@ def test_mirror_coverage_is_unknown_without_attested_sqlcipher_source(engine, tm
             committed_source_attested=True,
         )
         assert complete == {"status": "COMPLETE", "expected": 1, "verified": 1}
+
+
+def test_admin_reset_cannot_delete_recovery_outbox_history():
+    from centermanager.repositories.admin_data_reset_repository import AdminDataResetRepository
+    from centermanager.database.base import Base
+
+    assert "recovery_change_outbox" in Base.metadata.tables
+    assert "recovery_change_outbox" in AdminDataResetRepository.PROTECTED_TABLES
+    assert "recovery_change_outbox" not in AdminDataResetRepository.BUSINESS_TABLES
