@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.parent import Parent, RelationshipType
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -119,7 +120,13 @@ class ParentService:
                 is_primary_contact=is_primary_contact,
             )
             repo.add(parent)
+            record_for_active_write(
+                session, module="parent", action="CREATE",
+                entity_type="Parent", entity_id=parent.id,
+                entity_object=parent, summary_args={"student_id": parent.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(parent)
 
             if self._timeline_service:
@@ -216,7 +223,13 @@ class ParentService:
             if not changes:
                 return parent
 
+            record_for_active_write(
+                session, module="parent", action="UPDATE",
+                entity_type="Parent", entity_id=parent.id,
+                entity_object=parent, summary_args={"student_id": parent.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(parent)
 
             if self._timeline_service:
@@ -243,7 +256,13 @@ class ParentService:
             student_id = parent.student_id
             name = parent.name
             repo.delete(parent)
+            record_for_active_write(
+                session, module="parent", action="DELETE",
+                entity_type="Parent", entity_id=parent.id,
+                entity_object=parent, summary_args={"student_id": parent.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
