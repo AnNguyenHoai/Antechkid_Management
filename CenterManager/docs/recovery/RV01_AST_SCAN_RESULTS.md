@@ -59,3 +59,27 @@ Service count includes **timeline and report commits**, which must be classified
 **Evidence gate passed:** the static scan ran on a Windows GitHub runner, parsed all 446 configured Python files without syntax errors and produced a verifiable candidate artifact.
 
 **Not yet proven:** every dynamic dispatch, SQL trigger, native DBAPI action, background callback, alternate DB provider and schema compatibility behavior. Privacy/retention and release acceptance still require review. The RV-01 design can be approved as input to RV-02 without pretending the entire application has committed-event coverage. Issue #593 remains OPEN until founder and CI/QA review criteria are satisfied.
+
+
+## Preliminary owner-based triage of ALL 137 explicit commit calls
+
+Using the full verified artifact (not just selected service snippets), the 137 explicit `commit()` call sites were classified once by containing file/function:
+
+| Bucket | Commit sites | Treatment |
+| --- | ---: | --- |
+| **BUSINESS_CANDIDATE** | **116** | The key RV-02 transaction-bound outbox implementation/review queue; verify each path and actor. Includes privileged admin data reset, finance, academic and employee actions. |
+| **SYSTEM_INFRASTRUCTURE** | **10** | 7 in `database/`, 3 in `platform/`; verify maintenance provenance, not user business events |
+| **DERIVED_TIMELINE** | **5** | `timeline_service` (2), `class_timeline_service` (1), `teacher_timeline_service` (1), `expense_timeline_service` (1); these may still be stored, but are not the original business edit |
+| **DERIVED_REPORT** | **2** | `report_service.delete_report()`; classify report metadata/file semantics before exclusion |
+| **AUTH_LOGIN_SPECIAL** | **2** | `permission_service.authenticate_user()`; protected login uses local activity policy; legacy changes differ, no ordinary business event |
+| **IDENTITY_REPAIR_SPECIAL** | **1** | `employee_service.get_current_employee()` with verified identity repair permit; classify maintenance vs business |
+| **AUDIT_HELPER** | **1** | `audit_service.record()`, a separate log writer; its commit must not be double counted |
+| **TOTAL** | **137** | Every explicit commit candidate in the artifact is allocated once; **this is a preliminary owner-based triage, not proof 116 paths are fully covered**. |
+
+This reduces the **priority human review queue to 116 explicit business commit candidates** plus selected special/security/attachment paths. The remaining 962 non-commit candidates include **74 flush sites, 31 file copies, 51 explicit `os.replace`, 76 file unlink sites and 5 Git publisher references**, and must be reviewed under their separate safety contracts. In particular, many `connect` hits are GUI signal connections rather than SQLCipher connections.
+
+### Verified distinction between direct and indirect audit calls
+
+There are 24 syntactic `record_in_session()` sites. Some are **shared helpers**, e.g. `IncomeService._record_audit`, `ExpenseService._record_audit`, `EmployeeScheduleService._audit_week` and `EmployeeWorkRegistrationService._audit`. Thus a naive count of 24/116 is **not** a coverage percentage: one helper can cover many operations and other calls are conditional. Per-method branch tests and actual transaction relationships are mandatory in RV-02.
+
+**Implementation acceptance criterion:** Every BUSINESS_CANDIDATE function either emits a same-transaction outbox event, has a source-proven in-session audited equivalent wired with session/op IDs, or is explicitly documented as an approved exception with test. The separate 10 infrastructure commit sites must never be instrumented as ordinary human edits.
