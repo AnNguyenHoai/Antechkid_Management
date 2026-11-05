@@ -164,3 +164,12 @@ Run from repo root:
 The output is a deterministic **UNREVIEWED queue** with file, line, function, category and call name. It does not import/execute application code, open SQLCipher, change branch or modify runtime. It currently identifies only explicit Python AST calls; dynamic callbacks, C/native code, SQL trigger side effects, decorators, implicit ORM flush, and generic reflection remain manual gates. False positives (e.g., a SELECT `execute`, or non-filesystem `replace`) must be marked DERIVED/READ in a reviewed manifest. No claim that the complete static report has been executed in the GitHub-hosted CI is made yet.
 
 **RV-01 completion policy:** verify scanner output and triage all candidates before asserting complete coverage; alternatively formally accept explicit remaining unknowns as scope for RV-02. No user-facing popup should label an event list exhaustive while these unknowns remain.
+
+
+## Verified import partial-success semantics
+
+`services/student_import_service.py:38-93` iterates Excel rows and independently calls `StudentService.create_student()` at line 75. Each successful row can commit before a later row fails; the method returns `(success_count, error_count, errors)` and has **no whole-file atomic transaction**. Therefore the Recovery Change Log must include the successfully committed student records, not a misleading one-line “Excel import completed” event. Optional `import_batch_id` or source-row reference should group the per-student operation IDs without logging the Excel file's raw contents or uncommitted failures. This is a confirmed per-row partial-success boundary and should have a killed-process test in RV-02.
+
+## Verified CI execution contract
+
+The PR now adds a **Windows CI shard-0** step in `.github/workflows/pytest-suite.yml` that runs the AST scanner on every file under the configured roots and uploads `rv01-mutation-sites.json` as a review artifact. `tests/test_rv01_mutation_inventory.py` tests synthetic AST classification without executing source and asserts known real-world mutation boundaries. The artifact is **not** equivalent to a finished human classification. Treat full coverage as OPEN until review queue is triaged and runtime integration tests prove commit/outbox pairing.
