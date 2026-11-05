@@ -159,7 +159,8 @@ class EmployeeWorkingTimeService:
             self._scope(employee_id,u)
             repo=self._repository_provider.employee_working_times(s); rows=repo.list_for_employee(employee_id,start,end)
             if any(r.end_time is None for r in rows): raise EmployeeWorkingTimeValidationError("Cannot lock a month containing open entries.")
-            count=repo.lock_entries(rows); if count:
+            count=repo.lock_entries(rows)
+            if count:
                 record_for_active_write(s, module="working_time", action="LOCK_MONTH", entity_type="EmployeeWorkingTimeMonth", entity_id=employee_id, summary_args={"employee_id": employee_id, "record_count": count})
             s.commit(); mirror_after_successful_commit(s); return count
 
