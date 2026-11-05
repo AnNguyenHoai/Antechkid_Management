@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from centermanager.core.paths import get_paths
 from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
-from centermanager.platform.write_performance import trace_operation, timed_call
+from centermanager.platform.write_performance import trace_operation, trace_phase, timed_call
 
 logger = logging.getLogger(__name__)
 
@@ -905,7 +905,8 @@ class WriteTransactionManager:
                 self._state = WriteTransactionState.PUBLISHED
                 if self._generate_reports is not None:
                     try:
-                        timed_call("reports", self._generate_reports, set(self._dirty_student_ids))
+                        with trace_phase("reports"):
+                            self._generate_reports(set(self._dirty_student_ids))
                     except Exception as exc:
                         self._report_warning = (
                             f"Core data was published; local reports are incomplete. {exc}"
@@ -921,7 +922,9 @@ class WriteTransactionManager:
                 self._finishing_started_at = None
                 self._publish_intent = False
 
-                if not timed_call("release_lock", self._release_lock):
+                with trace_phase("release_lock"):
+                    released = self._release_lock()
+                if not released:
                     self._state = WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING
                     logger.warning(
                         "Transaction published successfully but remote WRITE lock release is pending"
