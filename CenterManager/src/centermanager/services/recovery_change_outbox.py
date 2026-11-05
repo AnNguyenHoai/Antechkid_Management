@@ -203,15 +203,15 @@ def record_for_active_write(
 
 
 def mirror_after_successful_commit(session: Session) -> None:
-    """Best-effort external mirror AFTER a proven caller-owned commit.
+    """Queue committed operation metadata; never block Save on crypto/fsync.
 
-    Never change a successful user transaction into a failed result because
-    a local mirror is unavailable. The unmirrored committed outbox rows remain
-    in a WAL-consistent protected recovery capture; RV-03 must flag a missing
-    mirror INCOMPLETE, and must never claim a complete change listing.
+    Read each event from the committed transaction before enqueueing. Stale
+    session.info references from rolled-back transactions are ignored. The
+    background worker receives immutable bytes only and cannot mutate SQLCipher
+    or Git MAIN. Queue overflow/failure means INCOMPLETE external mirror; the
+    existing WAL-complete protected recovery capture remains authoritative.
     """
     import logging
-    from centermanager.database.encryption import DatabaseKeyStore
 
     logger = logging.getLogger(__name__)
     info = getattr(session, "info", None)
@@ -222,19 +222,24 @@ def mirror_after_successful_commit(session: Session) -> None:
     if not pending or root is None:
         return
     try:
-        from centermanager.platform.recovery_change_mirror import mirror_committed_event
-        key = DatabaseKeyStore().load()
+        from centermanager.platform.recovery_change_mirror import _payload
+        from centermanager.platform.recovery_mirror_worker import submit_committed_payload
+
         for queued_event in pending:
-            # Pending Python session.info survives SQLAlchemy rollback. Never
-            # mirror a stale event object merely because a later unrelated
-            # transaction commits on the same Session. Check the primary key
-            # against actually committed SQLCipher rows before exporting.
+            # Never mirror a rolled-back row retained in Python session.info
+            # after another transaction later commits.
             committed = session.get(RecoveryChangeEvent, queued_event.event_id)
             if committed is None:
                 continue
-            mirror_committed_event(committed, recovery_root=root, encryption_key=key)
+            if not submit_committed_payload(
+                recovery_root=root, payload=_payload(committed)
+            ):
+                logger.error(
+                    "RV-02 committed operation was not queued for mirror; "
+                    "treat this recovery mirror as INCOMPLETE"
+                )
     except Exception:
         logger.exception(
-            "RV-02 committed outbox mirror incomplete; protected SQLCipher recovery "
-            "capture remains required; do not report complete Recovery Change Log"
+            "RV-02 committed outbox handoff failed; verified SQLCipher recovery "
+            "capture is required; never treat the mirror as complete"
         )
