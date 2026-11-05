@@ -58,3 +58,39 @@ Definitions: **ATOMIC** = confirmed audit row added to the *same* database trans
 - Post-publish report generation may mutate local derived data; do not treat all derived churn as business edits; retain existing journal rules until independently audited.
 - A Python event bus or timeline emitted after commit is for UI/report notifications, not a durable recovery authority.
 - No recovered data may be published by replaying a stale lock or reusing an old publisher; new WRITE session requires fresh remote session+OID and MAIN CAS.
+
+
+## Expanded mutation inventory — pass 2 (source read on main_repos)
+
+This section resolves several OPEN items from the first pass. A service being free of AuditService imports in the inspected source is **evidence only for that service**; it does not prove that no SQL trigger, generic persistence hook or UI wrapper records a separate audit.
+
+| Domain | Verified commit path / lines | Finding | Priority for transactional recovery event |
+| --- | --- | --- | --- |
+| Finance periods | `services/finance_period_service.py:168,196` | Period creation/closure commits directly; no in-transaction AuditService call was found in inspected file. Finance period boundaries affect reporting. | P0: create/close, date coverage and inactive status |
+| Tuition adjustments | `services/tuition_adjustment_service.py:229-247,287-299` | Refund and credit adjustment paths use `AuditService.record_in_session()` before transaction commit, with idempotency key. Audit already atomic; enrich with session/op metadata rather than duplicate business event. | P0: finance operation grouping |
+| Tuition accrual | `services/tuition_accrual_service.py:1-21` | Explicit **deterministic read model**, not persisted. No independent accrual Change Log event needed; log mutations to source Enrollment/Session/Attendance/Income/Adjustment. | DERIVED / no separate write log |
+| Teacher | `services/teacher_service.py:93-138,184-279,287-331` | Create/update/archive/restore commit then dispatch EventBus. No in-transaction AuditService call found in inspected file. | P1: teacher identity and status changes |
+| Teacher assignment | `services/teacher_assignment_service.py:31-79,79-107` | Assign/unassign commits then publishes change event. No in-transaction AuditService call found in inspected file. | P1: teacher/class assignment |
+| Teaching session | `services/session_service.py:99-140,170-262,286,301-316` | Create/update/state/delete direct commits. Session is input to tuition accrual; after-commit EventBus is not durable evidence. | **P0**: completed/cancelled dates and teaching session state |
+| Employee | `services/employee_service.py:141-145,182-221,223-275,299,308-351` | Employee create/update/account link/status changes commit directly; legacy self-identity repair is a specially authorized system mutation. No transaction-bound AuditService call found in inspected service. | P1: employee/role/account link; special maintenance excluded from normal WRITE event |
+| Class timeline | `services/class_timeline_service.py:30-57` | Separate `session.commit()`, often invoked after parent ClassService commit. **Not atomic** with class mutation. | DERIVED historical UI; cannot substitute outbox |
+| Teacher timeline | `services/teacher_timeline_service.py:30-57` | Separate `session.commit()` after teacher/assignment operations. | DERIVED historical UI; cannot substitute outbox |
+| Reports | `services/report_service.py:259-284` | Report deletion may mutate report metadata (and unlink generated report files). Must classify whether specific report files/metadata are fully regenerable; not all filesystem writes equal business changes. | OPEN classification; protect source attachments |
+| Employee documents | `services/employee_document_service.py:145-194` | **Copies file to runtime before DB metadata commit** at line 181. Crash can leave orphan file. No transactional audit in inspected path. Must include both file and metadata in recovery provenance. | P0 attachment lifecycle; file-first recovery |
+| Finance vouchers | `services/finance_attachment_service.py:172-225,228-252` | SHA-named file is copied atomically before DB metadata commit; `AuditService.record_in_session` follows file storage and precedes commit; removal soft-deletes metadata, preserves file. | Existing audit ATOMIC for metadata. Need file/capture integrity, orphan detection, and file reference in event. |
+
+### Expanded risk demonstrations
+
+**Teaching-session→tuition impact:** `TuitionAccrualService` is calculated from sessions/enrollments/attendance, not persisted. Therefore a teaching session marked completed in `SessionService` may change accrued debt even if no direct tuition row is written. The log must report the **source session change**; logging only an income/tuition adjustment misses it.
+
+**File-before-DB windows:** `EmployeeDocumentService.upload()` and `FinanceAttachmentService.add_attachment()` stage a file *before* metadata commit. If DB commit fails or process crashes, the staged file can remain unreferenced. A database-only outbox is insufficient to prove that the recovered capture contains all business attachments. Record staged file SHA/reference and verify it during recovery; do not delete an apparently orphaned file until provenance is established.
+
+**Read-model distinction:** `TuitionAccrualService` should **not** emit a new financial event every time a debt number is calculated; this would create false unaccepted changes from READ. Report/cached projection writes must be treated separately from business transaction logs.
+
+### Coverage follow-up still OPEN (must resolve before RV-02 general rollout)
+
+1. Repository-wide enumeration of source files and write sites is not provided by the connector's indexed search (broad search returned empty). The inspected named files are confirmed; **additional service directories, UI direct SQL, background tasks, SQLAlchemy Core/bulk and raw DBAPI operations remain unverified**.
+2. User/role/password/permission and settings mutation ownership must be traced from actual UI/service symbols, not inferred from the `AuditService.log_user_action` helper alone.
+3. Employee, schedule, work registration and finance document lifecycle includes module-specific paths not exhaustively discovered. Audit all live EXE entry points before claiming complete coverage.
+4. Some existing `AuditLog.details` include free-form input; external mirror must not dump these fields.
+5. Logging every SQLAlchemy flush/commit indiscriminately may include maintenance and derived/report operations and would be misleading. Require domain annotations at business operation boundaries.
