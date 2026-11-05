@@ -39,3 +39,24 @@ Production case metadata is authenticated using the existing protected SQLCipher
 Included synthetic tests: unique case per incident, restart persistence, missing/tampered capture, case HMAC tampering, distinction of verified/unknown publish, fail-closed startup on case-disk failure and retry without duplicates.
 
 Outstanding: latest Windows CI on PR #600; real encrypted SQLCipher/WAL Git A→A+10 two-machine test; interrupted-install process kill; stale writer/publisher fencing; old EXE missing outbox; attachments and Windows DPAPI access; packaging/UX UAT. Do not merge PR #600 or close #595 before those gates pass.
+
+## Phase 2 — durable case lifecycle hardening
+
+The registry now persists a case anchor in the existing recovery journal as `rv03_case_id`, **after** an authenticated case file has been fsynced. A crash between case persistence and journal pinning is recoverable: a subsequent RECONCILED startup verifies the same capture, finds the immutable case and pins it without creating another. During later normal CLEAN startups with an RV-03 pin, the preflight authenticates the case and revalidates its original captured DB fingerprint. A missing, tampered, or missing-key case blocks startup; legacy CLEAN journals without a pin use the original fast path. There is no auto-acknowledgement.
+
+All case creation retains `change_log_coverage=UNKNOWN` and distinguishable `publication=VERIFIED|UNVERIFIED`. A verified publication is not a claim that all later local mutations reached MAIN.
+
+## Phase 3 — safe MAIN A→A+10 integration coverage
+
+Added an isolated encrypted SQLCipher + actual local Git remote test in `test_e1b1_durable_write_recovery.py`:
+- Client A begins editing from base commit A and commits `LOCAL_UNACCEPTED` to its encrypted runtime.
+- A separate repository clone pushes ten legitimate remote commits without the local edit; MAIN advances to A+10.
+- Startup fetches independently observed A+10, reconciles the local workspace, verifies WAL-complete encrypted snapshot and persists PENDING_REVIEW case **before** resetting Git and installing MAIN.
+- Assert the new runtime matches MAIN (BASE only), the exact old capture still contains LOCAL_UNACCEPTED, and no local edit was published/merged.
+- Re-run startup; assert the case is still PENDING_REVIEW and no duplicate case appears.
+
+Additional regression: when remote MAIN changes after a previous RECONCILED capture approved another OID, **fail closed rather than installing a newer OID using stale proof**. Existing startup rollback/replay and E1B guards are reused unchanged.
+
+## Deferred gates
+
+Synthetic and isolated Git/SQLCipher integration tests are not packaged EXE UAT. Before production merge, still require 2-machine stale WRITE owner and old EXE testing, Windows process-kill during recovery/atomic install, DPAPI same-user recovery and inaccessible-key behavior, large attachments verification, and final code review. The remote lock TTL/grace, MAIN CAS and force-release behavior must remain unchanged.
