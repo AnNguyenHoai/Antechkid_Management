@@ -5,6 +5,7 @@ import os
 import hashlib
 import logging
 from sqlalchemy.orm import sessionmaker
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.employee_document import EmployeeDocument
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 
@@ -178,7 +179,13 @@ class EmployeeDocumentService:
                 notes=notes,
             )
             repo.add(d)
+            record_for_active_write(
+                s, module="attachment", action="UPLOAD",
+                entity_type="EmployeeDocument", entity_id=d.id,
+                entity_object=d, summary_args={"employee_id": d.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             repo.refresh(d)
 
         logger.info(
