@@ -83,7 +83,11 @@ def test_new_recovery_hooks_surround_business_commit(filename, methods):
         assert len(records) == len(commits) == len(mirrors) == 1, (
             filename, name, len(records), len(commits), len(mirrors)
         )
-        assert records[0].lineno < commits[0].lineno < mirrors[0].lineno
+        # Compact service methods may put successive statements on one line:
+        # `record(...); session.commit(); mirror(...)`. Compare exact AST
+        # source coordinates, not only .lineno, and retain strict ordering.
+        order = lambda call: (call.lineno, call.col_offset)
+        assert order(records[0]) < order(commits[0]) < order(mirrors[0])
         event_call = records[0]
         kwargs = {kw.arg: kw.value for kw in event_call.keywords}
         assert "entity_id" in kwargs
