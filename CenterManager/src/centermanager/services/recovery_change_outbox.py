@@ -116,3 +116,80 @@ def read_session_events(session: Session, write_session_id: str) -> list[Recover
         .order_by(RecoveryChangeEvent.occurred_at_utc, RecoveryChangeEvent.event_id)
         .all()
     )
+
+
+def record_for_active_write(
+    session: Session,
+    *,
+    module: str,
+    action: str,
+    entity_type: str,
+    entity_id: str | int | None,
+    summary_args: Mapping[str, object] | None = None,
+    operation_id: str | None = None,
+) -> RecoveryChangeEvent | None:
+    """Production adapter: only a real protected WRITE runtime creates outbox data.
+
+    Synthetic/unprotected test engines remain unchanged. This is *not* an
+    authorization bypass; SQLCipher MutationAuthorityGate still controls all
+    DML and commits. An active OPEN journal is required on protected runtime.
+    """
+    bind = session.get_bind()
+    if not bool(getattr(bind, "_cm_mutation_protected", False)):
+        return None
+
+    from centermanager.platform.write_recovery import WriteRecoveryJournal
+    from centermanager.core.current_user import get_current_user
+    journal = WriteRecoveryJournal()
+    doc = journal.inspect()
+    if (not doc or doc.get("status") != "OPEN"
+            or doc.get("mutation_authority_lost")
+            or not doc.get("session_id") or not doc.get("base_main_oid")):
+        raise RecoveryOutboxError("Verified OPEN WRITE recovery context is required")
+    actor = get_current_user()
+    event = record_in_session(
+        session,
+        write_session_id=str(doc["session_id"]),
+        base_main_oid=str(doc["base_main_oid"]),
+        actor_id=getattr(actor, "id", None),
+        module=module,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        summary_args=summary_args,
+        operation_id=operation_id,
+    )
+    session.info.setdefault("_rv02_after_commit_events", []).append(event)
+    session.info["_rv02_recovery_root"] = journal.root
+    return event
+
+
+def mirror_after_successful_commit(session: Session) -> None:
+    """Best-effort external mirror AFTER a proven caller-owned commit.
+
+    Never change a successful user transaction into a failed result because
+    a local mirror is unavailable. The unmirrored committed outbox rows remain
+    in a WAL-consistent protected recovery capture; RV-03 must flag a missing
+    mirror INCOMPLETE, and must never claim a complete change listing.
+    """
+    import logging
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    logger = logging.getLogger(__name__)
+    pending = session.info.pop("_rv02_after_commit_events", [])
+    root = session.info.pop("_rv02_recovery_root", None)
+    if not pending or root is None:
+        return
+    try:
+        from centermanager.platform.recovery_change_mirror import mirror_committed_event
+        key = DatabaseKeyStore().load()
+        for event in pending:
+            # SQLAlchemy expires attributes after commit by default. Reload
+            # committed row via SELECT; do not issue another SQLCipher write.
+            session.refresh(event)
+            mirror_committed_event(event, recovery_root=root, encryption_key=key)
+    except Exception:
+        logger.exception(
+            "RV-02 committed outbox mirror incomplete; protected SQLCipher recovery "
+            "capture remains required; do not report complete Recovery Change Log"
+        )
