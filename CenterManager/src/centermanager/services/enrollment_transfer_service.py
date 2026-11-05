@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
@@ -355,7 +356,13 @@ class EnrollmentTransferService:
                     },
                     summary=f"Enrollment transfer from {source.class_name} to {target_class.name}",
                 )
+                record_for_active_write(
+                    session, module="enrollment", action="TRANSFER",
+                    entity_type="EnrollmentTransfer", entity_id=transfer.id, entity_object=transfer,
+                    summary_args={"transfer_id": transfer.id, "source_enrollment_id": source.id},
+                )
                 session.commit()
+                mirror_after_successful_commit(session)
                 transfer_repo.refresh(transfer)
                 return transfer
         except _TransferPersistenceConflict:
