@@ -199,7 +199,12 @@ def test_failed_external_mirror_does_not_rollback_committed_user_data(engine, tm
         assert len(read_session_events(session, "unit-session")) == 1
 
 
-def test_missing_write_journal_fails_closed_on_protected_runtime(engine, tmp_path, monkeypatch):
+def test_missing_write_journal_emits_no_event_and_preserves_authority_boundary(engine, tmp_path, monkeypatch):
+    """Ancillary outbox must not mask the existing SQLCipher mutation gate.
+
+    These tests use an unguarded synthetic DB; real READ/stale authority denial
+    remains covered by E1B-2B mutation-gate integration tests.
+    """
     from centermanager.services import recovery_change_outbox as recorder
     from centermanager.platform import write_recovery
 
@@ -212,12 +217,13 @@ def test_missing_write_journal_fails_closed_on_protected_runtime(engine, tmp_pat
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
     engine._cm_runtime_owned = True
     with Session(engine) as session:
-        with pytest.raises(RecoveryOutboxError):
-            recorder.record_for_active_write(
-                session, module="student", action="UPDATE",
-                entity_type="Student", entity_id=2,
-            )
-        session.rollback()
+        assert recorder.record_for_active_write(
+            session, module="student", action="UPDATE",
+            entity_type="Student", entity_id=2,
+        ) is None
+        session.commit()
+    with Session(engine) as session:
+        assert read_session_events(session, "unit-session") == []
 
 
 def test_signed_publication_receipt_requires_verified_main(tmp_path):
