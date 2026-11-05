@@ -128,7 +128,7 @@ class EmployeeWorkRegistrationService:
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,ws);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED:raise EmployeeWorkRegistrationValidationError("Only accepted registrations can be reopened.")
-            r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;self._audit(s,self.AUDIT_REOPENED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);record_for_active_write(s, module="work_registration", action="REOPEN", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);return r
+            r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;self._audit(s,self.AUDIT_REOPENED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);record_for_active_write(s, module="work_registration", action="REOPEN", entity_type="EmployeeWorkRegistration", entity_id=getattr(r, "id", None), entity_object=r, summary_args={"employee_id": eid});s.commit();mirror_after_successful_commit(s);return r
     def set_submission_deadline(self,week_start,deadline:Optional[date],user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);ws,end=self._week_range(week_start)
         if deadline is not None and not(ws<=deadline<=end):raise EmployeeWorkRegistrationValidationError("Submission deadline must be inside the registration week.")
