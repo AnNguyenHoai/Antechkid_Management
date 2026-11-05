@@ -356,3 +356,43 @@ def test_admin_reset_cannot_delete_recovery_outbox_history():
     assert "recovery_change_outbox" in Base.metadata.tables
     assert "recovery_change_outbox" in AdminDataResetRepository.PROTECTED_TABLES
     assert "recovery_change_outbox" not in AdminDataResetRepository.BUSINESS_TABLES
+
+
+def test_rolled_back_session_info_does_not_fabricate_mirror_after_later_commit(
+    engine, tmp_path, monkeypatch
+):
+    from centermanager.services import recovery_change_outbox as recorder
+    from centermanager.platform import write_recovery
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    class SyntheticJournal:
+        root = tmp_path
+
+        def inspect(self):
+            return {
+                "status": "OPEN", "session_id": "unit-session",
+                "base_main_oid": BASE, "mutation_authority_lost": False,
+            }
+
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
+    monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: KEY)
+    engine._cm_runtime_owned = True
+    with Session(engine) as session:
+        rolled_back = recorder.record_for_active_write(
+            session, module="student", action="CREATE",
+            entity_type="Student", entity_id=61, summary_args={"student_id": 61},
+        )
+        session.rollback()  # session.info still retains the Python reference
+        accepted = recorder.record_for_active_write(
+            session, module="student", action="CREATE",
+            entity_type="Student", entity_id=62, summary_args={"student_id": 62},
+        )
+        session.commit()
+        recorder.mirror_after_successful_commit(session)
+    files = list(tmp_path.rglob("*.enc"))
+    assert len(files) == 1
+    assert files[0].stem == accepted.event_id
+    assert files[0].stem != rolled_back.event_id
+    with Session(engine) as session:
+        events = read_session_events(session, "unit-session")
+        assert [event.entity_id for event in events] == ["62"]
