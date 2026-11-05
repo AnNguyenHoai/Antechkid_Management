@@ -218,3 +218,46 @@ def test_missing_write_journal_fails_closed_on_protected_runtime(engine, tmp_pat
                 entity_type="Student", entity_id=2,
             )
         session.rollback()
+
+
+def test_signed_publication_receipt_requires_verified_main(tmp_path):
+    from centermanager.platform.recovery_publication_receipt import (
+        InvalidPublicationReceipt, read_verified_receipt, record_verified_publication,
+    )
+    document = {
+        "status": "PUBLISHED", "publication": "VERIFIED",
+        "session_id": "synthetic-session", "base_main_oid": "a" * 40,
+        "published_oid": "b" * 40,
+    }
+    path = record_verified_publication(document, recovery_root=tmp_path, signing_key=KEY)
+    receipt = read_verified_receipt(path, signing_key=KEY)
+    assert receipt["base_main_oid"] == "a" * 40
+    assert receipt["published_oid"] == "b" * 40
+    assert record_verified_publication(document, recovery_root=tmp_path, signing_key=KEY) == path
+    with pytest.raises(InvalidPublicationReceipt):
+        record_verified_publication(
+            {**document, "publication": "UNVERIFIED"}, recovery_root=tmp_path, signing_key=KEY
+        )
+    with pytest.raises(InvalidPublicationReceipt):
+        record_verified_publication(
+            {**document, "published_oid": "c" * 40}, recovery_root=tmp_path, signing_key=KEY
+        )
+    with pytest.raises(InvalidPublicationReceipt):
+        read_verified_receipt(path, signing_key=bytes(reversed(KEY)))
+
+
+def test_signed_receipt_detects_tampering(tmp_path):
+    from centermanager.platform.recovery_publication_receipt import (
+        InvalidPublicationReceipt, read_verified_receipt, record_verified_publication,
+    )
+    document = {
+        "status": "PUBLISHED", "publication": "VERIFIED",
+        "session_id": "unit-session", "base_main_oid": "a" * 40,
+        "published_oid": "b" * 40,
+    }
+    path = record_verified_publication(document, recovery_root=tmp_path, signing_key=KEY)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["published_oid"] = "c" * 40
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(InvalidPublicationReceipt):
+        read_verified_receipt(path, signing_key=KEY)
