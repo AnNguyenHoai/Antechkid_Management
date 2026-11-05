@@ -63,3 +63,36 @@ No client from an old session may run a previous publisher or write into a newly
 10. Legacy EXE/schema, two-machine lock/publish fencing and killed-process/WAL Windows UAT before deployment.
 
 **Approval gate:** RV-01 is a design/audit issue. RV-02 must resolve all OPEN inventory rows with code references before calling its logging complete; do not infer that this targeted repository audit exhaustively traced every write path.
+
+## 7. Design refinements after expanded source audit
+
+**Do not treat all activity as SQLCipher business transactions.** `TuitionAccrualService` is a deterministic READ model; the sources that change accrual include `SessionService` (completion/state/date), `AttendanceService`, Enrollment contract/freeze, and finance adjustments. The recovery report should show these **source commands** rather than generating an event each time a report is recalculated. Similarly `ReportService` deletion writes are a separate projection/artifact safety question.
+
+**Attachments need two-phase provenance rather than a fake single atomic boundary.** `FinanceAttachmentService._store_file` and `EmployeeDocumentService.upload` copy files before committing metadata. SQLCipher outbox is atomic with metadata only, not filesystem bytes. Design a staged-file ledger (temporary reference, expected SHA256, final path, operation ID) with fsync/atomic rename and cleanup rules: orphan files are preserved during uncertain recovery; missing files referenced by a committed metadata row are explicitly flagged. Recovery capture should include or durably reference the complete file set before runtime replacement. Finance voucher SHA naming helps idempotence but does not guarantee metadata and file atomicity.
+
+**Session / finance-period logging is P0, not cosmetic.** A completed teaching session can change outstanding tuition through the accrual read model without any new cash transaction. Finance-period activation/closure changes reporting context. RV-02 must include these sources before declaring the finance Change Log useful to the founder.
+
+**Privilege-based visibility:** Users with permission to view Recovery summary must see only domain events their ordinary role could see; student/finance details may require stricter privileges. A Recovery Case's existence can be shown without exposing private details; the local administrator can inspect a full protected report. No password or authentication secret may be echoed into mirrored log.
+
+**No outbox in READ:** Report refresh and derived projections in READ must not record business event, and auth/login activity should use a separate security audit channel if needed. Explicit system maintenance (migration/bootstrap) uses system mutation permit and should record a technical provenance event, not impersonate an employee WRITE transaction.
+
+## 8. RV-02 targeted implementation matrix and acceptance thresholds
+
+| Rollout slice | Included paths | Mandatory test |
+| --- | --- | --- |
+| 0: migration + durable primitive | SQLCipher outbox schema/repo + mirror worker + publication receipt | Commit/rollback pairing, WAL kill process, replay proof, legacy schema compatibility |
+| 1: finance | Income, Expense, TuitionAdjustment, FinanceAttachment, FinancePeriod | No duplicate finance re-entry; credit+cash same operation; receipt verified with Git MAIN |
+| 2: core academic | Student, Enrollment, Attendance, Class, SessionService | Same transaction outbox for state/date changes; grouped session attendance; class archive withdraws |
+| 3: personnel + attachments | Teacher, TeacherAssignment, Employee, EmployeeDocument, student profile documents | File/DB crash ordering, orphan preservation, redaction, actor capability |
+| 4: remaining repository-wide paths | users/roles/settings, background tasks, SQLAlchemy bulk/raw DBAPI and all GUI entry points | Enumerated call-site manifest and explicit unsupported-path CI failures or bounded coverage declaration |
+| 5: release | RV-03/RV-04/RV-05 integration | Startup A+10, Skip/Reviewed, fresh WRITE, EXE two-machine crash/UAT |
+
+No slice should claim end-to-end completeness until slice 4 (or accepted explicit exclusions) is verified. Documentation and targeted source review on this PR do **not** constitute an exhaustive repository scan.
+
+### Risk acceptance gates for founder
+
+- **Data priority:** no automatic merge; manual re-entry allowed, but the user must see a warning that events are potentially unaccepted, not proven absent from MAIN.
+- **Safety priority:** if backup cannot be verified, the app cannot discard it for convenience; non-blocking startup applies only after safe isolation.
+- **Operational priority:** do not make every Save wait for Git or remote checks; write local transactional event and mirror asynchronously with a safe final fence.
+- **Compatibility:** do not deploy a schema-changing outbox until older Windows EXEs' behavior has been tested; older sessions must not be permitted to publish incompatible authoritative databases.
+- **Exit criterion for RV-01:** founder approves this design and the coverage-gap inventory as the input plan for RV-02; RV-02 must prove remaining OPEN paths before promoting logging as complete. GitHub issue #593 should not auto-close from a partial implementation PR.
