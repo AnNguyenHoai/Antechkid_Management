@@ -119,3 +119,39 @@ def decrypt_mirrored_event(path: Path, *, encryption_key: bytes) -> dict:
     if len(encrypted) < 29:
         raise ValueError("Truncated recovery event")
     return json.loads(AESGCM(encryption_key).decrypt(encrypted[:12], encrypted[12:], _AAD))
+
+
+def assess_mirror_coverage(
+    events: list[RecoveryChangeEvent],
+    *,
+    recovery_root: Path,
+    encryption_key: bytes,
+    committed_source_attested: bool,
+) -> dict:
+    """Compare encrypted mirror with a *complete, attested* committed outbox view.
+
+    Returns UNKNOWN unless caller proves that the supplied event list covers a
+    trusted SQLCipher session snapshot. RV-03 must verify backup integrity and
+    its session ID before setting committed_source_attested=True. A missing or
+    corrupt segment cannot be reported as a complete Recovery Change Log.
+    """
+    if not committed_source_attested:
+        return {"status": "UNKNOWN", "expected": len(events), "verified": 0}
+    verified = 0
+    for event in events:
+        try:
+            if not _SESSION_PATTERN.fullmatch(event.write_session_id or ""):
+                return {"status": "INCOMPLETE", "expected": len(events), "verified": verified}
+            expected = (
+                Path(recovery_root) / "rv02-committed-events"
+                / event.write_session_id / (str(uuid.UUID(event.event_id)) + ".enc")
+            )
+            payload = decrypt_mirrored_event(expected, encryption_key=encryption_key)
+            if payload != json.loads(_payload(event)):
+                return {"status": "INCOMPLETE", "expected": len(events), "verified": verified}
+            verified += 1
+        except (OSError, ValueError, TypeError, KeyError):
+            return {"status": "INCOMPLETE", "expected": len(events), "verified": verified}
+        except Exception:
+            return {"status": "INCOMPLETE", "expected": len(events), "verified": verified}
+    return {"status": "COMPLETE", "expected": len(events), "verified": verified}
