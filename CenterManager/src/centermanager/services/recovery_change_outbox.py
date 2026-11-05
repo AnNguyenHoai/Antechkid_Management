@@ -136,7 +136,7 @@ def record_for_active_write(
     DML and commits. An active OPEN journal is required on protected runtime.
     """
     bind = session.get_bind()
-    if not bool(getattr(bind, "_cm_mutation_protected", False)):
+    if not bool(getattr(bind, "_cm_runtime_owned", False)):
         return None
 
     from centermanager.platform.write_recovery import WriteRecoveryJournal
