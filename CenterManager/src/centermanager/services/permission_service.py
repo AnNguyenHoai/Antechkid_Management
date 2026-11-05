@@ -12,6 +12,7 @@ import string
 from datetime import datetime
 from typing import Optional, List, Set, Callable, Any
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.capabilities import Capability
 from centermanager.models.user import User
 from centermanager.models.role import Role, RoleDefinitions
@@ -172,7 +173,12 @@ class PermissionService:
                 raise ValueError(f"Role '{name}' already exists.")
             role = Role(name=name, display_name=display_name, description=description, is_system=False)
             role.permissions = self._resolve_permissions(session, permission_names)
-            repo.add(role); session.commit(); repo.refresh(role)
+            record_for_active_write(
+                session, module="security", action="CREATE_ROLE",
+                entity_type="Role", entity_id=role.id, entity_object=role,
+                summary_args={"role_id": role.id},
+            )
+            repo.add(role); session.commit(); mirror_after_successful_commit(session); repo.refresh(role)
             logger.info("Custom role created: %s", name)
             self._audit("ROLE_CREATED", role, {"permissions": sorted(permission_names)})
             return role
@@ -194,7 +200,12 @@ class PermissionService:
                     raise RoleLifecycleError("Permissions of protected system roles cannot be changed.")
             else:
                 role.permissions = self._resolve_permissions(session, permission_names)
-            session.commit(); repo.refresh(role)
+            record_for_active_write(
+                session, module="security", action="UPDATE_ROLE",
+                entity_type="Role", entity_id=role.id, entity_object=role,
+                summary_args={"role_id": role.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); repo.refresh(role)
             logger.info("Role updated: %s", role.name)
             self._audit("ROLE_UPDATED", role, {"permissions": sorted(permission_names)})
             return role
@@ -210,7 +221,12 @@ class PermissionService:
             if repo.count_users(role_id) > 0:
                 raise RoleLifecycleError("A role assigned to users cannot be deleted. Reassign its users first.")
             role_name = role.name; target_role_id = role.id
-            repo.delete(role); session.commit()
+            record_for_active_write(
+                session, module="security", action="DELETE_ROLE",
+                entity_type="Role", entity_id=role.id, entity_object=role,
+                summary_args={"role_id": role.id},
+            )
+            repo.delete(role); session.commit(); mirror_after_successful_commit(session)
             self._audit("ROLE_DELETED", None, {"role_id": target_role_id, "role": role_name})
             logger.info("Custom role deleted: %s", role_name)
 
@@ -364,7 +380,12 @@ class PermissionService:
             user = User(username=username, password_hash=password_hash, full_name=full_name,
                         email=email, role_id=role.id, is_active=True)
             repo.add(user)
-            session.commit(); repo.refresh(user)
+            record_for_active_write(
+                session, module="security", action="CREATE_USER",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); repo.refresh(user)
             self._audit("USER_CREATED", user, {"role": role_name})
             return user
 
@@ -382,8 +403,13 @@ class PermissionService:
                 self._ensure_not_current_user(user_id, "remove administrator access from")
                 self._ensure_not_last_admin(session, user, "remove administrator access from")
             user.role_id = role.id
-            session.commit(); user_repo.refresh(user)
-            self._audit("USER_UNLOCKED", user)
+            record_for_active_write(
+                session, module="security", action="CHANGE_ROLE",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); user_repo.refresh(user)
+            self._audit("USER_ROLE_CHANGED", user)
             return user
 
     def delete_user(self, user_id: int) -> None:
@@ -401,7 +427,12 @@ class PermissionService:
                     f"{linked_employee.employee_code}. Deactivate the account instead of deleting it."
                 )
             repo.delete(user)
-            session.commit()
+            record_for_active_write(
+                session, module="security", action="DELETE_USER",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session)
 
     def set_user_active(self, user_id: int, active: bool) -> User:
         with self._session_factory() as session:
@@ -413,7 +444,12 @@ class PermissionService:
                 self._ensure_not_current_user(user_id, "deactivate")
                 self._ensure_not_last_admin(session, user, "deactivate")
             user.is_active = active
-            session.commit(); user_repo.refresh(user)
+            record_for_active_write(
+                session, module="security", action="SET_ACTIVE",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); user_repo.refresh(user)
             logger.info("User account status changed: user_id=%s active=%s", user_id, active)
             self._audit("USER_ACTIVATED" if active else "USER_DEACTIVATED", user)
             return user
@@ -460,7 +496,12 @@ class PermissionService:
                 )
                 employee_repo.add(employee)
 
-            session.commit()
+            record_for_active_write(
+                session, module="security", action="CREATE_WITH_EMPLOYEE",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session)
             user_repo.refresh(user)
             if employee is not None:
                 employee_repo.refresh(employee)
@@ -490,7 +531,12 @@ class PermissionService:
             user.force_password_change = True
             user.login_attempts = 0
             user.locked_until = None
-            session.commit()
+            record_for_active_write(
+                session, module="security", action="RESET_PASSWORD",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session)
             logger.info("Password reset for user_id=%s", user_id)
             self._audit("USER_PASSWORD_RESET", user)
             return temp_password
@@ -520,7 +566,12 @@ class PermissionService:
                     self._ensure_not_last_admin(session, user, "remove administrator access from")
                 user.role_id = role.id
 
-            session.commit(); user_repo.refresh(user)
+            record_for_active_write(
+                session, module="security", action="UPDATE_USER",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); user_repo.refresh(user)
             self._audit("USER_UPDATED", user)
             return user
 
@@ -532,5 +583,10 @@ class PermissionService:
                 raise UserNotFoundError(f"User {user_id} not found.")
             user.login_attempts = 0
             user.locked_until = None
-            session.commit(); user_repo.refresh(user)
+            record_for_active_write(
+                session, module="security", action="UNLOCK_USER",
+                entity_type="User", entity_id=user.id, entity_object=user,
+                summary_args={"user_id": user.id},
+            )
+            session.commit(); mirror_after_successful_commit(session); user_repo.refresh(user)
             return user
