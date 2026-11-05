@@ -237,11 +237,9 @@ class ClassService:
                     fee=class_obj.fee,
                     source="CLASS_CREATE",
                 )
-            if class_obj.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="class", action="CREATE",
-                entity_type="Class", entity_id=class_obj.id,
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
                 summary_args={"class_id": class_obj.id},
             )
             session.commit()
@@ -500,11 +498,9 @@ class ClassService:
                     source="CLASS_FEE_CHANGE",
                 )
 
-            if class_obj.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="class", action="UPDATE",
-                entity_type="Class", entity_id=class_obj.id,
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
                 summary_args={"class_id": class_obj.id},
             )
             session.commit()
@@ -643,11 +639,9 @@ class ClassService:
                 enrollment.status = "WITHDRAWN"
                 enrollment.end_date = withdrawal_date
             class_obj.deleted_at = self._utc_now()
-            if class_obj.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="class", action="ARCHIVE",
-                entity_type="Class", entity_id=class_obj.id,
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
                 summary_args={"class_id": class_obj.id, "changed_count": len(active_enrollments)},
             )
             session.commit()
@@ -680,11 +674,9 @@ class ClassService:
             if class_obj.deleted_at is None:
                 raise ClassNotDeletedError(f"Class {class_id} is not archived.")
             class_obj.deleted_at = None
-            if class_obj.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="class", action="RESTORE",
-                entity_type="Class", entity_id=class_obj.id,
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
                 summary_args={"class_id": class_obj.id},
             )
             session.commit()
