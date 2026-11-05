@@ -87,3 +87,39 @@ def test_nested_trace_preserves_parent_operation(caplog):
     assert len(summaries) == 1
     assert "op=start" in summaries[0]
     assert "push:1/10.0" in summaries[0]
+
+
+def test_method_phase_decorator_keeps_call_signature_and_result(caplog):
+    from centermanager.platform.write_performance import traced_phase
+
+    class LockManager:
+        @traced_phase("release_lock")
+        def release(self, *, outcome=False):
+            return outcome
+
+    @trace_operation("finish")
+    def finish():
+        manager = LockManager()
+        assert manager.release(outcome=True) is True
+        assert manager.release(outcome=False) is False
+        return True
+
+    with caplog.at_level(logging.INFO, logger="centermanager.platform.write_performance"):
+        assert finish() is True
+    summaries = [
+        rec.getMessage() for rec in caplog.records
+        if "PERF write_trace op=finish" in rec.getMessage()
+    ]
+    assert len(summaries) == 1
+    assert "release_lock:" in summaries[0]
+
+
+def test_snapshot_cleanup_contract_preserves_direct_release_check():
+    from pathlib import Path
+    import inspect
+    from centermanager.services.write_transaction import WriteTransactionManager
+
+    source = inspect.getsource(WriteTransactionManager._publish)
+    success = source[source.index("if success:"):source.index("else:")]
+    assert "if not self._release_lock():" in success
+    assert success.index("self._delete_snapshot()") > success.index("self._release_lock()")
