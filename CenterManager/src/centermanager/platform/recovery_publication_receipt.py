@@ -58,7 +58,7 @@ def record_verified_publication(document: dict, *, recovery_root: Path, signing_
     oid = document.get("published_oid", "")
     if (document.get("status") != "PUBLISHED"
             or document.get("publication") != "VERIFIED"
-            or not _SESSION.fullmatch(sid)
+            or sid in {".", ".."} or not _SESSION.fullmatch(sid)
             or not _SHA.fullmatch(base) or not _SHA.fullmatch(oid)):
         raise InvalidPublicationReceipt("A verified PUBLISHED journal receipt is required")
     directory = Path(recovery_root) / "rv02-published-main"
