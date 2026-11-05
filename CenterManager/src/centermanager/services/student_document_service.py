@@ -97,8 +97,8 @@ class StudentDocumentService:
             if doc is None:
                 raise ValueError(f"Document with id {document_id} not found.")
             file_path = get_paths().attachment_dir / doc.file_path
-            if file_path.exists():
-                file_path.unlink()
+            # DB commit first: a failed commit must not leave a document row
+            # pointing to a prematurely deleted physical attachment.
             repo.delete(doc)
             record_for_active_write(
                 session, module="attachment", action="DELETE",
@@ -107,3 +107,15 @@ class StudentDocumentService:
             )
             session.commit()
             mirror_after_successful_commit(session)
+
+        # Filesystem cleanup is best effort after the SQLCipher transaction.
+        # Retained orphan bytes are safer than a committed reference to a
+        # missing attachment; Recovery provenance can reconcile orphans.
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Student document metadata deleted but file cleanup failed "
+                "(document_id=%s)", document_id
+            )
