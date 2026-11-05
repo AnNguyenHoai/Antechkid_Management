@@ -396,6 +396,9 @@ def create_engine_for_path(
     engine = create_engine("sqlite://", echo=echo, creator=connect_database, poolclass=NullPool)
     from centermanager.database.mutation_authority import is_runtime_path
     engine._cm_mutation_protected = protect_mutations
+    # Distinguish the live runtime from isolated mutation-guarded test/repair DBs.
+    # Only the real runtime attaches session-scoped recovery business outbox rows.
+    engine._cm_runtime_owned = runtime_owned
     if mutation_guarded and not is_runtime_path(db_path):
         engine._cm_login_key = encryption_key
     if engine._cm_mutation_protected:
