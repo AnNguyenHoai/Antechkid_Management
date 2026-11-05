@@ -135,3 +135,93 @@ def test_startup_preflight_enforces_case_before_reset():
     pos_case = max(n for fn, n in calls if fn == "cases.register_from_reconciled")
     assert pos_reconcile < pos_case
     assert "reset_to_remote" not in ast.unparse(target)
+
+
+def test_startup_refuses_to_replace_when_case_persistence_fails(monkeypatch, tmp_path):
+    """A verified local capture without durable case must BLOCK MAIN installation."""
+    from types import SimpleNamespace
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    j = FakeJournal(tmp_path, status="OPEN")
+    j.document["status"] = "OPEN"
+
+    def denied_until_reconciled(*, legacy=False):
+        if j.document["status"] != "RECONCILED":
+            raise RecoveryRequired("local unaccepted changes")
+        return None
+
+    def reconcile(*, base_oid, accepted_main, observe_main):
+        assert base_oid == BASE and accepted_main == MAIN
+        assert observe_main() == MAIN
+        j.document["status"] = "RECONCILED"
+
+    j.assert_replaceable = denied_until_reconciled
+    j.reconcile = reconcile
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
+    monkeypatch.setattr(mutation_authority, "gate_for",
+                        lambda: SimpleNamespace(lock=RLock(), closed=True))
+
+    original_register = RecoveryCaseRegistry.register_from_reconciled
+
+    def disk_error(*args, **kwargs):
+        raise OSError("synthetic recovery case disk unavailable")
+
+    monkeypatch.setattr(RecoveryCaseRegistry, "register_from_reconciled", disk_error)
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: MAIN,
+        get_local_main_commit=lambda: BASE,
+    )
+    startup = startup_sync.StartupSynchronization(provider)
+    assert startup._prepare_authoritative_startup_replacement() is False
+    assert j.document["status"] == "RECONCILED"
+    assert startup._startup_reconciled_unaccepted_local is False
+
+    # Even though journal.reconcile already succeeded, a retry must not
+    # silently bypass a missing case when journal.status is RECONCILED.
+    assert startup._prepare_authoritative_startup_replacement() is False
+    monkeypatch.setattr(RecoveryCaseRegistry, "register_from_reconciled", original_register)
+
+
+def test_startup_creates_recovery_case_and_reuses_it_after_interruption(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    j = FakeJournal(tmp_path, status="OPEN")
+    j.document["status"] = "OPEN"
+    j.assert_replaceable = lambda *, legacy=False: (
+        None if j.document["status"] == "RECONCILED"
+        else (_ for _ in ()).throw(RecoveryRequired("unaccepted"))
+    )
+
+    def reconcile(*, base_oid, accepted_main, observe_main):
+        assert observe_main() == MAIN
+        j.document["status"] = "RECONCILED"
+
+    j.reconcile = reconcile
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
+    monkeypatch.setattr(mutation_authority, "gate_for",
+                        lambda: SimpleNamespace(lock=RLock(), closed=True))
+    monkeypatch.setattr(RecoveryCaseRegistry, "_key", lambda self: bytes(range(32)))
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: MAIN,
+        get_local_main_commit=lambda: BASE,
+    )
+
+    startup = startup_sync.StartupSynchronization(provider)
+    assert startup._prepare_authoritative_startup_replacement()
+    assert j.document["status"] == "RECONCILED"
+    assert len(RecoveryCaseRegistry(j).list_cases()) == 1
+
+    # Simulate a crash after the case is durable but before Git reset; the
+    # next process must recognize the existing case, not duplicate or erase.
+    rebooted = startup_sync.StartupSynchronization(provider)
+    assert rebooted._prepare_authoritative_startup_replacement()
+    assert len(RecoveryCaseRegistry(j).list_cases()) == 1
