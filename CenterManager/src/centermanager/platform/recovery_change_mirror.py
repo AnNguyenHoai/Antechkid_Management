@@ -63,7 +63,7 @@ def mirror_committed_event(
     if not isinstance(encryption_key, bytes) or len(encryption_key) not in (16, 24, 32):
         raise ValueError("Valid AES-GCM workspace key is required")
     session_id = event.write_session_id
-    if not _SESSION_PATTERN.fullmatch(session_id or ""):
+    if session_id in {".", ".."} or not _SESSION_PATTERN.fullmatch(session_id or ""):
         raise ValueError("Invalid session identifier for recovery mirror")
     try:
         event_id = str(uuid.UUID(event.event_id))
@@ -140,7 +140,7 @@ def assess_mirror_coverage(
     verified = 0
     for event in events:
         try:
-            if not _SESSION_PATTERN.fullmatch(event.write_session_id or ""):
+            if event.write_session_id in {".", ".."} or not _SESSION_PATTERN.fullmatch(event.write_session_id or ""):
                 return {"status": "INCOMPLETE", "expected": len(events), "verified": verified}
             expected = (
                 Path(recovery_root) / "rv02-committed-events"
