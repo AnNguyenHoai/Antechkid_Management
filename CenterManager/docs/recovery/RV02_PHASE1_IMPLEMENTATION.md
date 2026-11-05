@@ -115,3 +115,17 @@ Audit found a real cross-session reporting defect: the asynchronous mirror worke
 **Not covered by these synthetic tests:** Windows EXE schema handoff from an older published MAIN, 2-client old EXE write fencing, real SQLCipher physical WAL checkpoint under process kill, attachments staging, and actual startup/Save P95. Those remain mandatory release gates.
 
 **CI gate:** latest PR #599 head must be verified with all three Windows shards PASS; a prior PASS on `5a9bf566` does not validate this new worker version.
+
+
+## Verified Windows component latency evidence
+
+In previously completed Windows runner workflow [#42006247444](https://github.com/AnNguyenHoai/Antechkid_Management/actions/runs/42006247444), the **microbenchmark step passed**, even though that workflow's overall shard 0 pytest failed an unrelated mocked employee-registration test (later fixed in subsequent PASS run). With 50 synthetic AES-GCM mirror events:
+
+| Metric | Median | P95 |
+| --- | ---: | ---: |
+| Synchronous per-event mirror (crypto, new file, fsync) | 5.676 ms | 10.181 ms |
+| Async Save-path queue submit | 0.008 ms | 0.012 ms |
+
+End-to-end asynchronous submission for 50 events: 1.316 ms; until all 50 mirror files were encrypted and fsynced: 678.329 ms. These numbers describe **the mirrored-event component only** and must not be extrapolated into an end-to-end application latency speedup percentage. Worker session-scoping was added after this run; it must pass its own CI.
+
+Actual Windows EXE Save/startup and Finish Editing P95 with old/new binaries, SQLCipher encryption, file attachments, anti-virus and user-class sizes remain unmeasured.
