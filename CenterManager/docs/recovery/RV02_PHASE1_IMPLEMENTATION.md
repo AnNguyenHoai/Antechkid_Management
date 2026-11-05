@@ -100,3 +100,18 @@ Run `python tools/benchmark_rv02_mirror.py --samples 50 --json rv02-mirror-bench
 **Limitations:** This benchmark is *component-only* and excludes SQLCipher commit/read, Qt event loop, Git operations, startup, backup copy, antivirus variability and EXE packaging. Targets for actual Windows EXE UAT: Save P95 regression <=10%, normal startup P95 regression <=5%, zero main-thread encrypted-mirror fsync, no unaccepted edits silently marked fully logged. Do not claim these targets achieved from the component microbenchmark alone.
 
 Tests: `tests/test_rv02_background_mirror_worker.py` injects stalled storage, full queue, worker errors and immutable byte copies; updated existing outbox tests wait through a bounded drain barrier. `test_rv02_recovery_change_outbox.py` continues checking SQLCipher WAL commit and rollback durability.
+
+
+## Phase 2 safety hardening — session-isolated mirror drain and legacy schema regression
+
+Audit found a real cross-session reporting defect: the asynchronous mirror worker originally kept only a **global** failure counter. If WRITE session A had one failed mirror, a later fully mirrored WRITE session B still returned `INCOMPLETE` from `drain_before_capture`. That was a false cross-session contamination and could unnecessarily slow or alarm Finish Editing.
+
+- `recovery_mirror_worker._MirrorWorker` now maintains independent submitted/completed/failed counters keyed by exact `(recovery_root, write_session_id)`. Global worker statistics remain diagnostic only.
+- `record_for_active_write`'s post-commit handoff passes the authenticated event's `write_session_id` to the queue.
+- `WriteTransactionManager._publish` drains only the active Recovery Journal's session from that root, after WRITE quiescence and before protected pre-publish capture.
+- `tests/test_rv02_background_mirror_worker.py` adds regressions for prior failed session versus new successful session and a stale other-session blocked disk write. An actual task queued ahead in the same single worker may still delay new-session mirroring; the 5s bounded barrier remains and protected outbox capture must be retained.
+- A new `tests/test_rv02_migration_compatibility.py` checks additive schema creation without changing legacy business records and confirms migration downgrade refuses to discard committed outbox history.
+
+**Not covered by these synthetic tests:** Windows EXE schema handoff from an older published MAIN, 2-client old EXE write fencing, real SQLCipher physical WAL checkpoint under process kill, attachments staging, and actual startup/Save P95. Those remain mandatory release gates.
+
+**CI gate:** latest PR #599 head must be verified with all three Windows shards PASS; a prior PASS on `5a9bf566` does not validate this new worker version.
