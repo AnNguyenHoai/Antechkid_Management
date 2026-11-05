@@ -162,6 +162,8 @@ def test_verified_write_adapter_mirrors_only_after_successful_commit(engine, tmp
         assert not list(tmp_path.rglob("*.enc"))
         session.commit()
         recorder.mirror_after_successful_commit(session)
+        from centermanager.platform.recovery_mirror_worker import drain_before_capture
+        drain_before_capture(timeout_seconds=10.0)
         encrypted = list(tmp_path.rglob("*.enc"))
         assert len(encrypted) == 1
         payload = decrypt_mirrored_event(encrypted[0], encryption_key=KEY)
@@ -195,6 +197,8 @@ def test_failed_external_mirror_does_not_rollback_committed_user_data(engine, tm
         )
         session.commit()
         recorder.mirror_after_successful_commit(session)  # must not raise
+        from centermanager.platform.recovery_mirror_worker import drain_before_capture
+        drain_before_capture(timeout_seconds=10.0)
     assert not list(tmp_path.rglob("*.enc"))
     with Session(engine) as session:
         assert len(read_session_events(session, "unit-session")) == 1
@@ -390,6 +394,8 @@ def test_rolled_back_session_info_does_not_fabricate_mirror_after_later_commit(
         )
         session.commit()
         recorder.mirror_after_successful_commit(session)
+        from centermanager.platform.recovery_mirror_worker import drain_before_capture
+        drain_before_capture(timeout_seconds=10.0)
     files = list(tmp_path.rglob("*.enc"))
     assert len(files) == 1
     assert files[0].stem == accepted.event_id
