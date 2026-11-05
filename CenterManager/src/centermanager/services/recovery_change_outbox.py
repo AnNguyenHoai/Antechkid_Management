@@ -153,7 +153,13 @@ def record_for_active_write(
     if (not doc or doc.get("status") != "OPEN"
             or doc.get("mutation_authority_lost")
             or not doc.get("session_id") or not doc.get("base_main_oid")):
-        raise RecoveryOutboxError("Verified OPEN WRITE recovery context is required")
+        # Outbox is an ancillary record, not an authorization gate.
+        # In READ/WAITING, lost authority, post-publish callbacks, maintenance,
+        # and standalone service tests, the existing SQLCipher mutation gate
+        # remains responsible for denying unauthorized writes at flush/commit.
+        # Do not mask its MutationAuthorityError with an outbox-specific one.
+        # No event is emitted when there is no verified active WRITE session.
+        return None
     if entity_id is None and entity_object is not None:
         # Generated integer PK can only be known after the caller's pending
         # INSERT is flushed. This happens inside the same SQLCipher transaction.
