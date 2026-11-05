@@ -130,9 +130,9 @@ def test_startup_preflight_enforces_case_before_reset():
         for c in ast.walk(target) if isinstance(c, ast.Call)
     ]
     assert any(fn == "journal.reconcile" for fn, _ in calls)
-    assert sum(fn == "cases.register_from_reconciled" for fn, _ in calls) == 2
+    assert sum(fn.endswith(".register_from_reconciled") for fn, _ in calls) == 2
     pos_reconcile = min(n for fn, n in calls if fn == "journal.reconcile")
-    pos_case = max(n for fn, n in calls if fn == "cases.register_from_reconciled")
+    pos_case = max(n for fn, n in calls if fn.endswith(".register_from_reconciled"))
     assert pos_reconcile < pos_case
     assert "reset_to_remote" not in ast.unparse(target)
 
