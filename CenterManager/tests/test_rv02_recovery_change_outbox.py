@@ -150,7 +150,7 @@ def test_verified_write_adapter_mirrors_only_after_successful_commit(engine, tmp
 
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
     monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: KEY)
-    engine._cm_mutation_protected = True
+    engine._cm_runtime_owned = True
     with Session(engine) as session:
         item = recorder.record_for_active_write(
             session, module="student", action="CREATE",
@@ -185,7 +185,7 @@ def test_failed_external_mirror_does_not_rollback_committed_user_data(engine, tm
 
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
     monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: (_ for _ in ()).throw(OSError("unavailable")))
-    engine._cm_mutation_protected = True
+    engine._cm_runtime_owned = True
     with Session(engine) as session:
         recorder.record_for_active_write(
             session, module="finance", action="CREATE",
@@ -210,7 +210,7 @@ def test_missing_write_journal_fails_closed_on_protected_runtime(engine, tmp_pat
             return {"status": "RECOVERY_REQUIRED"}
 
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
-    engine._cm_mutation_protected = True
+    engine._cm_runtime_owned = True
     with Session(engine) as session:
         with pytest.raises(RecoveryOutboxError):
             recorder.record_for_active_write(
