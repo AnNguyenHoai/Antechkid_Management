@@ -45,7 +45,7 @@ def test_additive_outbox_migration_preserves_legacy_business_rows():
                 idx for idx in sa.inspect(conn).get_indexes("recovery_change_outbox")
                 if idx["name"] == "ix_recovery_outbox_operation"
             )
-            assert operation_index["unique"] is True
+            assert bool(operation_index["unique"]) is True
             # Explicitly safe to repeat in recovery tests without destroying rows.
             migration.upgrade()
             assert conn.execute(sa.text("SELECT COUNT(*) FROM legacy_student")).scalar_one() == 1
