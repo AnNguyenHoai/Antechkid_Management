@@ -127,6 +127,7 @@ def record_for_active_write(
     action: str,
     entity_type: str,
     entity_id: str | int | None,
+    entity_object: object | None = None,
     summary_args: Mapping[str, object] | None = None,
     operation_id: str | None = None,
 ) -> RecoveryChangeEvent | None:
@@ -136,7 +137,12 @@ def record_for_active_write(
     authorization bypass; SQLCipher MutationAuthorityGate still controls all
     DML and commits. An active OPEN journal is required on protected runtime.
     """
-    bind = session.get_bind()
+    # Fake sessions and non-authoritative engines need no recovery outbox.
+    # Service callers do not access persistence internals (EP-ARCH gates).
+    get_bind = getattr(session, "get_bind", None)
+    if not callable(get_bind):
+        return None
+    bind = get_bind()
     if not bool(getattr(bind, "_cm_runtime_owned", False)):
         return None
 
@@ -148,6 +154,20 @@ def record_for_active_write(
             or doc.get("mutation_authority_lost")
             or not doc.get("session_id") or not doc.get("base_main_oid")):
         raise RecoveryOutboxError("Verified OPEN WRITE recovery context is required")
+    if entity_id is None and entity_object is not None:
+        # Generated integer PK can only be known after the caller's pending
+        # INSERT is flushed. This happens inside the same SQLCipher transaction.
+        session.flush()
+        entity_id = getattr(entity_object, "id", None)
+    if entity_id is None:
+        raise RecoveryOutboxError("Committed recovery operation needs a stable entity ID")
+    normalized_args = dict(summary_args or {})
+    for key, value in list(normalized_args.items()):
+        if value is None and key.lower() in {
+            "student_id", "income_id", "expense_id", "enrollment_id",
+            "class_id", "session_id", "finance_period_id",
+        }:
+            normalized_args[key] = entity_id
     actor = get_current_user()
     event = record_in_session(
         session,
@@ -158,7 +178,7 @@ def record_for_active_write(
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
-        summary_args=summary_args,
+        summary_args=normalized_args,
         operation_id=operation_id,
     )
     session.info.setdefault("_rv02_after_commit_events", []).append(event)
@@ -178,8 +198,11 @@ def mirror_after_successful_commit(session: Session) -> None:
     from centermanager.database.encryption import DatabaseKeyStore
 
     logger = logging.getLogger(__name__)
-    pending = session.info.pop("_rv02_after_commit_events", [])
-    root = session.info.pop("_rv02_recovery_root", None)
+    info = getattr(session, "info", None)
+    if not isinstance(info, dict):
+        return
+    pending = info.pop("_rv02_after_commit_events", [])
+    root = info.pop("_rv02_recovery_root", None)
     if not pending or root is None:
         return
     try:
