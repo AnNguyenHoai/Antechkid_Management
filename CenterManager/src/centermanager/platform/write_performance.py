@@ -90,6 +90,17 @@ def trace_phase(name):
         )
 
 
+def traced_phase(name):
+    """Time a method while preserving its call site and return semantics."""
+    def decorate(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            with trace_phase(name):
+                return func(*args, **kwargs)
+        return wrapped
+    return decorate
+
+
 def timed_call(name, func, *args, **kwargs):
     with trace_phase(name):
         return func(*args, **kwargs)
