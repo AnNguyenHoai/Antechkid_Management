@@ -341,3 +341,57 @@ def test_startup_clean_state_rejects_missing_pinned_case(monkeypatch, tmp_path):
     assert not startup._prepare_authoritative_startup_replacement()
     assert "removed" in startup.recovery_error
     assert journal.inspect()["status"] == "CLEAN"
+
+
+def test_startup_with_active_local_writer_never_creates_case_or_reconciles(monkeypatch, tmp_path):
+    """An old live WRITE authority cannot be crossed by MAIN installation."""
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    j = FakeJournal(tmp_path, status="OPEN")
+    j.assert_replaceable = lambda *, legacy=False: (
+        (_ for _ in ()).throw(AssertionError("writer must block before journal access"))
+    )
+    j.reconcile = lambda **kwargs: (
+        (_ for _ in ()).throw(AssertionError("active owner cannot reconcile"))
+    )
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
+    monkeypatch.setattr(mutation_authority, "gate_for",
+                        lambda: SimpleNamespace(lock=RLock(), closed=False))
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: MAIN,
+        get_local_main_commit=lambda: BASE,
+    )
+    startup = startup_sync.StartupSynchronization(provider)
+    assert startup._prepare_authoritative_startup_replacement() is False
+    assert "local WRITE editor" in startup.recovery_error
+    assert not list((tmp_path / "cases").glob("*.json"))
+
+
+def test_unverified_remote_main_never_reconciles_or_creates_case(monkeypatch, tmp_path):
+    """A fetched OID without matching independent observation is no authority."""
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    j = FakeJournal(tmp_path, status="OPEN")
+    j.reconcile = lambda **kwargs: (
+        (_ for _ in ()).throw(AssertionError("unknown MAIN cannot reconcile"))
+    )
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
+    monkeypatch.setattr(mutation_authority, "gate_for",
+                        lambda: SimpleNamespace(lock=RLock(), closed=True))
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: "f" * 40,
+        get_local_main_commit=lambda: BASE,
+    )
+    startup = startup_sync.StartupSynchronization(provider)
+    assert startup._prepare_authoritative_startup_replacement() is False
+    assert "independently verified" in startup.recovery_error
+    assert j.inspect()["status"] == "OPEN"
+    assert not list((tmp_path / "cases").glob("*.json"))
