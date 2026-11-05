@@ -215,11 +215,15 @@ def mirror_after_successful_commit(session: Session) -> None:
     try:
         from centermanager.platform.recovery_change_mirror import mirror_committed_event
         key = DatabaseKeyStore().load()
-        for event in pending:
-            # SQLAlchemy expires attributes after commit by default. Reload
-            # committed row via SELECT; do not issue another SQLCipher write.
-            session.refresh(event)
-            mirror_committed_event(event, recovery_root=root, encryption_key=key)
+        for queued_event in pending:
+            # Pending Python session.info survives SQLAlchemy rollback. Never
+            # mirror a stale event object merely because a later unrelated
+            # transaction commits on the same Session. Check the primary key
+            # against actually committed SQLCipher rows before exporting.
+            committed = session.get(RecoveryChangeEvent, queued_event.event_id)
+            if committed is None:
+                continue
+            mirror_committed_event(committed, recovery_root=root, encryption_key=key)
     except Exception:
         logger.exception(
             "RV-02 committed outbox mirror incomplete; protected SQLCipher recovery "
