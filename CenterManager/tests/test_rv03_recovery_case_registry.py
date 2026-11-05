@@ -1,0 +1,137 @@
+"""RV-03 Recovery Case persistence, retry and fail-closed integration contracts.
+
+Synthetic journal tests never interact with live Git refs or production SQLCipher.
+Startup tests verify that preflight cannot install MAIN before case persistence.
+"""
+from __future__ import annotations
+
+import ast
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+from centermanager.platform.write_recovery import RecoveryRequired
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = "a" * 40
+MAIN = "b" * 40
+DB_HASH = "c" * 64
+
+
+class FakeJournal:
+    def __init__(self, root, *, status="RECONCILED", publish="UNVERIFIED"):
+        self.root = root
+        self.capture = root / "captures" / "synthetic"
+        self.capture.mkdir(parents=True)
+        self.document = {
+            "status": status, "base_main_oid": BASE,
+            "accepted_main_oid": MAIN,
+            "repository_id": "e" * 64,
+            "session_id": "session-001",
+            "last_capture": str(self.capture),
+            "publication": publish,
+            "published_oid": MAIN if publish == "VERIFIED" else None,
+        }
+        self.capture_valid = True
+
+    def inspect(self):
+        return dict(self.document)
+
+    def verify_capture(self, ref):
+        if not self.capture_valid or Path(ref).resolve() != self.capture.resolve():
+            raise RecoveryRequired("Synthetic capture verification failed")
+        return {
+            "files": {"center.db": DB_HASH, "attachments/document.dat": "d" * 64},
+            "journal": {"base_main_oid": BASE},
+        }
+
+
+def registry(journal, monkeypatch):
+    # Synthetic stable key; real production registry loads protected DPAPI key.
+    monkeypatch.setattr(RecoveryCaseRegistry, "_key", lambda self: bytes(range(32)))
+    return RecoveryCaseRegistry(journal)
+
+
+def test_unaccepted_case_is_saved_once_and_survives_restart(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    first = cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert first["status"] == "PENDING_REVIEW"
+    assert first["change_log_coverage"] == "UNKNOWN"
+    assert first["publication"] == "UNVERIFIED"
+    assert first["capture_db_sha256"] == DB_HASH
+    assert len(list((tmp_path / "cases").glob("*.json"))) == 1
+    assert cases.register_from_reconciled(observed_main_oid=MAIN) == first
+    assert RecoveryCaseRegistry(j).list_cases() == [first]
+
+
+def test_case_not_labeled_missing_remote_when_publication_unknown(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    j.document["published_oid"] = MAIN
+    case = registry(j, monkeypatch).register_from_reconciled(observed_main_oid=MAIN)
+    assert case["publication"] == "UNVERIFIED"
+    assert case["published_oid"] is None
+
+
+def test_verified_publication_requires_explicit_provenance(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path, publish="VERIFIED")
+    case = registry(j, monkeypatch).register_from_reconciled(observed_main_oid=MAIN)
+    assert case["publication"] == "VERIFIED"
+    assert case["published_oid"] == MAIN
+
+
+@pytest.mark.parametrize("failure", ["not_reconciled", "wrong_main", "broken_capture"])
+def test_registry_fails_closed_before_replace(tmp_path, monkeypatch, failure):
+    j = FakeJournal(tmp_path)
+    if failure == "not_reconciled":
+        j.document["status"] = "OPEN"
+    if failure == "broken_capture":
+        j.capture_valid = False
+    cases = registry(j, monkeypatch)
+    with pytest.raises(RecoveryRequired):
+        cases.register_from_reconciled(
+            observed_main_oid=("f" * 40) if failure == "wrong_main" else MAIN
+        )
+    assert not list((tmp_path / "cases").glob("*.json"))
+
+
+def test_registry_tampering_blocks_recovery(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    saved = cases.register_from_reconciled(observed_main_oid=MAIN)
+    path = cases.root / (saved["case_id"] + ".json")
+    raw = path.read_text(encoding="utf-8").replace("PENDING_REVIEW", "ACKNOWLEDGED")
+    path.write_text(raw, encoding="utf-8")
+    with pytest.raises(RecoveryRequired, match="inauthentic"):
+        cases.get(saved["case_id"])
+    with pytest.raises(RecoveryRequired):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+
+
+def test_existing_case_requires_original_capture_still_verified(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    cases.register_from_reconciled(observed_main_oid=MAIN)
+    j.capture_valid = False
+    with pytest.raises(RecoveryRequired):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+
+
+def test_startup_preflight_enforces_case_before_reset():
+    path = ROOT / "src" / "centermanager" / "platform" / "sync" / "startup_sync.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    methods = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    target = methods["_prepare_authoritative_startup_replacement"]
+    calls = [
+        (ast.unparse(c.func), c.lineno)
+        for c in ast.walk(target) if isinstance(c, ast.Call)
+    ]
+    assert any(fn == "journal.reconcile" for fn, _ in calls)
+    assert sum(fn == "cases.register_from_reconciled" for fn, _ in calls) == 2
+    pos_reconcile = min(n for fn, n in calls if fn == "journal.reconcile")
+    pos_case = max(n for fn, n in calls if fn == "cases.register_from_reconciled")
+    assert pos_reconcile < pos_case
+    assert "reset_to_remote" not in ast.unparse(target)
