@@ -100,3 +100,53 @@ def test_worker_receives_only_immutable_bytes_and_root(tmp_path, monkeypatch):
     original[:] = b"xxxxx"
     assert worker.drain(timeout_seconds=5)
     assert done == [(b"event", tmp_path, bytes(range(32)))]
+
+
+def test_publish_drains_before_existing_wal_consistent_capture():
+    """Static contract: never replace the recovery snapshot with a mirror-only check."""
+    import ast
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "centermanager" / "services" / "write_transaction.py"
+    ).read_text(encoding="utf-8-sig")
+    tree = ast.parse(source)
+    publish = next(
+        fn for fn in ast.walk(tree)
+        if isinstance(fn, ast.FunctionDef) and fn.name == "_publish"
+    )
+    calls = sorted(
+        (c for c in ast.walk(publish) if isinstance(c, ast.Call)),
+        key=lambda c: (c.lineno, c.col_offset),
+    )
+    drains = [c.lineno for c in calls if isinstance(c.func, ast.Name)
+              and c.func.id == "timed_call"
+              and c.args and isinstance(c.args[0], ast.Constant)
+              and c.args[0].value == "rv02_mirror_drain"]
+    captures = [c.lineno for c in calls if isinstance(c.func, ast.Name)
+                and c.func.id == "timed_call"
+                and c.args and isinstance(c.args[0], ast.Constant)
+                and c.args[0].value == "capture_before_publish"]
+    assert len(drains) == len(captures) == 1
+    assert drains[0] < captures[0]
+
+
+def test_mirror_worker_has_no_database_engine_imports():
+    """No new connection or Git credential must be opened in background worker."""
+    import ast
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "centermanager" / "platform" / "recovery_mirror_worker.py"
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    imports = [
+        imported.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Import)
+        for imported in n.names
+    ] + [
+        n.module or ""
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom)
+    ]
+    assert not any("sqlalchemy" in name or "git" in name.lower()
+                   for name in imports)
