@@ -898,7 +898,8 @@ class WriteTransactionManager:
             success = timed_call("git_publish", self._do_publish)
             if success:
                 if self._recovery_journal is not None:
-                    timed_call("recovery_published", self._recovery_journal.published, self._collab_manager._sync_provider)
+                    with trace_phase("recovery_published"):
+                        self._recovery_journal.published(self._collab_manager._sync_provider)
                 if self._version_manager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
