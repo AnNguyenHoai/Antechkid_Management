@@ -173,12 +173,13 @@ class PermissionService:
                 raise ValueError(f"Role '{name}' already exists.")
             role = Role(name=name, display_name=display_name, description=description, is_system=False)
             role.permissions = self._resolve_permissions(session, permission_names)
+            repo.add(role)
             record_for_active_write(
                 session, module="security", action="CREATE_ROLE",
                 entity_type="Role", entity_id=role.id, entity_object=role,
                 summary_args={"role_id": role.id},
             )
-            repo.add(role); session.commit(); mirror_after_successful_commit(session); repo.refresh(role)
+            session.commit(); mirror_after_successful_commit(session); repo.refresh(role)
             logger.info("Custom role created: %s", name)
             self._audit("ROLE_CREATED", role, {"permissions": sorted(permission_names)})
             return role
