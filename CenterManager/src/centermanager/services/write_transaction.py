@@ -357,6 +357,52 @@ class WriteTransactionManager:
         logger.error(self._last_start_error)
         return False
 
+    def _verify_grant_before_editing(self) -> bool:
+        """Fail closed if remote WRITE was revoked during DB handoff/journal prep.
+
+        This is a new remote observation at the final mutation boundary, not
+        a cached is_writing() flag or a local lock-file check. The generation
+        must match the grant captured by this transaction.
+        """
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if provider is None:
+            return True  # local-only collaboration retains existing semantics
+        session = self._collab_manager.get_session()
+        if session is None:
+            self._last_start_error = "WRITE authority missing: no active session."
+            return False
+        try:
+            auth = self._collab_manager.validate_write_authority(session)
+            valid = bool(auth.get("valid", False))
+            generation = auth.get("generation")
+            if (valid and auth.get("generation_authoritative") is True
+                    and generation != self._expected_generation):
+                valid = False
+            if valid and not self._collab_manager.is_writing():
+                valid = False
+            if valid:
+                logger.info(
+                    "Final WRITE grant validated before EDITING: generation=%s",
+                    generation,
+                )
+                return True
+            logger.error(
+                "Final WRITE grant rejected before EDITING: reason=%s "
+                "generation_matches=%s",
+                str(auth.get("reason") or "REMOTE_AUTHORITY_NOT_VERIFIED")[:120],
+                generation == self._expected_generation,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Final WRITE grant observation failed before EDITING: type=%s",
+                type(exc).__name__,
+            )
+        self._last_start_error = (
+            "Remote WRITE ownership was lost or could not be verified before "
+            "editing. Local changes are blocked; inspect collaboration state."
+        )
+        return False
+
     def _waiting_is_authoritative(self) -> bool:
         """A visible pending request is WAITING even in grace/ack uncertainty.
 
@@ -608,7 +654,25 @@ class WriteTransactionManager:
                 self._base_main_commit[:8] if self._base_main_commit else None,
             )
 
+            # Reject a GRANTED result whose lock disappeared during handoff.
+            # Check before the durable journal and again just before the gate
+            # opens to cover the several-second recovery capture window.
+            if not self._verify_grant_before_editing():
+                self._release_grant_after_failed_consistency_check()
+                self._state = WriteTransactionState.IDLE
+                return False
             if not self._begin_recovery_journal():
+                self._release_grant_after_failed_consistency_check()
+                return False
+            if not self._verify_grant_before_editing():
+                self._state = WriteTransactionState.RECOVERY_REQUIRED
+                self._is_editing = False
+                if self._recovery_journal is not None:
+                    try:
+                        self._recovery_journal.preserve("lost-authority-before-editing")
+                        self._recovery_journal.mark_authority_lost()
+                    except Exception:
+                        logger.exception("Failed to preserve recovery after WRITE grant loss")
                 self._release_grant_after_failed_consistency_check()
                 return False
             if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
@@ -1085,7 +1149,22 @@ class WriteTransactionManager:
             except Exception:
                 pass
 
+        if not self._verify_grant_before_editing():
+            self._release_grant_after_failed_consistency_check()
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            return
         if not self._begin_recovery_journal():
+            self._release_grant_after_failed_consistency_check()
+            return
+        if not self._verify_grant_before_editing():
+            self._state = WriteTransactionState.RECOVERY_REQUIRED
+            self._is_editing = False
+            if self._recovery_journal is not None:
+                try:
+                    self._recovery_journal.preserve("lost-authority-before-editing")
+                    self._recovery_journal.mark_authority_lost()
+                except Exception:
+                    logger.exception("Failed to preserve recovery after queued WRITE grant loss")
             self._release_grant_after_failed_consistency_check()
             return
         if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
