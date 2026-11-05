@@ -132,3 +132,89 @@ def test_invalid_ids_and_main_oid_rejected(engine):
         with pytest.raises(RecoveryOutboxError):
             record_in_session(session, write_session_id="s", base_main_oid="A+10",
                               module="finance", action="CREATE", entity_type="Income")
+
+
+def test_verified_write_adapter_mirrors_only_after_successful_commit(engine, tmp_path, monkeypatch):
+    from centermanager.services import recovery_change_outbox as recorder
+    from centermanager.platform import write_recovery
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    class SyntheticJournal:
+        root = tmp_path
+
+        def inspect(self):
+            return {
+                "status": "OPEN", "session_id": "unit-session",
+                "base_main_oid": BASE, "mutation_authority_lost": False,
+            }
+
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
+    monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: KEY)
+    engine._cm_mutation_protected = True
+    with Session(engine) as session:
+        item = recorder.record_for_active_write(
+            session, module="student", action="CREATE",
+            entity_type="Student", entity_id=77,
+            summary_args={"student_id": 77},
+        )
+        assert item is not None
+        assert not list(tmp_path.rglob("*.enc"))
+        session.commit()
+        recorder.mirror_after_successful_commit(session)
+        encrypted = list(tmp_path.rglob("*.enc"))
+        assert len(encrypted) == 1
+        payload = decrypt_mirrored_event(encrypted[0], encryption_key=KEY)
+        assert payload["entity_id"] == "77"
+    with Session(engine) as session:
+        assert len(read_session_events(session, "unit-session")) == 1
+
+
+def test_failed_external_mirror_does_not_rollback_committed_user_data(engine, tmp_path, monkeypatch):
+    from centermanager.services import recovery_change_outbox as recorder
+    from centermanager.platform import write_recovery
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    class SyntheticJournal:
+        root = tmp_path
+
+        def inspect(self):
+            return {
+                "status": "OPEN", "session_id": "unit-session",
+                "base_main_oid": BASE, "mutation_authority_lost": False,
+            }
+
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
+    monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: (_ for _ in ()).throw(OSError("unavailable")))
+    engine._cm_mutation_protected = True
+    with Session(engine) as session:
+        recorder.record_for_active_write(
+            session, module="finance", action="CREATE",
+            entity_type="Income", entity_id=55,
+            summary_args={"income_id": 55},
+        )
+        session.commit()
+        recorder.mirror_after_successful_commit(session)  # must not raise
+    assert not list(tmp_path.rglob("*.enc"))
+    with Session(engine) as session:
+        assert len(read_session_events(session, "unit-session")) == 1
+
+
+def test_missing_write_journal_fails_closed_on_protected_runtime(engine, tmp_path, monkeypatch):
+    from centermanager.services import recovery_change_outbox as recorder
+    from centermanager.platform import write_recovery
+
+    class SyntheticJournal:
+        root = tmp_path
+
+        def inspect(self):
+            return {"status": "RECOVERY_REQUIRED"}
+
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", SyntheticJournal)
+    engine._cm_mutation_protected = True
+    with Session(engine) as session:
+        with pytest.raises(RecoveryOutboxError):
+            recorder.record_for_active_write(
+                session, module="student", action="UPDATE",
+                entity_type="Student", entity_id=2,
+            )
+        session.rollback()
