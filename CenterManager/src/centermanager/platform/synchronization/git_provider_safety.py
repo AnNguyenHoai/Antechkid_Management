@@ -50,13 +50,14 @@ def install_git_command_serialization(provider_cls: Any) -> None:
         finally:
             finished = time.perf_counter()
             run_started = acquired if acquired is not None else finished
+            lock_wait_ms = (run_started - started) * 1000
+            run_ms = (finished - run_started) * 1000
             logger.debug(
                 "PERF git command=%s lock_wait_ms=%.1f run_ms=%.1f outcome=%s",
-                command,
-                (run_started - started) * 1000,
-                (finished - run_started) * 1000,
-                outcome,
+                command, lock_wait_ms, run_ms, outcome,
             )
+            from centermanager.platform.write_performance import record_git
+            record_git(command, lock_wait_ms, run_ms, outcome)
 
     provider_cls.__init__ = init_with_command_lock
     provider_cls._run_git_command = serialized_run_git_command
