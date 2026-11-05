@@ -86,6 +86,7 @@ def test_outbox_pk_rejects_duplicate_retry_event(engine):
 def test_unsafe_summary_arguments_rejected_before_insert(engine):
     with Session(engine) as session:
         for payload in ({"name": "Student Nguyen"}, {"password": "secret value"},
+                        {"password_id": "sensitive-hash"},
                         {"raw": {"nested": "sensitive"}}, {"notes": "<html>"}):
             with pytest.raises(RecoveryOutboxError):
                 _event(session, arguments=payload)
