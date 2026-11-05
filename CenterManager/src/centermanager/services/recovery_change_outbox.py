@@ -241,7 +241,8 @@ def mirror_after_successful_commit(session: Session) -> None:
             if committed is None:
                 continue
             if not submit_committed_payload(
-                recovery_root=root, payload=_payload(committed)
+                recovery_root=root, payload=_payload(committed),
+                session_id=committed.write_session_id
             ):
                 logger.error(
                     "RV-02 committed operation was not queued for mirror; "
