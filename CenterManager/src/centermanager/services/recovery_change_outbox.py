@@ -152,7 +152,16 @@ def record_for_active_write(
     if not callable(get_bind):
         return None
     bind = get_bind()
-    if not bool(getattr(bind, "_cm_runtime_owned", False)):
+    # MagicMock dynamically fabricates arbitrary attributes and converts
+    # them to True, including _cm_runtime_owned. Require an actual SQLAlchemy
+    # engine/connection before evaluating the production runtime marker.
+    # This does NOT weaken the DB mutation gate: real SQLCipher engines still
+    # enforce it independently at the SQL/commit boundary.
+    from sqlalchemy.engine import Connection, Engine
+    if not isinstance(bind, (Engine, Connection)):
+        return None
+    runtime_engine = bind.engine if isinstance(bind, Connection) else bind
+    if getattr(runtime_engine, "_cm_runtime_owned", False) is not True:
         return None
 
     from centermanager.platform.write_recovery import WriteRecoveryJournal
