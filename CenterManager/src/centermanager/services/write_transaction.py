@@ -380,6 +380,15 @@ class WriteTransactionManager:
                 valid = False
             if valid and not self._collab_manager.is_writing():
                 valid = False
+            # Session equality alone is insufficient: a renewed/replaced
+            # lock can have a different OID or revision. Check the provider's
+            # exact locally owned token against a fresh remote observation.
+            owns = getattr(type(provider), "owns_lock_observation", None)
+            if valid and callable(owns):
+                observed = provider.remote_lock_status()
+                valid = bool(owns(
+                    provider, observed, session.username, session.session_id,
+                ))
             if valid:
                 logger.info(
                     "Final WRITE grant validated before EDITING: generation=%s",
