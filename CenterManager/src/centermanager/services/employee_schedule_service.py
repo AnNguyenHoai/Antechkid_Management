@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import date, time, timedelta
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.employee_schedule import (
     EmployeeScheduleRule,
     EmployeeScheduleException,
@@ -159,7 +160,13 @@ class EmployeeScheduleService:
                 notes=notes or None,
             )
             repo.add_rule(r)
+            record_for_active_write(
+                s, module="schedule", action="ADD_RULE",
+                entity_type="EmployeeScheduleRule", entity_id=r.id, entity_object=r,
+                summary_args={"employee_id": r.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return r
 
     def update_rule(self, rule_id, *, day_of_week, start_time, end_time, effective_from, effective_to=None, notes=None, user=None):
@@ -188,7 +195,13 @@ class EmployeeScheduleService:
                 effective_to=effective_to,
                 notes=notes,
             )
+            record_for_active_write(
+                s, module="schedule", action="UPDATE_RULE",
+                entity_type="EmployeeScheduleRule", entity_id=r.id, entity_object=r,
+                summary_args={"employee_id": r.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return r
 
     def delete_rule(self, rule_id, user=None):
@@ -200,7 +213,13 @@ class EmployeeScheduleService:
                 return
             self._assert_manage_scope(r.employee_id, u)
             repo.delete_rule(r)
+            record_for_active_write(
+                s, module="schedule", action="DELETE_RULE",
+                entity_type="EmployeeScheduleRule", entity_id=r.id, entity_object=r,
+                summary_args={"employee_id": r.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
 
     def add_exception(self, employee_id, schedule_date, exception_type, start_time=None, end_time=None, notes=None, user=None):
         self._assert_manage_scope(employee_id, user)
@@ -224,7 +243,13 @@ class EmployeeScheduleService:
                 notes=notes or None,
             )
             repo.add_exception(x)
+            record_for_active_write(
+                s, module="schedule", action="ADD_EXCEPTION",
+                entity_type="EmployeeScheduleException", entity_id=x.id, entity_object=x,
+                summary_args={"employee_id": x.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return x
 
     def delete_exception(self, exception_id, user=None):
@@ -236,7 +261,13 @@ class EmployeeScheduleService:
                 return
             self._assert_manage_scope(x.employee_id, u)
             repo.delete_exception(x)
+            record_for_active_write(
+                s, module="schedule", action="DELETE_EXCEPTION",
+                entity_type="EmployeeScheduleException", entity_id=x.id, entity_object=x,
+                summary_args={"employee_id": x.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
 
     @staticmethod
     def _effective_template_blocks(repo, employee_id, work_date):
@@ -462,7 +493,13 @@ class EmployeeScheduleService:
                 note=(note or "").strip() or None,
             )
             repo.add_assignment(assignment)
+            record_for_active_write(
+                s, module="schedule", action="ADD_ASSIGNMENT",
+                entity_type="EmployeeScheduleAssignment", entity_id=assignment.id, entity_object=assignment,
+                summary_args={"employee_id": assignment.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return assignment
 
     def delete_week_assignment(self, assignment_id, user=None):
@@ -475,7 +512,13 @@ class EmployeeScheduleService:
             self._assert_manage_scope(assignment.employee_id, u)
             self._require_draft(assignment.schedule_week)
             repo.delete_assignment(assignment)
+            record_for_active_write(
+                s, module="schedule", action="DELETE_ASSIGNMENT",
+                entity_type="EmployeeScheduleAssignment", entity_id=assignment.id, entity_object=assignment,
+                summary_args={"employee_id": assignment.employee_id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
 
     def seed_week_from_registration(self, employee_id, week_start, user=None):
         """Copy accepted availability into a DRAFT weekly schedule once."""
@@ -508,7 +551,13 @@ class EmployeeScheduleService:
                 repo.add_assignment(assignment)
                 existing.append(assignment)
                 created += 1
+            record_for_active_write(
+                s, module="schedule", action="SEED_FROM_REGISTRATION",
+                entity_type="EmployeeScheduleWeek", entity_id=week.id, entity_object=week,
+                summary_args={"employee_id": employee_id, "record_count": created},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return created
 
     def seed_week_from_template(self, employee_id, week_start, user=None):
@@ -547,7 +596,13 @@ class EmployeeScheduleService:
                     repo.add_assignment(assignment)
                     existing.append(assignment)
                     created += 1
+            record_for_active_write(
+                s, module="schedule", action="SEED_FROM_TEMPLATE",
+                entity_type="EmployeeScheduleWeek", entity_id=week.id, entity_object=week,
+                summary_args={"employee_id": employee_id, "record_count": created},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return {"created": created, "skipped_outside_availability": skipped_outside_availability}
 
     def publish_week(self, week_start, user=None):
@@ -573,7 +628,13 @@ class EmployeeScheduleService:
                 actor,
                 {"assignment_count": len(assignments)},
             )
+            record_for_active_write(
+                s, module="schedule", action="PUBLISH_WEEK",
+                entity_type="EmployeeScheduleWeek", entity_id=week.id, entity_object=week,
+                summary_args={"schedule_week_id": week.id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return week
 
     def freeze_week(self, week_start, user=None):
@@ -589,7 +650,13 @@ class EmployeeScheduleService:
             week.frozen_at = get_clock().now()
             week.frozen_by_user_id = actor.id
             self._audit_week(s, self.AUDIT_FROZEN, week, actor)
+            record_for_active_write(
+                s, module="schedule", action="FREEZE_WEEK",
+                entity_type="EmployeeScheduleWeek", entity_id=week.id, entity_object=week,
+                summary_args={"schedule_week_id": week.id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return week
 
     def reopen_week_for_override(self, week_start, reason, user=None):
@@ -633,7 +700,13 @@ class EmployeeScheduleService:
                     "reason": reason,
                 },
             )
+            record_for_active_write(
+                s, module="schedule", action="REOPEN_WEEK",
+                entity_type="EmployeeScheduleWeek", entity_id=week.id, entity_object=week,
+                summary_args={"schedule_week_id": week.id},
+            )
             s.commit()
+            mirror_after_successful_commit(s)
             return week
 
     def registered_vs_scheduled(self, employee_id, week_start, user=None):
