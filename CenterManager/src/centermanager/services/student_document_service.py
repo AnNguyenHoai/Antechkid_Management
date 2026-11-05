@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.document import Document
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -65,7 +66,13 @@ class StudentDocumentService:
                 description=self._normalize_text(description),
             )
             repo.add(doc)
+            record_for_active_write(
+                session, module="attachment", action="UPLOAD",
+                entity_type="StudentDocument", entity_id=doc.id,
+                entity_object=doc, summary_args={"student_id": doc.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(doc)
 
             if self._timeline_service:
@@ -93,4 +100,10 @@ class StudentDocumentService:
             if file_path.exists():
                 file_path.unlink()
             repo.delete(doc)
+            record_for_active_write(
+                session, module="attachment", action="DELETE",
+                entity_type="StudentDocument", entity_id=doc.id,
+                entity_object=doc, summary_args={"student_id": doc.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
