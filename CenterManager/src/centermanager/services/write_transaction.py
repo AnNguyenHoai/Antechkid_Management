@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from centermanager.core.paths import get_paths
 from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
-from centermanager.platform.write_performance import trace_operation, trace_phase, timed_call
+from centermanager.platform.write_performance import trace_operation, trace_phase, traced_phase, timed_call
 
 logger = logging.getLogger(__name__)
 
@@ -923,9 +923,7 @@ class WriteTransactionManager:
                 self._finishing_started_at = None
                 self._publish_intent = False
 
-                with trace_phase("release_lock"):
-                    released = self._release_lock()
-                if not released:
+                if not self._release_lock():
                     self._state = WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING
                     logger.warning(
                         "Transaction published successfully but remote WRITE lock release is pending"
@@ -984,6 +982,7 @@ class WriteTransactionManager:
         logger.warning("No sync service available for publish")
         return False
 
+    @traced_phase("release_lock")
     def _release_lock(self) -> bool:
         if not self._collab_manager.is_writing():
             logger.warning("Cannot confirm transaction completion: local WRITE ownership is absent")
