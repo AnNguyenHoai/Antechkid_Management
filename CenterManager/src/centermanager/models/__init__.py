@@ -24,6 +24,7 @@ from centermanager.models.role import Role, RoleDefinitions
 from centermanager.models.permission import Permission, PermissionDefinitions
 from centermanager.models.role_permission import RolePermission
 from centermanager.models.audit_log import AuditLog
+from centermanager.models.recovery_change_event import RecoveryChangeEvent
 from centermanager.models.employee import Employee
 from centermanager.models.employee_document import EmployeeDocument
 from centermanager.models.employee_schedule import EmployeeScheduleRule, EmployeeScheduleException, EmployeeScheduleWeek, EmployeeScheduleAssignment
@@ -49,7 +50,7 @@ __all__ = [
     "StudentProduct", "Progress", "Attachment", "Class", "Session", "SessionStatus",
     "SessionNote", "TeachingProgress", "ClassAtmosphere", "StudentHighlight", "HighlightType",
     "Note", "NoteType", "Document", "Report", "User", "Role", "RoleDefinitions",
-    "Permission", "PermissionDefinitions", "RolePermission", "AuditLog", "Employee",
+    "Permission", "PermissionDefinitions", "RolePermission", "AuditLog", "RecoveryChangeEvent", "Employee",
     "EmployeeDocument", "EmployeeScheduleRule", "EmployeeScheduleException", "EmployeeScheduleWeek",
     "EmployeeScheduleAssignment", "EmployeeWorkingTimeEntry", "EmployeeWorkRegistration",
     "EmployeeWorkRegistrationPeriod", "Teacher", "TeacherDocument", "TeacherTimelineEvent",
