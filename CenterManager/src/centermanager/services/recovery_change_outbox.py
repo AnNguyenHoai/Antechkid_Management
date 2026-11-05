@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Mapping
 
 from sqlalchemy.orm import Session
@@ -91,6 +92,7 @@ def record_in_session(
     event = RecoveryChangeEvent(
         event_id=eid,
         operation_id=op,
+        occurred_at_utc=datetime.now(timezone.utc).replace(tzinfo=None),
         write_session_id=write_session_id,
         base_main_oid=base_main_oid.lower(),
         actor_id=str(actor_id) if actor_id is not None else None,
