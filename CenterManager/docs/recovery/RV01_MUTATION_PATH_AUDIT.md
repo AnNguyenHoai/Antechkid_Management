@@ -151,3 +151,16 @@ A successful GitHub tree listing for `main_repos` returned **1,638 tracked objec
 ### Scope / confidence note
 
 Git tree discovery allows an exact repository inventory. Targeted UI/service/DBAPI reads above establish verified specific call paths. A completed **machine-wide, all-file static AST scan** is not yet performed, and some repository paths may mutate through SQLAlchemy Core, trigger, migrations, native or background code. The RV-02 rollout must run a mechanically reproducible audit and CI coverage gate over the complete repository before claiming completeness; do not infer “everything covered” from these inspected examples.
+
+
+## Reproducible static mutation candidate inventory (added in RV-01)
+
+A **read-only** AST scanner is now committed at `CenterManager/tools/audit_recovery_mutations.py`. It enumerates candidate SQLAlchemy commits/flushes, SQL execute/bulk, DB connections, audit calls, Git publish references, config writes and filesystem modifications across `services/`, `repositories/`, `ui/`, `database/`, `platform/` and `events/`.
+
+Run from repo root:
+
+    python CenterManager/tools/audit_recovery_mutations.py --json rv01-mutation-sites.json
+
+The output is a deterministic **UNREVIEWED queue** with file, line, function, category and call name. It does not import/execute application code, open SQLCipher, change branch or modify runtime. It currently identifies only explicit Python AST calls; dynamic callbacks, C/native code, SQL trigger side effects, decorators, implicit ORM flush, and generic reflection remain manual gates. False positives (e.g., a SELECT `execute`, or non-filesystem `replace`) must be marked DERIVED/READ in a reviewed manifest. No claim that the complete static report has been executed in the GitHub-hosted CI is made yet.
+
+**RV-01 completion policy:** verify scanner output and triage all candidates before asserting complete coverage; alternatively formally accept explicit remaining unknowns as scope for RV-02. No user-facing popup should label an event list exhaustive while these unknowns remain.
