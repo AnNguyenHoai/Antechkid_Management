@@ -94,3 +94,60 @@ This section resolves several OPEN items from the first pass. A service being fr
 3. Employee, schedule, work registration and finance document lifecycle includes module-specific paths not exhaustively discovered. Audit all live EXE entry points before claiming complete coverage.
 4. Some existing `AuditLog.details` include free-form input; external mirror must not dump these fields.
 5. Logging every SQLAlchemy flush/commit indiscriminately may include maintenance and derived/report operations and would be misleading. Require domain annotations at business operation boundaries.
+
+
+## Expanded mutation inventory — pass 3: full repository tree discovery, UI routing and low-level intent recorder
+
+A successful GitHub tree listing for `main_repos` returned **1,638 tracked objects (not truncated)**, including **164 Python UI modules** and the actual service filenames. This resolves the earlier inability to enumerate names through unindexed code search. **It does not prove every file's contents were read.** Targeted verified sources below are explicit; remaining files require automated code coverage in RV-02.
+
+### User, role, settings and UI evidence
+
+| Component | Code reference | Classified status | Consequence |
+| --- | --- | --- | --- |
+| User/role service | `services/permission_service.py:57-70,164-214,353-535` | **AFTER-COMMIT best-effort audit**, separate `AuditService.record()` transaction | Change of role/user may commit while the audit insert fails or process dies; recovery outbox must be inside actual management transaction. |
+| Role-change audit semantic error | `services/permission_service.py:371-386` | **PROVEN BUG in current audit label**: `update_user_role` commits role change then emits `USER_UNLOCKED` | Never build Recovery Report directly from action string without fixing/normalizing; record distinct USER_ROLE_CHANGED event. In RV-01 document, do not silently change production. |
+| Login / password | `services/permission_service.py:264-346` | Protected authentication uses `LocalLoginState` outside shared DB; legacy login may commit account state; `change_password` uses `verified_self_password_change` permit | Password change needs **redacted security event** if covered; no password, hash, token, login credentials in any mirrored Change Log. Login throttling telemetry is *not* a normal business edit. |
+| Configuration | `services/configuration_service.py:29-36`, `ui/admin_workspace/settings_page.py:267` | Config JSON `save_config` on disk, **not SQLCipher transaction**; WRITE/outbox DB hook alone cannot cover it | Need separate protected-file provenance/atomic replace and an admin CONFIG_CHANGED record; check authority/rollback and whether Git MAIN owns this config. Do not log Git token or connection secrets. |
+| User UI | `ui/admin_workspace/user_list_page.py:158-224` | UI routes user writes through `PermissionService`, no direct SQLAlchemy commit observed in inspected file | Gap is **service audit transaction**, not duplicated UI log. |
+| Settings UI | `ui/admin_workspace/settings_page.py:218,267` | UI delegates saves to `ConfigurationService` | Outbox cannot automatically cover filesystem-only settings changes. |
+| Finance period UI | `ui/finance_workspace/finance_period_config_dialog.py:86-136` | UI delegates period configure/deactivate to service | Focus on `FinancePeriodService` transactional logging. |
+| Session note UI | `ui/session/session_note_widget.py:263-270,314` | Delegates to `SessionNoteService` | Service commits notes; content may contain PII. Use entity ID + action only for ordinary Recovery Report. |
+| Student image and documents UI | `ui/student_workspace/profile_image_dialog.py:125-146`, `ui/student_workspace/documents_widget.py:178-200` | Delegates to Student/StudentDocumentService | File-first and DB metadata reconciliation needed; do not log bytes or full paths. |
+| Employee schedule UI | `ui/employee_workspace/employee_schedule_widget.py:590-865` | Service calls for seed, assignments, publish/freeze/reopen and rule/exception CRUD | Need outbox for all schedule lifecycle writes; no direct UI commits observed in this inspected module. |
+| Admin data reset UI | `ui/admin_workspace/data_management_panel.py:117,182` | Delegates preview/reset to `AdminDataReset` | Treat mass reset as **one privileged grouped operation** with affected counts; avoid dumping individual PII. |
+
+### Additional service coverage
+
+| Component | Evidence | Status / disposition |
+| --- | --- | --- |
+| Parent | `services/parent_service.py:86-122,139-219,237-246` | Create/update/delete direct commits, no in-session audit observed: **P1**, privacy protected |
+| Assessment | `services/assessment_service.py:86-127,160-231,245-253` | Assessment create/update/delete commits: **P0 academic evidence**, must log metadata not raw scores/notes by default |
+| Session note | `services/session_note_service.py:52-101,110-184,188-195` | Create/update/delete commits: **P0** due to teaching progress; sensitive content redacted |
+| Student note/highlight | `services/student_note_service.py:42-110`, `services/student_highlight_service.py:18-66` | Create/update/delete direct commits: **P1**, do not mirror free-form content |
+| Student documents | `services/student_document_service.py:37-96` | File copied before DB commit; document deletion changes DB separately: **P0 attachment provenance** |
+| Teacher documents | `services/teacher_document_service.py:54-136` | File copied before DB commit: **P1 attachment provenance** |
+| Employee schedule | `services/employee_schedule_service.py:140-239,436-550,553-636` | Rules/exceptions/assignments/seed direct commits; weekly publish/freeze/reopen calls `_audit_week()` before commit. **PARTIAL audit coverage**, not entirely absent. |
+| Employee work registration | `services/employee_work_registration_service.py:83-144` | Actions create/update/delete/submit/accept/reopen/deadline/close use `_audit()` -> `record_in_session()` before commit: **ATOMIC metadata audit** for inspected paths. |
+| Employee working time | `services/employee_working_time_service.py:91-155` | Booking/check-in/check-out/approval/lock direct commits: no transaction-bound audit observed: **P1**, potential payroll impact |
+| Employee admin management | `services/employee_admin_management_service.py:102-118,159-170,204-220` | Employee/registration deletes use transaction-bound `record_in_session`: **ATOMIC** for inspected paths |
+| Enrollment transfer/reconciliation | `services/enrollment_transfer_service.py:335-358`, `services/enrollment_reconciliation_service.py:224-239,324-347` | Uses transaction-bound audit for inspected mutations: **ATOMIC**, ensure grouped operation IDs and no duplicate manual re-entry |
+| Financial settlement | `services/financial_settlement_service.py:173,310-334,395-423` | Lifecycle audit uses `_record_transition_audit` in caller transaction; some draft mutations must be verified separately. **PARTIAL** pending full per-method proof |
+| Admin data reset | `services/admin_data_reset.py:223-240` | Transaction-bound audit after destructive business deletion, **ATOMIC** at inspected boundary; recovery report should summarize privileged reset, not individual rows |
+| Student import | `services/student_import_service.py:38+` | Excel bulk import delegates to other methods (needs final call-path proof), do not assume atomic batch just from absence of commit in importer |
+| Teaching assessment, assignment, parent/notes | Above | Additional classes of unaccepted business data that earlier RV-01 draft had not enumerated |
+
+### Low-level SQL / safety-critical observation
+
+`database/guarded_dbapi.py:121-196` **already records encrypted mutation intents** to `WriteRecoveryJournal().root / 'mutation-intents'` using AES-GCM, fsync, SQL and parameters, with session and mutation-gate incarnation. It records a statement in a progress handler **before the first VM instruction** to survive later rollback or process failure. The project already has a local forensic intent ledger.
+
+**Important: an intent is not a committed operation.** Its rows may correspond to statements that subsequently fail, roll back, or have no net effect. It can contain sensitive SQL parameters and must **not** be printed into UI Recovery reports or used as user-readable applied-change evidence. This mechanism is complementary to a transaction-bound **business outbox**, not a substitute. Reusing/replacing it requires a separate security and disk-retention audit; do not double-log full SQL or expose its contents.
+
+`database/guarded_dbapi.py:223-226` validates commit authority at low level. `database/mutation_permissions.py:9+` maps table actions to permissions. `database/migration.py:143-185` executes Alembic with `system_mutation_permit('migration')`; `database/seed.py:19-131` bootstraps roles/permissions. These are privileged **system maintenance** changes, not ordinary user recovery events. Direct `executescript`, Core bulk SQL and database authorizer must stay protected by existing mutation gate.
+
+### Concrete issue flagged for RV-02, NOT modified here
+
+**`PermissionService.update_user_role()` emits `USER_UNLOCKED` after role update.** It is both a misleading action name and a best-effort post-commit audit. The fix should move a correctly classified role-change event into the same transaction and test it; separate security audit logging can remain compatible. Do not fix by simply renaming emitted text in the external Recovery Report.
+
+### Scope / confidence note
+
+Git tree discovery allows an exact repository inventory. Targeted UI/service/DBAPI reads above establish verified specific call paths. A completed **machine-wide, all-file static AST scan** is not yet performed, and some repository paths may mutate through SQLAlchemy Core, trigger, migrations, native or background code. The RV-02 rollout must run a mechanically reproducible audit and CI coverage gate over the complete repository before claiming completeness; do not infer “everything covered” from these inspected examples.
