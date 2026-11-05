@@ -1,6 +1,7 @@
 """StudentHighlightService - business logic for StudentHighlight."""
 from typing import List, Optional
 from sqlalchemy.orm import sessionmaker
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.student_highlight import StudentHighlight
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
 from centermanager.services.session_service import SessionService, SessionNotFoundError
@@ -32,7 +33,13 @@ class StudentHighlightService:
             repo = self._repository_provider.student_highlights(db_session)
             highlight = StudentHighlight(session_id=session_id, student_id=student_id, type=validated_type, title=validated_title, description=desc_cleaned)
             repo.add(highlight)
+            record_for_active_write(
+                db_session, module="student_highlight", action="CREATE",
+                entity_type="StudentHighlight", entity_id=highlight.id,
+                entity_object=highlight, summary_args={"student_id": highlight.student_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(highlight)
             self._event_bus.publish(StudentHighlightCreated(highlight_id=highlight.id, student_id=student_id, session_id=session_id, title=validated_title, highlight_type=validated_type, description=desc_cleaned))
             return highlight
@@ -53,7 +60,13 @@ class StudentHighlightService:
             if highlight_type is not None: highlight.type = StudentHighlightValidator.validate_type(highlight_type)
             if title is not None: highlight.title = StudentHighlightValidator.validate_title(title)
             if description is not None: highlight.description = description.strip() if description else None
+            record_for_active_write(
+                db_session, module="student_highlight", action="UPDATE",
+                entity_type="StudentHighlight", entity_id=highlight.id,
+                entity_object=highlight, summary_args={"student_id": highlight.student_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(highlight)
             return highlight
 
@@ -63,4 +76,10 @@ class StudentHighlightService:
             highlight = repo.get_by_id(highlight_id)
             if highlight is None: raise ValueError("Highlight not found.")
             repo.delete(highlight)
+            record_for_active_write(
+                db_session, module="student_highlight", action="DELETE",
+                entity_type="StudentHighlight", entity_id=highlight.id,
+                entity_object=highlight, summary_args={"student_id": highlight.student_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
