@@ -65,8 +65,9 @@ def record_in_session(
     the event is added only for a real change. The event ID can be supplied by
     a retrying caller to enforce exact idempotency at the database PK.
     """
-    if not write_session_id or len(write_session_id) > 128:
-        raise RecoveryOutboxError("Verified WRITE session identifier is required")
+    if (not isinstance(write_session_id, str) or write_session_id in {".", ".."}
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", write_session_id)):
+        raise RecoveryOutboxError("Verified safe WRITE session identifier is required")
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_main_oid or ""):
         raise RecoveryOutboxError("Full verified base MAIN OID is required")
     for field, value, maximum in (
