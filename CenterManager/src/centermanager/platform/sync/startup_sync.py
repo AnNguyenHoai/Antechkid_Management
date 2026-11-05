@@ -349,7 +349,6 @@ class StartupSynchronization:
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
             from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
-            cases = RecoveryCaseRegistry(journal)
             try:
                 journal.assert_replaceable(legacy=True)
                 # Interrupted startup may have reconciled and then crashed
@@ -357,7 +356,7 @@ class StartupSynchronization:
                 # from the same verified immutable capture before any reset.
                 current = journal.inspect()
                 if current and current.get("status") == "RECONCILED":
-                    cases.register_from_reconciled(
+                    RecoveryCaseRegistry(journal).register_from_reconciled(
                         observed_main_oid=current["accepted_main_oid"]
                     )
                 return True
@@ -388,7 +387,7 @@ class StartupSynchronization:
             # RV-03 fail-closed barrier: no Git reset/DB installation until
             # a signed Recovery Case references the verified WAL-complete
             # capture, with UNKNOWN Change Log coverage until attested.
-            cases.register_from_reconciled(observed_main_oid=accepted)
+            RecoveryCaseRegistry(journal).register_from_reconciled(observed_main_oid=accepted)
             journal.assert_replaceable()
             self._startup_reconciled_unaccepted_local = True
             logger.warning(
