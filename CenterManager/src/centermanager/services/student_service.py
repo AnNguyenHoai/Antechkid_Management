@@ -1,3 +1,4 @@
+from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 # -*- coding: utf-8 -*-
 """
 StudentService - business logic for Student entity.
@@ -86,6 +87,17 @@ class StudentService:
                 triggers,
             )
 
+    @staticmethod
+    def _record_recovery_change(session, student, action: str) -> None:
+        from centermanager.services.recovery_change_outbox import record_for_active_write
+        if student.id is None and bool(getattr(session.get_bind(), "_cm_mutation_protected", False)):
+            session.flush()
+        record_for_active_write(
+            session, module="student", action=action,
+            entity_type="Student", entity_id=student.id,
+            summary_args={"student_id": student.id} if student.id is not None else None,
+        )
+
     def create_student(
         self,
         full_name: str,
@@ -120,7 +132,9 @@ class StudentService:
                     notes=normalized_notes,
                 )
                 repo.add(student)
+                self._record_recovery_change(session, student, "CREATE")
                 session.commit()
+                mirror_after_successful_commit(session)
                 repo.refresh(student)
 
                 if self._timeline_service:
@@ -179,7 +193,9 @@ class StudentService:
 
             previous_status = student.status
             student.status = "ARCHIVED"
+            self._record_recovery_change(session, student, "ARCHIVE")
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(student)
 
             if self._timeline_service:
@@ -211,7 +227,9 @@ class StudentService:
 
             previous_status = student.status
             student.status = "ACTIVE"
+            self._record_recovery_change(session, student, "ACTIVATE")
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(student)
 
             if self._timeline_service:
@@ -253,7 +271,9 @@ class StudentService:
                     if old_path.exists():
                         old_path.unlink()
                     student.profile_image_path = None
+            self._record_recovery_change(session, student, "PROFILE_IMAGE")
             session.commit()
+            mirror_after_successful_commit(session)
             if self._event_bus:
                 self._event_bus.publish(StudentUpdated(
                     student_id=student.id,
@@ -346,7 +366,9 @@ class StudentService:
                 return student
 
             try:
+                self._record_recovery_change(session, student, "UPDATE")
                 session.commit()
+                mirror_after_successful_commit(session)
                 repo.refresh(student)
 
                 if self._timeline_service:
@@ -389,7 +411,9 @@ class StudentService:
 
             student.deleted_at = self._utc_now()
             try:
+                self._record_recovery_change(session, student, "DELETE")
                 session.commit()
+                mirror_after_successful_commit(session)
                 repo.refresh(student)
 
                 if self._timeline_service:
@@ -422,7 +446,9 @@ class StudentService:
                 raise StudentNotDeletedError(f"Student id {student_id} is not deleted.")
             student.deleted_at = None
             try:
+                self._record_recovery_change(session, student, "RESTORE")
                 session.commit()
+                mirror_after_successful_commit(session)
                 if self._timeline_service:
                     self._timeline_service.log_event(
                         student_id=student.id,
