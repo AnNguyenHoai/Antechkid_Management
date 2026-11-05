@@ -225,3 +225,66 @@ def test_startup_creates_recovery_case_and_reuses_it_after_interruption(monkeypa
     rebooted = startup_sync.StartupSynchronization(provider)
     assert rebooted._prepare_authoritative_startup_replacement()
     assert len(RecoveryCaseRegistry(j).list_cases()) == 1
+
+
+def test_reconciled_case_rejects_main_advance_before_install(monkeypatch, tmp_path):
+    """A previously approved MAIN cannot authorize a different later OID."""
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    journal = FakeJournal(tmp_path, status="RECONCILED")
+    journal.assert_replaceable = lambda *, legacy=False: None
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: journal)
+    monkeypatch.setattr(mutation_authority, "gate_for",
+                        lambda: SimpleNamespace(lock=RLock(), closed=True))
+    monkeypatch.setattr(RecoveryCaseRegistry, "_key", lambda self: bytes(range(32)))
+    cases = RecoveryCaseRegistry(journal)
+    first = cases.register_from_reconciled(observed_main_oid=MAIN)
+    remote_advanced = "f" * 40
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: remote_advanced,
+        observe_remote_main_commit=lambda: remote_advanced,
+        get_local_main_commit=lambda: BASE,
+    )
+    startup = startup_sync.StartupSynchronization(provider)
+    assert startup._prepare_authoritative_startup_replacement() is False
+    assert "Remote MAIN changed" in startup.recovery_error
+    assert cases.list_cases() == [first]
+    assert journal.inspect()["status"] == "RECONCILED"
+
+
+def test_case_survives_clean_restart_without_automatic_acknowledgement(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    old = cases.register_from_reconciled(observed_main_oid=MAIN)
+    j.document.update(status="CLEAN", publication="VERIFIED")
+    for _ in range(3):
+        assert RecoveryCaseRegistry(j).list_cases() == [old]
+        assert RecoveryCaseRegistry(j).get(old["case_id"])["status"] == "PENDING_REVIEW"
+
+
+def test_missing_original_capture_fails_closed_on_case_reuse(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    first = cases.register_from_reconciled(observed_main_oid=MAIN)
+    # Even if the current journal still points to a valid capture ID, loss
+    # of the original immutable captured proof is a release blocker.
+    j.capture_valid = False
+    with pytest.raises(RecoveryRequired):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert cases.get(first["case_id"]) == first
+
+
+def test_registry_requires_protected_key_when_encryption_is_required(tmp_path, monkeypatch):
+    from centermanager.database import encryption
+    j = FakeJournal(tmp_path)
+    monkeypatch.setattr(encryption, "database_encryption_required", lambda: True)
+    monkeypatch.setattr(
+        encryption.DatabaseKeyStore, "load",
+        lambda self: (_ for _ in ()).throw(encryption.DatabaseKeyUnavailable("missing DPAPI key")),
+    )
+    with pytest.raises(encryption.DatabaseKeyUnavailable):
+        RecoveryCaseRegistry(j).register_from_reconciled(observed_main_oid=MAIN)
+    assert not list((tmp_path / "cases").glob("*.json"))
