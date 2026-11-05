@@ -166,11 +166,9 @@ class FinancePeriodService:
                 covering.status = FinancePeriod.STATUS_INACTIVE
 
             repo.add(period)
-            if bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="finance", action="CONFIGURE_PERIOD",
-                entity_type="FinancePeriod", entity_id=period.id,
+                entity_type="FinancePeriod", entity_id=period.id, entity_object=period,
                 summary_args={"finance_period_id": period.id} if period.id is not None else None,
             )
             session.commit()
@@ -204,7 +202,7 @@ class FinancePeriodService:
             period.effective_to = end_date
             record_for_active_write(
                 session, module="finance", action="DEACTIVATE_PERIOD",
-                entity_type="FinancePeriod", entity_id=period.id,
+                entity_type="FinancePeriod", entity_id=period.id, entity_object=period,
                 summary_args={"finance_period_id": period.id},
             )
             session.commit()
