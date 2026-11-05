@@ -356,8 +356,17 @@ class StartupSynchronization:
                 # from the same verified immutable capture before any reset.
                 current = journal.inspect()
                 if current and current.get("status") == "RECONCILED":
+                    # Reconciliation authorizes exactly ONE observed MAIN
+                    # generation. If remote advanced after the capture (for
+                    # example on a restarted install), do not reset to a newer
+                    # OID under proof for a different generation.
+                    if current.get("accepted_main_oid") != accepted:
+                        raise RecoveryRequired(
+                            "Remote MAIN changed since recovery reconciliation; "
+                            "retain the captured case and explicitly review the new MAIN."
+                        )
                     RecoveryCaseRegistry(journal).register_from_reconciled(
-                        observed_main_oid=current["accepted_main_oid"]
+                        observed_main_oid=accepted
                     )
                 return True
             except RecoveryRequired:
