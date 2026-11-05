@@ -237,7 +237,16 @@ class AdminDataResetService:
                 },
                 summary=f"Admin reset {normalized} data",
             )
+            from centermanager.services.recovery_change_outbox import (
+                record_for_active_write, mirror_after_successful_commit,
+            )
+            record_for_active_write(
+                session, module="admin", action="DATA_RESET",
+                entity_type="WorkspaceDataReset", entity_id=normalized,
+                summary_args={"record_count": sum(deleted.values())},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
         return AdminDataResetResult(
             scope=normalized,

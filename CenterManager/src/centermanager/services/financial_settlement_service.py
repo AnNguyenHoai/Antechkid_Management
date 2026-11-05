@@ -13,6 +13,7 @@ from centermanager.core.wallet import resolve_wallet
 from centermanager.models.finance_period import FinancePeriodDefinition
 from centermanager.models.financial_settlement import FinancialSettlement
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.services.audit_service import AuditService
 from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.wallet_service import WalletService
@@ -327,7 +328,13 @@ class FinancialSettlementService:
                     },
                 )
 
+            record_for_active_write(
+                session, module="finance", action="SAVE",
+                entity_type="FinancialSettlement", entity_id=row.id,
+                entity_object=row, summary_args={"settlement_id": row.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             settlement_repo.refresh(row)
             return row
 
@@ -420,6 +427,12 @@ class FinancialSettlementService:
                     "reopened_at": reopened_at.isoformat(),
                 },
             )
+            record_for_active_write(
+                session, module="finance", action="REOPEN",
+                entity_type="FinancialSettlement", entity_id=row.id,
+                entity_object=row, summary_args={"settlement_id": row.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             settlement_repo.refresh(row)
             return row

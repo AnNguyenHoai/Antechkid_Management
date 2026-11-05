@@ -607,6 +607,18 @@ class WriteRecoveryJournal:
         self.update(status='PUBLISHED', publication='VERIFIED', published_oid=local,
                     published_runtime_sha256=_hash(capture / 'center.db'),
                     accepted_local_files=self._local_files())
+        # RV-02: independent signed receipt AFTER the exact remote MAIN check.
+        # A failed local receipt cannot undo a confirmed Git publication or
+        # invent a new failed business transaction. Retain the journal proof.
+        try:
+            from centermanager.database.encryption import DatabaseKeyStore
+            from centermanager.platform.recovery_publication_receipt import record_verified_publication
+            record_verified_publication(
+                self.inspect(), recovery_root=self.root,
+                signing_key=DatabaseKeyStore().load(),
+            )
+        except Exception:
+            logger.exception('Verified Git MAIN publish but RV-02 signed receipt is unavailable')
 
     def preserve_post_publish_changes(self):
         """A success callback may commit local report metadata after the push.

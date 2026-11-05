@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.teacher_assignment import TeacherAssignment
 from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
@@ -57,7 +58,13 @@ class TeacherAssignmentService:
 
             assignment = TeacherAssignment(teacher_id=teacher_id, class_id=class_id)
             repo.add(assignment)
+            record_for_active_write(
+                session, module="teacher_assignment", action="ASSIGN",
+                entity_type="TeacherAssignment", entity_id=assignment.id,
+                entity_object=assignment, summary_args={"teacher_id": assignment.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(assignment)
 
             self._timeline_service.log_event(
@@ -94,7 +101,13 @@ class TeacherAssignmentService:
 
             assignment_id = assignment.id
             repo.delete(assignment)
+            record_for_active_write(
+                session, module="teacher_assignment", action="UNASSIGN",
+                entity_type="TeacherAssignment", entity_id=assignment.id,
+                entity_object=assignment, summary_args={"teacher_id": assignment.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             self._timeline_service.log_event(
                 teacher_id=teacher_id,

@@ -14,6 +14,7 @@ from centermanager.services.expense_timeline_service import ExpenseTimelineServi
 from centermanager.services.finance_ledger_guard import FinanceLedgerGuard, FinancePeriodClosedError
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.audit_service import AuditService
+from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 from centermanager.core.permission_guard import require_permission
 from centermanager.core.current_user import get_current_user
 from centermanager.events.event_bus import EventBus
@@ -117,6 +118,12 @@ class ExpenseService:
             entity_type="Expense",
             entity_id=expense.id,
             summary=f"{action}: Expense#{expense.id}",
+        )
+        from centermanager.services.recovery_change_outbox import record_for_active_write
+        record_for_active_write(
+            session, module="finance", action=action,
+            entity_type="Expense", entity_id=expense.id,
+            summary_args={"expense_id": expense.id},
         )
 
     def _normalize_text(self, text: Optional[str]) -> Optional[str]:
@@ -256,6 +263,7 @@ class ExpenseService:
                 new_values=self._audit_snapshot(expense),
             )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(expense)
             expense_id = expense.id
             self._log_timeline_best_effort(expense_id=expense_id, event_type="ExpenseCreated", title=f"Expense Created: {category}",
@@ -414,6 +422,7 @@ class ExpenseService:
                 new_values=self._audit_snapshot(expense),
             )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(expense)
             self._log_timeline_best_effort(expense_id=expense.id, event_type="ExpenseUpdated", title="Expense Updated",
                                            description="; ".join(changes), metadata={"changes": changes})
@@ -458,6 +467,7 @@ class ExpenseService:
                 new_values=self._audit_snapshot(expense),
             )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(expense)
             self._log_timeline_best_effort(
                 expense_id=expense.id, event_type="ExpenseReimbursed", title="Expense Reimbursed",
@@ -488,6 +498,7 @@ class ExpenseService:
                 new_values=self._audit_snapshot(expense),
             )
             session.commit()
+            mirror_after_successful_commit(session)
             self._log_timeline_best_effort(expense_id=expense_id, event_type="ExpenseDeleted", title="Expense Deleted",
                                            description=f"Expense {category} amount {amount:,.0f} VND deleted")
             self._publish_finance_change("deleted", expense_id)

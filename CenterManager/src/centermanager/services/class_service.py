@@ -6,6 +6,7 @@ from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.services.timeline_actor import resolve_timeline_actor
 from centermanager.models.class_ import Class
@@ -236,7 +237,13 @@ class ClassService:
                     fee=class_obj.fee,
                     source="CLASS_CREATE",
                 )
+            record_for_active_write(
+                session, module="class", action="CREATE",
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
+                summary_args={"class_id": class_obj.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(class_obj)
 
             if self._timeline_service:
@@ -491,7 +498,13 @@ class ClassService:
                     source="CLASS_FEE_CHANGE",
                 )
 
+            record_for_active_write(
+                session, module="class", action="UPDATE",
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
+                summary_args={"class_id": class_obj.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(class_obj)
 
             if self._timeline_service:
@@ -626,7 +639,13 @@ class ClassService:
                 enrollment.status = "WITHDRAWN"
                 enrollment.end_date = withdrawal_date
             class_obj.deleted_at = self._utc_now()
+            record_for_active_write(
+                session, module="class", action="ARCHIVE",
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
+                summary_args={"class_id": class_obj.id, "changed_count": len(active_enrollments)},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -655,7 +674,13 @@ class ClassService:
             if class_obj.deleted_at is None:
                 raise ClassNotDeletedError(f"Class {class_id} is not archived.")
             class_obj.deleted_at = None
+            record_for_active_write(
+                session, module="class", action="RESTORE",
+                entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
+                summary_args={"class_id": class_obj.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             if self._timeline_service:
                 self._timeline_service.log_event(

@@ -17,6 +17,7 @@ from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRe
 from centermanager.events.event_bus import EventBus
 from centermanager.events.student_events import StudentEnrollmentChanged
 from centermanager.services.audit_service import AuditService
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.services.authorization_service import AuthorizationService
 from centermanager.services.tuition_discount_policy import (
     TuitionDiscountPolicy,
@@ -484,7 +485,17 @@ class EnrollmentService:
                     },
                     summary=f"Tuition fee override for enrollment in {class_obj.name}",
                 )
+            record_for_active_write(
+                session, module="enrollment", action="ENROLL",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={
+                    "enrollment_id": enrollment.id,
+                    "student_id": enrollment.student_id,
+                    "class_id": enrollment.class_id,
+                },
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(enrollment)
             self._publish_change(enrollment, "ENROLLED", None)
             return enrollment
@@ -590,7 +601,17 @@ class EnrollmentService:
                 },
                 summary=f"Tuition freeze for enrollment #{enrollment_id}",
             )
+            record_for_active_write(
+                session, module="enrollment", action="FREEZE",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={
+                    "enrollment_id": enrollment.id,
+                    "student_id": enrollment.student_id,
+                    "class_id": enrollment.class_id,
+                },
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             freeze_repo.refresh(freeze)
             self._publish_change(enrollment, "TUITION_FROZEN", enrollment.status)
             return freeze
@@ -642,7 +663,17 @@ class EnrollmentService:
                 },
                 summary=f"Tuition resume for enrollment #{enrollment_id}",
             )
+            record_for_active_write(
+                session, module="enrollment", action="RESUME",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={
+                    "enrollment_id": enrollment.id,
+                    "student_id": enrollment.student_id,
+                    "class_id": enrollment.class_id,
+                },
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             freeze_repo.refresh(freeze)
             self._publish_change(enrollment, "TUITION_RESUMED", enrollment.status)
             return freeze
@@ -804,7 +835,17 @@ class EnrollmentService:
                     },
                     summary=f"Restore Enrollment#{enrollment.id}",
                 )
+            record_for_active_write(
+                session, module="enrollment", action="RESTORE",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={
+                    "enrollment_id": enrollment.id,
+                    "student_id": enrollment.student_id,
+                    "class_id": enrollment.class_id,
+                },
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(enrollment)
             self._publish_change(enrollment, "RESTORED", previous_status)
             return enrollment
@@ -879,7 +920,17 @@ class EnrollmentService:
                     },
                     summary=f"{action}: Enrollment#{enrollment.id}",
                 )
+            record_for_active_write(
+                session, module="enrollment", action="CHANGE_STATUS",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={
+                    "enrollment_id": enrollment.id,
+                    "student_id": enrollment.student_id,
+                    "class_id": enrollment.class_id,
+                },
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(enrollment)
             self._publish_change(
                 enrollment,

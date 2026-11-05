@@ -8,6 +8,7 @@ from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.teacher import Teacher
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
@@ -123,7 +124,13 @@ class TeacherService:
             )
             repo = self._repository_provider.teachers(session)
             repo.add(teacher)
+            record_for_active_write(
+                session, module="teacher", action="CREATE",
+                entity_type="Teacher", entity_id=teacher.id,
+                entity_object=teacher, summary_args={"teacher_id": teacher.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(teacher)
 
             if self._timeline_service:
@@ -264,7 +271,13 @@ class TeacherService:
             if not changes:
                 return teacher
 
+            record_for_active_write(
+                session, module="teacher", action="UPDATE",
+                entity_type="Teacher", entity_id=teacher.id,
+                entity_object=teacher, summary_args={"teacher_id": teacher.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(teacher)
 
             if self._timeline_service:
@@ -293,7 +306,13 @@ class TeacherService:
             if teacher.deleted_at is not None:
                 raise TeacherAlreadyDeletedError(f"Teacher {teacher_id} already deleted.")
             teacher.deleted_at = self._utc_now()
+            record_for_active_write(
+                session, module="teacher", action="ARCHIVE",
+                entity_type="Teacher", entity_id=teacher.id,
+                entity_object=teacher, summary_args={"teacher_id": teacher.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -318,7 +337,13 @@ class TeacherService:
             if teacher.deleted_at is None:
                 raise TeacherNotDeletedError(f"Teacher {teacher_id} is not deleted.")
             teacher.deleted_at = None
+            record_for_active_write(
+                session, module="teacher", action="RESTORE",
+                entity_type="Teacher", entity_id=teacher.id,
+                entity_object=teacher, summary_args={"teacher_id": teacher.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
             if self._timeline_service:
                 self._timeline_service.log_event(

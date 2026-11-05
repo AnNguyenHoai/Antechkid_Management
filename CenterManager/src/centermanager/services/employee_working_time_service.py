@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date, datetime, time, timedelta
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee import Employee
 from centermanager.models.employee_working_time import EmployeeWorkingTimeEntry
@@ -95,7 +96,8 @@ class EmployeeWorkingTimeService:
         with self._sf() as s:
             repo=self._repository_provider.employee_working_times(s); self._assert_no_overlap(repo,employee_id,work_date,start_time,end_time)
             e=EmployeeWorkingTimeEntry(employee_id=employee_id,work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),source=EmployeeWorkingTimeEntry.SOURCE_MANUAL,status=EmployeeWorkingTimeEntry.STATUS_BOOKED,notes=notes or None,created_by_user_id=u.id)
-            repo.add(e); s.commit(); return e
+            repo.add(e); record_for_active_write(s, module="working_time", action="BOOK", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s); return e
 
     def check_in(self, employee_id, at: datetime | None = None, work_type="WORK", notes=None, user=None):
         u=self._user(user); self._assert_write_scope(employee_id,u); at=at or datetime.now()
@@ -103,7 +105,8 @@ class EmployeeWorkingTimeService:
             repo=self._repository_provider.employee_working_times(s)
             if repo.open_entry(employee_id): raise EmployeeWorkingTimeValidationError("You already have an open working-time entry. Check out first.")
             e=EmployeeWorkingTimeEntry(employee_id=employee_id,work_date=at.date(),start_time=at.time().replace(second=0,microsecond=0),end_time=None,work_type=(work_type or "WORK").strip(),source=EmployeeWorkingTimeEntry.SOURCE_CHECK_IN,status=EmployeeWorkingTimeEntry.STATUS_OPEN,notes=notes or None,created_by_user_id=u.id)
-            repo.add(e); s.commit(); return e
+            repo.add(e); record_for_active_write(s, module="working_time", action="CHECK_IN", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s); return e
 
     def check_out(self, entry_id, at: datetime | None = None, user=None):
         u=self._user(user); at=at or datetime.now()
@@ -113,7 +116,8 @@ class EmployeeWorkingTimeService:
             self._assert_write_scope(e.employee_id,u)
             if e.status != EmployeeWorkingTimeEntry.STATUS_OPEN: raise EmployeeWorkingTimeValidationError("Only an open entry can be checked out.")
             if e.work_date != at.date(): raise EmployeeWorkingTimeValidationError("Check-out must be on the same work date as check-in.")
-            end=at.time().replace(second=0,microsecond=0); self._validate_times(e.start_time,end); repo.check_out(e,end); s.commit(); return e
+            end=at.time().replace(second=0,microsecond=0); self._validate_times(e.start_time,end); repo.check_out(e,end); record_for_active_write(s, module="working_time", action="CHECK_OUT", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s); return e
 
     def update_booking(self, entry_id, *, work_date, start_time, end_time, work_type, notes=None, user=None):
         u=self._user(user)
@@ -124,7 +128,8 @@ class EmployeeWorkingTimeService:
             if e.status in {EmployeeWorkingTimeEntry.STATUS_APPROVED, EmployeeWorkingTimeEntry.STATUS_LOCKED}: raise EmployeeWorkingTimeAccessDeniedError("Approved or locked working time cannot be edited.")
             self._assert_no_overlap(repo,e.employee_id,work_date,start_time,end_time,e.id)
             repo.update_booking(e,work_date=work_date,start_time=start_time,end_time=end_time,work_type=work_type.strip(),notes=notes)
-            s.commit(); return e
+            record_for_active_write(s, module="working_time", action="UPDATE", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s); return e
 
     def delete_entry(self, entry_id, user=None):
         u=self._user(user)
@@ -133,7 +138,8 @@ class EmployeeWorkingTimeService:
             if not e:return
             self._assert_write_scope(e.employee_id,u)
             if e.status in {EmployeeWorkingTimeEntry.STATUS_APPROVED, EmployeeWorkingTimeEntry.STATUS_LOCKED}: raise EmployeeWorkingTimeAccessDeniedError("Approved or locked working time cannot be deleted.")
-            repo.delete(e);s.commit()
+            repo.delete(e);record_for_active_write(s, module="working_time", action="DELETE", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s)
 
     def approve(self, entry_id, user=None):
         u=self._user(user)
@@ -142,7 +148,8 @@ class EmployeeWorkingTimeService:
             repo=self._repository_provider.employee_working_times(s); e=repo.get(entry_id)
             if not e: raise EmployeeWorkingTimeValidationError("Working-time entry not found.")
             if e.end_time is None: raise EmployeeWorkingTimeValidationError("Open entry must be checked out before approval.")
-            repo.approve(e,u.id);s.commit();return e
+            repo.approve(e,u.id);record_for_active_write(s, module="working_time", action="APPROVE", entity_type="EmployeeWorkingTimeEntry", entity_id=e.id, entity_object=e, summary_args={"employee_id": e.employee_id})
+            s.commit(); mirror_after_successful_commit(s);return e
 
     def lock_month(self, employee_id, year, month, user=None):
         u=self._user(user)
@@ -152,7 +159,10 @@ class EmployeeWorkingTimeService:
             self._scope(employee_id,u)
             repo=self._repository_provider.employee_working_times(s); rows=repo.list_for_employee(employee_id,start,end)
             if any(r.end_time is None for r in rows): raise EmployeeWorkingTimeValidationError("Cannot lock a month containing open entries.")
-            count=repo.lock_entries(rows); s.commit(); return count
+            count=repo.lock_entries(rows)
+            if count:
+                record_for_active_write(s, module="working_time", action="LOCK_MONTH", entity_type="EmployeeWorkingTimeMonth", entity_id=employee_id, summary_args={"employee_id": employee_id, "record_count": count})
+            s.commit(); mirror_after_successful_commit(s); return count
 
     def monthly_summary(self, employee_id, year, month, user=None):
         u=self._user(user)

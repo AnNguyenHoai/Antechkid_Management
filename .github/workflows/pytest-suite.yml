@@ -64,6 +64,19 @@ jobs:
           path: CenterManager/rv01-mutation-sites.json
           if-no-files-found: warn
 
+      - name: RV-02 mirror latency microbenchmark (shard 0 only)
+        if: matrix.shard == 0
+        run: |
+          python tools/benchmark_rv02_mirror.py --samples 50 --json rv02-mirror-benchmark.json
+
+      - name: Upload RV-02 mirror latency benchmark
+        if: matrix.shard == 0 && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv02-mirror-benchmark-${{ github.run_id }}
+          path: CenterManager/rv02-mirror-benchmark.json
+          if-no-files-found: warn
+
       - name: Run full pytest suite
         env:
           QT_QPA_PLATFORM: offscreen

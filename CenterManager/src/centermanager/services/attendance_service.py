@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 from centermanager.models.attendance import Attendance, AttendanceStatus
 from centermanager.models.session import SessionStatus
 from centermanager.models.student import Student
@@ -383,7 +384,22 @@ class AttendanceService:
                     results.append(attendance)
                     side_effects.append((student_id, None, row["status"], True))
 
+                # One business operation per committed session sheet. Teacher notes
+                # and student names are not copied into recovery metadata.
+                changed_count = sum(1 for _, old, _, changed in side_effects if old is None or changed)
+                if changed_count:
+                    from centermanager.services.recovery_change_outbox import record_for_active_write
+                    record_for_active_write(
+                        session, module="attendance", action="SAVE_SHEET",
+                        entity_type="AttendanceSheet", entity_id=session_id,
+                        summary_args={
+                            "session_id": session_id,
+                            "class_id": session_obj.class_id,
+                            "changed_count": changed_count,
+                        },
+                    )
                 session.commit()
+                mirror_after_successful_commit(session)
             except Exception:
                 session.rollback()
                 raise

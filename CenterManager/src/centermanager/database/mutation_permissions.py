@@ -46,6 +46,9 @@ def mutation_permissions(table, action, column=None):
     groups['class_timeline_events'] = ('class.create', 'class.update', 'class.delete', 'lesson.create', 'lesson.update', 'lesson.cancel', 'attendance.create', 'attendance.update', 'student.update')
     groups['timeline_events'] = tuple(c.value for c in Capability if c.value.startswith(('student.', 'attendance.', 'class.', 'finance.income.')) and not c.value.endswith(('.view', '.read', '.export')))
     groups['audit_logs'] = tuple(c.value for c in Capability if not c.value.endswith(('.view', '.read', '.export', '.view.self', '.view.all')))
+    # Transactional recovery index is a side effect of an authorized business
+    # write, never an independent privilege or READ-time persistence path.
+    groups['recovery_change_outbox'] = groups['audit_logs']
     if action == 23:
         lifecycle = {
             'students': {'deleted_at': ('student.delete', 'student.update'),

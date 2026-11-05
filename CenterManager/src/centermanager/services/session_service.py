@@ -12,6 +12,7 @@ from centermanager.repositories.provider import RepositoryProvider, create_defau
 from centermanager.events.event_bus import EventBus
 from centermanager.events.class_events import ClassSessionChanged
 from centermanager.services.class_timeline_service import ClassTimelineService
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.permission_guard import require_permission
 
 class SessionServiceError(Exception):
@@ -137,7 +138,13 @@ class SessionService:
                 note=norm_note,
             )
             repo.add(session_obj)
+            record_for_active_write(
+                db_session, module="session", action="CREATE",
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
+                summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(session_obj)
 
             timeline_service = ClassTimelineService(self._session_factory)
@@ -259,7 +266,13 @@ class SessionService:
             if not changes:
                 return session_obj
 
+            record_for_active_write(
+                db_session, module="session", action="UPDATE",
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
+                summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(session_obj)
 
             timeline_service = ClassTimelineService(self._session_factory)
@@ -283,7 +296,13 @@ class SessionService:
             if session_obj.status == SessionStatus.CANCELLED.value:
                 raise SessionValidationError("Session already cancelled.")
             session_obj.status = SessionStatus.CANCELLED.value
+            record_for_active_write(
+                db_session, module="session", action="CANCEL",
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
+                summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(session_obj)
 
             timeline_service = ClassTimelineService(self._session_factory)
@@ -310,7 +329,13 @@ class SessionService:
             deleted_session_id = session_obj.id
 
             repo.delete(session_obj)
+            record_for_active_write(
+                db_session, module="session", action="DELETE",
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
+                summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
 
             if self._event_bus is not None:
                 self._event_bus.publish(ClassSessionChanged(

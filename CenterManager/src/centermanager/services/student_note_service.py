@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.note import Note, NoteType
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -53,7 +54,13 @@ class StudentNoteService:
             )
             repo = self._repository_provider.notes(session)
             repo.add(note)
+            record_for_active_write(
+                session, module="student_note", action="CREATE",
+                entity_type="StudentNote", entity_id=note.id,
+                entity_object=note, summary_args={"student_id": note.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(note)
 
             if self._timeline_service:
@@ -96,7 +103,13 @@ class StudentNoteService:
                     raise ValueError("Note content cannot be empty.")
                 note.content = norm
 
+            record_for_active_write(
+                session, module="student_note", action="UPDATE",
+                entity_type="StudentNote", entity_id=note.id,
+                entity_object=note, summary_args={"student_id": note.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(note)
             return note
 
@@ -107,4 +120,10 @@ class StudentNoteService:
             if note is None:
                 raise ValueError(f"Note with id {note_id} not found.")
             repo.delete(note)
+            record_for_active_write(
+                session, module="student_note", action="DELETE",
+                entity_type="StudentNote", entity_id=note.id,
+                entity_object=note, summary_args={"student_id": note.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)

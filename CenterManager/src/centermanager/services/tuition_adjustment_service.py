@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
@@ -244,7 +245,13 @@ class TuitionAdjustmentService:
                              "prepaid_only": prepaid_only, "idempotency_key": key, "reason": resolved_reason},
                     entity_type="TuitionAdjustment", entity_id=adjustment.id,
                     summary=f"Tuition refund for Enrollment#{enrollment.id}")
+                record_for_active_write(
+                    session, module="tuition", action="REFUND",
+                    entity_type="TuitionAdjustment", entity_id=adjustment.id,
+                    summary_args={"tuition_adjustment_id": adjustment.id, "enrollment_id": enrollment.id},
+                )
                 session.commit()
+                mirror_after_successful_commit(session)
                 adjustments.refresh(adjustment)
         except Exception as exc:
             return self._recover_integrity_conflict(exc, key, command)
@@ -296,7 +303,13 @@ class TuitionAdjustmentService:
                              "accounting_period_start": accounting_period_start.isoformat(), "idempotency_key": key,
                              "reason": resolved_reason, "wallet_movement": False}, entity_type="TuitionAdjustment",
                     entity_id=adjustment.id, summary=f"Tuition credit adjustment for Enrollment#{enrollment.id}")
+                record_for_active_write(
+                    session, module="tuition", action="CREDIT_ADJUSTMENT",
+                    entity_type="TuitionAdjustment", entity_id=adjustment.id,
+                    summary_args={"tuition_adjustment_id": adjustment.id, "enrollment_id": enrollment.id},
+                )
                 session.commit()
+                mirror_after_successful_commit(session)
                 adjustments.refresh(adjustment)
         except Exception as exc:
             return self._recover_integrity_conflict(exc, key, command)

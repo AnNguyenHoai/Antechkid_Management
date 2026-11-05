@@ -8,6 +8,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.assessment import Assessment, AssessmentType
 from centermanager.models.timeline_event import TimelineEventType
 from centermanager.services.timeline_service import TimelineService
@@ -124,7 +125,13 @@ class AssessmentService:
             )
             repo = self._repository_provider.assessments(session)
             repo.add(assessment)
+            record_for_active_write(
+                session, module="assessment", action="CREATE",
+                entity_type="Assessment", entity_id=assessment.id,
+                entity_object=assessment, summary_args={"student_id": assessment.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(assessment)
 
             if self._timeline_service:
@@ -228,7 +235,13 @@ class AssessmentService:
             if not changes:
                 return assessment
 
+            record_for_active_write(
+                session, module="assessment", action="UPDATE",
+                entity_type="Assessment", entity_id=assessment.id,
+                entity_object=assessment, summary_args={"student_id": assessment.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(assessment)
             if self._timeline_service:
                 self._timeline_service.log_event(
@@ -250,7 +263,13 @@ class AssessmentService:
                 raise AssessmentNotFoundError(f"Assessment id {assessment_id} not found.")
             student_id = assessment.student_id
             repo.delete(assessment)
+            record_for_active_write(
+                session, module="assessment", action="DELETE",
+                entity_type="Assessment", entity_id=assessment.id,
+                entity_object=assessment, summary_args={"student_id": assessment.student_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             if self._timeline_service:
                 self._timeline_service.log_event(
                     student_id=student_id,

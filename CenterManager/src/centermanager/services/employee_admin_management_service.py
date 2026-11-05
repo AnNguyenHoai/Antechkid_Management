@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee_work_registration_period import EmployeeWorkRegistrationPeriod
 from centermanager.models.role import RoleDefinitions
@@ -115,7 +116,13 @@ class EmployeeAdminManagementService:
                 },
                 actor=actor,
             )
+            record_for_active_write(
+                session, module="employee", action="REOPEN_REGISTRATION_PERIOD",
+                entity_type="EmployeeWorkRegistrationPeriod", entity_id=period.id, entity_object=period,
+                summary_args={"registration_period_id": period.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             period_repo.refresh(period)
             return period
 
@@ -167,7 +174,13 @@ class EmployeeAdminManagementService:
                 details=details,
                 actor=actor,
             )
+            record_for_active_write(
+                session, module="employee", action="DELETE_REGISTRATION",
+                entity_type="EmployeeWorkRegistration", entity_id=registration.id, entity_object=registration,
+                summary_args={"registration_id": registration.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
     def delete_employee(
         self,
@@ -217,4 +230,10 @@ class EmployeeAdminManagementService:
                 },
                 actor=actor,
             )
+            record_for_active_write(
+                session, module="employee", action="DELETE_EMPLOYEE",
+                entity_type="Employee", entity_id=employee.id, entity_object=employee,
+                summary_args={"employee_id": employee.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)

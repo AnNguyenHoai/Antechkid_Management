@@ -959,6 +959,26 @@ class WriteTransactionManager:
 
         try:
             if self._recovery_journal is not None:
+                # Local Save and mutation gate are already quiesced here.
+                # Drain ONLY the mirror worker (which never opens SQLCipher).
+                # No Git/network operation is introduced by this barrier.
+                # A failed/expired mirror is NOT a data-loss event: the
+                # WAL-complete SQLCipher capture below still retains outbox.
+                from centermanager.platform.recovery_mirror_worker import drain_before_capture
+                active_recovery = self._recovery_journal.inspect() or {}
+                mirror_drained = timed_call(
+                    "rv02_mirror_drain", drain_before_capture, 5.0,
+                    recovery_root=self._recovery_journal.root,
+                    session_id=active_recovery.get("session_id"),
+                )
+                self._recovery_journal.update(
+                    rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
+                )
+                if not mirror_drained:
+                    logger.warning(
+                        "RV-02 background mirror incomplete before publication; "
+                        "preserving original SQLCipher outbox in protected capture"
+                    )
                 timed_call("capture_before_publish", self._recovery_journal.preserve, "before-publish")
                 self._recovery_journal.update(status="PUBLISHING")
             success = timed_call("git_publish", self._do_publish)

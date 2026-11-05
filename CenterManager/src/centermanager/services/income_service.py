@@ -29,6 +29,7 @@ from centermanager.repositories.provider import (
     create_default_repository_provider,
 )
 from centermanager.services.audit_service import AuditService
+from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 from centermanager.services.class_service import ClassService
 from centermanager.services.finance_ledger_guard import (
     FinanceLedgerGuard,
@@ -330,6 +331,12 @@ class IncomeService:
             entity_id=income.id,
             summary=f"{action}: Income#{income.id}",
         )
+        from centermanager.services.recovery_change_outbox import record_for_active_write
+        record_for_active_write(
+            session, module="finance", action=action,
+            entity_type="Income", entity_id=income.id,
+            summary_args={"income_id": income.id},
+        )
 
     def _best_effort_timeline_event(self, **kwargs) -> None:
         try:
@@ -588,6 +595,7 @@ class IncomeService:
             repo.flush()
             self._record_audit(session, income, "CREATE", new_values=self._audit_snapshot(income))
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(income)
 
             if student_id is not None:
@@ -747,6 +755,7 @@ class IncomeService:
             event_finance_period_start = finance_period_start
 
             session.commit()
+            mirror_after_successful_commit(session)
             income_repo.refresh(income)
             adjustment_repo.refresh(adjustment)
 
@@ -923,6 +932,7 @@ class IncomeService:
                 new_values=after,
             )
             session.commit()
+            mirror_after_successful_commit(session)
             income_repo.refresh(income)
             self._publish_finance_change("tuition_reconciled", income.id)
             return income
@@ -1018,6 +1028,7 @@ class IncomeService:
             after = self._audit_snapshot(income)
             self._record_audit(session, income, "UPDATE", old_values=before, new_values=after)
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(income)
 
             if income.student_id is not None:
@@ -1053,6 +1064,7 @@ class IncomeService:
             after = self._audit_snapshot(income)
             self._record_audit(session, income, "VOID", old_values=before, new_values=after)
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(income)
             if income.student_id is not None:
                 self._best_effort_timeline_event(
@@ -1079,6 +1091,7 @@ class IncomeService:
             after = self._audit_snapshot(income)
             self._record_audit(session, income, "DELETE", old_values=before, new_values=after)
             session.commit()
+            mirror_after_successful_commit(session)
             if student_id is not None:
                 self._best_effort_timeline_event(
                     student_id=student_id,

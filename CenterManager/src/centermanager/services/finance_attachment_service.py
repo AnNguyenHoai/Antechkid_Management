@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_any_permission, require_permission
@@ -220,7 +221,13 @@ class FinanceAttachmentService:
                 entity_id=attachment.id,
                 summary=f"ATTACH_VOUCHER: {entity_type}#{entity_id}",
             )
+            record_for_active_write(
+                session, module="attachment", action="ATTACH",
+                entity_type="FinanceAttachment", entity_id=attachment.id,
+                entity_object=attachment, summary_args={"attachment_id": attachment.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(attachment)
         self._publish("created", attachment.id)
         return attachment
@@ -247,7 +254,13 @@ class FinanceAttachmentService:
                 entity_id=attachment.id,
                 summary=f"REMOVE_VOUCHER: {attachment.entity_type}#{attachment.entity_id}",
             )
+            record_for_active_write(
+                session, module="attachment", action="REMOVE",
+                entity_type="FinanceAttachment", entity_id=attachment.id,
+                entity_object=attachment, summary_args={"attachment_id": attachment.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
         self._publish("deleted", attachment_id)
 
     # ---- queries -----------------------------------------------------------
