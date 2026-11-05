@@ -316,3 +316,28 @@ def test_real_sqlcipher_wal_commit_survives_missing_external_mirror(tmp_path):
             assert len(read_session_events(session, "synthetic-sqlcipher")) == 1
     finally:
         encrypted_engine.dispose()
+
+
+def test_mirror_coverage_is_unknown_without_attested_sqlcipher_source(engine, tmp_path):
+    from centermanager.platform.recovery_change_mirror import assess_mirror_coverage
+    with Session(engine) as session:
+        _event(session)
+        session.commit()
+        events = read_session_events(session, "unit-session")
+        assert assess_mirror_coverage(
+            events, recovery_root=tmp_path, encryption_key=KEY,
+            committed_source_attested=False,
+        )["status"] == "UNKNOWN"
+        missing = assess_mirror_coverage(
+            events, recovery_root=tmp_path, encryption_key=KEY,
+            committed_source_attested=True,
+        )
+        assert missing["status"] == "INCOMPLETE"
+        assert missing["verified"] == 0
+        for event in events:
+            mirror_committed_event(event, recovery_root=tmp_path, encryption_key=KEY)
+        complete = assess_mirror_coverage(
+            events, recovery_root=tmp_path, encryption_key=KEY,
+            committed_source_attested=True,
+        )
+        assert complete == {"status": "COMPLETE", "expected": 1, "verified": 1}
