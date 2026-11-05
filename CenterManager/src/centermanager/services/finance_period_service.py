@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
@@ -165,7 +166,15 @@ class FinancePeriodService:
                 covering.status = FinancePeriod.STATUS_INACTIVE
 
             repo.add(period)
+            if bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
+                session.flush()
+            record_for_active_write(
+                session, module="finance", action="CONFIGURE_PERIOD",
+                entity_type="FinancePeriod", entity_id=period.id,
+                summary_args={"finance_period_id": period.id} if period.id is not None else None,
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(period)
             return period
 
@@ -193,7 +202,13 @@ class FinancePeriodService:
 
             period.status = FinancePeriod.STATUS_INACTIVE
             period.effective_to = end_date
+            record_for_active_write(
+                session, module="finance", action="DEACTIVATE_PERIOD",
+                entity_type="FinancePeriod", entity_id=period.id,
+                summary_args={"finance_period_id": period.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
             repo.refresh(period)
             return period
 
