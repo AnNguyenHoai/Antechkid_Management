@@ -74,3 +74,29 @@ The recorder's Python `session.info` may still hold a pointer to a rolled-back o
 - Native DBAPI/SQLAlchemy Core/SQL triggers may not emit domain hooks. The existing guarded_dbapi mutation-intent ledger and E1B-2B local authority gate remain essential, but encrypted *intent* is not proof of committed edits.
 - Legacy EXEs do not emit the new table: coverage must remain `UNKNOWN`, never `COMPLETE`. Validate schema compatibility before a production migration.
 - Performance and Windows SQLCipher/WAL kill-process, two-client, publish timeout, lease-loss and backup-restart UAT must pass.
+
+
+## Performance optimization — asynchronous encrypted mirror (RV-02, 2026-11-05)
+
+### Save-path contract
+
+The business operation and recovery outbox **still share one SQLCipher commit**. Following that commit, `mirror_after_successful_commit` verifies each event ID against the committed SQLCipher outbox, serializes minimal allowlisted metadata and enqueues **immutable bytes**. It does **not** load the encryption key, invoke AES-GCM, create files or call fsync on the Save thread. `recovery_mirror_worker.py` performs these operations with a bounded (512-item) dedicated daemon worker; it never accesses DB sessions, recovery journals or Git refs.
+
+This change is deliberately a **risk-limited first optimization**: preserve the one-file-per-event immutable mirror format and its existing tamper/coverage semantics instead of introducing a new batch-file schema before Windows UAT. Physical batch segments and key-cache optimization may follow after benchmarks demonstrate a need.
+
+### Failure and barrier contract
+
+- Queue full: refuse additional mirror work immediately, flag incomplete and keep the SQLCipher outbox. Never block Save until disk becomes available.
+- Worker exception: log incomplete; never propagate an exception that falsely reports a successful business commit as failed.
+- Abrupt process termination while worker is pending: externally mirrored history may be incomplete, but existing Recovery Journal **must** preserve a WAL-consistent SQLCipher database with committed outbox events. RV-03 must compare the protected snapshot to mirror and disclose INCOMPLETE.
+- Finish Editing: after the local Save/gate finishes, but **before** `preserve('before-publish')`, call `drain_before_capture(timeout_seconds=5)`; update journal `rv02_mirror_state` to `QUEUE_DRAINED` or `INCOMPLETE`. `QUEUE_DRAINED` certifies ONLY worker queue processing, **not** completeness of all committed events. Do not silently treat it as `COMPLETE` without offline snapshot attestation.
+- If drain times out or fails, proceed through the **existing protected SQLCipher recovery capture**, not a new unsafe Git publication or an optimistic mirror-complete claim. The background worker never retains an open DB handle during runtime replacement.
+- `async Save` is not equivalent to `async SQLCipher commit`: transaction atomicity, WRITE authority and rollback semantics are unchanged.
+
+### Windows latency and QA
+
+Run `python tools/benchmark_rv02_mirror.py --samples 50 --json rv02-mirror-benchmark.json` locally. Windows CI shard 0 runs the same synthetic microbenchmark and publishes its JSON artifact. Metrics: synchronous per-event AES-GCM+fsync median/P95 versus async enqueue median/P95, plus total wall-time until all mirrors are durably written.
+
+**Limitations:** This benchmark is *component-only* and excludes SQLCipher commit/read, Qt event loop, Git operations, startup, backup copy, antivirus variability and EXE packaging. Targets for actual Windows EXE UAT: Save P95 regression <=10%, normal startup P95 regression <=5%, zero main-thread encrypted-mirror fsync, no unaccepted edits silently marked fully logged. Do not claim these targets achieved from the component microbenchmark alone.
+
+Tests: `tests/test_rv02_background_mirror_worker.py` injects stalled storage, full queue, worker errors and immutable byte copies; updated existing outbox tests wait through a bounded drain barrier. `test_rv02_recovery_change_outbox.py` continues checking SQLCipher WAL commit and rollback durability.
