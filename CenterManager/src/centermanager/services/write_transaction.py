@@ -670,7 +670,7 @@ class WriteTransactionManager:
                 if self._recovery_journal is not None:
                     try:
                         self._recovery_journal.preserve("lost-authority-before-editing")
-                        self._recovery_journal.mark_authority_lost()
+                        self._recovery_journal.update(mutation_authority_lost=True)
                     except Exception:
                         logger.exception("Failed to preserve recovery after WRITE grant loss")
                 self._release_grant_after_failed_consistency_check()
@@ -1162,7 +1162,7 @@ class WriteTransactionManager:
             if self._recovery_journal is not None:
                 try:
                     self._recovery_journal.preserve("lost-authority-before-editing")
-                    self._recovery_journal.mark_authority_lost()
+                    self._recovery_journal.update(mutation_authority_lost=True)
                 except Exception:
                     logger.exception("Failed to preserve recovery after queued WRITE grant loss")
             self._release_grant_after_failed_consistency_check()
