@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Tuple
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
@@ -236,7 +237,13 @@ class EnrollmentReconciliationService:
                 },
                 summary=f"Enrollment#{enrollment.id} confirmed as legitimate history",
             )
+            record_for_active_write(
+                session, module="enrollment", action="REVIEW_LEGITIMATE",
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
+                summary_args={"enrollment_id": enrollment.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
     def reconcile(
         self,
@@ -344,7 +351,13 @@ class EnrollmentReconciliationService:
                     f"Enrollment#{canonical.id}"
                 ),
             )
+            record_for_active_write(
+                session, module="enrollment", action="RECONCILE",
+                entity_type="Enrollment", entity_id=duplicate.id, entity_object=duplicate,
+                summary_args={"enrollment_id": duplicate.id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
         if self._event_bus is not None:
             self._event_bus.publish(
