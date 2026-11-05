@@ -150,3 +150,57 @@ def test_mirror_worker_has_no_database_engine_imports():
     ]
     assert not any("sqlalchemy" in name or "git" in name.lower()
                    for name in imports)
+
+
+def test_failed_old_session_does_not_poison_new_write_session(tmp_path, monkeypatch):
+    """Failure from WRITE A must not mark a fully mirrored WRITE B incomplete."""
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    processed = []
+
+    def selective_failure(payload, *, recovery_root, encryption_key):
+        if payload == b"A":
+            raise OSError("simulated prior WRITE mirror failure")
+        processed.append(payload)
+
+    monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: bytes(range(32)))
+    monkeypatch.setattr(recovery_change_mirror, "mirror_committed_payload", selective_failure)
+    worker = _MirrorWorker(max_pending=4)
+    assert worker.enqueue(tmp_path, b"A", session_id="old-write")
+    assert not worker.drain(5.0, recovery_root=tmp_path, session_id="old-write")
+    assert worker.enqueue(tmp_path, b"B", session_id="new-write")
+    assert worker.drain(5.0, recovery_root=tmp_path, session_id="new-write")
+    assert processed == [b"B"]
+    assert worker.snapshot()["failed"] == 1
+
+
+def test_scoped_drain_does_not_wait_for_another_session_disk(tmp_path, monkeypatch):
+    """A stuck other-session mirror must not block the new WRITE drain."""
+    from centermanager.database.encryption import DatabaseKeyStore
+
+    stalled = threading.Event()
+    release = threading.Event()
+
+    def slow_old_write(payload, *, recovery_root, encryption_key):
+        if payload == b"old":
+            stalled.set()
+            assert release.wait(4)
+
+    monkeypatch.setattr(DatabaseKeyStore, "load", lambda self: bytes(range(32)))
+    monkeypatch.setattr(recovery_change_mirror, "mirror_committed_payload", slow_old_write)
+    worker = _MirrorWorker(max_pending=4)
+    try:
+        assert worker.enqueue(tmp_path, b"old", session_id="old-write")
+        assert stalled.wait(2)
+        # A session with no queued events must not inherit old-write latency.
+        started = time.perf_counter()
+        assert worker.drain(
+            0.1, recovery_root=tmp_path, session_id="new-write"
+        )
+        assert time.perf_counter() - started < 0.2
+        assert not worker.drain(
+            0.01, recovery_root=tmp_path, session_id="old-write"
+        )
+    finally:
+        release.set()
+    assert worker.drain(5)
