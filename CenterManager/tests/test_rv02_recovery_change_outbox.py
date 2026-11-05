@@ -312,6 +312,23 @@ def test_real_sqlcipher_wal_commit_survives_missing_external_mirror(tmp_path):
             assert session.execute(text("SELECT COUNT(*) FROM local_business")).scalar_one() == 1
             assert len(read_session_events(session, "synthetic-sqlcipher")) == 1
         assert not list(tmp_path.rglob("*.enc"))
+        # An attested crash capture must report an unmirrored committed event
+        # as INCOMPLETE; no stale or empty mirror can be declared complete.
+        from centermanager.platform.recovery_change_mirror import assess_mirror_coverage
+        with Session(encrypted_engine) as snapshot_session:
+            committed_events = read_session_events(snapshot_session, "synthetic-sqlcipher")
+            assert assess_mirror_coverage(
+                committed_events,
+                recovery_root=tmp_path,
+                encryption_key=KEY,
+                committed_source_attested=True,
+            ) == {"status": "INCOMPLETE", "expected": 1, "verified": 0}
+            assert assess_mirror_coverage(
+                committed_events,
+                recovery_root=tmp_path,
+                encryption_key=KEY,
+                committed_source_attested=False,
+            )["status"] == "UNKNOWN"
 
         # Both business row and outbox must be committed or both absent.
         with Session(encrypted_engine) as session:
