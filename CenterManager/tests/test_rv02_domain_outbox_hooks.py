@@ -21,6 +21,17 @@ EXPECTED = {
     "parent_service.py": ("create_parent", "update_parent", "delete_parent"),
     "teacher_service.py": ("create_teacher", "update_teacher", "delete_teacher", "restore_teacher"),
     "teacher_assignment_service.py": ("assign_teacher_to_class", "unassign_teacher_from_class"),
+    "student_document_service.py": ("upload_document", "delete_document"),
+    "teacher_document_service.py": ("upload_document", "delete_document"),
+    "employee_document_service.py": ("upload",),
+    "finance_attachment_service.py": ("add_attachment", "remove_attachment"),
+    "permission_service.py": (
+        "create_role", "update_role", "delete_role", "create_user",
+        "update_user_role", "delete_user", "set_user_active",
+        "create_user_with_temp_password", "reset_user_password",
+        "update_user", "unlock_user",
+    ),
+    "financial_settlement_service.py": ("_save", "reopen"),
 }
 
 
@@ -57,3 +68,22 @@ def test_new_recovery_hooks_surround_business_commit(filename, methods):
         assert isinstance(kwargs["summary_args"], ast.Dict)
         assert all(isinstance(key, ast.Constant) and key.value.endswith("_id")
                    for key in kwargs["summary_args"].keys)
+
+
+def test_student_document_delete_keeps_file_until_after_commit():
+    """A failed metadata commit may not leave an existing document without bytes."""
+    tree = ast.parse((SERVICES / "student_document_service.py").read_text(encoding="utf-8-sig"))
+    delete = next(node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "delete_document")
+    calls = _calls(delete)
+    commits = [call.lineno for call in calls if _callee(call) == "session.commit"]
+    file_unlinks = [call.lineno for call in calls if _callee(call) == "file_path.unlink"]
+    assert len(commits) == len(file_unlinks) == 1
+    assert commits[0] < file_unlinks[0]
+
+
+def test_permission_change_role_audit_is_semantically_correct():
+    source = (SERVICES / "permission_service.py").read_text(encoding="utf-8-sig")
+    role_change = source.split("    def update_user_role(", 1)[1].split("\n    def ", 1)[0]
+    assert 'self._audit("USER_ROLE_CHANGED", user)' in role_change
+    assert 'self._audit("USER_UNLOCKED", user)' not in role_change
