@@ -965,8 +965,11 @@ class WriteTransactionManager:
                 # A failed/expired mirror is NOT a data-loss event: the
                 # WAL-complete SQLCipher capture below still retains outbox.
                 from centermanager.platform.recovery_mirror_worker import drain_before_capture
+                active_recovery = self._recovery_journal.inspect() or {}
                 mirror_drained = timed_call(
-                    "rv02_mirror_drain", drain_before_capture, 5.0
+                    "rv02_mirror_drain", drain_before_capture, 5.0,
+                    recovery_root=self._recovery_journal.root,
+                    session_id=active_recovery.get("session_id"),
                 )
                 self._recovery_journal.update(
                     rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
