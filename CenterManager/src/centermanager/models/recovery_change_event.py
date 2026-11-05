@@ -34,5 +34,5 @@ class RecoveryChangeEvent(Base):
 
     __table_args__ = (
         Index("ix_recovery_outbox_session", "write_session_id", "occurred_at_utc"),
-        Index("ix_recovery_outbox_operation", "operation_id"),
+        Index("ix_recovery_outbox_operation", "operation_id", unique=True),
     )
