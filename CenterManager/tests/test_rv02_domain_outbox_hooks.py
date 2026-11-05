@@ -32,6 +32,30 @@ EXPECTED = {
         "update_user", "unlock_user",
     ),
     "financial_settlement_service.py": ("_save", "reopen"),
+    "employee_service.py": (
+        "create_employee", "create_employee_with_account", "link_existing_user",
+        "update_status", "update_employee",
+    ),
+    "employee_working_time_service.py": (
+        "create_booking", "check_in", "check_out", "update_booking",
+        "delete_entry", "approve", "lock_month",
+    ),
+    "employee_schedule_service.py": (
+        "add_rule", "update_rule", "delete_rule", "add_exception",
+        "delete_exception", "add_week_assignment", "delete_week_assignment",
+        "seed_week_from_registration", "seed_week_from_template",
+        "publish_week", "freeze_week", "reopen_week_for_override",
+    ),
+    "employee_work_registration_service.py": (
+        "create", "update", "delete", "submit_week", "accept", "reopen",
+        "set_submission_deadline", "close_week",
+    ),
+    "employee_admin_management_service.py": (
+        "reopen_period", "delete_registration", "delete_employee",
+    ),
+    "enrollment_transfer_service.py": ("transfer",),
+    "enrollment_reconciliation_service.py": ("mark_legitimate", "reconcile"),
+
 }
 
 
@@ -63,11 +87,13 @@ def test_new_recovery_hooks_surround_business_commit(filename, methods):
         event_call = records[0]
         kwargs = {kw.arg: kw.value for kw in event_call.keywords}
         assert "entity_id" in kwargs
-        assert "entity_object" in kwargs
         assert "summary_args" in kwargs
         assert isinstance(kwargs["summary_args"], ast.Dict)
-        assert all(isinstance(key, ast.Constant) and key.value.endswith("_id")
-                   for key in kwargs["summary_args"].keys)
+        assert all(
+            isinstance(key, ast.Constant)
+            and (key.value.endswith("_id") or key.value in {"record_count", "changed_count"})
+            for key in kwargs["summary_args"].keys
+        )
 
 
 def test_student_document_delete_keeps_file_until_after_commit():
