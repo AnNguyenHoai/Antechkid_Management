@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from centermanager.core.paths import get_paths
 from centermanager.database.artifact_security import materialize_runtime_database_to_repository
 from centermanager.platform.collaboration import CollaborationManager, WriteRequestResult
+from centermanager.platform.write_performance import trace_operation, timed_call
 
 logger = logging.getLogger(__name__)
 
@@ -528,6 +529,7 @@ class WriteTransactionManager:
         return True
 
     # ---- Start / Finish / Cancel ----
+    @trace_operation("start")
     def start_editing(self, save_callback: Optional[Callable[[], bool]] = None) -> bool:
         start_total = time.perf_counter()
         self._last_start_error = ""
@@ -561,7 +563,7 @@ class WriteTransactionManager:
             return False
 
         request_started = time.perf_counter()
-        result = self._collab_manager.request_write()
+        result = timed_call("request_write", self._collab_manager.request_write)
         request_ms = (time.perf_counter() - request_started) * 1000
         logger.info(
             "Start Editing collaboration result=%s message=%s position=%s",
@@ -575,7 +577,7 @@ class WriteTransactionManager:
             # session owns the distributed lock; on failure, release the grant
             # before returning to IDLE.
             handoff_started = time.perf_counter()
-            if not self._verify_first_writer_consistency():
+            if not timed_call("handoff", self._verify_first_writer_consistency):
                 self._release_grant_after_failed_consistency_check()
                 self._transition_to(WriteTransactionState.IDLE, "consistency verification failed")
                 logger.info(
@@ -608,7 +610,7 @@ class WriteTransactionManager:
                 self._base_main_commit[:8] if self._base_main_commit else None,
             )
 
-            if not self._begin_recovery_journal():
+            if not timed_call("recovery_begin", self._begin_recovery_journal):
                 self._release_grant_after_failed_consistency_check()
                 return False
             if not self._transition_to(WriteTransactionState.EDITING, "durable recovery prepared"):
@@ -617,7 +619,7 @@ class WriteTransactionManager:
             if not self._open_local_mutations():
                 return False
             snapshot_started = time.perf_counter()
-            self._create_snapshot()
+            timed_call("snapshot", self._create_snapshot)
             snapshot_ms = (time.perf_counter() - snapshot_started) * 1000
             logger.info(
                 "PERF start_edit total_ms=%.1f request_ms=%.1f handoff_ms=%.1f snapshot_ms=%.1f",
@@ -656,6 +658,7 @@ class WriteTransactionManager:
             logger.warning(f"Failed to acquire write lock: {self._last_start_error}")
             return False
 
+    @trace_operation("finish")
     def finish_editing(self,
                        save_callback: Optional[Callable[[], bool]] = None,
                        on_publish_success: Optional[Callable[[], None]] = None,
@@ -692,7 +695,7 @@ class WriteTransactionManager:
             with self._mutation_gate.lock:
                 self._mutation_gate.finishing_thread = threading.get_ident()
         authority_started = time.perf_counter()
-        result = self.enter_finishing()
+        result = timed_call("authority", self.enter_finishing)
         authority_ms = (time.perf_counter() - authority_started) * 1000
         if not result.get("success"):
             if self._state in (WriteTransactionState.FINISHING_WAITING_FOR_COLLABORATION,
@@ -708,7 +711,7 @@ class WriteTransactionManager:
         save_fn = save_callback or self._save_callback
         if save_fn is not None:
             try:
-                save_success = save_fn()
+                save_success = timed_call("local_save", save_fn)
                 if not save_success:
                     logger.error("Local save failed")
                     if self._state != WriteTransactionState.RECOVERY_REQUIRED:
@@ -736,13 +739,13 @@ class WriteTransactionManager:
         self._on_publish_success = on_publish_success
         self._on_publish_failure = on_publish_failure
 
-        if not self._create_pending_version():
+        if not timed_call("pending_version", self._create_pending_version):
             logger.error("Pending version creation failed")
             self._state = WriteTransactionState.FAILED
             return False
 
         materialize_started = time.perf_counter()
-        if not self._publish_database_and_manifest():
+        if not timed_call("materialize", self._publish_database_and_manifest):
             logger.error("Database + manifest publish failed")
             self._state = WriteTransactionState.FAILED
             if self._version_manager:
@@ -752,7 +755,7 @@ class WriteTransactionManager:
         materialize_ms = (time.perf_counter() - materialize_started) * 1000
 
         publish_started = time.perf_counter()
-        publish_result = self._publish()
+        publish_result = timed_call("publish_and_release", self._publish)
         publish_ms = (time.perf_counter() - publish_started) * 1000
         logger.info(
             "PERF finish_edit total_ms=%.1f authority_ms=%.1f save_ms=%.1f materialize_ms=%.1f publish_release_ms=%.1f result=%s",
@@ -890,19 +893,19 @@ class WriteTransactionManager:
 
         try:
             if self._recovery_journal is not None:
-                self._recovery_journal.preserve("before-publish")
+                timed_call("capture_before_publish", self._recovery_journal.preserve, "before-publish")
                 self._recovery_journal.update(status="PUBLISHING")
-            success = self._do_publish()
+            success = timed_call("git_publish", self._do_publish)
             if success:
                 if self._recovery_journal is not None:
-                    self._recovery_journal.published(self._collab_manager._sync_provider)
+                    timed_call("recovery_published", self._recovery_journal.published, self._collab_manager._sync_provider)
                 if self._version_manager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
                 self._state = WriteTransactionState.PUBLISHED
                 if self._generate_reports is not None:
                     try:
-                        self._generate_reports(set(self._dirty_student_ids))
+                        timed_call("reports", self._generate_reports, set(self._dirty_student_ids))
                     except Exception as exc:
                         self._report_warning = (
                             f"Core data was published; local reports are incomplete. {exc}"
@@ -912,13 +915,13 @@ class WriteTransactionManager:
                 if self._on_publish_success:
                     self._on_publish_success()
                 post_publish_pending = bool(self._recovery_journal is not None and
-                    self._recovery_journal.preserve_post_publish_changes())
+                    timed_call("post_publish_validation", self._recovery_journal.preserve_post_publish_changes))
                 self._collab_manager._lock.clear_finishing_data()
                 self._finishing_deadline = None
                 self._finishing_started_at = None
                 self._publish_intent = False
 
-                if not self._release_lock():
+                if not timed_call("release_lock", self._release_lock):
                     self._state = WriteTransactionState.PUBLISHED_LOCK_RELEASE_PENDING
                     logger.warning(
                         "Transaction published successfully but remote WRITE lock release is pending"
