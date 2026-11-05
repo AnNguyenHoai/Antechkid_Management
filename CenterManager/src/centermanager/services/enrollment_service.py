@@ -485,11 +485,9 @@ class EnrollmentService:
                     },
                     summary=f"Tuition fee override for enrollment in {class_obj.name}",
                 )
-            if enrollment.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="enrollment", action="ENROLL",
-                entity_type="Enrollment", entity_id=enrollment.id,
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
                 summary_args={
                     "enrollment_id": enrollment.id,
                     "student_id": enrollment.student_id,
@@ -603,11 +601,9 @@ class EnrollmentService:
                 },
                 summary=f"Tuition freeze for enrollment #{enrollment_id}",
             )
-            if enrollment.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="enrollment", action="FREEZE",
-                entity_type="Enrollment", entity_id=enrollment.id,
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
                 summary_args={
                     "enrollment_id": enrollment.id,
                     "student_id": enrollment.student_id,
@@ -667,11 +663,9 @@ class EnrollmentService:
                 },
                 summary=f"Tuition resume for enrollment #{enrollment_id}",
             )
-            if enrollment.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="enrollment", action="RESUME",
-                entity_type="Enrollment", entity_id=enrollment.id,
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
                 summary_args={
                     "enrollment_id": enrollment.id,
                     "student_id": enrollment.student_id,
@@ -841,11 +835,9 @@ class EnrollmentService:
                     },
                     summary=f"Restore Enrollment#{enrollment.id}",
                 )
-            if enrollment.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="enrollment", action="RESTORE",
-                entity_type="Enrollment", entity_id=enrollment.id,
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
                 summary_args={
                     "enrollment_id": enrollment.id,
                     "student_id": enrollment.student_id,
@@ -928,11 +920,9 @@ class EnrollmentService:
                     },
                     summary=f"{action}: Enrollment#{enrollment.id}",
                 )
-            if enrollment.id is None and bool(getattr(session.get_bind(), "_cm_runtime_owned", False)):
-                session.flush()
             record_for_active_write(
                 session, module="enrollment", action="CHANGE_STATUS",
-                entity_type="Enrollment", entity_id=enrollment.id,
+                entity_type="Enrollment", entity_id=enrollment.id, entity_object=enrollment,
                 summary_args={
                     "enrollment_id": enrollment.id,
                     "student_id": enrollment.student_id,
