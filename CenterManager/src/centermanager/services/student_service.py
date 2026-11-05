@@ -90,11 +90,9 @@ class StudentService:
     @staticmethod
     def _record_recovery_change(session, student, action: str) -> None:
         from centermanager.services.recovery_change_outbox import record_for_active_write
-        if student.id is None and bool(getattr(session.get_bind(), "_cm_mutation_protected", False)):
-            session.flush()
         record_for_active_write(
             session, module="student", action=action,
-            entity_type="Student", entity_id=student.id,
+            entity_type="Student", entity_id=student.id, entity_object=student,
             summary_args={"student_id": student.id} if student.id is not None else None,
         )
 
