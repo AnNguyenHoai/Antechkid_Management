@@ -15,6 +15,14 @@ import time
 import uuid
 from pathlib import Path
 from unittest.mock import patch
+import sys
+
+# Direct invocation via `python tools/benchmark_rv02_mirror.py` puts tools/
+# (not CenterManager/src/) on sys.path on Windows CI. Resolve source locally,
+# without touching editable installs, user PATH, or production configuration.
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from centermanager.database.encryption import DatabaseKeyStore
 from centermanager.platform.recovery_change_mirror import mirror_committed_payload
