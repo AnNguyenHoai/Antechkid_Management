@@ -138,11 +138,9 @@ class SessionService:
                 note=norm_note,
             )
             repo.add(session_obj)
-            if session_obj.id is None and bool(getattr(db_session.get_bind(), "_cm_runtime_owned", False)):
-                db_session.flush()
             record_for_active_write(
                 db_session, module="session", action="CREATE",
-                entity_type="TeachingSession", entity_id=session_obj.id,
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
                 summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
             )
             db_session.commit()
@@ -268,11 +266,9 @@ class SessionService:
             if not changes:
                 return session_obj
 
-            if session_obj.id is None and bool(getattr(db_session.get_bind(), "_cm_runtime_owned", False)):
-                db_session.flush()
             record_for_active_write(
                 db_session, module="session", action="UPDATE",
-                entity_type="TeachingSession", entity_id=session_obj.id,
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
                 summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
             )
             db_session.commit()
@@ -300,11 +296,9 @@ class SessionService:
             if session_obj.status == SessionStatus.CANCELLED.value:
                 raise SessionValidationError("Session already cancelled.")
             session_obj.status = SessionStatus.CANCELLED.value
-            if session_obj.id is None and bool(getattr(db_session.get_bind(), "_cm_runtime_owned", False)):
-                db_session.flush()
             record_for_active_write(
                 db_session, module="session", action="CANCEL",
-                entity_type="TeachingSession", entity_id=session_obj.id,
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
                 summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
             )
             db_session.commit()
@@ -335,11 +329,9 @@ class SessionService:
             deleted_session_id = session_obj.id
 
             repo.delete(session_obj)
-            if session_obj.id is None and bool(getattr(db_session.get_bind(), "_cm_runtime_owned", False)):
-                db_session.flush()
             record_for_active_write(
                 db_session, module="session", action="DELETE",
-                entity_type="TeachingSession", entity_id=session_obj.id,
+                entity_type="TeachingSession", entity_id=session_obj.id, entity_object=session_obj,
                 summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
             )
             db_session.commit()
