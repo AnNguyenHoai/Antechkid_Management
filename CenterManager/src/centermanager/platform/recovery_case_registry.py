@@ -91,6 +91,14 @@ class RecoveryCaseRegistry:
         if not capture:
             raise RecoveryRequired("Recovery Case requires the preserved database and attachments.")
         verified = self.journal.verify_capture(capture)
+        # The manifest is the existing authenticated proof: never accept a
+        # recovery case built from a capture belonging to a different repo,
+        # even if its ciphertext happens to be decryptable with the same key.
+        manifest_journal = verified.get("journal") or {}
+        captured_repository = manifest_journal.get("repository_id")
+        if (captured_repository is not None
+                and captured_repository != document.get("repository_id")):
+            raise RecoveryRequired("Recovery Case capture belongs to a different repository.")
         if verified.get("journal", {}).get("base_main_oid") not in {
             document.get("base_main_oid"), None
         }:
@@ -107,8 +115,9 @@ class RecoveryCaseRegistry:
                 raise RecoveryRequired("Recovery Case identity collision; startup blocked.")
             # The remote may advance later; keep the exact MAIN observed when
             # the incident was initially isolated. Do not rewrite history.
-            if not self.journal.verify_capture(previous["capture_ref"]):
-                raise RecoveryRequired("Recovery Case original capture could not be verified.")
+            original_manifest = self.journal.verify_capture(previous["capture_ref"])
+            if original_manifest.get("files", {}).get("center.db") != previous["capture_db_sha256"]:
+                raise RecoveryRequired("Recovery Case original captured database fingerprint has changed.")
             return previous
 
         # Status from a failed/unknown publication must remain UNVERIFIED;
