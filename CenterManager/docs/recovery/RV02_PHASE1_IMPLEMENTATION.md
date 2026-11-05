@@ -129,3 +129,21 @@ In previously completed Windows runner workflow [#42006247444](https://github.co
 End-to-end asynchronous submission for 50 events: 1.316 ms; until all 50 mirror files were encrypted and fsynced: 678.329 ms. These numbers describe **the mirrored-event component only** and must not be extrapolated into an end-to-end application latency speedup percentage. Worker session-scoping was added after this run; it must pass its own CI.
 
 Actual Windows EXE Save/startup and Finish Editing P95 with old/new binaries, SQLCipher encryption, file attachments, anti-virus and user-class sizes remain unmeasured.
+
+
+## RV-02 Step 1 integrity audit — operation dedupe and DB→mirror crash boundary
+
+**Baseline:** Previous head `90e1b853` Windows CI `42031103845` PASS (3/3). New tests/schema changes require their own green CI.
+
+**P0 finding A — retry operation-id reuse could create duplicate confirmed events.** Before this audit, `event_id` was a PK, but `operation_id` had only a non-unique index. A retry with the same operation ID and a new event ID would therefore append a second committed event. The additive migration and ORM index now enforce `UNIQUE(operation_id)`; a duplicate aborts the **whole caller-owned business transaction**, not just the event insert. This is **duplicate suppression / fail-closed behavior**, not a claim that a failed retry automatically returns the previous successful result. A future UI-level idempotent-result lookup must not authorize new mutations.
+
+The current design records **one recovery event per operation ID**. If a future operation needs multiple events sharing a transaction operation ID, introduce a separate event ordinal and explicit operation grouping contract rather than quietly removing uniqueness. Migration `1e10a045` is not yet merged/deployed; schema changes here must be retested on Windows EXE and remain blocked if existing DBs already contain duplicate operation IDs.
+
+**P0 finding B — committed SQLCipher row can outlive missing external mirror.** The crash window between `session.commit()` and worker fsync is unavoidable without synchronous mirror IO. This is safe **only if** an authenticated WAL-complete protected SQLCipher capture is retained. The real SQLCipher WAL test now asserts a committed business row and outbox row remain available while no encrypted external mirror exists; an attested source yields `INCOMPLETE`, while unattested source yields `UNKNOWN`. A crash cannot be called fully mirrored on queue status alone.
+
+**Evidence and limitations**
+- `test_rv02_recovery_change_outbox.py`: operation-id uniqueness with fresh event ID; full business rollback on conflict; encrypted SQLCipher WAL crash gap; mirror completeness/UNKNOWN.
+- `test_rv02_migration_compatibility.py`: additive migration has a **unique** operation index and preserves legacy business rows; downgrade with committed outbox refuses destructive deletion.
+- Existing E1B recovery capture uses `runtime_database_publication_snapshot()`, validates SQLCipher artifact and hashes all included files, and writes an HMAC-signed manifest. Do not bypass those source-of-truth checks when RV-03 presents an event list.
+- The process-kill boundary with Windows packaged EXE, old-client schema and multi-workstation runtime replacement are **still outstanding**; tests above are injection/synthetic, not EXE certification.
+- Known limitation: per-entity source hooks cannot prove every lower-level DBAPI/SQLAlchemy Core/file-only write is represented. Full completeness must be attested against a verified captured SQLCipher source and the RV-01 mutation register; an old EXE without the table is `UNKNOWN`.
