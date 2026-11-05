@@ -54,27 +54,36 @@ def mirror_committed_event(
     recovery_root: Path,
     encryption_key: bytes,
 ) -> Path:
-    """Store one event at a deterministic, immutable, encrypted path.
+    """Compatibility wrapper: mirror immutable event metadata."""
+    return mirror_committed_payload(
+        _payload(event), recovery_root=recovery_root, encryption_key=encryption_key
+    )
 
-    Call **only after the SQLCipher transaction committed**. Caller must
-    separately track completeness; successful mirrored files never certify that
-    all committed events were exported. No plaintext PII or SQL parameters.
+
+def mirror_committed_payload(
+    payload: bytes, *, recovery_root: Path, encryption_key: bytes
+) -> Path:
+    """Persist a verified committed event payload without opening SQLCipher.
+
+    Caller must verify the event actually committed before queuing this data.
+    This routine runs only in the mirror worker, not in the UI save path.
     """
+    data = json.loads(payload)
+    session_id = data["write_session_id"]
+    try:
+        event_id = str(uuid.UUID(data["event_id"]))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValueError("Invalid committed event identity") from exc
+    if not isinstance(session_id, str) or session_id in {".", ".."} or not _SESSION_PATTERN.fullmatch(session_id):
+        raise ValueError("Invalid session identifier for recovery mirror")
     if not isinstance(encryption_key, bytes) or len(encryption_key) not in (16, 24, 32):
         raise ValueError("Valid AES-GCM workspace key is required")
-    session_id = event.write_session_id
-    if session_id in {".", ".."} or not _SESSION_PATTERN.fullmatch(session_id or ""):
-        raise ValueError("Invalid session identifier for recovery mirror")
-    try:
-        event_id = str(uuid.UUID(event.event_id))
-    except ValueError as exc:
-        raise ValueError("Invalid recovery event ID") from exc
     directory = Path(recovery_root) / "rv02-committed-events" / session_id
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = directory / (event_id + ".enc")
 
     # Existing event must be authenticated and bytewise semantically identical.
-    plaintext = _payload(event)
+    plaintext = payload
     if target.exists():
         if decrypt_mirrored_event(target, encryption_key=encryption_key) != json.loads(plaintext):
             raise ValueError("Existing immutable recovery event differs from committed source")
