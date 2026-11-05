@@ -93,6 +93,8 @@ def _service(monkeypatch, paths, writer=None):
     service._sync_manager = SimpleNamespace(provider=lambda: provider)
 
     class VerifiedJournal:
+        root = paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery")
+
         def inspect(self):
             return dict(receipt)
 
@@ -100,7 +102,15 @@ def _service(monkeypatch, paths, writer=None):
             assert before == receipt
             assert accepted_main == "accepted-main"
             assert observe_main() == accepted_main
+            # Rollback backups must be outside Database/ BEFORE sealing CLEAN.
+            assert not list(paths.database_dir.glob(".*.previous-*"))
+            preserved = list((self.root / "handoff-rollback").glob("*/.center.db.previous-*"))
+            assert len(preserved) == 1
+            assert preserved[0].is_file()
             order.append("receipt")
+
+        def assert_replaceable(self):
+            order.append("receipt-verified")
 
     monkeypatch.setattr(recovery, "require_replaceable", lambda: None)
     monkeypatch.setattr(recovery, "WriteRecoveryJournal", VerifiedJournal)
@@ -238,6 +248,8 @@ def test_receipt_failure_rolls_back_db_before_discarding_backup(tmp_path, monkey
     import centermanager.platform.write_recovery as recovery
 
     class RejectReceipt:
+        root = paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery")
+
         def inspect(self):
             return {"status": "CLEAN", "publication": "VERIFIED"}
 
@@ -266,6 +278,8 @@ def test_unverified_receipt_stops_before_database_mutation(tmp_path, monkeypatch
     import centermanager.platform.write_recovery as recovery
 
     class UnacceptedJournal:
+        root = paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery")
+
         def inspect(self):
             return {"status": "OPEN", "publication": "UNKNOWN"}
 
@@ -274,3 +288,52 @@ def test_unverified_receipt_stops_before_database_mutation(tmp_path, monkeypatch
     assert order == []
     assert fence["active"] is False
     assert _read_values(runtime_db) == ["PREVIOUS_ACCEPTED"]
+
+
+def test_clean_receipt_fingerprint_excludes_deleted_handoff_backup(tmp_path, monkeypatch):
+    """Regression for Windows 2026-11-05: one removed database backup after CLEAN."""
+    paths = _paths(tmp_path)
+    repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+    _make_plain_db(repo_db, ["FROM_MAIN"])
+    runtime_db = paths.database_dir / "center.db"
+    _make_plain_db(runtime_db, ["PRIOR_ACCEPTED"])
+    service, fence, order = _service(monkeypatch, paths)
+
+    assert service._apply_runtime_update() is True
+    assert order.index("receipt") < order.index("receipt-verified")
+    assert "receipt-verified" in order
+    assert not list(paths.database_dir.glob(".*.previous-*"))
+    assert not list(
+        (paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery") /
+         "handoff-rollback").glob("*/.center.db.previous-*")
+    )
+    assert _read_values(runtime_db) == ["FROM_MAIN"]
+
+
+def test_rejected_receipt_retains_old_db_until_rollback(tmp_path, monkeypatch):
+    """Unaccepted handoff preserves and restores the previous DB from recovery area."""
+    paths = _paths(tmp_path)
+    repo_db = paths.runtime_root / "repository" / "database" / "center.db"
+    _make_plain_db(repo_db, ["NEW"])
+    runtime_db = paths.database_dir / "center.db"
+    _make_plain_db(runtime_db, ["OLD"])
+    service, fence, order = _service(monkeypatch, paths)
+
+    import centermanager.platform.write_recovery as recovery
+
+    class RejectOnSeal:
+        root = paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery")
+
+        def inspect(self):
+            return {"status": "CLEAN", "publication": "VERIFIED"}
+
+        def record_verified_handoff_install(self, **kwargs):
+            backup = list((self.root / "handoff-rollback").glob("*/.center.db.previous-*"))
+            assert len(backup) == 1
+            assert _read_values(backup[0]) == ["OLD"]
+            raise recovery.RecoveryRequired("simulated MAIN advancement")
+
+    monkeypatch.setattr(recovery, "WriteRecoveryJournal", RejectOnSeal)
+    assert service._apply_runtime_update() is False
+    assert _read_values(runtime_db) == ["OLD"]
+    assert fence["active"] is False

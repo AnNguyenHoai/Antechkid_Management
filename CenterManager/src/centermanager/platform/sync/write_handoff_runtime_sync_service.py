@@ -231,10 +231,14 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         staged_manifest = runtime_manifest.with_name(
             f".{runtime_manifest.name}.handoff-{token}.tmp"
         )
-        previous_db = runtime_db.with_name(f".{runtime_db.name}.previous-{token}")
-        previous_manifest = runtime_manifest.with_name(
-            f".{runtime_manifest.name}.previous-{token}"
-        )
+        # Keep rollback artifacts in the protected recovery area, outside the
+        # live runtime fingerprint. Previously these backups were placed in
+        # Database/ and accidentally accepted into CLEAN receipt fingerprints
+        # before they were deleted; journal.begin then rejected the deletion.
+        recovery_root = WriteRecoveryJournal().root
+        rollback_dir = recovery_root / "handoff-rollback" / token
+        previous_db = rollback_dir / f".{runtime_db.name}.previous-{token}"
+        previous_manifest = rollback_dir / f".{runtime_manifest.name}.previous-{token}"
 
         sidecars = [
             runtime_db.with_name(runtime_db.name + "-wal"),
@@ -242,7 +246,7 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
             runtime_db.with_name(runtime_db.name + "-journal"),
         ]
         previous_sidecars = {
-            sidecar: sidecar.with_name(f".{sidecar.name}.previous-{token}")
+            sidecar: rollback_dir / f".{sidecar.name}.previous-{token}"
             for sidecar in sidecars
         }
 
@@ -253,7 +257,18 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         new_manifest_installed = False
         sessions_refreshed = False
 
+        rollback_restored = False
         try:
+            # The recovery root belongs to CenterManager's private runtime.
+            # Refuse symlinked recovery parents instead of writing backups
+            # through an arbitrary destination.
+            if recovery_root.is_symlink() or rollback_dir.parent.is_symlink():
+                raise RuntimeError("WRITE handoff recovery backup parent is a symlink")
+            rollback_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+            logger.info(
+                "WRITE handoff rollback artifacts isolated outside the accepted "
+                "database fingerprint"
+            )
             # Stage and fully validate an immutable copy before fencing runtime.
             _copy_fsync(repo_db, staged_db)
             validate_database_artifact(
@@ -373,6 +388,9 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
                 accepted_main=accepted_main,
                 observe_main=provider.observe_remote_main_commit,
             )
+            logger.info(
+                "WRITE handoff receipt sealed without temporary DB rollback artifacts"
+            )
 
         except Exception:
             logger.exception("Atomic authoritative runtime materialization failed")
@@ -403,6 +421,7 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
                 # after rollback is complete. Handoff still returns False, so the
                 # just-acquired WRITE lease will be released by collaboration.
                 self._refresh_db_sessions()
+                rollback_restored = True
                 logger.warning("Previous runtime DB restored after failed handoff install")
             except Exception:
                 logger.exception(
@@ -411,6 +430,15 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
             finally:
                 staged_db.unlink(missing_ok=True)
                 staged_manifest.unlink(missing_ok=True)
+                # Never delete a backup if rollback itself failed.
+                if rollback_restored:
+                    try:
+                        rollback_dir.rmdir()
+                    except OSError:
+                        logger.warning(
+                            "WRITE handoff rollback directory retained after restore; "
+                            "inspect remaining artifacts"
+                        )
             return False
 
         finally:
@@ -423,7 +451,18 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         previous_manifest.unlink(missing_ok=True)
         for _, backup in preserved_sidecars:
             backup.unlink(missing_ok=True)
-
+        try:
+            rollback_dir.rmdir()
+        except OSError:
+            logger.warning(
+                "WRITE handoff rollback directory retained after success; "
+                "inspect remaining artifacts"
+            )
+        # Prove that the accepted receipt survives rollback-backup cleanup.
+        # This is not a bypass: all normal business files, DB SHA, WAL and
+        # Git invariants are still checked by the ordinary CLEAN guard.
+        WriteRecoveryJournal().assert_replaceable()
+        logger.info("WRITE handoff CLEAN receipt remains valid after backup cleanup")
         return True
 
     def execute_write_handoff_sync(self) -> bool:
