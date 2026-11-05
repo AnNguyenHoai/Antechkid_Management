@@ -96,3 +96,30 @@ No slice should claim end-to-end completeness until slice 4 (or accepted explici
 - **Operational priority:** do not make every Save wait for Git or remote checks; write local transactional event and mirror asynchronously with a safe final fence.
 - **Compatibility:** do not deploy a schema-changing outbox until older Windows EXEs' behavior has been tested; older sessions must not be permitted to publish incompatible authoritative databases.
 - **Exit criterion for RV-01:** founder approves this design and the coverage-gap inventory as the input plan for RV-02; RV-02 must prove remaining OPEN paths before promoting logging as complete. GitHub issue #593 should not auto-close from a partial implementation PR.
+
+
+## 9. Further source-verified requirements: security events, non-DB writes, and existing mutation-intent ledger
+
+### Three distinct event types — do not conflate them
+
+1. **Business committed event** (new transactional SQLCipher outbox): user-recoverable facts, recorded in the exact same DB transaction as a successful business change. The user-facing report displays sanitized summaries only.
+2. **Forensic mutation intent** (already implemented in `database/guarded_dbapi.py:121-196`): AES-GCM encrypted and fsync'd statement/parameters **before SQL execution**, intentionally retained across rollback. It cannot prove successful commit. **Never replay it or display raw SQL/parameters to users.**
+3. **Security/system/file provenance**: role/password/session authentication, config.json modifications, migrations, source document copies. These do not all share ordinary business SQLCipher commit boundaries; use a separate privileged journal or explicit staged-file receipt, always excluding secrets.
+
+This is a key simplification: do **not** rewrite low-level guarded_dbapi to serve as the user's Change Log. Its forensic intent data are sensitive, potentially expensive and may include rolled-back writes. The business outbox should be a compact independent record emitted from trusted service transaction boundaries.
+
+### Highest-risk uncovered routes
+
+- `PermissionService._audit()` is best-effort **after** business commit using a separate `AuditService.record()` transaction. Move an appropriate security metadata event inside the original transaction; avoid password/hash data. `update_user_role()` currently labels a role change as `USER_UNLOCKED`, so existing audit action names require semantic review before reuse.
+- `ConfigurationService.save()` changes config.json using `save_config()` without a SQLCipher commit. The DB outbox cannot cover config changes; decide if such config is Git-authoritative or machine-local. Do not capture Git tokens, credentials, or DB encryption data. A protected config change receipt can be emitted after atomic file write and validation, but a crash before it needs a separately verifiable file-level checkpoint.
+- `EmployeeScheduleService` has **mixed coverage**: regular rules/exceptions/assignments direct commits without observed audit, while publish/freeze/reopen calls `_audit_week()` within transaction. Apply outbox to direct commands, reuse in-session audit where present.
+- `EmployeeWorkRegistrationService` does use in-session audit for the examined commands. Do not record a second falsely independent business edit from its timeline.
+- `SessionNoteService` and `AssessmentService` mutate valuable teaching records without verified in-session audit; prioritize concise identifiers to support manual checking.
+- `StudentDocumentService`, `TeacherDocumentService`, `EmployeeDocumentService` are file-before-DB. A DB outbox describes committed metadata, but a separate file manifest/capture must preserve bytes and detect staged orphans.
+- `StudentImportService` may call ordinary services repeatedly, producing a **partially successful import**. Recovery should show batch ID plus successful item IDs; do not mark entire Excel import applied merely because the dialog closed.
+
+### Coverage verification process for RV-02
+
+An implementer must check the current repository's full Python tree with an AST/static manifest rather than assume only service names examined in RV-01 exist. Scan `services/`, `repositories/`, `ui/`, `database/`, `platform/` and native Git/SQLCipher adapters for: `commit`, `flush`, `bulk_save_objects`, `bulk_insert_mappings`, `bulk_update_mappings`, `execute`, `executescript`, `sqlite3.connect`, `os.replace`, `shutil.copy*`, raw `write_bytes/text`, Git publication, and background delayed callbacks. Annotate each detected path as BUSINESS, DERIVED, SYSTEM or FILE with reviewed owner and test IDs. Any new business command missing an outbox hook must fail a targeted regression gate. Automated detection is only a candidate index; it cannot by itself prove that every mutation is transactionally logged.
+
+**Review status remains OPEN until** (1) the complete call-site manifest is verified (not merely a sample), (2) privacy and retention are explicitly approved, (3) Windows CI passes, and (4) compatibility and performance verification plans are accepted. No premature `Closes #593` in PR body.
