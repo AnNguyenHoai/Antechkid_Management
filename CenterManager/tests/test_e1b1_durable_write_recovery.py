@@ -394,6 +394,9 @@ def test_transaction_prepares_journal_before_editing_and_blocks_on_failure(works
     collab.request_write.return_value = WriteRequestInfo(WriteRequestResult.GRANTED)
     tx = WriteTransactionManager(collab)
     monkeypatch.setattr(tx, '_verify_first_writer_consistency', lambda: True)
+    # This fixture tests journal failure ordering, not remote Git ownership.
+    # Exact remote lock/OID validation is covered by test_write_grant_rollback_race.
+    monkeypatch.setattr(tx, '_verify_grant_before_editing', lambda: True)
     monkeypatch.setattr(tx, '_get_handoff_main_commit', lambda: workspace.base)
     observed = []
     def fail(self, *a, **k):
