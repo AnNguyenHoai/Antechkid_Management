@@ -395,3 +395,28 @@ def test_unverified_remote_main_never_reconciles_or_creates_case(monkeypatch, tm
     assert "independently verified" in startup.recovery_error
     assert j.inspect()["status"] == "OPEN"
     assert not list((tmp_path / "cases").glob("*.json"))
+
+
+def test_interrupted_case_journal_pin_is_recovered_without_duplicate(tmp_path, monkeypatch):
+    """Crash between durable case file and journal pin must be retryable."""
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    original_update = j.update
+    attempts = {"count": 0}
+
+    def interrupted_update(**fields):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise OSError("simulated crash during journal pin")
+        return original_update(**fields)
+
+    j.update = interrupted_update
+    with pytest.raises(OSError, match="simulated crash"):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+    saved = list((tmp_path / "cases").glob("*.json"))
+    assert len(saved) == 1
+    assert "rv03_case_id" not in j.inspect()
+    recovered = RecoveryCaseRegistry(j).register_from_reconciled(observed_main_oid=MAIN)
+    assert recovered["case_id"] == saved[0].stem
+    assert j.inspect()["rv03_case_id"] == recovered["case_id"]
+    assert len(list((tmp_path / "cases").glob("*.json"))) == 1
