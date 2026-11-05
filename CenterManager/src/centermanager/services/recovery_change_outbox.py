@@ -19,6 +19,16 @@ from centermanager.models.recovery_change_event import RecoveryChangeEvent
 
 _SAFE_KEY = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 _SAFE_VALUE = re.compile(r"^[a-zA-Z0-9_.:-]{0,100}$")
+# Exact allowlist: a *_id suffix alone could accidentally expose secrets.
+_SAFE_SUMMARY_KEYS = frozenset({
+    "income_id", "expense_id", "student_id", "session_id", "class_id",
+    "finance_period_id", "tuition_adjustment_id", "enrollment_id",
+    "teacher_id", "assessment_id", "parent_id", "note_id",
+    "highlight_id", "employee_id", "user_id", "role_id",
+    "schedule_week_id", "registration_period_id", "registration_id",
+    "transfer_id", "source_enrollment_id", "attachment_id",
+    "settlement_id", "record_count", "changed_count",
+})
 
 
 class RecoveryOutboxError(ValueError):
@@ -29,9 +39,8 @@ def _safe_summary_args(arguments: Mapping[str, object] | None) -> str:
     """Allow only identifiers/tags, never a user's free-form notes or passwords."""
     fields: dict[str, str] = {}
     for key, value in (arguments or {}).items():
-        if (not isinstance(key, str) or not _SAFE_KEY.fullmatch(key)
-                or not (key.endswith("_id") or key in {"changed_count", "record_count"})):
-            raise RecoveryOutboxError("Recovery summary only permits record identifiers and counts")
+        if not isinstance(key, str) or key not in _SAFE_SUMMARY_KEYS:
+            raise RecoveryOutboxError("Recovery summary only permits approved IDs and counts")
         if not isinstance(value, (str, int, bool)):
             raise RecoveryOutboxError("Recovery summary arguments must be scalar identifiers")
         item = str(value)
