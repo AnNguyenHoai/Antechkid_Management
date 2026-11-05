@@ -75,6 +75,41 @@ class RecoveryCaseRegistry:
         except Exception as exc:
             raise RecoveryRequired("Recovery Case registry is unreadable or inauthentic; startup blocked.") from exc
 
+    def _pin(self, case: dict) -> dict:
+        """Durably bind the current journal to its independently stored case.
+
+        If a crash occurs after case fsync but before journal pinning, startup
+        can reconstruct this binding from the same immutable capture.
+        """
+        doc = self.journal.inspect()
+        pinned = doc.get("rv03_case_id")
+        if pinned is not None and pinned != case["case_id"]:
+            raise RecoveryRequired("Recovery journal points to another incident case.")
+        if pinned is None:
+            self.journal.update(rv03_case_id=case["case_id"])
+            if self.journal.inspect().get("rv03_case_id") != case["case_id"]:
+                raise RecoveryRequired("Recovery Case journal pin was not persisted.")
+        return case
+
+    def verify_pinned_case(self) -> dict | None:
+        """Fail closed if a previously isolated case was removed or tampered.
+
+        A legacy CLEAN journal without an RV-03 case remains unaffected.
+        """
+        doc = self.journal.inspect()
+        if not doc or not doc.get("rv03_case_id"):
+            return None
+        case = self.get(doc["rv03_case_id"])
+        if case is None:
+            raise RecoveryRequired("Pinned Recovery Case was removed; keep workspace for review.")
+        if (case.get("repository_id") != doc.get("repository_id")
+                or case.get("base_main_oid") != doc.get("base_main_oid")):
+            raise RecoveryRequired("Pinned Recovery Case does not match the current journal.")
+        manifest = self.journal.verify_capture(case["capture_ref"])
+        if manifest.get("files", {}).get("center.db") != case["capture_db_sha256"]:
+            raise RecoveryRequired("Pinned Recovery Case captured database has changed.")
+        return case
+
     def register_from_reconciled(self, *, observed_main_oid: str) -> dict:
         """Register case after an existing verified journal.reconcile(), before Git reset.
 
@@ -118,7 +153,7 @@ class RecoveryCaseRegistry:
             original_manifest = self.journal.verify_capture(previous["capture_ref"])
             if original_manifest.get("files", {}).get("center.db") != previous["capture_db_sha256"]:
                 raise RecoveryRequired("Recovery Case original captured database fingerprint has changed.")
-            return previous
+            return self._pin(previous)
 
         # Status from a failed/unknown publication must remain UNVERIFIED;
         # equality of a remote OID alone is not a proof that local edits landed.
@@ -159,12 +194,12 @@ class RecoveryCaseRegistry:
             existing = self.get(case_id)
             if existing is None:
                 raise RecoveryRequired("Concurrent recovery case could not be verified.")
-            return existing
+            return self._pin(existing)
         except Exception:
             # A half-written case must remain a blocker until manually
             # inspected; never delete potentially sole review evidence.
             raise
-        return entry
+        return self._pin(entry)
 
     def list_cases(self) -> list[dict]:
         if not self.root.exists():
