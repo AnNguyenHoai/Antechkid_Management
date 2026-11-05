@@ -261,3 +261,58 @@ def test_signed_receipt_detects_tampering(tmp_path):
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(InvalidPublicationReceipt):
         read_verified_receipt(path, signing_key=KEY)
+
+
+def test_real_sqlcipher_wal_commit_survives_missing_external_mirror(tmp_path):
+    """Crash window: data and outbox committed; encrypted mirror not yet copied."""
+    from sqlalchemy import text
+    from sqlalchemy.pool import NullPool
+    from centermanager.database.encryption import load_sqlcipher_driver, apply_sqlcipher_key
+
+    database = tmp_path / "synthetic-center.db"
+    cipher = load_sqlcipher_driver()
+
+    def connect():
+        conn = cipher.connect(str(database), check_same_thread=False)
+        apply_sqlcipher_key(conn, KEY)
+        return conn
+
+    raw = connect()
+    try:
+        raw.execute("PRAGMA journal_mode=WAL")
+        raw.execute("CREATE TABLE local_business (id INTEGER PRIMARY KEY, code TEXT NOT NULL)")
+        raw.commit()
+    finally:
+        raw.close()
+
+    encrypted_engine = create_engine("sqlite://", creator=connect, poolclass=NullPool)
+    try:
+        RecoveryChangeEvent.__table__.create(encrypted_engine)
+        with Session(encrypted_engine) as session:
+            session.execute(text("INSERT INTO local_business (code) VALUES ('COMMITTED')"))
+            record_in_session(
+                session, write_session_id="synthetic-sqlcipher", base_main_oid=BASE,
+                module="student", action="CREATE", entity_type="Student", entity_id=1,
+                summary_args={"student_id": 1},
+            )
+            session.commit()
+        # Simulate process crash here: mirror_committed_event was NEVER called.
+        with Session(encrypted_engine) as session:
+            assert session.execute(text("SELECT COUNT(*) FROM local_business")).scalar_one() == 1
+            assert len(read_session_events(session, "synthetic-sqlcipher")) == 1
+        assert not list(tmp_path.rglob("*.enc"))
+
+        # Both business row and outbox must be committed or both absent.
+        with Session(encrypted_engine) as session:
+            session.execute(text("INSERT INTO local_business (code) VALUES ('ROLLED_BACK')"))
+            record_in_session(
+                session, write_session_id="synthetic-sqlcipher", base_main_oid=BASE,
+                module="student", action="CREATE", entity_type="Student", entity_id=2,
+                summary_args={"student_id": 2},
+            )
+            session.rollback()
+        with Session(encrypted_engine) as session:
+            assert session.execute(text("SELECT COUNT(*) FROM local_business")).scalar_one() == 1
+            assert len(read_session_events(session, "synthetic-sqlcipher")) == 1
+    finally:
+        encrypted_engine.dispose()
