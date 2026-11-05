@@ -44,7 +44,7 @@ def upgrade() -> None:
         op.create_index("ix_recovery_outbox_session", "recovery_change_outbox",
                         ["write_session_id", "occurred_at_utc"])
     if "ix_recovery_outbox_operation" not in names:
-        op.create_index("ix_recovery_outbox_operation", "recovery_change_outbox", ["operation_id"])
+        op.create_index("ix_recovery_outbox_operation", "recovery_change_outbox", ["operation_id"], unique=True)
 
 
 def downgrade() -> None:
