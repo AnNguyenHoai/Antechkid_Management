@@ -1,4 +1,3 @@
-from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 # -*- coding: utf-8 -*-
 """
 StudentService - business logic for Student entity.
@@ -22,6 +21,7 @@ from centermanager.services.exceptions import (
     StudentNotDeletedError,
 )
 from centermanager.services.timeline_service import TimelineService
+from centermanager.services.recovery_change_outbox import mirror_after_successful_commit
 from centermanager.events.student_events import StudentArchived, StudentActivated, StudentDeleted, StudentUpdated
 from centermanager.events.event_bus import EventBus
 from typing import TYPE_CHECKING
