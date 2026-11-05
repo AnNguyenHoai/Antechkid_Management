@@ -50,6 +50,20 @@ jobs:
           git config --global user.name "CenterManager CI"
           git config --global user.email "ci@centermanager.invalid"
 
+      - name: RV-01 mutation-site AST scan (shard 0 only)
+        if: matrix.shard == 0
+        run: |
+          python tools/audit_recovery_mutations.py --json rv01-mutation-sites.json
+          python -c "import json,collections; d=json.load(open('rv01-mutation-sites.json',encoding='utf-8')); print('RV01_MUTATION_SCAN scanned_files='+str(d['scanned_files'])+' candidates='+str(d['candidate_calls'])+' parse_errors='+str(len(d['parse_errors']))); print('RV01_MUTATION_CATEGORIES '+json.dumps(dict(sorted(collections.Counter(x['category'] for x in d['sites']).items()))))"
+
+      - name: Upload RV-01 mutation audit review queue
+        if: matrix.shard == 0 && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv01-mutation-sites-${{ github.run_id }}
+          path: CenterManager/rv01-mutation-sites.json
+          if-no-files-found: warn
+
       - name: Run full pytest suite
         env:
           QT_QPA_PLATFORM: offscreen
