@@ -421,6 +421,13 @@ class CollaborationManager:
         )
 
     def _rollback_ungranted_lock(self):
+        # A concurrent poller queue renewal must not delete the just-pushed
+        # lock while the requesting thread is still consuming its queue head.
+        # All grant/rollback transitions share the same reentrant mutex.
+        with self._state_mutex:
+            return self._rollback_ungranted_lock_locked()
+
+    def _rollback_ungranted_lock_locked(self):
         if self._ungranted_lock:
             remote = self._get_remote_lock_status()
             if remote["state"] == "UNKNOWN":
@@ -519,6 +526,10 @@ class CollaborationManager:
             return False
         self._ungranted_lock = True
         self._lock_acquired = True
+        logger.info(
+            "WRITE grant provisional; remote lock acquired, queue consume pending "
+            "(run_handoff=%s)", run_handoff,
+        )
         try:
             # Queue and lock are distinct refs. Recheck after CAS, and consume
             # only a still-live head with queue CAS, never a missing/cancelled request.
@@ -558,11 +569,16 @@ class CollaborationManager:
                 return False
             self._ungranted_lock = False
             self._pending_request = None
+            logger.info("WRITE grant committed after exact remote ownership verification")
             self._waiting_handoff_code = ""
             self._publish_write_granted(request_id, 0)
             return True
         finally:
             if self._ungranted_lock:
+                logger.warning(
+                    "WRITE grant rollback: provisional remote lock not committed; "
+                    "reason=%s", self._waiting_handoff_code or "UNKNOWN",
+                )
                 self._rollback_ungranted_lock()
 
     def _publish_write_granted(self, request_id: str, queue_position: int) -> None:
@@ -696,21 +712,22 @@ class CollaborationManager:
             return True
 
     def refresh_waiting_request(self, request_id: Optional[str] = None) -> bool:
-        self._ensure_initialized()
-        if self._session is None:
-            return False
-        if self._cancel_pending:
-            return self.cancel_waiting_request()
-        if not self._rollback_ungranted_lock():
-            return False
-        request = self._queue_get_by_session(self._session.session_id)
-        if request is None:
-            if self._pending_request is not None:
+        with self._state_mutex:
+            self._ensure_initialized()
+            if self._session is None:
+                return False
+            if self._cancel_pending:
                 return self.cancel_waiting_request()
-            return False
-        if request_id and request.request_id != request_id:
-            return False
-        return self._queue_refresh(request)
+            if not self._rollback_ungranted_lock():
+                return False
+            request = self._queue_get_by_session(self._session.session_id)
+            if request is None:
+                if self._pending_request is not None:
+                    return self.cancel_waiting_request()
+                return False
+            if request_id and request.request_id != request_id:
+                return False
+            return self._queue_refresh(request)
 
     def has_pending_waiting_request(self, request_id: Optional[str] = None) -> bool:
         self._ensure_initialized()

@@ -108,6 +108,9 @@ def test_first_writer_runs_consistency_barrier_before_editing(monkeypatch, temp_
     tx = WriteTransactionManager(collab)
     tx.set_sync_service(sync)
     monkeypatch.setattr(tx, "_create_snapshot", lambda: None)
+    # The provider is a deliberately minimal handoff stub without remote
+    # lock tokens. Exercise ownership validation in its dedicated tests.
+    monkeypatch.setattr(tx, "_verify_grant_before_editing", lambda: True)
 
     assert tx.start_editing() is True
     assert sync.calls == 1
