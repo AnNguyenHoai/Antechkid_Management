@@ -6,6 +6,7 @@ from typing import Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.session import SessionStatus
 from centermanager.models.session_note import SessionNote, TeachingProgress, ClassAtmosphere
 from centermanager.repositories.provider import RepositoryProvider, create_default_repository_provider
@@ -98,7 +99,13 @@ class SessionNoteService:
                 homework=norm_homework,
             )
             repo.add(note)
+            record_for_active_write(
+                db_session, module="session_note", action="CREATE",
+                entity_type="SessionNote", entity_id=note.id,
+                entity_object=note, summary_args={"session_id": note.session_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(note)
             return note
 
@@ -181,7 +188,13 @@ class SessionNoteService:
             if not changed:
                 return note
 
+            record_for_active_write(
+                db_session, module="session_note", action="UPDATE",
+                entity_type="SessionNote", entity_id=note.id,
+                entity_object=note, summary_args={"session_id": note.session_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
             repo.refresh(note)
             return note
 
@@ -192,4 +205,10 @@ class SessionNoteService:
             if note is None:
                 raise SessionNoteNotFoundError(f"No note found for session {session_id}")
             repo.delete(note)
+            record_for_active_write(
+                db_session, module="session_note", action="DELETE",
+                entity_type="SessionNote", entity_id=note.id,
+                entity_object=note, summary_args={"session_id": note.session_id},
+            )
             db_session.commit()
+            mirror_after_successful_commit(db_session)
