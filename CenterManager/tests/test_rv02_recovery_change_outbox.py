@@ -403,3 +403,23 @@ def test_rolled_back_session_info_does_not_fabricate_mirror_after_later_commit(
     with Session(engine) as session:
         events = read_session_events(session, "unit-session")
         assert [event.entity_id for event in events] == ["62"]
+
+
+def test_mocked_session_cannot_impersonate_protected_runtime():
+    """MagicMock bind attributes are truthy even when no real Engine exists."""
+    from unittest.mock import MagicMock
+    from centermanager.services.recovery_change_outbox import record_for_active_write
+
+    session = MagicMock()
+    session.get_bind.return_value._cm_runtime_owned = True
+    result = record_for_active_write(
+        session,
+        module="work_registration",
+        action="REOPEN",
+        entity_type="EmployeeWorkRegistration",
+        entity_id=None,
+        summary_args={"employee_id": 7},
+    )
+    assert result is None
+    session.add.assert_not_called()
+    session.flush.assert_not_called()
