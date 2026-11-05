@@ -112,7 +112,8 @@ class StudentDocumentService:
         # Retained orphan bytes are safer than a committed reference to a
         # missing attachment; Recovery provenance can reconcile orphans.
         try:
-            file_path.unlink(missing_ok=True)
+            if file_path.exists():
+                file_path.unlink()
         except OSError:
             import logging
             logging.getLogger(__name__).exception(
