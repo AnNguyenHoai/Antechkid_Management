@@ -9,6 +9,7 @@ from typing import Optional, List
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.models.teacher_document import TeacherDocument
 from centermanager.models.teacher_timeline_event import TeacherTimelineEventType
 from centermanager.repositories.provider import RepositoryProvider
@@ -86,7 +87,13 @@ class TeacherDocumentService:
                 )
                 repo = self._repository_provider.teacher_documents(session)
                 repo.add(doc)
+                record_for_active_write(
+                    session, module="attachment", action="UPLOAD",
+                    entity_type="TeacherDocument", entity_id=doc.id,
+                    entity_object=doc, summary_args={"teacher_id": doc.teacher_id},
+                )
                 session.commit()
+                mirror_after_successful_commit(session)
                 repo.refresh(doc)
         except Exception:
             # Compensate the physical side effect when DB persistence fails.
@@ -133,7 +140,13 @@ class TeacherDocumentService:
             file_path = get_paths().attachment_dir / doc.file_path
 
             repo.delete(doc)
+            record_for_active_write(
+                session, module="attachment", action="DELETE",
+                entity_type="TeacherDocument", entity_id=doc.id,
+                entity_object=doc, summary_args={"teacher_id": doc.teacher_id},
+            )
             session.commit()
+            mirror_after_successful_commit(session)
 
         # Post-commit cleanup is intentionally best-effort. A failed physical
         # delete cannot corrupt DB consistency; the file becomes an orphan that
