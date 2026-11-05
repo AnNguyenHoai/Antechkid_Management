@@ -38,6 +38,7 @@ class AdminDataResetRepository:
         "permissions",
         "role_permissions",
         "audit_logs",
+        "recovery_change_outbox",  # Immutable unaccepted edits; never destructively reset
     })
 
     FINANCE_TABLES = frozenset({
