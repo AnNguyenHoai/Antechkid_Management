@@ -29,8 +29,9 @@ def _safe_summary_args(arguments: Mapping[str, object] | None) -> str:
     """Allow only identifiers/tags, never a user's free-form notes or passwords."""
     fields: dict[str, str] = {}
     for key, value in (arguments or {}).items():
-        if not isinstance(key, str) or not _SAFE_KEY.fullmatch(key):
-            raise RecoveryOutboxError("Unapproved recovery summary key")
+        if (not isinstance(key, str) or not _SAFE_KEY.fullmatch(key)
+                or not (key.endswith("_id") or key in {"changed_count", "record_count"})):
+            raise RecoveryOutboxError("Recovery summary only permits record identifiers and counts")
         if not isinstance(value, (str, int, bool)):
             raise RecoveryOutboxError("Recovery summary arguments must be scalar identifiers")
         item = str(value)
