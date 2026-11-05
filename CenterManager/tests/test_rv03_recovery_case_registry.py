@@ -40,6 +40,9 @@ class FakeJournal:
     def inspect(self):
         return dict(self.document)
 
+    def update(self, **fields):
+        self.document.update(fields)
+
     def verify_capture(self, ref):
         if not self.capture_valid or Path(ref).resolve() != self.capture.resolve():
             raise RecoveryRequired("Synthetic capture verification failed")
@@ -288,3 +291,53 @@ def test_registry_requires_protected_key_when_encryption_is_required(tmp_path, m
     with pytest.raises(encryption.DatabaseKeyUnavailable):
         RecoveryCaseRegistry(j).register_from_reconciled(observed_main_oid=MAIN)
     assert not list((tmp_path / "cases").glob("*.json"))
+
+
+def test_pinned_case_missing_after_clean_restart_is_blocking(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    entry = cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert j.inspect()["rv03_case_id"] == entry["case_id"]
+    j.document["status"] = "CLEAN"
+    cases.verify_pinned_case()
+    (cases.root / (entry["case_id"] + ".json")).unlink()
+    with pytest.raises(RecoveryRequired, match="removed"):
+        cases.verify_pinned_case()
+
+
+def test_pinned_case_capture_corruption_blocks_clean_restart(tmp_path, monkeypatch):
+    j = FakeJournal(tmp_path)
+    cases = registry(j, monkeypatch)
+    cases.register_from_reconciled(observed_main_oid=MAIN)
+    j.document["status"] = "CLEAN"
+    j.capture_valid = False
+    with pytest.raises(RecoveryRequired):
+        RecoveryCaseRegistry(j).verify_pinned_case()
+
+
+def test_startup_clean_state_rejects_missing_pinned_case(monkeypatch, tmp_path):
+    from threading import RLock
+    from centermanager.platform.sync import startup_sync
+    from centermanager.database import mutation_authority
+    from centermanager.platform import write_recovery
+
+    journal = FakeJournal(tmp_path)
+    cases = registry(journal, monkeypatch)
+    original = cases.register_from_reconciled(observed_main_oid=MAIN)
+    journal.document["status"] = "CLEAN"
+    journal.assert_replaceable = lambda *, legacy=False: None
+    (cases.root / (original["case_id"] + ".json")).unlink()
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: journal)
+    monkeypatch.setattr(
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(lock=RLock(), closed=True)
+    )
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: MAIN,
+        get_local_main_commit=lambda: MAIN,
+    )
+    startup = startup_sync.StartupSynchronization(provider)
+    assert not startup._prepare_authoritative_startup_replacement()
+    assert "removed" in startup.recovery_error
+    assert journal.inspect()["status"] == "CLEAN"
