@@ -351,32 +351,31 @@ class StartupSynchronization:
             from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
             try:
                 journal.assert_replaceable(legacy=True)
-                # Interrupted startup may have reconciled and then crashed
-                # before its case entry was durably written. Reconstruct it
-                # from the same verified immutable capture before any reset.
+            except RecoveryRequired:
+                # Existing journal safety says the runtime cannot yet be
+                # replaced. A previously RECONCILED case cannot be silently
+                # re-created against another base or remote generation.
                 current = journal.inspect()
                 if current and current.get("status") == "RECONCILED":
-                    # Reconciliation authorizes exactly ONE observed MAIN
-                    # generation. If remote advanced after the capture (for
-                    # example on a restarted install), do not reset to a newer
-                    # OID under proof for a different generation.
+                    raise
+            else:
+                current = journal.inspect()
+                if current and current.get("status") == "RECONCILED":
                     if current.get("accepted_main_oid") != accepted:
                         raise RecoveryRequired(
                             "Remote MAIN changed since recovery reconciliation; "
                             "retain the captured case and explicitly review the new MAIN."
                         )
+                    # Reconstruct if crash occurred after reconcile but
+                    # before the signed case or journal pin was persisted.
                     RecoveryCaseRegistry(journal).register_from_reconciled(
                         observed_main_oid=accepted
                     )
+                elif current and current.get("rv03_case_id"):
+                    # This incident was already isolated on a prior startup;
+                    # detect missing/modified evidence even after CLEAN.
+                    RecoveryCaseRegistry(journal).verify_pinned_case()
                 return True
-            except RecoveryRequired:
-                # Only an actual journal replacement conflict may lead to
-                # reconciliation. Never treat an inauthentic/missing Recovery
-                # Case as permission to overwrite the existing runtime.
-                current = journal.inspect()
-                if current and current.get("status") == "RECONCILED":
-                    raise
-                pass
             existing = journal.inspect()
             if existing is not None:
                 base = existing.get("base_main_oid")
