@@ -423,3 +423,64 @@ def test_mocked_session_cannot_impersonate_protected_runtime():
     assert result is None
     session.add.assert_not_called()
     session.flush.assert_not_called()
+
+
+def test_operation_id_cannot_create_duplicate_committed_events(engine):
+    """Retrying one business operation with a fresh event UUID is not a new edit."""
+    operation_id = str(uuid.uuid4())
+    with Session(engine) as session:
+        record_in_session(
+            session, write_session_id="unit-session", base_main_oid=BASE,
+            module="student", action="UPDATE", entity_type="Student",
+            entity_id=17, operation_id=operation_id,
+            event_id=str(uuid.uuid4()),
+        )
+        session.commit()
+    with Session(engine) as session:
+        record_in_session(
+            session, write_session_id="unit-session", base_main_oid=BASE,
+            module="student", action="UPDATE", entity_type="Student",
+            entity_id=17, operation_id=operation_id,
+            event_id=str(uuid.uuid4()),
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+    with Session(engine) as session:
+        events = read_session_events(session, "unit-session")
+        assert len(events) == 1
+        assert events[0].operation_id == operation_id
+
+
+def test_duplicate_operation_id_rollback_preserves_unrelated_business_rows(engine):
+    """Uniqueness violation rolls back the business edit in the same transaction."""
+    from sqlalchemy import text
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE synthetic_business (id INTEGER PRIMARY KEY, value TEXT)"
+        )
+    operation_id = str(uuid.uuid4())
+    with Session(engine) as session:
+        session.execute(text("INSERT INTO synthetic_business VALUES (1, 'accepted')"))
+        record_in_session(
+            session, write_session_id="unit-session", base_main_oid=BASE,
+            module="student", action="CREATE", entity_type="Student",
+            entity_id=1, operation_id=operation_id,
+        )
+        session.commit()
+    with Session(engine) as session:
+        session.execute(text("INSERT INTO synthetic_business VALUES (2, 'retry')"))
+        record_in_session(
+            session, write_session_id="unit-session", base_main_oid=BASE,
+            module="student", action="CREATE", entity_type="Student",
+            entity_id=2, operation_id=operation_id,
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+    with Session(engine) as session:
+        assert session.execute(
+            text("SELECT id FROM synthetic_business ORDER BY id")
+        ).scalars().all() == [1]
+        assert len(read_session_events(session, "unit-session")) == 1
