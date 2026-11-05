@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from datetime import date, time, timedelta
 from typing import Optional
+from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.employee_work_registration import EmployeeWorkRegistration
@@ -88,7 +89,7 @@ class EmployeeWorkRegistrationService:
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._open_period(s,ws);r=self._get_registration(s,eid,p.id,True);created=not bool(r.blocks)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("This registration week has already been submitted and cannot be changed.")
-            self._overlap(r.blocks,work_date,start_time,end_time);repo.add_block(r.id,work_date,start_time,end_time,work_type.strip(),notes or None);self._audit(s,self.AUDIT_CREATED if created else self.AUDIT_UPDATED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);s.commit();repo.refresh(r);return r
+            self._overlap(r.blocks,work_date,start_time,end_time);repo.add_block(r.id,work_date,start_time,end_time,work_type.strip(),notes or None);self._audit(s,self.AUDIT_CREATED if created else self.AUDIT_UPDATED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);record_for_active_write(s, module="work_registration", action="CREATE", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);repo.refresh(r);return r
     def update(self,bid,*,work_date,start_time,end_time,work_type,notes=None,user=None):
         u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
@@ -96,7 +97,7 @@ class EmployeeWorkRegistrationService:
             if not b:raise EmployeeWorkRegistrationValidationError("Registration block not found.")
             r=b.registration;self._scope(r.employee_id,u);ws=r.period.week_start;self._validate(work_date,start_time,end_time,work_type,ws)
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be edited.")
-            p=self._period(s,ws) if admin_override else self._open_period(s,ws);self._overlap(r.blocks,work_date,start_time,end_time,b.id);repo.update_block(bid,work_date,start_time,end_time,work_type.strip(),notes or None);self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);s.commit();return r
+            p=self._period(s,ws) if admin_override else self._open_period(s,ws);self._overlap(r.blocks,work_date,start_time,end_time,b.id);repo.update_block(bid,work_date,start_time,end_time,work_type.strip(),notes or None);self._audit(s,self.AUDIT_UPDATED,r,details={"operation":"update_block","block_id":bid,"admin_override":admin_override,"period_status":p.status},actor=u);record_for_active_write(s, module="work_registration", action="UPDATE", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);return r
     def delete(self,bid,user=None):
         u=self._user(user);admin_override=self.can_admin_override(u)
         with self._sf() as s:
@@ -106,7 +107,7 @@ class EmployeeWorkRegistrationService:
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT and not admin_override:raise EmployeeWorkRegistrationAccessDeniedError("Only draft registrations can be deleted.")
             registration_id=r.id;repo.delete_block(bid);repo.flush();self._audit(s,self.AUDIT_DELETED,r,details={"block_id":bid,"registration_deleted":not bool(r.blocks),"admin_override":admin_override},actor=u)
             if not r.blocks:repo.delete(registration_id)
-            s.commit()
+            record_for_active_write(s, module="work_registration", action="DELETE", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s)
     def submit(self,bid,user=None):raise EmployeeWorkRegistrationValidationError("Block-level submission is not supported. Submit the whole registration week.")
     def submit_week(self,eid,week_start,user=None):
         u=self._user(user);self._scope(eid,u);ws=self.week_start(week_start)
@@ -115,30 +116,30 @@ class EmployeeWorkRegistrationService:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._open_period(s,ws);r=self._get_registration(s,eid,p.id)
             if not r or not r.blocks:raise EmployeeWorkRegistrationValidationError("Add at least one availability block before submitting.")
             if r.status!=EmployeeWorkRegistration.STATUS_DRAFT:raise EmployeeWorkRegistrationValidationError("Registration is not in draft state.")
-            r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.submitted_at=get_clock().now();self._audit(s,self.AUDIT_SUBMITTED,r,details={"employee_id":eid,"week_start":ws.isoformat(),"block_count":len(r.blocks)},actor=u);s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_SUBMITTED;r.submitted_at=get_clock().now();self._audit(s,self.AUDIT_SUBMITTED,r,details={"employee_id":eid,"week_start":ws.isoformat(),"block_count":len(r.blocks)},actor=u);record_for_active_write(s, module="work_registration", action="SUBMIT_WEEK", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);return r
     def accept(self,eid,week_start,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);ws=self.week_start(week_start)
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,ws);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_SUBMITTED:raise EmployeeWorkRegistrationValidationError("Only submitted registrations can be accepted.")
-            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);s.commit();repo.refresh(r);return r
+            r.status=EmployeeWorkRegistration.STATUS_ACCEPTED;r.accepted_at=get_clock().now();r.accepted_by_user_id=u.id;self._audit(s,self.AUDIT_ACCEPTED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);record_for_active_write(s, module="work_registration", action="ACCEPT", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);repo.refresh(r);return r
     def reopen(self,eid,week_start,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);ws=self.week_start(week_start)
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,ws);r=self._get_registration(s,eid,p.id)
             if not r or r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED:raise EmployeeWorkRegistrationValidationError("Only accepted registrations can be reopened.")
-            r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;self._audit(s,self.AUDIT_REOPENED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);s.commit();return r
+            r.status=EmployeeWorkRegistration.STATUS_DRAFT;r.submitted_at=None;r.accepted_at=None;r.accepted_by_user_id=None;self._audit(s,self.AUDIT_REOPENED,r,details={"employee_id":eid,"week_start":ws.isoformat()},actor=u);record_for_active_write(s, module="work_registration", action="REOPEN", entity_type="EmployeeWorkRegistration", entity_id=r.id, entity_object=r, summary_args={"employee_id": r.employee_id});s.commit();mirror_after_successful_commit(s);return r
     def set_submission_deadline(self,week_start,deadline:Optional[date],user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);ws,end=self._week_range(week_start)
         if deadline is not None and not(ws<=deadline<=end):raise EmployeeWorkRegistrationValidationError("Submission deadline must be inside the registration week.")
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,ws)
             if p.status==EmployeeWorkRegistrationPeriod.STATUS_CLOSED:raise EmployeeWorkRegistrationValidationError("Registration period is already closed.")
-            p.submission_deadline=deadline;self._audit(s,self.AUDIT_DEADLINE,p,target_type="EmployeeWorkRegistrationPeriod",details={"week_start":ws.isoformat(),"deadline":deadline.isoformat() if deadline else None},actor=u);s.commit();self._repository_provider.employee_work_registration_periods(s).refresh(p);return p
+            p.submission_deadline=deadline;self._audit(s,self.AUDIT_DEADLINE,p,target_type="EmployeeWorkRegistrationPeriod",details={"week_start":ws.isoformat(),"deadline":deadline.isoformat() if deadline else None},actor=u);record_for_active_write(s, module="work_registration", action="SET_DEADLINE", entity_type="EmployeeWorkRegistrationPeriod", entity_id=p.id, entity_object=p, summary_args={"registration_period_id": p.id});s.commit();mirror_after_successful_commit(s);self._repository_provider.employee_work_registration_periods(s).refresh(p);return p
     def close_week(self,week_start,user=None):
         u=self._user(user);self._require_permission(self.MANAGE_PERMISSION,u);ws=self.week_start(week_start)
         with self._sf() as s:
             repo=self._repository_provider.employee_work_registrations(s);repo.begin_write();p=self._period(s,ws);rows=repo.list_all(p.id)
             if not rows:raise EmployeeWorkRegistrationValidationError("Cannot close a registration week with no employee submissions.")
             if any(r.status!=EmployeeWorkRegistration.STATUS_ACCEPTED for r in rows):raise EmployeeWorkRegistrationValidationError("All employee registrations must be accepted before closing the week.")
-            p.status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED;p.closed_at=get_clock().now();p.closed_by_user_id=u.id;self._audit(s,self.AUDIT_CLOSED,p,target_type="EmployeeWorkRegistrationPeriod",details={"week_start":ws.isoformat(),"registration_count":len(rows)},actor=u);s.commit();return len(rows)
+            p.status=EmployeeWorkRegistrationPeriod.STATUS_CLOSED;p.closed_at=get_clock().now();p.closed_by_user_id=u.id;self._audit(s,self.AUDIT_CLOSED,p,target_type="EmployeeWorkRegistrationPeriod",details={"week_start":ws.isoformat(),"registration_count":len(rows)},actor=u);record_for_active_write(s, module="work_registration", action="CLOSE_WEEK", entity_type="EmployeeWorkRegistrationPeriod", entity_id=p.id, entity_object=p, summary_args={"registration_period_id": p.id});s.commit();mirror_after_successful_commit(s);return len(rows)
