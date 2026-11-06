@@ -61,7 +61,9 @@ def test_missing_or_invalid_git_config_requires_first_run_dialog_then_sync():
     assert "dialog.exec()" in method
     assert "dialog.DialogCode.Accepted" in method
     assert "GitSynchronizationProvider" in method
-    assert "StartupSynchronization(provider).run()" in method
+    assert "startup = StartupSynchronization(provider)" in method
+    assert "if not startup.run():" in method
+    assert "if not startup.remote_unavailable:" in method
     # SEC-01 must validate the materialized runtime through the encryption-aware
     # boundary so Windows never retries an encrypted DB as plaintext SQLite.
     assert "inspect_runtime_database()" in method
