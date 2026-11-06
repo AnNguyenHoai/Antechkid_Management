@@ -118,7 +118,7 @@ class StudentFinancialWidget(QWidget):
         summary_layout.setHorizontalSpacing(SPACING["md"])
         summary_layout.setVerticalSpacing(SPACING["md"])
         self.total_expected_label = self._create_summary_card("Expected tuition", "0 VND")
-        self.total_paid_label = self._create_summary_card("Paid", "0 VND")
+        self.total_paid_label = self._create_summary_card("Tuition settled (cash + credit)", "0 VND")
         self.outstanding_label = self._create_summary_card("Receivable debt (no credit offset)", "0 VND")
         self.status_label = self._create_summary_card("Status", "No data")
         summary_cards = (
@@ -142,7 +142,7 @@ class StudentFinancialWidget(QWidget):
             [
                 {"key": "class", "label": "Class", "sortable": True},
                 {"key": "expected", "label": "Expected", "sortable": True},
-                {"key": "paid", "label": "Paid", "sortable": True},
+                {"key": "paid", "label": "Settled (cash + credit)", "sortable": True},
                 {"key": "outstanding", "label": "Outstanding", "sortable": True},
                 {"key": "status", "label": "Status", "sortable": True},
             ],
