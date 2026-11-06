@@ -26,6 +26,7 @@ from centermanager.core.current_user import get_current_user
 from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.class_service import ClassService
 from centermanager.services.income_service import IncomeService, IncomeValidationError
+from centermanager.services.tuition_adjustment_service import TuitionAdjustmentValidationError
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 from centermanager.ui.finance_workspace.tuition_enrollment_picker import TuitionEnrollmentPicker
@@ -701,7 +702,7 @@ class IncomeFormDialog(QDialog):
                     created = created[0]
                 self._commit_vouchers(getattr(created, "id", None))
             self.accept()
-        except IncomeValidationError as exc:
+        except (IncomeValidationError, TuitionAdjustmentValidationError) as exc:
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
         except Exception:
             logger.exception("Error saving income")
