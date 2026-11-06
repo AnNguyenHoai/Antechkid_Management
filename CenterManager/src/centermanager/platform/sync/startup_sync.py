@@ -348,11 +348,34 @@ class StartupSynchronization:
                 )
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
+            from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
             try:
                 journal.assert_replaceable(legacy=True)
-                return True
             except RecoveryRequired:
-                pass
+                # Existing journal safety says the runtime cannot yet be
+                # replaced. A previously RECONCILED case cannot be silently
+                # re-created against another base or remote generation.
+                current = journal.inspect()
+                if current and current.get("status") == "RECONCILED":
+                    raise
+            else:
+                current = journal.inspect()
+                if current and current.get("status") == "RECONCILED":
+                    if current.get("accepted_main_oid") != accepted:
+                        raise RecoveryRequired(
+                            "Remote MAIN changed since recovery reconciliation; "
+                            "retain the captured case and explicitly review the new MAIN."
+                        )
+                    # Reconstruct if crash occurred after reconcile but
+                    # before the signed case or journal pin was persisted.
+                    RecoveryCaseRegistry(journal).register_from_reconciled(
+                        observed_main_oid=accepted
+                    )
+                elif current and current.get("rv03_case_id"):
+                    # This incident was already isolated on a prior startup;
+                    # detect missing/modified evidence even after CLEAN.
+                    RecoveryCaseRegistry(journal).verify_pinned_case()
+                return True
             existing = journal.inspect()
             if existing is not None:
                 base = existing.get("base_main_oid")
@@ -369,6 +392,10 @@ class StartupSynchronization:
                 accepted_main=accepted,
                 observe_main=self._provider.observe_remote_main_commit,
             )
+            # RV-03 fail-closed barrier: no Git reset/DB installation until
+            # a signed Recovery Case references the verified WAL-complete
+            # capture, with UNKNOWN Change Log coverage until attested.
+            RecoveryCaseRegistry(journal).register_from_reconciled(observed_main_oid=accepted)
             journal.assert_replaceable()
             self._startup_reconciled_unaccepted_local = True
             logger.warning(
