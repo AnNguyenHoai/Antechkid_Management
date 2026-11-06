@@ -87,6 +87,7 @@ def test_zero_cash_path_never_calls_income_creation_or_creates_wallet_entry():
     assert "Income(" not in helper
     assert "create_income(" not in helper
     assert "idempotency_key=idempotency_key" in helper
+    assert "cap_to_outstanding=True" in helper
     assert "return service.credit_adjustment(" in helper
     assert "if is_credit_only:" in dialog
     assert "self.accept()\n                        return" in dialog
@@ -107,3 +108,16 @@ def test_credit_service_keeps_ledger_audit_permission_and_finance_event():
     assert "mirror_after_successful_commit(session)" in method
     assert "self._publish(adjustment)" in method
     assert "Income(" not in method
+
+
+def test_credit_only_cap_is_enforced_after_write_reservation():
+    root = Path(__file__).resolve().parents[1] / "src" / "centermanager"
+    source = (root / "services" / "tuition_adjustment_service.py").read_text(encoding="utf-8")
+    credit = source.split("def credit_adjustment(", 1)[1]
+    assert "cap_to_outstanding: bool = False" in credit
+    assert "if cap_to_outstanding:" in credit
+    assert "TuitionAccrualService.calculate_from_records(" in credit
+    assert "sum_active_tuition_for_enrollment(" in credit
+    assert "value > owed" in credit
+    assert credit.index("adjustments.acquire_command_lock(") < credit.index("if cap_to_outstanding:")
+    assert credit.index("if cap_to_outstanding:") < credit.index("session.commit()")
