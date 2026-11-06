@@ -38,6 +38,7 @@ class BootstrapManager:
         self._repo_manager = RepositoryManager()
         self._context_manager = RuntimeContextManager()
         self._sync_provider = None
+        self._offline_read = False
 
     def run(self) -> bool:
         """Execute startup sequence."""
@@ -136,7 +137,9 @@ class BootstrapManager:
                 self._lifecycle.transition_to(PlatformLifecycleState.STOPPED)
                 return False
 
-            self._context.runtime.state.transition_to(RuntimeState.READY)
+            self._context.runtime.state.transition_to(
+                RuntimeState.OFFLINE if getattr(self, '_offline_read', False) else RuntimeState.READY
+            )
             self._lifecycle.transition_to(PlatformLifecycleState.READY)
             logger.info("[BOOTSTRAP] Platform ready")
             return True
@@ -236,9 +239,21 @@ class BootstrapManager:
         )
 
         logger.info("[BOOTSTRAP] Synchronizing authoritative Git runtime")
-        if not StartupSynchronization(provider).run():
-            logger.error("[BOOTSTRAP] Authoritative Git synchronization failed")
-            return False
+        startup = StartupSynchronization(provider)
+        if not startup.run():
+            if not startup.remote_unavailable:
+                logger.error("[BOOTSTRAP] Authoritative Git synchronization failed")
+                return False
+            from centermanager.platform.sync.offline_read_gate import assess_offline_read
+            eligibility = assess_offline_read(paths)
+            if not eligibility.allowed:
+                logger.error("[BOOTSTRAP] Offline READ denied: %s", eligibility.reason)
+                return False
+            # Offline is READ-only and does NOT accept a local commit as MAIN.
+            from centermanager.platform.sync.offline_read_state import set_offline_read
+            self._offline_read = True
+            set_offline_read(True)
+            logger.warning("[BOOTSTRAP] Verified cached Offline READ (Git fetch unavailable)")
 
         state = inspect_runtime_database()
         if state is not DatabaseLifecycleState.AVAILABLE:

@@ -170,8 +170,14 @@ def main() -> int:
         if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
             startup_journal.assert_replaceable()
 
-        ensure_schema()
-        logger.info("[STARTUP] Schema ensured")
+        if bootstrap._offline_read:
+            # A cached READ must never implicitly stamp/migrate accepted data.
+            from centermanager.database.migration import verify_runtime_schema_readonly
+            verify_runtime_schema_readonly()
+            logger.info("[STARTUP] Offline READ schema verified without mutation")
+        else:
+            ensure_schema()
+            logger.info("[STARTUP] Schema ensured")
 
         # A first-time installation can legitimately migrate the freshly
         # downloaded MAIN database before login. Only this same-process
@@ -205,6 +211,13 @@ def main() -> int:
             logger.error("[STARTUP] No user after login. Exiting.")
             return 1
 
+        if bootstrap._offline_read and current_user.force_password_change:
+            QMessageBox.warning(
+                None, "Internet required for password change",
+                "This account requires an authoritative password change. "
+                "Connect to Git MAIN and complete password change before accessing cached data.",
+            )
+            return 1
         set_current_user(current_user)
         logger.info(f"[STARTUP] User authenticated: {current_user.username}")
 
@@ -459,7 +472,8 @@ def main() -> int:
 
         window.app_top_bar.start_edit_requested.connect(report_start_edit_outcome)
 
-        auto_report_service.run_daily_check()
+        if not bootstrap._offline_read:
+            auto_report_service.run_daily_check()
 
         window.show()
         logger.info("[STARTUP] MainWindow shown")
@@ -469,7 +483,7 @@ def main() -> int:
         # WriteTransactionManager are all live. The coordinator keeps the
         # workspace restricted until publication succeeds.
         password_change_coordinator = None
-        if current_user.force_password_change:
+        if current_user.force_password_change and not bootstrap._offline_read:
             from centermanager.ui.authoritative_password_change import (
                 AuthoritativePasswordChangeCoordinator,
             )

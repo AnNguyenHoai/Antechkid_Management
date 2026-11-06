@@ -686,6 +686,19 @@ class MainWindow(QMainWindow):
         state = self._transaction.state
         is_editing = self._transaction.is_editing
 
+        from centermanager.platform.sync.offline_read_state import offline_read_active
+        if offline_read_active() and state == WriteTransactionState.IDLE:
+            self.start_edit_btn.setVisible(True)
+            self.start_edit_btn.setEnabled(False)
+            self.start_edit_btn.setText("Offline - READ only")
+            self.finish_edit_btn.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            self.app_top_bar.set_transaction_text("Offline READ - cached data")
+            self.app_top_bar.set_mode("READ", "warning")
+            self._update_write_actions(False)
+            self._editing_idle_timer.stop()
+            return
+
         if state == WriteTransactionState.RECOVERY_REQUIRED:
             self.start_edit_btn.setVisible(False)
             self.finish_edit_btn.setVisible(False)
@@ -911,6 +924,14 @@ class MainWindow(QMainWindow):
     # ===== Transaction Actions =====
 
     def _on_start_editing(self) -> None:
+        from centermanager.platform.sync.offline_read_state import offline_read_active
+        if offline_read_active():
+            self.statusBar().showMessage(
+                "Offline READ: Start Editing requires an authenticated Git MAIN sync.", 8000,
+            )
+            self._update_write_buttons()
+            return
+
         if self._transaction.state in (
             WriteTransactionState.EDITING_STALE,
             WriteTransactionState.FINISHING_STALE,

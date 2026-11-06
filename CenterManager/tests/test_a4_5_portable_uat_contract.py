@@ -35,7 +35,9 @@ def test_configured_startup_never_creates_engine_before_authoritative_sync():
 
     assert bootstrap_marker < initialize_marker < engine_marker
     assert "if not self._ensure_authoritative_runtime_database(paths):" in bootstrap_source
-    assert "if not StartupSynchronization(provider).run():" in bootstrap_source
+    assert "startup = StartupSynchronization(provider)" in bootstrap_source
+    assert "if not startup.run():" in bootstrap_source
+    assert "if not startup.remote_unavailable:" in bootstrap_source
 
 
 def test_startup_sync_requires_authoritative_database_before_success():
