@@ -60,3 +60,35 @@ Additional regression: when remote MAIN changes after a previous RECONCILED capt
 ## Deferred gates
 
 Synthetic and isolated Git/SQLCipher integration tests are not packaged EXE UAT. Before production merge, still require 2-machine stale WRITE owner and old EXE testing, Windows process-kill during recovery/atomic install, DPAPI same-user recovery and inaccessible-key behavior, large attachments verification, and final code review. The remote lock TTL/grace, MAIN CAS and force-release behavior must remain unchanged.
+
+
+## Phase 4 — interrupted-install and immutable asset failure injection (2026-11-06)
+
+New regression suite: `tests/test_rv03_phase4_install_failure_injection.py`.
+
+- Restore pre-install database, WAL, attachments and manifest after a simulated partial MAIN install; remove files originally absent while retaining the saved recovery snapshot.
+- Corruption of any saved DB/WAL/attachment checksum must reject replay **before any live file is changed**.
+- Modified marker/target inventory cannot restore into an unexpected path.
+- A second install cannot begin while an interrupted-install marker remains.
+- This is deterministic failure injection, **not** a Windows process-kill or physical disk-failure test.
+
+## Phase 5 — compatibility and publication-negative regression (2026-11-06)
+
+New regression suite: `tests/test_rv03_phase5_compatibility.py`.
+
+- A signed pending case remains pending and `change_log_coverage=UNKNOWN` across clean restarts.
+- A pinned case cannot be used with another repository or original base.
+- Tampering with review status must fail HMAC validation, never acknowledge automatically.
+- Legacy CLEAN journals without an RV-03 pin retain their previous compatibility path.
+- Mismatched remote MAIN observation cannot call reset/publish/release/renew.
+- An uncertain legacy publication cannot be labeled VERIFIED merely because an OID matches.
+
+### Release gates still required
+
+These added tests do **not** demonstrate the following and must not be used to approve deployment without further evidence:
+
+1. Windows packaged EXE smoke test: authentic SQLCipher/DPAPI key under the same Windows user; missing key and another-user access refuse replacement.
+2. Two machines/clients: stale/old EXE cannot mutate the newly installed runtime or directly publish a stale Git MAIN; verify remote refs and lock unchanged. An old EXE with direct Git write credentials is a deployment/credential limitation and **cannot** be made safe solely by new-client tests.
+3. Actual Windows subprocess termination at each install marker and copy/rename boundary, repeated fresh process restart, and restore-proof verification.
+4. Large/multiple attachment tree, symlink/junction and disk-full Windows error-path tests.
+5. Full Windows pytest shards and final PR review. Keep PR #600 Draft and Issue #595 open pending all release gates.
