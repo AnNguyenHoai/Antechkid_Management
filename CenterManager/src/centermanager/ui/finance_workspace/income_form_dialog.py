@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Create/edit Income dialog with immutable transaction identity in edit mode."""
 import logging
+from uuid import uuid4
 from datetime import date
 from typing import Optional
 
@@ -56,6 +57,7 @@ class IncomeFormDialog(QDialog):
         self._persisted_refs = None
         self._identity_unresolved = False
         self._initial_edit_values = None
+        self._credit_only_command_key = f"tuition-credit-only:{uuid4()}"
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(620)
@@ -117,7 +119,7 @@ class IncomeFormDialog(QDialog):
         form.addRow("Loại thu *", self.type_combo)
 
         self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
-        self.amount_spin.setRange(0.01, 999999999.99)
+        self.amount_spin.setRange(0.0, 999999999.99)
         form.addRow("Số tiền thực nhận *", self.amount_spin)
 
         self.credit_enabled = QCheckBox(
@@ -593,8 +595,21 @@ class IncomeFormDialog(QDialog):
             )
             return
         amount = self.amount_spin.value()
-        if amount <= 0:
-            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
+        is_credit_only = (
+            not self._is_edit
+            and self.source_combo.currentIndex() == 0
+            and self.type_combo.currentText() == "Tuition"
+            and amount == 0
+            and self.credit_enabled.isVisible()
+            and self.credit_enabled.isChecked()
+        )
+        if amount <= 0 and not is_credit_only:
+            QMessageBox.warning(
+                self, "Lỗi",
+                "Số tiền thực nhận phải lớn hơn 0. Với miễn học phí 100%, "
+                "chọn giảm giá / credit, nhập khoản miễn và lý do. "
+                "Hợp đồng học phí 0 đồng không cần tạo Income."
+            )
             return
 
         payment_method = self.method_combo.currentData()
@@ -643,6 +658,19 @@ class IncomeFormDialog(QDialog):
                         raise IncomeValidationError(
                             "Vui lòng nhập lý do giảm giá / tuition credit."
                         )
+                    if is_credit_only:
+                        # No Income, wallet movement or imaginary receipt.
+                        self._income_service.create_tuition_credit_only(
+                            student_id=int(student_id),
+                            class_id=int(class_id),
+                            enrollment_id=int(enrollment_id),
+                            credit_amount=credit_amount,
+                            credit_reason=credit_reason,
+                            adjustment_date=payment_date,
+                            idempotency_key=self._credit_only_command_key,
+                        )
+                        self.accept()
+                        return
                     created = self._income_service.create_tuition_payment_with_credit(
                         student_id=int(student_id),
                         class_id=int(class_id),
