@@ -211,6 +211,13 @@ def main() -> int:
             logger.error("[STARTUP] No user after login. Exiting.")
             return 1
 
+        if bootstrap._offline_read and current_user.force_password_change:
+            QMessageBox.warning(
+                None, "Internet required for password change",
+                "This account requires an authoritative password change. "
+                "Connect to Git MAIN and complete password change before accessing cached data.",
+            )
+            return 1
         set_current_user(current_user)
         logger.info(f"[STARTUP] User authenticated: {current_user.username}")
 
