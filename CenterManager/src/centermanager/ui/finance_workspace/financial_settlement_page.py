@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
+from centermanager.services.financial_settlement_service import FinancialSettlementService
 from centermanager.ui.design_system.tokens import (
     COLORS,
     FONT_FAMILY,
@@ -127,6 +128,9 @@ class FinancialSettlementPage(QWidget):
         self._loaded_status = "DRAFT"
         self._loaded_id = None
         self._target_date = get_clock().today()
+        # Only ledger totals returned by the last successful period preview
+        # may be used for a local, unsaved projection.
+        self._projection_totals = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -215,6 +219,10 @@ class FinancialSettlementPage(QWidget):
         self.opening_bank = self._money_input(optional=False)
         grid.addWidget(self.opening_cash, 1, 1)
         grid.addWidget(self.opening_bank, 1, 2)
+        # The preview is deliberately local. Save Draft/Confirm remain the
+        # only operations that persist values or close a finance period.
+        for editor in (self.opening_cash, self.opening_bank):
+            editor.textChanged.connect(self._update_live_projection)
 
         grid.addWidget(self._row_label("System income"), 2, 0)
         self.income_cash = self._money_label()
@@ -244,6 +252,8 @@ class FinancialSettlementPage(QWidget):
         self.actual_bank = self._money_input(optional=True)
         grid.addWidget(self.actual_cash, 6, 1)
         grid.addWidget(self.actual_bank, 6, 2)
+        for editor in (self.actual_cash, self.actual_bank):
+            editor.textChanged.connect(self._update_live_projection)
 
         grid.addWidget(self._row_label("Difference", strong=True), 7, 0)
         self.difference_cash = self._money_label(strong=True)
@@ -364,6 +374,35 @@ class FinancialSettlementPage(QWidget):
             f"font-weight:{FONT_WEIGHTS['semibold']}; color:{color};"
         )
 
+    def _update_live_projection(self, *_args) -> None:
+        """Recalculate unsaved Expected Closing/Difference from cached totals.
+
+        No database reads, writes, audit event or Recovery mutation occurs
+        when a user types. Invalid intermediate input stays a visual preview
+        error instead of causing a service-side or persistence error.
+        """
+        if self._projection_totals is None:
+            return
+        try:
+            calculated = FinancialSettlementService._calculate(
+                self.opening_cash.money_value() or Decimal("0"),
+                self.opening_bank.money_value() or Decimal("0"),
+                self._projection_totals,
+                self.actual_cash.money_value(),
+                self.actual_bank.money_value(),
+            )
+        except (ValueError, InvalidOperation):
+            self.expected_cash.setText("-")
+            self.expected_bank.setText("-")
+            self._set_difference(self.difference_cash, None)
+            self._set_difference(self.difference_bank, None)
+            return
+
+        self.expected_cash.setText(self._format_money(calculated["expected_closing_cash"]))
+        self.expected_bank.setText(self._format_money(calculated["expected_closing_bank"]))
+        self._set_difference(self.difference_cash, calculated["difference_cash"])
+        self._set_difference(self.difference_bank, calculated["difference_bank"])
+
     def _notify(self, message: str, level: str = "warning") -> None:
         if self._notification_service is not None and hasattr(self._notification_service, "notify"):
             self._notification_service.notify(message, level)
@@ -371,6 +410,7 @@ class FinancialSettlementPage(QWidget):
             QMessageBox.warning(self, "Financial Settlement", message)
 
     def _clear_projection(self, message: str) -> None:
+        self._projection_totals = None
         self.period_label.setText(message)
         self._loaded_status = "UNAVAILABLE"
         self._loaded_id = None
@@ -420,6 +460,8 @@ class FinancialSettlementPage(QWidget):
             self._clear_projection(str(exc))
             return
 
+        # Suppress transient calculations during programmatic repopulation.
+        self._projection_totals = None
         self.period_label.setText(data["period_label"])
         self._loaded_status = data["status"]
         self._loaded_id = data.get("id")
@@ -442,6 +484,10 @@ class FinancialSettlementPage(QWidget):
         self._set_difference(self.difference_cash, data["difference_cash"])
         self._set_difference(self.difference_bank, data["difference_bank"])
         self.comment_edit.setPlainText(data.get("comment", ""))
+        self._projection_totals = {
+            key: Decimal(str(data[key]))
+            for key in ("income_cash", "income_bank", "expense_cash", "expense_bank")
+        }
         self._apply_write_state()
 
     def _request_payload(self) -> dict:

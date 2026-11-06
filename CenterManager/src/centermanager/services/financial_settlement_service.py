@@ -307,8 +307,12 @@ class FinancialSettlementService:
             )
             row.confirmed_at = get_clock().now() if confirm else None
 
+            # A new DRAFT has no database-generated PK until flush. The same
+            # identifier is required by both the immutable Recovery Outbox and
+            # the CONFIRM transition audit, before the single commit below.
+            # Flush stays inside this transaction and never publishes data.
+            settlement_repo.flush()
             if confirm:
-                settlement_repo.flush()
                 self._record_transition_audit(
                     session,
                     row,
