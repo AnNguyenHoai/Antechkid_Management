@@ -75,6 +75,21 @@ def _validate_post_upgrade_schema(connection, config: Config) -> None:
     )
 
 
+def verify_runtime_schema_readonly() -> None:
+    """Offline READ may inspect, but never migrate/stamp a cached database.
+
+    Use the bundled Alembic version + physical schema invariant without DDL.
+    This must fail before login if the EXE needs a newer schema.
+    """
+    engine = create_production_engine()
+    try:
+        config = get_alembic_config(get_database_path())
+        with engine.connect() as connection:
+            _validate_post_upgrade_schema(connection, config)
+    finally:
+        engine.dispose()
+
+
 def _bundled_root() -> Path | None:
     """Return PyInstaller's extracted resource root when running frozen."""
     if not getattr(sys, "frozen", False):
