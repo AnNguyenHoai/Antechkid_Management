@@ -9,6 +9,7 @@ from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from centermanager.events.collaboration_events import ModeChanged, WriteGranted, WriteReleased
+from centermanager.events.finance_events import FinanceDataChanged
 from centermanager.events.synchronization_events import SynchronizationCompleted, VersionUpdated
 from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.context import PlatformContext
@@ -254,6 +255,7 @@ class StudentWorkspaceShell(WorkspaceBase):
             self._event_subscriptions.append(event_bus.register(SynchronizationCompleted, self._on_sync_completed))
             self._event_subscriptions.append(event_bus.register(VersionUpdated, self._on_version_updated))
             self._event_subscriptions.append(event_bus.register(ReloadRequired, self._on_reload_required))
+            event_bus.register(FinanceDataChanged, self._on_finance_data_changed)
         self._is_initialized = True
         logger.info("[StudentWorkspace] Initialized")
 
@@ -339,6 +341,26 @@ class StudentWorkspaceShell(WorkspaceBase):
             QTimer.singleShot(0, lambda: self.set_write_enabled(False))
         else:
             self.set_write_enabled(False)
+
+    def _on_finance_data_changed(self, event: FinanceDataChanged) -> None:
+        """Refresh the displayed student's canonical Finance projection after commit.
+
+        Finance Workspace receives this same event. Do not refresh before the
+        income/adjustment mutation is committed; never reconstruct a balance
+        from UI rows or change the selected accounting period.
+        """
+        if event.entity not in {"income", "tuition_adjustment"}:
+            return
+        if self._current_student_id is None:
+            return
+        if QThread.currentThread() != self.thread():
+            QTimer.singleShot(0, self._refresh_current_student_finance)
+        else:
+            self._refresh_current_student_finance()
+
+    def _refresh_current_student_finance(self) -> None:
+        if self._current_student_id is not None:
+            self.detail_page.financial_tab.set_student(self._current_student_id)
 
     def _on_sync_completed(self, _event: SynchronizationCompleted) -> None:
         # Background sync remains passive per UI-PROD-07: refresh without toast.
