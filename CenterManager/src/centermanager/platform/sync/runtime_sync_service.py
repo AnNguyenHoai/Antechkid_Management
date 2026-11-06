@@ -246,6 +246,16 @@ class RuntimeSyncService:
     def _sync_loop(self) -> None:
         while self._running:
             try:
+                from centermanager.platform.sync.offline_read_state import offline_read_active
+                if offline_read_active():
+                    # Git OID can advance without a manifest/runtime_version
+                    # increment. Reconnect must not depend on version diff.
+                    # This thread is separate from the Qt GUI thread.
+                    provider = self._sync_manager.provider()
+                    if provider.health():
+                        self._perform_sync()
+                    time.sleep(self._poll_interval)
+                    continue
                 self._perform_check()
                 if self._pending_update:
                     self._attempt_sync()
