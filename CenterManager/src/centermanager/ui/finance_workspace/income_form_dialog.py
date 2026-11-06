@@ -584,6 +584,16 @@ class IncomeFormDialog(QDialog):
             note += f" ({extra_note})"
         return None, None, None, "Other", note
 
+    @staticmethod
+    def _is_credit_only_request(*, amount: float, is_edit: bool,
+                                is_student: bool, income_type: str,
+                                credit_checked: bool, credit_visible: bool) -> bool:
+        """A zero-cash grant is a tuition credit, never an Income transaction."""
+        return (
+            not is_edit and is_student and income_type == "Tuition"
+            and amount == 0 and credit_checked and credit_visible
+        )
+
     def _save(self) -> None:
         if self._is_edit and (
             self._identity_unresolved or not self.save_btn.isEnabled()
@@ -596,13 +606,13 @@ class IncomeFormDialog(QDialog):
             )
             return
         amount = self.amount_spin.value()
-        is_credit_only = (
-            not self._is_edit
-            and self.source_combo.currentIndex() == 0
-            and self.type_combo.currentText() == "Tuition"
-            and amount == 0
-            and self.credit_enabled.isVisible()
-            and self.credit_enabled.isChecked()
+        is_credit_only = self._is_credit_only_request(
+            amount=amount,
+            is_edit=self._is_edit,
+            is_student=self.source_combo.currentIndex() == 0,
+            income_type=self.type_combo.currentText(),
+            credit_checked=self.credit_enabled.isChecked(),
+            credit_visible=self.credit_enabled.isVisible(),
         )
         if amount <= 0 and not is_credit_only:
             QMessageBox.warning(
