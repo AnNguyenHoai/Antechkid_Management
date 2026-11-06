@@ -49,3 +49,15 @@ Use a test repository with no reused production PAT; archive evidence in restric
 - [ ] Founder explicitly signs off with build hash and evidence index
 
 Until these are checked: **DO NOT MERGE AS A RELEASE APPROVAL / DO NOT CLOSE #597**. Use `Refs #597` in partial PRs. Add `Closes #597` only to the final PR after actual Windows EXE and cross-workstation evidence plus founder approval.
+
+
+## Normal stale-local regression — A Finish → B Finish → A returns
+
+`tests/test_rv05_clean_remote_advance.py` independently exercises **a normal successful collaboration**, not a Recovery incident:
+
+1. Client A obtains WRITE, commits `A_FIRST` to encrypted SQLCipher and finishes with a verified `CLEAN` journal at Git MAIN M1.
+2. Client B clones Git MAIN, adds `B_SECOND` to the *authoritative encrypted database*, updates its signed artifact identity and pushes a successor M2.
+3. A is still at M1 locally, but its receipt is `CLEAN`. Normal startup verifies and installs M2; assert **no recovery case**, no pending review, correct SQLCipher rows.
+4. A independently obtains a fresh WRITE, publishes `A_THIRD` at M3, and restarts. Verify MAIN/runtime contain all three accepted edits and the registry remains empty.
+
+This is a regression guard against mistakenly treating **lagging local MAIN** as **unaccepted local work**. Production Git authentication, independently deployed old EXEs and two physical Windows workstations remain separate UAT requirements.
