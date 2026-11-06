@@ -52,6 +52,14 @@ def _credit(key):
     )
 
 
+def _income_service_for_session(session):
+    service = IncomeService.__new__(IncomeService)
+    service._repository_provider = SimpleNamespace(
+        incomes=lambda _session: IncomeRepository(_session)
+    )
+    return service
+
+
 def _paid_for_finance_and_student(session):
     provider = SimpleNamespace(incomes=lambda _session: IncomeRepository(session))
     service = OutstandingService.__new__(OutstandingService)
@@ -94,7 +102,7 @@ def test_immutable_payment_time_credit_blocks_void_edit_and_delete_until_reconci
         session.add_all([income, _credit("tuition-payment-credit:income:100")])
         session.commit()
         with pytest.raises(IncomeValidationError, match="non-cash tuition credit"):
-            IncomeService._ensure_payment_time_credit_not_orphaned(session, income)
+            _income_service_for_session(session)._ensure_payment_time_credit_not_orphaned(session, income)
         assert _paid_for_finance_and_student(session) == 700
         assert income.status == Income.STATUS_ACTIVE
 
@@ -105,7 +113,7 @@ def test_legacy_unattributed_payment_discount_fails_closed_not_silently_understa
         session.add_all([income, _credit("tuition-payment-credit:legacy-uuid")])
         session.commit()
         with pytest.raises(IncomeValidationError, match="legacy payment-time credit"):
-            IncomeService._ensure_payment_time_credit_not_orphaned(session, income)
+            _income_service_for_session(session)._ensure_payment_time_credit_not_orphaned(session, income)
         assert _paid_for_finance_and_student(session) == 700
 
 
@@ -115,7 +123,7 @@ def test_unrelated_income_is_not_blocked_by_another_explicitly_linked_credit(ses
         unrelated = _income(200, income_id=101)
         session.add_all([linked, unrelated, _credit("tuition-payment-credit:income:100")])
         session.commit()
-        IncomeService._ensure_payment_time_credit_not_orphaned(session, unrelated)
+        _income_service_for_session(session)._ensure_payment_time_credit_not_orphaned(session, unrelated)
 
 
 def test_student_workspace_consumes_committed_finance_events_without_changing_data():
@@ -129,6 +137,7 @@ def test_student_workspace_consumes_committed_finance_events_without_changing_da
             financial_tab=SimpleNamespace(set_student=lambda student_id: refreshed.append(student_id))
         ),
         thread=lambda: QThread.currentThread(),
+        _refresh_current_student_finance=lambda: refreshed.append(19),
     )
     StudentWorkspaceShell._on_finance_data_changed(
         fake, FinanceDataChanged(entity="income", action="voided", entity_id=9)
