@@ -68,4 +68,4 @@ def test_offline_recovery_does_not_turn_other_bootstrap_failure_into_read():
     source = (ROOT / "platform" / "bootstrap" / "bootstrap_manager.py").read_text(encoding="utf-8")
     assert "if not startup.remote_unavailable:" in source
     assert "if not eligibility.allowed:" in source
-    assert "RuntimeState.OFFLINE if self._offline_read else RuntimeState.READY" in source
+    assert "RuntimeState.OFFLINE if getattr(self, '_offline_read', False) else RuntimeState.READY" in source
