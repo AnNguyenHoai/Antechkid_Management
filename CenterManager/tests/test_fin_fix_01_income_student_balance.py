@@ -2,7 +2,7 @@
 
 Small synthetic SQLAlchemy fixture; no production database or Git repository.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -37,7 +37,7 @@ def _income(amount, *, enrollment_id=17, status=Income.STATUS_ACTIVE, deleted=Fa
         payment_method="CASH",
         payment_date=date(2026, 11, 1),
         status=status,
-        deleted_at=date(2026, 11, 2) if deleted else None,
+        deleted_at=datetime(2026, 11, 2) if deleted else None,
     )
 
 
@@ -81,7 +81,7 @@ def test_void_and_soft_delete_income_recompute_same_canonical_course_balance(ses
         assert _paid_for_finance_and_student(session) == 200
         assert 1000 - _paid_for_finance_and_student(session) == 800
 
-        second.deleted_at = date(2026, 11, 6)
+        second.deleted_at = datetime(2026, 11, 6)
         session.commit()
         session.expire_all()
         assert _paid_for_finance_and_student(session) == 0
