@@ -40,7 +40,7 @@ def _fake_reconnect(monkeypatch, *, observed):
         _last_sync=None,
         _failed_count=0,
         _context_manager=SimpleNamespace(
-            get_context=lambda: SimpleNamespace(runtime=SimpleNamespace(state=runtime_state))
+            get_context=lambda: SimpleNamespace(state=runtime_state)
         ),
         _collab_manager=SimpleNamespace(
             get_session=lambda: SimpleNamespace(session_id="testing"),
