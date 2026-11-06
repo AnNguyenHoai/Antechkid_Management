@@ -217,6 +217,36 @@ class MainWindow(QMainWindow):
         self._refresh_student_list()
         self._update_write_buttons()
 
+        # Startup sync has already completed and the user is logged in.
+        # This reminder is informational; never changes a WRITE lease.
+        recovery_menu = self.menuBar().addMenu("Khôi phục")
+        recovery_history = recovery_menu.addAction("Danh sách Recovery Case")
+        recovery_history.triggered.connect(self._show_recovery_case_history)
+        QTimer.singleShot(0, self._show_pending_recovery_cases)
+
+    def _show_pending_recovery_cases(self) -> None:
+        from centermanager.ui.recovery_cases_dialog import show_pending_recovery_reminder
+        try:
+            show_pending_recovery_reminder(self)
+        except Exception:
+            logger.exception("Recovery Case reminder could not be verified")
+            QMessageBox.warning(
+                self, "Không thể kiểm tra Recovery Case",
+                "Không đọc được thông tin recovery. Không xác nhận case nào đã kiểm tra. "
+                "Vui lòng liên hệ hỗ trợ và không xóa bản backup."
+            )
+
+    def _show_recovery_case_history(self) -> None:
+        from centermanager.ui.recovery_cases_dialog import RecoveryCasesDialog
+        try:
+            RecoveryCasesDialog(self).exec()
+        except Exception:
+            logger.exception("Recovery Case history unavailable")
+            QMessageBox.warning(
+                self, "Không thể xem Recovery Case",
+                "Không đọc được thông tin recovery. Vui lòng giữ nguyên backup."
+            )
+
     def _setup_application_shell(self) -> None:
         """Build the global top bar + workspace content shell."""
         runtime_version = str(self._platform_context.runtime.manifest.runtime_version)
