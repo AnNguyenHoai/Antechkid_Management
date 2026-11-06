@@ -34,6 +34,7 @@ class StartupSynchronization:
         self._runtime_db_path = self._paths.database_dir / "center.db"
         self._runtime_manifest_path = self._paths.runtime_root / "manifest.json"
         self._metadata_dir = self._paths.metadata_dir
+        self.remote_unavailable = False
 
     def _fresh_install_eligible(self, journal) -> bool:
         """Only grant startup provenance to a workspace with no prior data.
@@ -131,7 +132,11 @@ class StartupSynchronization:
 
         # 2. Fetch remote (must succeed)
         if not self._fetch_remote():
-            logger.error("Fetch failed, remote unavailable. Cannot proceed.")
+            # Only this point permits a later, separately authenticated
+            # Offline READ fallback. Git/recovery/identity failures after
+            # fetching MAIN must never be converted to a cache fallback.
+            self.remote_unavailable = True
+            logger.error("Fetch failed, remote unavailable. Cannot proceed online.")
             return False
 
         # A local WRITE receipt may be absent or unresolved after an EXE upgrade.
