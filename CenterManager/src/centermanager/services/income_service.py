@@ -665,6 +665,7 @@ class IncomeService:
             adjustment_date,
             reason=credit_reason,
             idempotency_key=idempotency_key,
+            cap_to_outstanding=True,
         )
 
     @require_permission("finance.income.create")
