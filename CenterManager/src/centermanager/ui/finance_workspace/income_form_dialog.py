@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Create/edit Income dialog with immutable transaction identity in edit mode."""
 import logging
+from uuid import uuid4
 from datetime import date
 from typing import Optional
 
@@ -25,6 +26,7 @@ from centermanager.core.current_user import get_current_user
 from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.class_service import ClassService
 from centermanager.services.income_service import IncomeService, IncomeValidationError
+from centermanager.services.tuition_adjustment_service import TuitionAdjustmentValidationError
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
 from centermanager.ui.finance_workspace.tuition_enrollment_picker import TuitionEnrollmentPicker
@@ -56,6 +58,7 @@ class IncomeFormDialog(QDialog):
         self._persisted_refs = None
         self._identity_unresolved = False
         self._initial_edit_values = None
+        self._credit_only_command_key = f"tuition-credit-only:{uuid4()}"
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(620)
@@ -117,7 +120,7 @@ class IncomeFormDialog(QDialog):
         form.addRow("Loại thu *", self.type_combo)
 
         self.amount_spin = AutoClearDoubleSpinBox(prefix="VND ")
-        self.amount_spin.setRange(0.01, 999999999.99)
+        self.amount_spin.setRange(0.0, 999999999.99)
         form.addRow("Số tiền thực nhận *", self.amount_spin)
 
         self.credit_enabled = QCheckBox(
@@ -581,6 +584,16 @@ class IncomeFormDialog(QDialog):
             note += f" ({extra_note})"
         return None, None, None, "Other", note
 
+    @staticmethod
+    def _is_credit_only_request(*, amount: float, is_edit: bool,
+                                is_student: bool, income_type: str,
+                                credit_checked: bool, credit_visible: bool) -> bool:
+        """A zero-cash grant is a tuition credit, never an Income transaction."""
+        return (
+            not is_edit and is_student and income_type == "Tuition"
+            and amount == 0 and credit_checked and credit_visible
+        )
+
     def _save(self) -> None:
         if self._is_edit and (
             self._identity_unresolved or not self.save_btn.isEnabled()
@@ -593,8 +606,21 @@ class IncomeFormDialog(QDialog):
             )
             return
         amount = self.amount_spin.value()
-        if amount <= 0:
-            QMessageBox.warning(self, "Lỗi", "Số tiền phải lớn hơn 0.")
+        is_credit_only = self._is_credit_only_request(
+            amount=amount,
+            is_edit=self._is_edit,
+            is_student=self.source_combo.currentIndex() == 0,
+            income_type=self.type_combo.currentText(),
+            credit_checked=self.credit_enabled.isChecked(),
+            credit_visible=self.credit_enabled.isVisible(),
+        )
+        if amount <= 0 and not is_credit_only:
+            QMessageBox.warning(
+                self, "Lỗi",
+                "Số tiền thực nhận phải lớn hơn 0. Với miễn học phí 100%, "
+                "chọn giảm giá / credit, nhập khoản miễn và lý do. "
+                "Hợp đồng học phí 0 đồng không cần tạo Income."
+            )
             return
 
         payment_method = self.method_combo.currentData()
@@ -643,6 +669,19 @@ class IncomeFormDialog(QDialog):
                         raise IncomeValidationError(
                             "Vui lòng nhập lý do giảm giá / tuition credit."
                         )
+                    if is_credit_only:
+                        # No Income, wallet movement or imaginary receipt.
+                        self._income_service.create_tuition_credit_only(
+                            student_id=int(student_id),
+                            class_id=int(class_id),
+                            enrollment_id=int(enrollment_id),
+                            credit_amount=credit_amount,
+                            credit_reason=credit_reason,
+                            adjustment_date=payment_date,
+                            idempotency_key=self._credit_only_command_key,
+                        )
+                        self.accept()
+                        return
                     created = self._income_service.create_tuition_payment_with_credit(
                         student_id=int(student_id),
                         class_id=int(class_id),
@@ -673,7 +712,7 @@ class IncomeFormDialog(QDialog):
                     created = created[0]
                 self._commit_vouchers(getattr(created, "id", None))
             self.accept()
-        except IncomeValidationError as exc:
+        except (IncomeValidationError, TuitionAdjustmentValidationError) as exc:
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
         except Exception:
             logger.exception("Error saving income")

@@ -623,6 +623,52 @@ class IncomeService:
             return income
 
     @require_permission("finance.income.create")
+    def create_tuition_credit_only(
+        self,
+        *,
+        student_id: int,
+        class_id: int,
+        enrollment_id: int,
+        credit_amount,
+        credit_reason: str,
+        adjustment_date: date,
+        idempotency_key: str,
+    ) -> TuitionAdjustment:
+        """Settle tuition with non-cash credit when actual payment is zero.
+
+        An Income row always means real cash/bank movement, never a zero-VND
+        placeholder. The dedicated immutable adjustment is audited and does
+        not affect cash/bank dashboards. The service revalidates the Enrollment
+        identity; do not trust the UI picker alone.
+        """
+        self._student_service.get_student(student_id)
+        self._class_name_for_tuition(class_id)
+        with self._session_factory() as session:
+            self._resolve_tuition_enrollment(
+                session,
+                student_id=int(student_id),
+                class_id=int(class_id),
+                enrollment_id=int(enrollment_id),
+            )
+        from centermanager.services.tuition_adjustment_service import (
+            TuitionAdjustmentService,
+        )
+        service = TuitionAdjustmentService(
+            self._session_factory,
+            repository_provider=self._repository_provider,
+            audit_service=self._audit_service,
+            event_bus=self._event_bus,
+        )
+        return service.credit_adjustment(
+            int(enrollment_id),
+            credit_amount,
+            adjustment_date,
+            reason=credit_reason,
+            idempotency_key=idempotency_key,
+            cap_to_outstanding=True,
+        )
+
+    @require_permission("finance.income.create")
     def create_tuition_payment_with_credit(
         self,
         *,

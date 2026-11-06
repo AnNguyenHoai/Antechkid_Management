@@ -260,7 +260,8 @@ class TuitionAdjustmentService:
 
     @require_permission("finance.income.create")
     def credit_adjustment(self, enrollment_id: int, amount, adjustment_date: date, *, reason: str,
-                          idempotency_key: str, origin_adjustment_id: Optional[int] = None) -> TuitionAdjustment:
+                          idempotency_key: str, origin_adjustment_id: Optional[int] = None,
+                          cap_to_outstanding: bool = False) -> TuitionAdjustment:
         value = self._validate_amount(amount)
         effective_date = self._validate_date(adjustment_date)
         resolved_reason = self._reason(reason)
@@ -283,6 +284,34 @@ class TuitionAdjustmentService:
                         f"Enrollment #{enrollment.reconciled_into_enrollment_id}; "
                         "use the canonical Enrollment."
                     )
+                if cap_to_outstanding:
+                    # For a zero-cash waiver, require verifiable *accrued*
+                    # tuition owed at this date. Lock acquisition above prevents
+                    # a concurrent waiver command from observing the same old
+                    # balance. Do not turn an unconfigured Enrollment into
+                    # unearned prepaid tuition.
+                    from centermanager.services.tuition_accrual_service import (
+                        TuitionAccrualService, TuitionAccrualUnresolvedError,
+                    )
+                    try:
+                        sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
+                        accrual = TuitionAccrualService.calculate_from_records(
+                            enrollment, sessions, effective_date,
+                        )
+                    except TuitionAccrualUnresolvedError as exc:
+                        raise TuitionAdjustmentValidationError(
+                            "Tuition contract is not configured; a credit-only waiver cannot be applied."
+                        ) from exc
+                    settled = _money(
+                        self._repository_provider.incomes(session).sum_active_tuition_for_enrollment(
+                            enrollment_id, as_of_date=effective_date
+                        )
+                    )
+                    owed = max(_money(accrual.net_accrued) - settled, Decimal("0.00"))
+                    if value > owed:
+                        raise TuitionAdjustmentValidationError(
+                            "Non-cash waiver exceeds accrued tuition still owed for this Enrollment."
+                        )
                 if origin_adjustment_id is not None:
                     origin_adjustment = adjustments.get_by_id(origin_adjustment_id)
                     if origin_adjustment is None or origin_adjustment.enrollment_id != enrollment_id:
