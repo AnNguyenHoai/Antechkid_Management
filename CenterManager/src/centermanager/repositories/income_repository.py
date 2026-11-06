@@ -441,6 +441,20 @@ class IncomeRepository(BaseRepository[Income]):
             )
         )
 
+    def list_payment_time_credit_keys_for_enrollment(self, enrollment_id: int) -> Tuple[str, ...]:
+        """Return payment-time discount identity markers for safe Income mutation.
+
+        The immutable credit ledger is repository-owned; application services
+        must never query SQLAlchemy sessions directly. Legacy UUID-only keys
+        remain intentionally ambiguous rather than guessed.
+        """
+        rows = self._session.query(TuitionAdjustment.idempotency_key).filter(
+            TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
+            TuitionAdjustment.enrollment_id == enrollment_id,
+            TuitionAdjustment.idempotency_key.like("tuition-payment-credit:%"),
+        ).all()
+        return tuple(key for (key,) in rows)
+
     def sum_active_tuition_for_enrollment(self, enrollment_id: int, *, as_of_date: Optional[date] = None) -> Decimal:
         """Return effective settled tuition without materializing ledger ORM rows.
 
