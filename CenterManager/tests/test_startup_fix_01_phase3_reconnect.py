@@ -99,3 +99,13 @@ def test_background_reconnect_does_not_require_version_increment():
     assert "provider.health()" in body
     assert "self._perform_sync()" in body
     assert body.index("offline_read_active()") < body.index("self._perform_check()")
+
+
+def test_reconnect_keeps_write_fence_until_verified_clean_runtime():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src" / "centermanager"
+    service = (root / "platform" / "sync" / "authoritative_runtime_sync_service.py").read_text(encoding="utf-8")
+    reconnect = service.split("def _perform_sync(", 1)[1]
+    assert reconnect.index("self._apply_runtime_update()") < reconnect.index("provider.observe_remote_main_commit()")
+    assert reconnect.index("WriteRecoveryJournal().assert_replaceable()") < reconnect.index("set_offline_read(False)")
+    assert 'ModeChanged(mode="READ")' in reconnect
