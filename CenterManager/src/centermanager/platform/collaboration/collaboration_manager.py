@@ -625,6 +625,12 @@ class CollaborationManager:
         logger.info("Collaboration shutdown complete")
 
     def request_write(self, reason: str = "") -> WriteRequestInfo:
+        from centermanager.platform.sync.offline_read_state import offline_read_active
+        if offline_read_active():
+            return WriteRequestInfo(
+                WriteRequestResult.ERROR,
+                message="Offline READ: verify Git MAIN and synchronize before Start Editing.",
+            )
         self._ensure_initialized()
         if self._sync_provider is not None:
             with self._state_mutex:
