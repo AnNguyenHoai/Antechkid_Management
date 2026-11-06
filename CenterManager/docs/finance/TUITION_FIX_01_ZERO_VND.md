@@ -19,7 +19,7 @@ For a tuition Enrollment with accrued tuition that is waived **at collection tim
 
 - Credit-only grant is a positive financial adjustment: do not create it for an already-zero contract simply to record a free course. Use Enrollment pricing instead.
 - The account must have finance.income.create and authorized WRITE; period closing rules still apply.
-- The UI currently validates only positive credit and a reason; **finance reviewer must confirm the requested amount against the Enrollment's actual outstanding** to prevent an over-credit. A separate cap enforcement is advisable before production use if the workflow allows partial/full waiver without preapproval.
+- The dedicated zero-cash credit-only path enforces a **server-side cap to accrued unpaid tuition** after acquiring the adjustment command lock. Non-cash waiver cannot create excess prepaid credit; unconfigured contracts fail closed. Staff must still verify the intended course and waiver approval.
 - Legacy payment-time credits are immutable and may require manual reconciliation on later Income void/edit. TUITION-FIX-01 does not change that ledger lifecycle.
 - Repeated credit-only submissions with the **same** idempotency key are deduplicated, but separate dialogs represent separate authorized commands. The operator must check prior adjustments in Tuition Detail.
 
