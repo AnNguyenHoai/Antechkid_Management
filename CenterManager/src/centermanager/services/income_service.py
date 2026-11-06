@@ -135,6 +135,38 @@ class IncomeService:
             raise IncomeValidationError("Amount must be greater than 0.")
         return amount
 
+    @staticmethod
+    def _ensure_payment_time_credit_not_orphaned(session, income: Income) -> None:
+        """Prevent payment mutations that would detach an immutable credit.
+
+        Payment-time discounts have historically been committed as a separate
+        immutable CREDIT_ADJUSTMENT row. The ledger does not support reversing
+        that credit by voiding an Income. For new rows the idempotency key binds
+        the exact Income; old UUID-only keys are ambiguous and require manual
+        reconciliation. Rejecting is safer than leaving debt silently understated.
+        """
+        if income.income_type != "Tuition" or income.enrollment_id is None:
+            return
+        credits = session.query(TuitionAdjustment.idempotency_key).filter(
+            TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
+            TuitionAdjustment.enrollment_id == income.enrollment_id,
+            TuitionAdjustment.idempotency_key.like("tuition-payment-credit:%"),
+        ).all()
+        receipt_key = f"tuition-payment-credit:income:{income.id}"
+        for (key,) in credits:
+            if key == receipt_key:
+                raise IncomeValidationError(
+                    "This Income includes a non-cash tuition credit. "
+                    "Void/edit must reverse the linked credit through an audited "
+                    "settlement workflow before changing the payment."
+                )
+            if not key.startswith("tuition-payment-credit:income:"):
+                raise IncomeValidationError(
+                    "This Enrollment has a legacy payment-time credit without "
+                    "verifiable payment linkage. Reconcile the immutable credit "
+                    "before editing, voiding or deleting its payments."
+                )
+
     def _validate_income_ownership(
         self,
         income_type,
@@ -712,7 +744,7 @@ class IncomeService:
                 adjustment_date=payment_date,
                 wallet=None,
                 reason=resolved_reason,
-                idempotency_key=f"tuition-payment-credit:{uuid4()}",
+                idempotency_key=f"tuition-payment-credit:income:{income.id}",
                 created_by=getattr(actor, "username", None),
             )
             adjustment_repo.add(adjustment)
@@ -957,6 +989,7 @@ class IncomeService:
                 raise IncomeValidationError("Only ACTIVE income can be edited.")
 
             self._ensure_income_period_mutable(session, income)
+            self._ensure_payment_time_credit_not_orphaned(session, income)
             before = self._audit_snapshot(income)
             changed = []
 
@@ -1055,6 +1088,7 @@ class IncomeService:
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be voided.")
             self._ensure_income_period_mutable(session, income)
+            self._ensure_payment_time_credit_not_orphaned(session, income)
             before = self._audit_snapshot(income)
             _, actor_name = self._actor()
             income.status = Income.STATUS_VOIDED
@@ -1085,6 +1119,7 @@ class IncomeService:
             if income is None or income.deleted_at is not None:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or already deleted.")
             self._ensure_income_period_mutable(session, income)
+            self._ensure_payment_time_credit_not_orphaned(session, income)
             before = self._audit_snapshot(income)
             student_id = income.student_id
             income.deleted_at = datetime.now()
