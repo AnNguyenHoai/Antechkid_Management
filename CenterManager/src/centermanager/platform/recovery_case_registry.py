@@ -201,6 +201,57 @@ class RecoveryCaseRegistry:
             raise
         return self._pin(entry)
 
+    def mark_reviewed(self, case_id: str) -> dict:
+        """Explicit acknowledgement only; never deletes backup or changes Git/WRITE.
+
+        The case remains signed and readable for audit. The rename is atomic;
+        on a crash either the original PENDING file or complete ACKNOWLEDGED
+        file is present. The caller must obtain explicit UI consent.
+        """
+        import os
+        import uuid
+
+        case = self.get(case_id)
+        if case is None:
+            raise RecoveryRequired("Recovery Case is missing; cannot acknowledge.")
+        # Acknowledgement is not authorization to use an unverified capture.
+        manifest = self.journal.verify_capture(case["capture_ref"])
+        if manifest.get("files", {}).get("center.db") != case["capture_db_sha256"]:
+            raise RecoveryRequired("Recovery Case backup is not verifiable.")
+        if case["status"] == "ACKNOWLEDGED":
+            return case
+        if case["status"] != "PENDING_REVIEW":
+            raise RecoveryRequired("Unknown Recovery Case review state.")
+        updated = {
+            **case,
+            "status": "ACKNOWLEDGED",
+            "reviewed_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        signed = {**updated, "integrity": self._signature(updated, self._key())}
+        target = self.root / (case_id + ".json")
+        temporary = self.root / ("." + case_id + "." + uuid.uuid4().hex + ".tmp")
+        try:
+            with temporary.open("x", encoding="utf-8") as stream:
+                os.chmod(temporary, 0o600)
+                json.dump(signed, stream, sort_keys=True, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Do not recreate a case which was removed during review.
+            if not target.is_file() or target.is_symlink():
+                raise RecoveryRequired("Recovery Case changed while reviewing.")
+            latest = self.get(case_id)
+            if latest != case:
+                raise RecoveryRequired("Recovery Case changed while reviewing.")
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return self.get(case_id)
+
+    def pending_cases(self) -> list[dict]:
+        """Authenticate every registry entry, including reviewed cases."""
+        return [case for case in self.list_cases()
+                if case["status"] == "PENDING_REVIEW"]
+
     def list_cases(self) -> list[dict]:
         if not self.root.exists():
             return []
