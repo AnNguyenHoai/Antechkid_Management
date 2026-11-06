@@ -74,8 +74,12 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
     try:
         assert tx.start_editing(), tx.last_start_error
         assert tx.state == WriteTransactionState.EDITING
-        with connect(w.journal.database) as database:
+        database = connect(w.journal.database)
+        try:
             database.execute("INSERT INTO recovery_items(value) VALUES ('NEW_AUTHORIZED_WRITE')")
+            database.commit()
+        finally:
+            database.close()
         tx.mark_dirty()
         assert tx.finish_editing(), tx.last_start_error
         assert tx.state == WriteTransactionState.IDLE
