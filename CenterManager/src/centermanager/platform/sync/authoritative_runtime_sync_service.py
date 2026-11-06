@@ -202,8 +202,8 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
                     return False
                 WriteRecoveryJournal().assert_replaceable()
                 # Switch on only after a verified runtime/receipt+remote OID.
-                context = self._context_manager.get_context()
-                context.runtime.state.transition_to(RuntimeState.READY)
+                runtime_context = self._context_manager.get_context()
+                runtime_context.state.transition_to(RuntimeState.READY)
                 set_offline_read(False)
                 self._event_bus.publish(ModeChanged(mode="READ"))
                 session = self._collab_manager.get_session()
