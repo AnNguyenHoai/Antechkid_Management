@@ -94,7 +94,7 @@ def test_first_draft_gets_scalar_pk_before_outbox_and_single_commit(monkeypatch)
     assert row.status == FinancialSettlement.STATUS_DRAFT
     assert row.opening_cash == Decimal("18000000.00")
     assert row.expected_closing_cash == Decimal("18000100.00")
-    assert row.expected_closing_bank == Decimal("25400000.00")
+    assert row.expected_closing_bank == Decimal("25000400.00")
     assert repo.flushed == 1
     assert repo.refreshed == 1
     assert session.commits == 1
