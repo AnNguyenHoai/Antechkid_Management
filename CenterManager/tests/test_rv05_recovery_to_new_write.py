@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 from tests.test_e1b1_durable_write_recovery import (
-    workspace, begin, mutate, values, git,
+    workspace, begin, mutate, values, git, connect,
 )
 
 
@@ -74,23 +74,23 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
     try:
         assert tx.start_editing(), tx.last_start_error
         assert tx.state == WriteTransactionState.EDITING
-        mutate(w)
+        with connect(w.journal.database) as database:
+            database.execute("INSERT INTO recovery_items(value) VALUES ('NEW_AUTHORIZED_WRITE')")
         tx.mark_dirty()
         assert tx.finish_editing(), tx.last_start_error
         assert tx.state == WriteTransactionState.IDLE
         new_oid = w.provider.observe_remote_main_commit()
         assert new_oid not in {w.base, accepted_oid}
         assert values(w.journal.repository / "database" / "center.db") == [
-            "BASE", "LOCAL_UNACCEPTED"
+            "BASE", "NEW_AUTHORIZED_WRITE"
         ]
-        # Same text value is synthetic; the only newly published row is the
-        # mutation performed *after* safe startup, never the earlier capture.
+        # Earlier LOCAL_UNACCEPTED data must not leak into the new remote MAIN.
         assert values(captured_path / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
         assert w.journal.verify_capture(captured_path)["files"]["center.db"] == case["capture_db_sha256"]
         assert registry.get(case["case_id"])["status"] == "PENDING_REVIEW"
         assert StartupSynchronization(w.provider).run()
         assert registry.get(case["case_id"])["status"] == "PENDING_REVIEW"
         assert len(registry.list_cases()) == 1
-        assert values(w.journal.database) == ["BASE", "LOCAL_UNACCEPTED"]
+        assert values(w.journal.database) == ["BASE", "NEW_AUTHORIZED_WRITE"]
     finally:
         cm.shutdown()
