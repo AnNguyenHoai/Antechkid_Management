@@ -138,7 +138,7 @@ class BootstrapManager:
                 return False
 
             self._context.runtime.state.transition_to(
-                RuntimeState.OFFLINE if self._offline_read else RuntimeState.READY
+                RuntimeState.OFFLINE if getattr(self, '_offline_read', False) else RuntimeState.READY
             )
             self._lifecycle.transition_to(PlatformLifecycleState.READY)
             logger.info("[BOOTSTRAP] Platform ready")
