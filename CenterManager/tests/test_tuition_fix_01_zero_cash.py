@@ -17,7 +17,7 @@ def test_zero_course_price_is_configured_not_missing():
         planned_sessions=24,
     )
     contract = EnrollmentService._snapshot_tuition_contract(
-        free_class, enrolled_from_session=1
+        free_class, enrolled_from_session=1, enrolled_until_session=None
     )
     assert contract["agreed_course_fee"] == Decimal("0")
     assert contract["unit_fee"] == Decimal("0")
@@ -33,6 +33,7 @@ def test_full_course_discount_is_zero_net_obligation():
     contract = EnrollmentService._snapshot_tuition_contract(
         class_record,
         enrolled_from_session=1,
+        enrolled_until_session=None,
         discount_type="PERCENT",
         discount_value=Decimal("100"),
         discount_source="MANUAL",
