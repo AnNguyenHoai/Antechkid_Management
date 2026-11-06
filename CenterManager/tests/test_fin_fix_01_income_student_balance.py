@@ -146,10 +146,19 @@ def test_student_workspace_consumes_committed_finance_events_without_changing_da
         fake, FinanceDataChanged(entity="tuition_adjustment", action="credit_adjustment", entity_id=8)
     )
     assert refreshed == [19, 19]
+    # Expense events must not refresh Student tuition; preserve both prior
+    # refreshes (Income void + non-cash adjustment), not just the first.
     StudentWorkspaceShell._on_finance_data_changed(
         fake, FinanceDataChanged(entity="expense", action="deleted", entity_id=7)
     )
-    assert refreshed == [19]
+    assert refreshed == [19, 19]
+
+    # Student Workspace may be open without a selected profile.
+    fake._current_student_id = None
+    StudentWorkspaceShell._on_finance_data_changed(
+        fake, FinanceDataChanged(entity="income", action="deleted", entity_id=9)
+    )
+    assert refreshed == [19, 19]
 
 
 def test_payment_time_credit_key_is_tied_to_exact_created_income():
