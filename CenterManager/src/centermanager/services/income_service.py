@@ -135,8 +135,7 @@ class IncomeService:
             raise IncomeValidationError("Amount must be greater than 0.")
         return amount
 
-    @staticmethod
-    def _ensure_payment_time_credit_not_orphaned(session, income: Income) -> None:
+    def _ensure_payment_time_credit_not_orphaned(self, session, income: Income) -> None:
         """Prevent payment mutations that would detach an immutable credit.
 
         Payment-time discounts have historically been committed as a separate
@@ -147,13 +146,11 @@ class IncomeService:
         """
         if income.income_type != "Tuition" or income.enrollment_id is None:
             return
-        credits = session.query(TuitionAdjustment.idempotency_key).filter(
-            TuitionAdjustment.kind == TuitionAdjustment.KIND_CREDIT,
-            TuitionAdjustment.enrollment_id == income.enrollment_id,
-            TuitionAdjustment.idempotency_key.like("tuition-payment-credit:%"),
-        ).all()
+        credit_keys = self._repository_provider.incomes(
+            session
+        ).list_payment_time_credit_keys_for_enrollment(income.enrollment_id)
         receipt_key = f"tuition-payment-credit:income:{income.id}"
-        for (key,) in credits:
+        for key in credit_keys:
             if key == receipt_key:
                 raise IncomeValidationError(
                     "This Income includes a non-cash tuition credit. "
