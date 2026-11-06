@@ -35,3 +35,7 @@ These PRs are stacked. Merge in the order #605 -> #606 -> #607 -> #608 after gre
 ## Known operational boundary
 
 Offline startup is deliberately **fail-closed**, not a second authoritative source. A valid cached snapshot is permitted for READ; **no offline editing** is added. A resumed network connection alone is not acceptance; fresh MAIN verification and a valid CLEAN receipt are both required before WRITE becomes available.
+
+## CI trigger note for stacked reviews
+
+Repository Pytest workflow currently triggers pull requests targeting `main_repos` only. When reviewing these dependent PRs, briefly target `main_repos` and push the phase-specific test commit to obtain a comparable full Windows CI run, then restore the stacked base. This is testing only; no merge is authorized by a successful run.
