@@ -181,6 +181,41 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             self._pending_update = False
             self._last_sync = datetime.now()
             self._failed_count = 0
+
+            from centermanager.platform.sync.offline_read_state import (
+                offline_read_active, set_offline_read,
+            )
+            if offline_read_active():
+                # Pull-only sync and atomic runtime install must be complete
+                # before any READ->WRITE availability transition. A successful
+                # HTTP probe alone never releases the offline fence.
+                from centermanager.platform.write_recovery import WriteRecoveryJournal
+                from centermanager.platform.runtime.context.runtime_state import RuntimeState
+                from centermanager.platform.collaboration.events import ModeChanged
+                from centermanager.platform.sync.events import SynchronizationCompleted
+
+                provider = self._sync_manager.provider()
+                accepted = provider.get_local_main_commit()
+                observed = provider.observe_remote_main_commit()
+                if not accepted or observed != accepted:
+                    logger.warning("Reconnect: Git MAIN OID changed; retaining Offline READ")
+                    return False
+                WriteRecoveryJournal().assert_replaceable()
+                # Switch on only after a verified runtime/receipt+remote OID.
+                runtime_context = self._context_manager.get_context()
+                runtime_context.state.transition_to(RuntimeState.READY)
+                set_offline_read(False)
+                self._event_bus.publish(ModeChanged(mode="READ"))
+                session = self._collab_manager.get_session()
+                self._event_bus.publish(SynchronizationCompleted(
+                    correlation_id="offline-read-reconnect",
+                    session_id=session.session_id if session else "unknown",
+                    old_version=self._current_version,
+                    new_version=self._current_version,
+                    duration_ms=0,
+                ))
+                logger.info("Offline READ successfully reconnected to verified Git MAIN")
+
             logger.info(
                 "Pull-only synchronization completed; no runtime state was published to MAIN"
             )
