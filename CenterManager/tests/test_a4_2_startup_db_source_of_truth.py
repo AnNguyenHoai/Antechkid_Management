@@ -164,7 +164,9 @@ def test_app_materializes_git_database_before_creating_production_engine():
 
     assert bootstrap_marker < initialize_marker < engine_marker < schema_marker
     assert "if not self._ensure_authoritative_runtime_database(paths):" in bootstrap_source
-    assert "if not StartupSynchronization(provider).run():" in bootstrap_source
+    assert "startup = StartupSynchronization(provider)" in bootstrap_source
+    assert "if not startup.run():" in bootstrap_source
+    assert "if not startup.remote_unavailable:" in bootstrap_source
 
 
 def test_app_refuses_configured_startup_sync_failure():
@@ -174,7 +176,7 @@ def test_app_refuses_configured_startup_sync_failure():
         root / "src/centermanager/platform/bootstrap/bootstrap_manager.py"
     ).read_text(encoding="utf-8")
 
-    sync_failure = bootstrap_source.index("if not StartupSynchronization(provider).run():")
+    sync_failure = bootstrap_source.index("if not startup.run():")
     failure_block = bootstrap_source[sync_failure:sync_failure + 300]
     assert "Authoritative Git synchronization failed" in failure_block
     assert "return False" in failure_block
