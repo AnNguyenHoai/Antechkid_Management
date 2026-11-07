@@ -35,6 +35,9 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
         # attachments. Never traverse manual-review itself (it contains this
         # destination and possibly earlier archives).
         roots = dict(journal._workspace_roots())
+        # Include machine-bound DPAPI/config evidence when it exists, so
+        # workstation reprovisioning cannot destroy the only usable legacy key.
+        roots["config"] = journal.runtime / "Config"
         roots["recovery"] = journal.root
         for category, location in sorted(roots.items()):
             location = Path(location)
