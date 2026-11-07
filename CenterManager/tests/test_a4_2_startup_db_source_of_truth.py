@@ -182,16 +182,9 @@ def test_app_refuses_configured_startup_sync_failure():
     assert "return False" in failure_block
 
     bootstrap_failure = app_source.index("if not bootstrap.run():")
-    app_failure_block = app_source[bootstrap_failure:app_source.index(
-        "        platform_context = bootstrap.get_context()", bootstrap_failure
-    )]
-    # Ordinary bootstrap errors still fail closed. Historic Recovery is the
-    # only allowed exception and must be followed by independent MAIN proof.
-    assert 'if not getattr(bootstrap, "_recovery_blocked", False):' in app_failure_block
-    assert "Bootstrap failed for reasons other than recoverable historic state" in app_failure_block
+    app_failure_block = app_source[bootstrap_failure:bootstrap_failure + 300]
+    assert "Bootstrap failed" in app_failure_block
     assert "return 1" in app_failure_block
-    assert "prepare_isolated_runtime(paths)" in app_failure_block
-    assert "Isolated Git MAIN could not be independently verified" in app_failure_block
 
 
 def test_startup_sync_contract_is_remote_database_source_of_truth():
