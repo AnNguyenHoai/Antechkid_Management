@@ -39,6 +39,7 @@ class BootstrapManager:
         self._context_manager = RuntimeContextManager()
         self._sync_provider = None
         self._offline_read = False
+        self._recovery_blocked = False
 
     def run(self) -> bool:
         """Execute startup sequence."""
@@ -64,6 +65,7 @@ class BootstrapManager:
             try:
                 journal_document = WriteRecoveryJournal(paths).inspect()
             except RecoveryRequired as exc:
+                self._recovery_blocked = True
                 logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.critical(
@@ -242,6 +244,7 @@ class BootstrapManager:
         startup = StartupSynchronization(provider)
         if not startup.run():
             if not startup.remote_unavailable:
+                self._recovery_blocked = bool(getattr(startup, 'recovery_error', None))
                 logger.error("[BOOTSTRAP] Authoritative Git synchronization failed")
                 return False
             from centermanager.platform.sync.offline_read_gate import assess_offline_read
