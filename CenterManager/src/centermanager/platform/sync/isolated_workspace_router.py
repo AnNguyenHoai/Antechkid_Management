@@ -62,8 +62,8 @@ def read_selected_workspace(project_root: Path) -> tuple[Path | None, tuple[Path
             project_root / (n if n == "runtime" else _validated_name(n))
             for n in data["retained_roots"]
         )
-        if len(set(historic)) != len(historic):
-            raise ValueError("duplicate history")
+        if len(set(historic)) != len(historic) or any(p.is_symlink() for p in historic):
+            raise ValueError("duplicate or unsafe history")
         active = project_root / name
         if active.is_symlink() or not active.is_dir() or active in historic:
             raise ValueError("missing or conflicting active workspace")
@@ -87,6 +87,8 @@ def prepare_isolated_runtime(paths) -> IsolatedWorkspace:
     candidate.mkdir(mode=0o700)
     try:
         source = original / "Config"
+        if source.is_symlink():
+            raise WorkspaceIsolationError("Protected configuration directory is a symlink.")
         dest = candidate / "Config"
         dest.mkdir()
         for name in _CONFIG_FILES:
@@ -120,23 +122,33 @@ def accept_isolated_runtime(project_root: Path, workspace: IsolatedWorkspace) ->
             or prior.parent != root or prior == candidate
             or candidate.is_symlink() or not candidate.is_dir()):
         raise WorkspaceIsolationError("Cannot accept unverified runtime routing.")
-    previous_active, retained = read_selected_workspace(root)
-    if previous_active is not None and previous_active != prior:
-        raise WorkspaceIsolationError("Another active runtime was selected concurrently.")
-    if previous_active is None and prior.name != "runtime":
-        raise WorkspaceIsolationError("Original runtime is not the canonical active selection.")
-    history = [p.name for p in retained]
-    if prior.name not in history:
-        history.append(prior.name)
-    receipt = {"format": 1, "active_name": candidate.name, "retained_roots": history}
-    marker = _marker_path(root)
-    temp = marker.with_name("." + marker.name + "." + uuid.uuid4().hex + ".tmp")
+    # Cross-process selection CAS: a second instance must never silently
+    # redirect future launches away from another newly accepted workspace.
+    from PySide6.QtCore import QLockFile
+    lock = QLockFile(str(root / ".centermanager-active-runtime.lock"))
+    lock.setStaleLockTime(30_000)
+    if not lock.tryLock(0):
+        raise WorkspaceIsolationError("Another process is committing runtime selection.")
     try:
-        with temp.open("x", encoding="utf-8") as stream:
-            json.dump(receipt, stream, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp, marker)
+        previous_active, retained = read_selected_workspace(root)
+        if previous_active is not None and previous_active != prior:
+            raise WorkspaceIsolationError("Another active runtime was selected concurrently.")
+        if previous_active is None and prior.name != "runtime":
+            raise WorkspaceIsolationError("Original runtime is not the canonical active selection.")
+        history = [p.name for p in retained]
+        if prior.name not in history:
+            history.append(prior.name)
+        receipt = {"format": 1, "active_name": candidate.name, "retained_roots": history}
+        marker = _marker_path(root)
+        temp = marker.with_name("." + marker.name + "." + uuid.uuid4().hex + ".tmp")
+        try:
+            with temp.open("x", encoding="utf-8") as stream:
+                json.dump(receipt, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp, marker)
+        finally:
+            temp.unlink(missing_ok=True)
     finally:
-        temp.unlink(missing_ok=True)
+        lock.unlock()
     return candidate
