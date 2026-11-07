@@ -1,5 +1,13 @@
-# REC-02 staging acceptance
+# REC-02 — Git MAIN First, Single Active Database, Temporary Backup
 
-Scope: independently verify MAIN OID, encrypted database, signature/identity and manifest without modifying local workspace or Recovery.
+## Chốt thiết kế
+- Chỉ có một active runtime: `runtime/Database/center.db`.
+- Git MAIN đã fetch và được quan sát độc lập mới được phép replace.
+- Trước replace phải sao lưu có manifest SHA-256 và kiểm tra lại: database, WAL/SHM, repository, attachments, metadata và Recovery log/outbox/cases.
+- Backup chỉ phục vụ review thủ công; không tự merge, publish hoặc restore vào MAIN.
+- Nếu mất nguồn hoặc backup lỗi, startup từ chối replace; không xóa dữ liệu local.
+- Không dọn snapshot/recovery trước khi bảo toàn.
+- Repo/Git cũ chỉ được reset sau khi bản sao đạt kiểm tra.
 
-This staged candidate is NOT an activated runtime. Do not merge as final startup behavior until crash-safe workspace activation and old local evidence archival are implemented and Windows UAT passes.
+## Gate
+Windows CI: test_rec02_single_main_backup.py; full bootstrap/Git regression; no-DB + business-material; corrupt journal; symlink; rollback DB/WAL; PRECLONE; Git OID race. Cần Windows EXE UAT trước merge.
