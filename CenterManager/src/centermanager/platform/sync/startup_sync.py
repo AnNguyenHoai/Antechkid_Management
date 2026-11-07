@@ -195,6 +195,7 @@ class StartupSynchronization:
             # This one-time capability is consumed by app.py only after
             # Alembic and identity checks, before login/WRITE.
             self._provider._verified_manual_main_oid = self._accepted_startup_main_oid
+            self._provider._verified_manual_backup_path = str(self._manual_review_backup.resolve())
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
             # files were copied and verified before Git MAIN replacement.
