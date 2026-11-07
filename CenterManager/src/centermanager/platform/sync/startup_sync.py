@@ -480,11 +480,20 @@ class StartupSynchronization:
                 return False
             # Do not let provider.reset_to_remote() fetch a different generation
             # after a recovery capture has already pinned the accepted commit.
-            self._provider._run_git_command(["reset", "--hard", accepted])
-            if getattr(self, "_startup_reconciled_unaccepted_local", False):
-                # Untracked legacy artifacts cannot be left in the accepted
-                # repository. Existing reconciliation has preserved their
-                # exact bytes (including repo worktree) in a verified capture.
+            if getattr(self, "_manual_review_backup", None) is not None:
+                # The generic Git mutation gate correctly refuses to reset
+                # a dirty journal. The narrowly scoped provider command can
+                # operate only on the exact verified MAIN after the ORIGINAL
+                # DB/WAL/Git/Recovery has been archived with checked hashes.
+                self._provider.reset_verified_main_after_manual_backup(
+                    accepted, self._manual_review_backup,
+                )
+            else:
+                self._provider._run_git_command(["reset", "--hard", accepted])
+            if (getattr(self, "_startup_reconciled_unaccepted_local", False)
+                    and getattr(self, "_manual_review_backup", None) is None):
+                # The dedicated verified-backup path cleaned untracked files
+                # inside its narrow provider command already.
                 self._provider._run_git_command(["clean", "-fd"])
             actual = self._provider.get_local_main_commit()
             if actual != accepted:
