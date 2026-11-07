@@ -94,6 +94,8 @@ class StartupSynchronization:
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         _journal = WriteRecoveryJournal()
         fresh_install = self._fresh_install_eligible(_journal)
+        self._initial_main_receipt_allowed = fresh_install
+        self._manual_review_backup = None
         # A previous process may have died between individually atomic
         # filesystem renames.  Neither Git reset nor journal reconciliation
         # may run until an incomplete installation is explicitly recovered.
@@ -188,11 +190,13 @@ class StartupSynchronization:
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
-        if fresh_install:
+        if self._initial_main_receipt_allowed:
+            # No previous active journal was silently promoted. Any legacy
+            # files were copied and verified before Git MAIN replacement.
             # This in-process proof is consumed immediately after ensure_schema.
             # Never persist a marker that could outlive a crash or EXE update.
             self._provider._fresh_install_main_oid = self._accepted_startup_main_oid
-            logger.info("Fresh install: deferring CLEAN receipt until schema verification")
+            logger.info("Verified MAIN bootstrap: deferring new CLEAN receipt until schema verification")
         logger.info("Startup synchronization completed successfully")
         return True
 
@@ -353,6 +357,29 @@ class StartupSynchronization:
                 )
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
+            # A legacy workspace WITHOUT a journal can still have business
+            # artifacts (attachments, DB, WAL). This is not a fresh install,
+            # but it may become a clean MAIN generation after we have
+            # durably archived EVERY local file, including Recovery evidence.
+            # It must not be legitimized before the authoritative install and
+            # schema verification succeed.
+            current = journal.inspect()
+            if current is None and not self._initial_main_receipt_allowed:
+                from centermanager.platform.sync.manual_review_backup import (
+                    preserve_workspace_for_manual_review, verify_manual_review_backup,
+                )
+                archive = preserve_workspace_for_manual_review(
+                    journal, reason="legacy-no-receipt-before-main-reset",
+                )
+                verify_manual_review_backup(archive)
+                self._manual_review_backup = archive
+                self._initial_main_receipt_allowed = True
+                self._startup_reconciled_unaccepted_local = True
+                logger.warning(
+                    "Legacy local artifacts archived for manual Recovery review before MAIN install"
+                )
+                # Archive is evidence only; no old local state is published.
+                return True
             from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
             try:
                 journal.assert_replaceable(legacy=True)
