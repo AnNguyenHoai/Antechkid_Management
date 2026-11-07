@@ -1,5 +1,10 @@
-# REC-04 notice acceptance
+# REC-04 — Recovery Review Must Not Block Operations
 
-Scope: never block startup with modal reminder; show pending counts or metadata warning in menu/status bar. Manual operator review remains explicit.
+- Startup displays a nonmodal status/menu indicator.
+- Shows signed pending Recovery Cases plus checked and unchecked manual-review archive folders.
+- User chooses to open details; no forced modal, no automatic acknowledgement or deletion.
+- The archive is NOT a second active workspace and is never used as a source for WRITE/publish.
+- Raw journal/outbox plus WAL/DB remain available in the protected temporary archive for manual comparison with MAIN.
 
-The notice is informational only: it never acknowledges, merges or publishes recovery changes, nor does it relax existing startup/WRITE guards.
+## Gate
+test_rec04_nonmodal_notice.py and physical Windows UAT of pending/invalid/empty/corrupt Recovery archives and manually opening the backup folder.
