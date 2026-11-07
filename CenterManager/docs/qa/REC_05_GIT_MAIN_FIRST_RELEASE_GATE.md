@@ -1,45 +1,33 @@
-# REC-05 — Git MAIN First / Non-blocking Recovery acceptance gate
+# REC-05 — Git MAIN First + Single Active DB + Recovery Log + Temporary Backup
 
-## Decision
+## Nghiệm thu kiến trúc
 
-Git MAIN is authoritative; local recovery is retained for manual review only. A historic incident must not block READ/WRITE on a **new, independently accepted** MAIN workspace. It must also never be silently published, merged, deleted or treated as CLEAN by changing JSON status.
+1. Chỉ **một active database**: `runtime/Database/center.db`. Không sử dụng router hoặc `runtime-main-*`.
+2. Quyền dữ liệu lấy từ Git MAIN có commit/OID quan sát độc lập. Giữ nguyên remote WRITE lease và publication CAS.
+3. Trước khi cài MAIN, sao lưu có SHA-256 và xác minh **toàn bộ dữ liệu cũ**: DB/WAL/SHM, repo, attachments, metadata, Recovery journal/outbox/cases, logs liên quan.
+4. Sau backup được xác minh, cho phép Git reset/cài MAIN nguyên tử. Archive không bao giờ được merge hoặc publish.
+5. Sau SQLCipher, Alembic và Git verification, cấp receipt CLEAN/VERIFIED **mới** cho DB MAIN, không biến trạng thái Recovery cũ thành CLEAN; raw journal cũ vẫn nằm trong archive.
+6. Recovery UI chỉ nhắc không modal, người dùng tự đối chiếu và nhập lại thay đổi chưa publish.
+7. Với lỗi mạng: Offline READ theo cơ chế an toàn hiện tại; WRITE vẫn bị khóa.
+8. Nếu không thể xác minh backup hoặc MAIN, giữ nguyên local và không cấp WRITE.
 
-## Implemented in this PR stack
+## Test tự động
 
-- REC-01: null/missing legacy capture journal compatibility; invalid/mismatched evidence still refused.
-- REC-02: stage independently verified exact MAIN artifacts and prepare a separate candidate runtime containing only the current user's protected workstation configuration, never copying old DB/WAL/Recovery.
-- REC-03: on recovery-specific bootstrap failure, attempt an independent Git MAIN bootstrap into the candidate runtime; after normal SQLCipher/schema and recovery receipt acceptance, atomically route future launches to this new active runtime. The old workspace and journal remain at their original paths. Existing WRITE lease, fencing and publication CAS remain authoritative.
-- REC-04: nonmodal reminder menu and status bar; retained historic case registries can be viewed at original untouched roots; manual acknowledgement remains explicit.
-- REC-05: deterministic fault injection for remote MAIN advance during staging, IO errors, identity validation rejection, and tampered receipts.
+- `test_rec02_single_main_backup.py`: lưu toàn bộ DB/WAL/log, lỗi hash, old journal hỏng, thiếu journal nhưng có business material.
+- `test_rec03_single_main_acceptance.py`: receipt mới sau verified backup, từ chối remote OID lệch, archive bị sửa, kiểm tra đăng nhập chỉ sau receipt.
+- `test_rec04_nonmodal_notice.py`: không modal, không auto-acknowledge, chỉ báo manual backups.
+- `test_rec05_single_main_faults.py`: crash khi đang copy, disk-full khi seal receipt, remote MAIN thay đổi, không có multiple active runtime.
+- `test_rv05_recovery_to_new_write.py`: Git bare remote + SQLCipher integration, local edit cũ không lên MAIN, Start Editing/Finish Editing phiên mới hoạt động.
+- Toàn bộ Windows pytest shards trên HEAD mới nhất từng PR #610–#614 phải PASS.
 
-## HARD RELEASE BLOCKERS — not yet implemented / verified
+## Windows EXE release gate — chưa xác nhận bằng CI đơn thuần
 
-- [ ] Complete fault-injection of new-runtime boot + atomic active-pointer transition under kill/process crash, Windows file-lock contention, schema migration and EXE upgrade; code paths exist but have not undergone physical UAT
-- [ ] Formal security review of the active-runtime pointer and retained-root registry, including cross-process CAS, Windows ACLs, symlinks, DPAPI key portability and release-folder upgrades
-- [ ] Confirm fresh active WRITE receipt is created from accepted migrated MAIN bytes and no historic OPEN/PUBLISHING evidence is reclassified as CLEAN across real Windows EXE restarts
-- [ ] Validate two-machine WRITE lease/fencing/CAS and ensure no older client publishes an archived runtime following pointer migration
-- [ ] Windows UAT of archived Recovery Case review UI (including malformed/legacy case), with no acknowledgement or auto-publish
-- [ ] Multi-process and legacy executable publisher tests; no stale client can publish previous local state
-- [ ] Two-machine Windows EXE UAT and fresh-install/upgrade/rollback compatibility
-- [ ] Latest Windows CI green on all five PR heads after the final commits
+- [ ] Máy nhân viên có `db_present=False, business_material=True` boot MAIN rồi Start Editing/Finish Editing.
+- [ ] Máy có journal `OPEN`, `PUBLISHING`, `RECONCILED`, corrupt JSON và raw WAL vẫn mở READ, xin WRITE sau backup, không mất data cũ.
+- [ ] Hai máy cùng đọc MAIN; chỉ một máy giữ WRITE; stale client không publish được.
+- [ ] Kill EXE khi sao lưu trước khi copy xong, khi cài DB, sau khi cài nhưng chưa seal receipt; restart an toàn.
+- [ ] Disk full, antivirus file lock, Git auth revoked, OID race, sai khóa SQLCipher và identity: fail closed mà không ghi đè dữ liệu chưa backup.
+- [ ] Xem lại backup/log và nhập lại một khoản Income/Expense/Student, sau đó Finish Editing; không có sửa đổi local cũ tự động xuất hiện trên MAIN.
+- [ ] Review các file DPAPI/key, quyền truy cập thư mục manual-review và chính sách xóa backup sau khi người dùng xác nhận đã kiểm tra.
 
-Do not merge/ship any REC-02/03/04/05 implementation before fresh MAIN startup, old workspace retention, replay/routing and two-machine Windows UAT are signed off. A passing test of staged bytes alone does not authorize WRITE.
-
-## Windows UAT matrix
-
-1. Authoritative MAIN stable and old local journal CLEAN → open normally, READ, acquire lease, edit and publish, observe from second machine.
-2. Old local journal OPEN, PUBLISHING, POST_PUBLISH_PENDING, RECONCILED, missing/corrupt JSON or absent signed Case → archive/isolate the original without mutation; open a NEW MAIN workspace; show review indicator; do not replay old local into MAIN.
-3. Simulate power loss after archive reservation; after one copy; after durable journal/capture; after staging DB; after commit-OID proof; after active switch. Every restart should either finish cleanly or safely fall back to prior untouched evidence.
-4. Loss of Git, revoked token, missing Git binary → verified cached READ only; WRITE denied until MAIN and lease verified.
-5. Missing/wrong DPAPI key, SQLCipher authentication failure, identity generation downgrade → do not accept unverified DB or create a new key for old ciphertext.
-6. Remote MAIN advances after fetch or while staging → abandon stale stage; retry without WRITE.
-7. Runtime DB contains uncheckpointed WAL or raw DBAPI handle open → never truncate/reuse it while opening a new main-only workspace.
-8. Recovery Case is missing/corrupt on the old workspace → show diagnostic and allow manual investigation after NEW workspace activation; no case is silently stamped valid.
-9. Multiple Windows users / copied portable EXE → credentials remain user-bound; new main workspace uses correctly provisioned secret; no accidental cross-account publishing.
-10. File in use, disk full, antivirus quarantine, insufficient permissions → no mutation of old database, attachments and recovery evidence; no partially accepted new workspace.
-11. Recovery notification skipped/reopened/acknowledged → only explicit operator review changes signed case state.
-12. Compare hashes and Git OID before/after every failure injection; assert no unintended Git push, DB mutation, or change-log replay.
-
-### CI success is not sufficient
-
-CI unit tests validate isolated components and established contracts. A full successful EXE + two-machine acceptance is mandatory before any production startup/WRITE activation.
+Không merge hoặc phát hành REC-02/03/04/05 chỉ dựa trên CI PASS khi các test Windows EXE trọng yếu chưa hoàn thành.
