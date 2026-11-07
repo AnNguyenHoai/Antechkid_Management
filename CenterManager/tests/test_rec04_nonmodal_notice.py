@@ -41,7 +41,7 @@ def test_invalid_recovery_notice_remains_non_modal(monkeypatch):
     fake, actions, notices = _notice_fake()
     MainWindow._show_pending_recovery_cases(fake)
     assert ("visible", True) in actions
-    assert "chưa xác minh" in notices[0][0]
+    assert "Không xác minh" in notices[0][0]
 
 
 def test_no_recovery_cases_hide_non_modal_notice(monkeypatch):
