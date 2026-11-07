@@ -79,10 +79,21 @@ def stage_exact_main(provider, repository_root: Path, stage_root: Path, *,
         _copy_durable(source_manifest, destination / "manifest.json")
 
         if validate is None:
-            from centermanager.database.startup_security import inspect_authoritative_database_for_startup
-            result = inspect_authoritative_database_for_startup(db_folder / "center.db")
-            if not result.ready:
-                raise MainStageError("Staged MAIN failed SQLCipher/identity validation.")
+            # Staging is non-mutating. The startup_security preflight calls
+            # validate_and_pin_identity(), which would advance the production
+            # identity floor before activation; never call it here.
+            from centermanager.database.encryption import (
+                DatabaseKeyStore, database_encryption_required,
+            )
+            from centermanager.database.artifact_security import validate_database_artifact
+            from centermanager.database.artifact_identity import validate_identity
+            encrypted = database_encryption_required()
+            key = DatabaseKeyStore().load() if encrypted else None
+            validate_database_artifact(
+                db_folder / "center.db", encryption_required=encrypted, key=key,
+            )
+            if encrypted:
+                validate_identity(db_folder / "center.db", key)
         else:
             validate(db_folder / "center.db")
 
