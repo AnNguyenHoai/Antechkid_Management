@@ -420,3 +420,67 @@ def test_interrupted_case_journal_pin_is_recovered_without_duplicate(tmp_path, m
     assert recovered["case_id"] == saved[0].stem
     assert j.inspect()["rv03_case_id"] == recovered["case_id"]
     assert len(list((tmp_path / "cases").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("legacy_journal", [None, {}])
+def test_authenticated_legacy_capture_with_null_or_missing_journal_can_be_registered(
+    tmp_path, monkeypatch, legacy_journal
+):
+    j = FakeJournal(tmp_path)
+    original_verify = j.verify_capture
+
+    def legacy_capture(ref):
+        manifest = original_verify(ref)
+        if legacy_journal is None:
+            manifest["journal"] = None
+        else:
+            manifest.pop("journal")
+        return manifest
+
+    j.verify_capture = legacy_capture
+    cases = registry(j, monkeypatch)
+    case = cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert case["status"] == "PENDING_REVIEW"
+    assert case["publication"] == "UNVERIFIED"
+    assert case["capture_db_sha256"] == DB_HASH
+    assert cases.register_from_reconciled(observed_main_oid=MAIN) == case
+
+
+@pytest.mark.parametrize("invalid_journal", ["bad", [], 0, True])
+def test_malformed_capture_journal_is_rejected_without_new_case(
+    tmp_path, monkeypatch, invalid_journal
+):
+    j = FakeJournal(tmp_path)
+    original_verify = j.verify_capture
+
+    def malformed(ref):
+        manifest = original_verify(ref)
+        manifest["journal"] = invalid_journal
+        return manifest
+
+    j.verify_capture = malformed
+    cases = registry(j, monkeypatch)
+    with pytest.raises(RecoveryRequired, match="metadata is malformed"):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert not list((tmp_path / "cases").glob("*.json"))
+
+
+@pytest.mark.parametrize("field,mismatch", [
+    ("repository_id", "f" * 64), ("base_main_oid", "f" * 40),
+])
+def test_conflicting_capture_provenance_stays_blocking(
+    tmp_path, monkeypatch, field, mismatch
+):
+    j = FakeJournal(tmp_path)
+    original_verify = j.verify_capture
+
+    def conflicting(ref):
+        manifest = original_verify(ref)
+        manifest["journal"][field] = mismatch
+        return manifest
+
+    j.verify_capture = conflicting
+    cases = registry(j, monkeypatch)
+    with pytest.raises(RecoveryRequired):
+        cases.register_from_reconciled(observed_main_oid=MAIN)
+    assert not list((tmp_path / "cases").glob("*.json"))
