@@ -29,6 +29,9 @@ def legacy(tmp_path):
     (attachments / "receipt.bin").write_bytes(b"personal receipt")
     metadata = runtime / "metadata"
     metadata.mkdir()
+    config = runtime / "Config"
+    config.mkdir()
+    (config / "database_key.dpapi").write_bytes(b"old Windows DPAPI key")
     archive_root = tmp_path / "runtime.write-recovery"
     archive_root.mkdir()
     (archive_root / "journal.json").write_text('{"status":"OPEN","local":"old"}')
@@ -47,6 +50,7 @@ def test_manual_archive_keeps_db_wal_receipt_and_original_recovery_log(legacy):
     assert (archive / "database" / "center.db").read_bytes() == b"unpublished local"
     assert (archive / "database" / "center.db-wal").read_bytes() == b"unpublished WAL"
     assert (archive / "attachments" / "receipt.bin").read_bytes() == b"personal receipt"
+    assert (archive / "config" / "database_key.dpapi").read_bytes() == b"old Windows DPAPI key"
     assert (archive / "recovery" / "journal.json").read_bytes() == b'{"status":"OPEN","local":"old"}'
     assert legacy.database.read_bytes() == b"unpublished local"
     assert legacy.journal.read_text() == '{"status":"OPEN","local":"old"}'
@@ -129,3 +133,34 @@ def test_archive_rejects_symlinked_workspace_without_overwriting_original(legacy
     with pytest.raises(ManualBackupError):
         preserve_workspace_for_manual_review(legacy, reason="symlink")
     assert legacy.database.read_bytes() == b"unpublished local"
+
+
+def test_no_runtime_db_but_legacy_business_material_is_not_discarded(
+    legacy, monkeypatch,
+):
+    from centermanager.platform import write_recovery
+    from centermanager.database import mutation_authority
+    legacy.database.unlink()
+    legacy.database.with_name("center.db-wal").unlink()
+    legacy.journal.unlink()
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: legacy)
+    monkeypatch.setattr(
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(
+            lock=__import__("threading").RLock(), closed=True,
+        ),
+    )
+    oid = "a" * 40
+    fake = SimpleNamespace(
+        _provider=SimpleNamespace(
+            get_fetched_remote_main_commit=lambda: oid,
+            observe_remote_main_commit=lambda: oid,
+        ),
+        _initial_main_receipt_allowed=False,
+        _manual_review_backup=None,
+    )
+    assert StartupSynchronization._prepare_authoritative_startup_replacement(fake)
+    assert fake._initial_main_receipt_allowed is True
+    assert (fake._manual_review_backup / "attachments" / "receipt.bin").read_bytes() == b"personal receipt"
+    assert (fake._manual_review_backup / "config" / "database_key.dpapi").read_bytes() == b"old Windows DPAPI key"
+    verify_manual_review_backup(fake._manual_review_backup)
