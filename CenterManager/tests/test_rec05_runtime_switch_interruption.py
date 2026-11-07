@@ -72,7 +72,10 @@ def test_incomplete_legacy_key_copy_refuses_symlinked_secret(tmp_path):
     _root(old)
     secret = old / "Config" / "database_key.dpapi"
     secret.unlink()
-    secret.symlink_to(old / "Database" / "center.db")
+    try:
+        secret.symlink_to(old / "Database" / "center.db")
+    except OSError:
+        pytest.skip("Windows runner does not permit test symlink creation")
     with pytest.raises(WorkspaceIsolationError, match="configuration"):
         prepare_isolated_runtime(SimpleNamespace(project_root=tmp_path, runtime_root=old))
     assert (old / "Database" / "center.db").read_bytes() == b"unpublished-LOCAL"
