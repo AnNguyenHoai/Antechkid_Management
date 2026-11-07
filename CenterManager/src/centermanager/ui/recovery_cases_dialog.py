@@ -13,10 +13,12 @@ from PySide6.QtWidgets import (
 
 from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
 from centermanager.platform.write_recovery import WriteRecoveryJournal
+from centermanager.platform.recovery_change_classification import classify_case
 
 
 def _summary(case):
     """Only authenticated, non-sensitive metadata. Never read SQLCipher rows."""
+    assessment = classify_case(case)
     return {
         "case_id": case["case_id"],
         "status": case["status"],
@@ -24,12 +26,15 @@ def _summary(case):
         "reviewed_at_utc": case.get("reviewed_at_utc"),
         "publication": case.get("publication", "UNVERIFIED"),
         "change_log_coverage": case.get("change_log_coverage", "UNKNOWN"),
+        "recovery_classification": assessment.classification,
+        "recovery_reason_code": assessment.reason_code,
+        "business_mutation_count": assessment.business_mutation_count,
         "base_main_oid": case.get("base_main_oid"),
         "observed_main_oid": case.get("observed_main_oid"),
         "note": (
-            "Không thể kết luận thay đổi nào đã hoặc chưa được ghi lên MAIN. "
-            "Cần đối chiếu thủ công với dữ liệu hiện tại; đặc biệt tránh nhập trùng "
-            "các khoản thu, chi và công nợ."
+            assessment.message + " "
+            "Cần đối chiếu dữ liệu hiện tại trước khi nhập lại, "
+            "đặc biệt các khoản thu, chi và công nợ."
         ),
     }
 
@@ -106,6 +111,8 @@ class RecoveryCasesDialog(QDialog):
             f"Mã case: {case['case_id'][:16]}…\n"
             f"Trạng thái công bố: {case.get('publication', 'UNVERIFIED')}\n"
             f"Mức độ đầy đủ Change Log: {case.get('change_log_coverage', 'UNKNOWN')}\n"
+            f"Phân loại: {classify_case(case).classification}\n"
+            f"Lý do: {classify_case(case).message}\n"
             "Danh sách thao tác có thể không đầy đủ. "
             "Không suy đoán các khoản đã mất; liên hệ hỗ trợ kỹ thuật để kiểm tra backup."
         )
