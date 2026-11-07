@@ -80,8 +80,11 @@ class BootstrapManager:
             # present at startup is an orphan. The single-instance lock is
             # already held. Retention is skipped while recovery may be needed.
             from centermanager.platform.snapshot_retention import prune_orphaned_snapshots
-            if not legacy_metadata_unreadable:
-                prune_orphaned_snapshots(getattr(paths, "snapshots_dir", None), journal_document)
+            # No local cleanup before Git MAIN and the manual archive are
+            # verified. Even an apparently CLEAN legacy journal may have
+            # orphaned snapshots/attachments that must remain inspectable.
+            # Deferred retention can run after the new MAIN receipt is sealed.
+            logger.info("[BOOTSTRAP] Snapshot cleanup deferred until local recovery evidence is preserved")
 
             repo_state = self._repo_manager.detect()
             logger.info(f"[BOOTSTRAP] Repository state: {repo_state.value}")
