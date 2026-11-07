@@ -64,3 +64,28 @@ def test_startup_recovery_reminder_does_not_invoke_modal_exec():
     assert ".exec(" not in method
     assert "mark_reviewed(" not in method
     assert "QMessageBox.warning(" not in method
+
+
+def test_retained_open_journal_without_case_shows_unresolved_legacy_notice(monkeypatch):
+    from centermanager.platform import recovery_case_registry, write_recovery
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
+    monkeypatch.setattr(recovery_case_registry, "RecoveryCaseRegistry", lambda _: SimpleNamespace(pending_cases=lambda: []))
+    fake, actions, notices = _notice_fake()
+    fake._retained_recovery_registries = lambda: [
+        SimpleNamespace(
+            pending_cases=lambda: [],
+            journal=SimpleNamespace(inspect=lambda: {"status": "OPEN"}),
+        )
+    ]
+    MainWindow._show_pending_recovery_cases(fake)
+    assert ("visible", True) in actions
+    assert any("Recovery cũ" in text for kind, text in actions if kind == "text")
+    assert notices
+
+
+def test_recovery_history_can_enumerate_old_untouched_registries():
+    root = Path(__file__).resolve().parents[1] / "src" / "centermanager"
+    source = (root / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert "def _retained_recovery_registries(self)" in source
+    assert "registries.extend(self._retained_recovery_registries())" in source
+    assert "RecoveryCasesDialog(self, registry=registry).exec()" in source
