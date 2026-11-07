@@ -196,6 +196,33 @@ class BootstrapManager:
                     )
 
         if git_config is None or database_key_needs_provisioning:
+            # Provisioning can replace machine-bound Git/SQLCipher secrets.
+            # If there is an old DB/WAL, preserve its original configuration
+            # and ciphertext BEFORE that dialog can change credentials.
+            from centermanager.platform.write_recovery import WriteRecoveryJournal
+            from centermanager.platform.sync.manual_review_backup import (
+                preserve_workspace_for_manual_review, verify_manual_review_backup,
+            )
+            local_db = paths.database_dir / "center.db"
+            old_artifacts = (
+                local_db.exists() or local_db.is_symlink()
+                or any(local_db.with_name(local_db.name + suffix).exists()
+                       for suffix in ("-wal", "-shm", "-journal"))
+            )
+            if old_artifacts:
+                try:
+                    preprovision_archive = preserve_workspace_for_manual_review(
+                        WriteRecoveryJournal(paths), reason="before-workstation-provisioning",
+                    )
+                    verify_manual_review_backup(preprovision_archive)
+                    logger.warning(
+                        "[BOOTSTRAP] Legacy DB/WAL and machine-bound config archived before provisioning"
+                    )
+                except Exception:
+                    logger.exception(
+                        "[BOOTSTRAP] Cannot safely preserve legacy workstation before provisioning"
+                    )
+                    return False
             credential_status = git_config_service.credential_status()
             if git_config is None:
                 if credential_status in (
