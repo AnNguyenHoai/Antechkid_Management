@@ -175,9 +175,11 @@ def test_dirty_journal_blocks_destructive_boundary(workspace, path):
         from centermanager.platform.sync.startup_sync import StartupSynchronization
         startup = StartupSynchronization(w.provider)
         assert startup.run()  # New approved startup policy: verified Git MAIN wins.
-        receipt = w.journal.inspect()
-        assert receipt["status"] == "CLEAN"
-        w.journal.verify_capture(receipt["last_capture"])
+        from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
+        archive = startup._manual_review_backup
+        verify_manual_review_backup(archive)
+        assert (archive / "recovery" / "journal.json").is_file()
+        assert values(archive / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
     elif path == 'runtime':
         from centermanager.platform.sync.write_handoff_runtime_sync_service import RuntimeSyncService
         assert not RuntimeSyncService._apply_runtime_update(SimpleNamespace())
@@ -611,21 +613,18 @@ def test_rv03_remote_a_plus_ten_preserves_unaccepted_sqlcipher_then_boots_main(w
     # Only BASE is installed from authoritative MAIN. The unaccepted work is
     # still recoverable from the signed WAL-consistent protected capture.
     assert values(w.journal.database) == ["BASE"]
-    cases = RecoveryCaseRegistry(w.journal).list_cases()
-    assert len(cases) == 1
-    case = cases[0]
-    assert case["status"] == "PENDING_REVIEW"
-    assert case["publication"] == "UNVERIFIED"
-    assert case["base_main_oid"] == w.base
-    assert case["observed_main_oid"] == latest_main
-    assert case["change_log_coverage"] == "UNKNOWN"
-    snapshot = Path(case["capture_ref"])
-    assert w.journal.verify_capture(snapshot)["files"]["center.db"] == case["capture_db_sha256"]
-    assert values(snapshot / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
+    archived = startup._manual_review_backup
+    verify_manual_review_backup(archived)
+    assert values(archived / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    assert (archived / "recovery" / "journal.json").is_file()
 
-    # The second startup must not generate an additional case or erase A.
+    # app.py seals a NEW receipt only after schema verification, before login.
+    w.journal.record_verified_manual_reset(
+        provider=w.provider, accepted_main=latest_main, archive=archived,
+    )
+    assert w.journal.inspect()["status"] == "CLEAN"
     assert StartupSynchronization(w.provider).run()
-    again = RecoveryCaseRegistry(w.journal).list_cases()
-    assert len(again) == 1 and again[0] == case
-    assert values(snapshot / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    verify_manual_review_backup(archived)
+    assert values(archived / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
     assert values(w.journal.database) == ["BASE"]
