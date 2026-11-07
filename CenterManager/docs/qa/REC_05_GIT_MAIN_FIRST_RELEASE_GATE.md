@@ -7,23 +7,23 @@ Git MAIN is authoritative; local recovery is retained for manual review only. A 
 ## Implemented in this PR stack
 
 - REC-01: null/missing legacy capture journal compatibility; invalid/mismatched evidence still refused.
-- REC-02 foundation: stage a freshly verified exact MAIN database/identity/manifest separately; never mutate a user DB/WAL/recovery during stage. Not yet connected to production activation.
-- REC-03 foundation: proof of independently accepted MAIN generation, without using historic case status to prove a new active generation. Does not itself grant WRITE.
-- REC-04: nonmodal reminder menu and status bar; manual case review retains explicit acknowledgement.
+- REC-02: stage independently verified exact MAIN artifacts and prepare a separate candidate runtime containing only the current user's protected workstation configuration, never copying old DB/WAL/Recovery.
+- REC-03: on recovery-specific bootstrap failure, attempt an independent Git MAIN bootstrap into the candidate runtime; after normal SQLCipher/schema and recovery receipt acceptance, atomically route future launches to this new active runtime. The old workspace and journal remain at their original paths. Existing WRITE lease, fencing and publication CAS remain authoritative.
+- REC-04: nonmodal reminder menu and status bar; retained historic case registries can be viewed at original untouched roots; manual acknowledgement remains explicit.
 - REC-05: deterministic fault injection for remote MAIN advance during staging, IO errors, identity validation rejection, and tampered receipts.
 
 ## HARD RELEASE BLOCKERS — not yet implemented / verified
 
-- [ ] Crash-safe activation of staged MAIN into a new active workspace, without overwriting any legacy local database, WAL, attachments, journal, or original recovery capture; migration/repository identity and windows path scoping must be addressed
-- [ ] Signed durable record of archived incident/reference that survives process crashes while workspace routing changes
-- [ ] Fresh active WRITE receipt created from the actual accepted and migrated MAIN bytes; **no** reclassification of historic OPEN/PUBLISHING evidence as CLEAN
-- [ ] Only current active workspace's accepted-main provenance participates in Start Editing; remote lease, fencing and publish CAS still enforce WRITE
-- [ ] Recovery UI can list archived old incidents even if stored outside the active workspace, without granting WRITE or silently acknowledging any record
+- [ ] Complete fault-injection of new-runtime boot + atomic active-pointer transition under kill/process crash, Windows file-lock contention, schema migration and EXE upgrade; code paths exist but have not undergone physical UAT
+- [ ] Formal security review of the active-runtime pointer and retained-root registry, including cross-process CAS, Windows ACLs, symlinks, DPAPI key portability and release-folder upgrades
+- [ ] Confirm fresh active WRITE receipt is created from accepted migrated MAIN bytes and no historic OPEN/PUBLISHING evidence is reclassified as CLEAN across real Windows EXE restarts
+- [ ] Validate two-machine WRITE lease/fencing/CAS and ensure no older client publishes an archived runtime following pointer migration
+- [ ] Windows UAT of archived Recovery Case review UI (including malformed/legacy case), with no acknowledgement or auto-publish
 - [ ] Multi-process and legacy executable publisher tests; no stale client can publish previous local state
 - [ ] Two-machine Windows EXE UAT and fresh-install/upgrade/rollback compatibility
 - [ ] Latest Windows CI green on all five PR heads after the final commits
 
-Never mark REC-02 and REC-03 complete or merge their foundations as finished nonblocking startup. Having a stage/receipt alone does not mean the active runtime has switched.
+Do not merge/ship any REC-02/03/04/05 implementation before fresh MAIN startup, old workspace retention, replay/routing and two-machine Windows UAT are signed off. A passing test of staged bytes alone does not authorize WRITE.
 
 ## Windows UAT matrix
 
