@@ -33,40 +33,28 @@ def test_legacy_drift_requires_remote_proof_before_reconciliation(monkeypatch):
     startup._provider = remote
     assert startup._prepare_authoritative_startup_replacement() is False
     assert not any(event[0] == "reconcile" for event in events)
-    assert "cannot be independently verified" in startup.recovery_error
+    assert "Exact remote Git MAIN cannot be verified" in startup.recovery_error
 
 
-def test_legacy_drift_preserves_before_allowing_replace(monkeypatch):
+def test_legacy_drift_preserves_before_allowing_replace(monkeypatch, tmp_path):
     events = []
     class Journal:
-        def assert_replaceable(self, legacy=False):
-            events.append(("check", legacy))
-            if legacy:
-                raise RecoveryRequired("legacy local drift")
+        journal = tmp_path / "runtime.write-recovery" / "journal.json"
+        root = journal.parent
         def inspect(self):
             return None
-        def reconcile(self, **kwargs):
-            assert kwargs["base_oid"] == "b" * 40
-            assert kwargs["observe_main"]() == "a" * 40
-            events.append(("preserve-and-reconcile", kwargs["accepted_main"]))
-    monkeypatch.setattr("centermanager.platform.write_recovery.WriteRecoveryJournal", Journal)
-    # This source-level legacy policy test uses a minimal synthetic journal,
-    # not a verified SQLCipher capture. Model the RV-03 case boundary with a
-    # contract-checked test double; full capture/HMAC behavior is verified by
-    # test_rv03_recovery_case_registry.py. Never bypass the gate in production.
-    class VerifiedCaseRegistry:
-        def __init__(self, journal):
-            assert isinstance(journal, Journal)
-        def register_from_reconciled(self, *, observed_main_oid):
-            assert events == [
-                ("check", True),
-                ("preserve-and-reconcile", "a" * 40),
-            ]
-            assert observed_main_oid == "a" * 40
-            events.append(("registered-verified-case", observed_main_oid))
     monkeypatch.setattr(
-        "centermanager.platform.recovery_case_registry.RecoveryCaseRegistry",
-        VerifiedCaseRegistry,
+        "centermanager.platform.write_recovery.WriteRecoveryJournal", Journal,
+    )
+    from centermanager.platform.sync import manual_review_backup
+    archive = tmp_path / "runtime.write-recovery" / "manual-review" / "test"
+    monkeypatch.setattr(
+        manual_review_backup, "preserve_workspace_for_manual_review",
+        lambda journal, *, reason: events.append(("preserve", reason)) or archive,
+    )
+    monkeypatch.setattr(
+        manual_review_backup, "verify_manual_review_backup",
+        lambda target: events.append(("verify", target)),
     )
     remote = SimpleNamespace(
         get_fetched_remote_main_commit=lambda: "a" * 40,
@@ -75,13 +63,15 @@ def test_legacy_drift_preserves_before_allowing_replace(monkeypatch):
     )
     startup = StartupSynchronization.__new__(StartupSynchronization)
     startup._provider = remote
+    startup._initial_main_receipt_allowed = False
     assert startup._prepare_authoritative_startup_replacement() is True
     assert events == [
-        ("check", True),
-        ("preserve-and-reconcile", "a" * 40),
-        ("registered-verified-case", "a" * 40),
-        ("check", False),
+        ("preserve", "manual-review-before-authoritative-main"),
+        ("verify", archive),
     ]
+    assert startup._startup_reconciled_unaccepted_local is True
+    assert startup._initial_main_receipt_allowed is True
+    assert startup._manual_review_backup == archive
 
 
 def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, monkeypatch):
