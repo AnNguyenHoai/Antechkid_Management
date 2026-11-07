@@ -61,24 +61,27 @@ class BootstrapManager:
             from centermanager.platform.write_recovery import (
                 WriteRecoveryJournal, RecoveryRequired,
             )
+            legacy_metadata_unreadable = False
             try:
                 journal_document = WriteRecoveryJournal(paths).inspect()
             except RecoveryRequired as exc:
-                logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(
-                    None, "WRITE recovery required",
-                    str(exc) + "\nPreserve the runtime and recovery folder; "
-                    "do not remove either to bypass this guard.",
+                # Recovery is evidence for manual review, not active authority.
+                # StartupSynchronization must archive the raw journal and DB
+                # BEFORE any replacement. Do not prune any orphan snapshots.
+                logger.warning(
+                    "[BOOTSTRAP] Old Recovery metadata unreadable; preserve then use verified MAIN: %s",
+                    exc,
                 )
-                return False
+                journal_document = None
+                legacy_metadata_unreadable = True
 
             # TECH-008: pre-edit snapshots are only reachable through the
             # in-memory WriteTransaction that created them, so any snapshot
             # present at startup is an orphan. The single-instance lock is
             # already held. Retention is skipped while recovery may be needed.
             from centermanager.platform.snapshot_retention import prune_orphaned_snapshots
-            prune_orphaned_snapshots(getattr(paths, "snapshots_dir", None), journal_document)
+            if not legacy_metadata_unreadable:
+                prune_orphaned_snapshots(getattr(paths, "snapshots_dir", None), journal_document)
 
             repo_state = self._repo_manager.detect()
             logger.info(f"[BOOTSTRAP] Repository state: {repo_state.value}")
