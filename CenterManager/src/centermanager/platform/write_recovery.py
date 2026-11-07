@@ -257,6 +257,9 @@ class WriteRecoveryJournal:
                 wal_pending=wal_pending,
                 local_files_match=not (added or removed or changed),
                 git_clean=git_status_clean,
+                repository_match=repository_match,
+                head_accepted=(head == document.get('published_oid')),
+                head_upstream=(head == upstream),
             )
             # Explicitly diagnose file/provenance drift, never claim that
             # a business row changed merely from a byte-level fingerprint.
