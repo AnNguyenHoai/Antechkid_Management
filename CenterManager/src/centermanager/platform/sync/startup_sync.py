@@ -722,7 +722,25 @@ class StartupSynchronization:
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+        manual_archive = getattr(self, "_manual_review_backup", None)
+        if manual_archive is None:
+            require_replaceable()
+        else:
+            # A verified manual archive replaces ONLY the old startup
+            # replacement gate; it does not grant any WRITE authority.
+            from centermanager.platform.sync.manual_review_backup import (
+                verify_manual_review_backup,
+            )
+            from centermanager.database.mutation_authority import gate_for
+            verify_manual_review_backup(manual_archive)
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active editor prevents Git MAIN database replacement.")
+            if (self._provider.get_fetched_remote_main_commit() != self._accepted_startup_main_oid
+                    or self._provider.observe_remote_main_commit() != self._accepted_startup_main_oid
+                    or self._provider.get_local_main_commit() != self._accepted_startup_main_oid):
+                raise RuntimeError("Git MAIN generation changed before database materialization.")
         repo_db = self._repo_path / "database" / "center.db"
         if not repo_db.exists():
             logger.error(f"Repository database not found: {repo_db}")
