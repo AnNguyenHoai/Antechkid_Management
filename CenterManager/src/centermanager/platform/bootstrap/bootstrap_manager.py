@@ -67,12 +67,9 @@ class BootstrapManager:
             except RecoveryRequired as exc:
                 self._recovery_blocked = True
                 logger.error("[BOOTSTRAP] Corrupt WRITE recovery metadata: %s", exc)
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(
-                    None, "WRITE recovery required",
-                    str(exc) + "\nPreserve the runtime and recovery folder; "
-                    "do not remove either to bypass this guard.",
-                )
+                # Do not show a modal before the app can attempt an isolated,
+                # independently verified MAIN runtime. The original workspace
+                # and its journal remain untouched for manual investigation.
                 return False
 
             # TECH-008: pre-edit snapshots are only reachable through the
