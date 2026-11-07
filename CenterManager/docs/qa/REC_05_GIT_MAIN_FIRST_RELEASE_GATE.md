@@ -31,3 +31,17 @@
 - [ ] Review các file DPAPI/key, quyền truy cập thư mục manual-review và chính sách xóa backup sau khi người dùng xác nhận đã kiểm tra.
 
 Không merge hoặc phát hành REC-02/03/04/05 chỉ dựa trên CI PASS khi các test Windows EXE trọng yếu chưa hoàn thành.
+
+
+## Recovery Change Classification — cảnh báo không suy diễn mất dữ liệu
+
+- Recovery Case cũ được phân loại **khi đọc**; không sửa, ký lại hoặc ghi đè evidence.
+- `PUBLISHED_VERIFIED`: receipt chỉ chứng minh publication đã được xác nhận, KHÔNG chứng minh mọi thay đổi đều lên MAIN.
+- `RECOVERY_UNCERTAIN`: chưa đủ provenance về publication/Change Log; base OID bằng observed OID không đủ kết luận CLEAN.
+- `FILE_MISMATCH`: DB hash, WAL hoặc các file khác khác bản đã chấp nhận; không đồng nhất với thay đổi dữ liệu nghiệp vụ.
+- `BUSINESS_CHANGE`: chỉ khi có **bằng chứng độc lập** về số mutation nghiệp vụ chưa được MAIN chấp nhận; hiện không tự suy ra từ Change Log `UNKNOWN`.
+- `CLEAN`: chỉ chẩn đoán được khi đủ bằng chứng receipt, SQLCipher checksum, WAL, local files, repo identity, MAIN head/upstream.
+- Recovery export và UI hiển thị mã phân loại + lời giải thích, không xuất tên học sinh, dòng dữ liệu, đường dẫn, token hoặc key.
+- `log_clean_mismatch()` ghi classification/reason không có dữ liệu nhạy cảm, không thay đổi quyết định chặn WRITE hay trạng thái Recovery.
+
+**Regression:** `test_rec05_recovery_change_classification.py` kiểm tra case VERIFIED/UNVERIFIED, OID bằng nhau, WAL/hash drift, thiếu provenance, không tạo ra giả định business change, không acknowledge case và không sửa database.
