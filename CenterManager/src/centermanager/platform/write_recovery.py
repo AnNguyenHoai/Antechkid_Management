@@ -689,6 +689,53 @@ class WriteRecoveryJournal:
         self.assert_replaceable()
         logger.info('Fresh-install WRITE recovery receipt initialized after schema migration')
 
+    def record_verified_manual_reset(self, *, provider, accepted_main, archive):
+        """Seal a NEW MAIN session only after old local evidence was archived.
+
+        This is not a repair of the old journal. It is an independent receipt
+        for a fully installed/migrated Git MAIN, checked before any login or
+        WRITE. The previous journal survives unchanged inside the archive.
+        """
+        from centermanager.platform.sync.manual_review_backup import (
+            verify_manual_review_backup,
+        )
+        archive = Path(archive).resolve()
+        if (not archive.is_relative_to((self.root / 'manual-review').resolve())
+                or not archive.is_dir()):
+            raise RecoveryRequired('Manual Recovery backup is outside the protected archive.')
+        verify_manual_review_backup(archive)
+        if self.journal.exists() and not (archive / 'recovery' / 'journal.json').is_file():
+            raise RecoveryRequired('Original Recovery journal was not preserved before MAIN reset.')
+        if (not accepted_main
+                or getattr(provider, '_verified_manual_main_oid', None) != accepted_main
+                or str(archive) != getattr(provider, '_verified_manual_backup_path', None)
+                or provider.observe_remote_main_commit() != accepted_main):
+            raise RecoveryRequired('Independent MAIN verification is not available for manual reset.')
+        if (not self.database.is_file() or self._wal_pending()
+                or not (self.repository / 'database' / 'center.db').is_file()
+                or self._git('rev-parse', 'HEAD') != accepted_main
+                or self._git('rev-parse', '@{upstream}') != accepted_main
+                or self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired('Manual reset cannot attest the installed MAIN generation.')
+        # The old raw journal is already copied and hashed in the archive.
+        # Do not mutate its status to CLEAN or silently mark it reviewed.
+        receipt = dict(
+            format=1, runtime=str(self.runtime), repository=str(self.repository),
+            database=str(self.database), repository_id=self._repository_id(),
+            session_id='main-reset-' + uuid.uuid4().hex,
+            base_main_oid=accepted_main, published_oid=accepted_main,
+            status='CLEAN', publication='VERIFIED', release='VERIFIED',
+            published_runtime_sha256=_hash(self.database),
+            accepted_local_files=self._local_files(),
+            manual_review_archive=str(archive),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _json(self.journal, receipt)
+        delattr(provider, '_verified_manual_main_oid')
+        delattr(provider, '_verified_manual_backup_path')
+        self.assert_replaceable()
+        logger.warning('New Git MAIN receipt accepted; previous local Recovery remains archived for manual review')
+
     def refresh_verified_bootstrap_migration(self, *, provider, before):
         """Refresh a previously CLEAN receipt after authorized startup Alembic.
 
