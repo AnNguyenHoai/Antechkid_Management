@@ -97,6 +97,16 @@ def main() -> int:
     try:
         logger.info("[STARTUP] Application starting")
         paths = get_paths()
+        from centermanager.platform.sync.isolated_workspace_router import (
+            read_selected_workspace, prepare_isolated_runtime,
+            accept_isolated_runtime,
+        )
+        # A successfully bootstrapped isolated MAIN may become the canonical
+        # runtime on subsequent launches. The historic workspace remains at
+        # its old path, with its DB/WAL/Recovery journal untouched.
+        selected_runtime, _historic_roots = read_selected_workspace(paths.project_root)
+        if selected_runtime is not None:
+            paths._runtime_root = selected_runtime
         paths.ensure_directories()
         init_config()
         config = get_config()
@@ -130,10 +140,43 @@ def main() -> int:
             return 2
 
         bootstrap = BootstrapManager()
+        isolated_candidate = None
         if not bootstrap.run():
-            logger.error("[STARTUP] Bootstrap failed")
-            QMessageBox.critical(None, "Startup Error", "Platform bootstrap failed. Please check logs.")
-            return 1
+            if not getattr(bootstrap, "_recovery_blocked", False):
+                logger.error("[STARTUP] Bootstrap failed for reasons other than recoverable historic state")
+                QMessageBox.critical(None, "Startup Error", "Platform bootstrap failed. Please check logs.")
+                return 1
+
+            # Recovery of a prior runtime is an operator-review issue, not a
+            # reason to reject a distinct Git-authoritative MAIN workspace.
+            # Never reset, delete, or rewrite the original DB/WAL/journal.
+            logger.warning("[STARTUP] Historic recovery blocks old workspace; preparing isolated Git MAIN")
+            try:
+                isolated_candidate = prepare_isolated_runtime(paths)
+                # Release only this process's original single-instance lock.
+                # All future SQLCipher/Git operations occur under a *new*
+                # independent runtime and a new instance lock.
+                instance_lock.unlock()
+                paths._runtime_root = isolated_candidate.candidate
+                paths.ensure_directories()
+                init_config()
+                config = get_config()
+                instance_lock = QLockFile(str(paths.runtime_root / ".centermanager.instance.lock"))
+                instance_lock.setStaleLockTime(30_000)
+                if not instance_lock.tryLock(0):
+                    raise RuntimeError("Alternate MAIN workspace is already in use")
+                bootstrap = BootstrapManager()
+                if not bootstrap.run():
+                    raise RuntimeError("Isolated Git MAIN could not be independently verified")
+            except Exception:
+                logger.exception("[STARTUP] Isolated MAIN fallback failed; legacy runtime left untouched")
+                QMessageBox.critical(
+                    None, "Startup Error",
+                    "Could not start an independent verified Git MAIN workspace. "
+                    "The previous local database and Recovery evidence are preserved. "
+                    "Check Internet/credentials and logs.",
+                )
+                return 1
 
         platform_context = bootstrap.get_context()
         context_manager = bootstrap._context_manager
@@ -191,6 +234,16 @@ def main() -> int:
         elif schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
             startup_journal.refresh_verified_bootstrap_migration(
                 provider=sync_provider, before=schema_receipt_before
+            )
+
+        if isolated_candidate is not None:
+            # Commit a future-launch pointer only AFTER the alternate Git MAIN
+            # sync, SQLCipher/schema validation and verified receipt succeeded,
+            # and BEFORE login/WRITE. Interrupted earlier attempts retain the
+            # original pointer and never discard local evidence.
+            accept_isolated_runtime(paths.project_root, isolated_candidate)
+            logger.warning(
+                "[STARTUP] Isolated MAIN workspace accepted; previous Recovery retained for review"
             )
 
         permission_service = PermissionService(session_factory)
