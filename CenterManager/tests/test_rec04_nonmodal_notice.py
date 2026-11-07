@@ -14,6 +14,7 @@ def _notice_fake():
     )
     return SimpleNamespace(
         _recovery_pending_action=action,
+        _manual_review_archives=lambda: [],
         statusBar=lambda: SimpleNamespace(showMessage=lambda text, timeout: notices.append((text, timeout))),
     ), actions, notices
 
@@ -66,26 +67,25 @@ def test_startup_recovery_reminder_does_not_invoke_modal_exec():
     assert "QMessageBox.warning(" not in method
 
 
-def test_retained_open_journal_without_case_shows_unresolved_legacy_notice(monkeypatch):
+def test_manual_review_backup_shows_notice_without_acknowledgement(monkeypatch):
     from centermanager.platform import recovery_case_registry, write_recovery
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
-    monkeypatch.setattr(recovery_case_registry, "RecoveryCaseRegistry", lambda _: SimpleNamespace(pending_cases=lambda: []))
+    monkeypatch.setattr(
+        recovery_case_registry, "RecoveryCaseRegistry",
+        lambda _: SimpleNamespace(pending_cases=lambda: []),
+    )
     fake, actions, notices = _notice_fake()
-    fake._retained_recovery_registries = lambda: [
-        SimpleNamespace(
-            pending_cases=lambda: [],
-            journal=SimpleNamespace(inspect=lambda: {"status": "OPEN"}),
-        )
-    ]
+    fake._manual_review_archives = lambda: [Path("backup-1")]
     MainWindow._show_pending_recovery_cases(fake)
     assert ("visible", True) in actions
-    assert any("Recovery cũ" in text for kind, text in actions if kind == "text")
+    assert any("1 backup thủ công" in value for kind, value in actions if kind == "text")
     assert notices
 
 
-def test_recovery_history_can_enumerate_old_untouched_registries():
+def test_recovery_history_offers_manual_archive_folder_without_reopening_old_db():
     root = Path(__file__).resolve().parents[1] / "src" / "centermanager"
     source = (root / "ui" / "main_window.py").read_text(encoding="utf-8")
-    assert "def _retained_recovery_registries(self)" in source
-    assert "registries.extend(self._retained_recovery_registries())" in source
-    assert "RecoveryCasesDialog(self, registry=registry).exec()" in source
+    assert "def _manual_review_archives(self)" in source
+    assert "QDesktopServices.openUrl(" in source
+    assert "QUrl.fromLocalFile(" in source
+    assert "registries.extend(self._retained_recovery_registries())" not in source
