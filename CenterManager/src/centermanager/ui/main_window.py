@@ -222,18 +222,45 @@ class MainWindow(QMainWindow):
         recovery_menu = self.menuBar().addMenu("Khôi phục")
         recovery_history = recovery_menu.addAction("Danh sách Recovery Case")
         recovery_history.triggered.connect(self._show_recovery_case_history)
+        self._recovery_pending_action = recovery_menu.addAction("Recovery: đang kiểm tra...")
+        self._recovery_pending_action.triggered.connect(self._show_recovery_case_history)
+        self._recovery_pending_action.setVisible(False)
         QTimer.singleShot(0, self._show_pending_recovery_cases)
 
     def _show_pending_recovery_cases(self) -> None:
-        from centermanager.ui.recovery_cases_dialog import show_pending_recovery_reminder
+        """Non-modal reminder: never withhold the main window for case review.
+
+        This only reads signed case metadata; the operator can open the case
+        list from the Khôi phục menu at any time. Closing/ignoring the notice
+        never acknowledges or erases Recovery evidence.
+        """
+        from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
         try:
-            show_pending_recovery_reminder(self)
+            pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
+            if not pending:
+                self._recovery_pending_action.setVisible(False)
+                return
+            count = len(pending)
+            self._recovery_pending_action.setText(
+                f"Cần kiểm tra {count} Recovery Case - xem chi tiết"
+            )
+            self._recovery_pending_action.setVisible(True)
+            self.statusBar().showMessage(
+                f"Có {count} Recovery Case cần đối chiếu với Git MAIN. "
+                "Mở menu Khôi phục để xem; thao tác hiện tại không bị chặn.",
+                20000,
+            )
         except Exception:
             logger.exception("Recovery Case reminder could not be verified")
-            QMessageBox.warning(
-                self, "Không thể kiểm tra Recovery Case",
-                "Không đọc được thông tin recovery. Không xác nhận case nào đã kiểm tra. "
-                "Vui lòng liên hệ hỗ trợ và không xóa bản backup."
+            self._recovery_pending_action.setText(
+                "Recovery Case chưa xác minh được - liên hệ hỗ trợ"
+            )
+            self._recovery_pending_action.setVisible(True)
+            self.statusBar().showMessage(
+                "Không xác minh được Recovery metadata; giữ nguyên backup và "
+                "liên hệ hỗ trợ. Chưa đánh dấu case nào đã kiểm tra.",
+                20000,
             )
 
     def _show_recovery_case_history(self) -> None:
