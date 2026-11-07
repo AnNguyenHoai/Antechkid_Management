@@ -1,5 +1,7 @@
-# REC-05 CI acceptance
+# REC-05 — Single Active Git MAIN Fault-Injection and CI
 
-Scope: run full Windows pytest against cumulative REC-01..REC-05 changes, including failure injection.
+Automatic tests cover pre-copy failure; checksum mismatch; tampered WAL/receipt; malformed old Recovery; independent MAIN OID mismatch; disk-full when sealing new CLEAN receipt; restart idempotence; and the existing real Git+SQLCipher RV-05 integration test that proves earlier local unaccepted business rows do NOT appear on MAIN.
 
-CI PASS does not satisfy real crash-safe activation/WRITE requirements or Windows EXE UAT. All partial foundations remain Draft until production-ready gates in REC_05_GIT_MAIN_FIRST_RELEASE_GATE.md are met.
+Expected source of truth: Git MAIN only; active database: runtime/Database/center.db; recovery: immutable historical log and temporary copy in sibling .write-recovery/manual-review.
+
+No runtime multiplexer, alternate active DB, auto merge, or recovery publish. PR stays Draft until all three Windows pytest shards on HEAD PASS and two-machine Windows EXE acceptance passes.
