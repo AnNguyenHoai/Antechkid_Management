@@ -227,26 +227,27 @@ class MainWindow(QMainWindow):
         self._recovery_pending_action.setVisible(False)
         QTimer.singleShot(0, self._show_pending_recovery_cases)
 
-    def _retained_recovery_registries(self):
-        """Read historic case registries at their original untouched paths."""
-        from types import SimpleNamespace
-        from centermanager.core.paths import get_paths
-        from centermanager.platform.sync.isolated_workspace_router import read_selected_workspace
-        from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+    def _manual_review_archives(self):
+        """Independent backup-only evidence, never an active database."""
+        from pathlib import Path
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-
-        paths = get_paths()
-        _, retained = read_selected_workspace(paths.project_root)
-        registries = []
-        for old in retained:
-            old_paths = SimpleNamespace(
-                runtime_root=old,
-                database_dir=old / "Database",
-                metadata_dir=old / "metadata",
-                attachment_dir=old / "Attachment",
-            )
-            registries.append(RecoveryCaseRegistry(WriteRecoveryJournal(old_paths)))
-        return registries
+        from centermanager.platform.sync.manual_review_backup import (
+            verify_manual_review_backup,
+        )
+        root = Path(WriteRecoveryJournal().root) / "manual-review"
+        if not root.exists():
+            return []
+        archives = []
+        for candidate in sorted(root.iterdir()):
+            if not candidate.is_dir() or candidate.is_symlink():
+                continue
+            try:
+                verify_manual_review_backup(candidate)
+                archives.append(candidate)
+            except Exception:
+                logger.warning("Manual Recovery backup unreadable: retained for investigation")
+                archives.append(candidate)
+        return archives
 
     def _show_pending_recovery_cases(self) -> None:
         """Non-modal reminder: never withhold the main window for case review.
@@ -260,27 +261,12 @@ class MainWindow(QMainWindow):
         try:
             pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
             count = len(pending)
-            unresolved_historic = False
-            for registry in getattr(self, "_retained_recovery_registries", lambda: [])():
-                try:
-                    old_cases = registry.pending_cases()
-                    count += len(old_cases)
-                    old_journal = registry.journal.inspect()
-                    if (old_journal and old_journal.get("status") not in {"CLEAN", "PUBLISHED"}
-                            and not old_cases):
-                        # A legacy interruption may precede RV-03 case
-                        # registration. It still needs manual investigation.
-                        unresolved_historic = True
-                except Exception:
-                    logger.exception("Archived recovery registry could not be read")
-                    unresolved_historic = True
-            if count == 0 and not unresolved_historic:
+            archives = len(self._manual_review_archives())
+            if not count and not archives:
                 self._recovery_pending_action.setVisible(False)
                 return
             self._recovery_pending_action.setText(
-                f"Cần kiểm tra {count} Recovery Case - xem chi tiết"
-                if not unresolved_historic else
-                "Có Recovery cũ chưa xác minh - liên hệ hỗ trợ"
+                f"Cần kiểm tra {count} Recovery Case, {archives} backup thủ công"
             )
             self._recovery_pending_action.setVisible(True)
             self.statusBar().showMessage(
@@ -305,11 +291,18 @@ class MainWindow(QMainWindow):
         from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         try:
-            registries = [RecoveryCaseRegistry(WriteRecoveryJournal())]
-            registries.extend(self._retained_recovery_registries())
-            for registry in registries:
-                if registry.list_cases():
-                    RecoveryCasesDialog(self, registry=registry).exec()
+            registry = RecoveryCaseRegistry(WriteRecoveryJournal())
+            if registry.list_cases():
+                RecoveryCasesDialog(self, registry=registry).exec()
+            archives = self._manual_review_archives()
+            if archives:
+                # No automatic acknowledgement/deletion; show location only
+                # on explicit operator action, for manual data comparison.
+                from PySide6.QtCore import QUrl
+                from PySide6.QtGui import QDesktopServices
+                QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(archives[0].parent))
+                )
         except Exception:
             logger.exception("Recovery Case history unavailable")
             QMessageBox.warning(
