@@ -1550,6 +1550,53 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def is_configured(self) -> bool:
         return bool(self._repository_url)
 
+    def reset_verified_main_after_manual_backup(self, accepted_oid: str, archive) -> bool:
+        """Single-purpose startup reset after complete manual evidence backup.
+
+        Does NOT bypass the generic Git mutation gate: only this method can
+        reset exactly the fetched-and-observed authoritative MAIN. The old
+        workspace is retained in its verified archive, not published.
+        """
+        import re
+        import subprocess
+        from pathlib import Path
+        from centermanager.database.mutation_authority import gate_for
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.sync.manual_review_backup import (
+            verify_manual_review_backup,
+        )
+
+        journal = WriteRecoveryJournal()
+        archive = Path(archive).resolve()
+        if (not re.fullmatch(r"[0-9a-f]{40}", accepted_oid or "")
+                or not archive.is_relative_to((journal.root / "manual-review").resolve())):
+            raise RuntimeError("Unverified MAIN commit or Recovery archive.")
+        verify_manual_review_backup(archive)
+        gate = gate_for()
+        with gate.lock:
+            if not gate.closed:
+                raise RuntimeError("Active local WRITE editor prevents MAIN reset.")
+            if (self.get_fetched_remote_main_commit() != accepted_oid
+                    or self.observe_remote_main_commit() != accepted_oid):
+                raise RuntimeError("Remote MAIN changed after verified Recovery backup.")
+            if not self._git_executable:
+                raise RuntimeError("Git is unavailable for verified MAIN reset.")
+            # Hold the provider command lock across both local operations;
+            # no other in-process Git command can interleave reset and clean.
+            with self._git_command_lock:
+                for args in (["reset", "--hard", accepted_oid], ["clean", "-fd"]):
+                    result = subprocess.run(
+                        [self._git_executable, *args],
+                        cwd=str(self._repo_path), capture_output=True, text=True,
+                        env=self._get_env(), check=False, timeout=60,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError("Git MAIN local replacement failed.")
+        if (self.get_local_main_commit() != accepted_oid
+                or self.observe_remote_main_commit() != accepted_oid):
+            raise RuntimeError("Git MAIN changed during local replacement.")
+        return True
+
     def reset_to_remote(self, branch: Optional[str] = None) -> bool:
         if branch is None:
             branch = self._branch
