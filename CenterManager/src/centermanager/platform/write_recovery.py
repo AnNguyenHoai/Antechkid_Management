@@ -249,6 +249,22 @@ class WriteRecoveryJournal:
             upstream = self._git('rev-parse', '@{upstream}')
             git_status_clean = not bool(
                 self._git('status', '--porcelain', '--untracked-files=all'))
+            from centermanager.platform.recovery_change_classification import classify_mismatch
+            assessment = classify_mismatch(
+                receipt_status=document.get('status'),
+                publication=document.get('publication'),
+                db_hash_match=db_match,
+                wal_pending=wal_pending,
+                local_files_match=not (added or removed or changed),
+                git_clean=git_status_clean,
+            )
+            # Explicitly diagnose file/provenance drift, never claim that
+            # a business row changed merely from a byte-level fingerprint.
+            logger.warning(
+                'Recovery classification phase=%s classification=%s reason=%s '
+                'business_mutation_count=UNKNOWN',
+                phase, assessment.classification, assessment.reason_code,
+            )
             logger.warning(
                 'Recovery mismatch phase=%s status=%s publication=%s '
                 'db_hash_match=%s wal_pending=%s local_files_match=%s '
