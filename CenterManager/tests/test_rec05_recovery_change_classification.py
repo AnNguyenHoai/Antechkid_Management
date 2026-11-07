@@ -84,11 +84,14 @@ def test_clean_requires_all_proofs_and_no_wal():
     proof = dict(
         receipt_status="CLEAN", publication="VERIFIED",
         db_hash_match=True, wal_pending=False, local_files_match=True,
-        git_clean=True,
+        git_clean=True, repository_match=True,
+        head_accepted=True, head_upstream=True,
     )
     assert classify_mismatch(**proof).classification == CLEAN
     assert classify_mismatch(**{**proof, "git_clean": False}).classification == RECOVERY_UNCERTAIN
     assert classify_mismatch(**{**proof, "wal_pending": None}).classification == RECOVERY_UNCERTAIN
+    assert classify_mismatch(**{**proof, "repository_match": False}).classification == RECOVERY_UNCERTAIN
+    assert classify_mismatch(**{**proof, "head_upstream": False}).classification == RECOVERY_UNCERTAIN
 
 
 def test_business_change_requires_explicit_confirmed_unpublished_events():
