@@ -129,12 +129,21 @@ class RecoveryCaseRegistry:
         # The manifest is the existing authenticated proof: never accept a
         # recovery case built from a capture belonging to a different repo,
         # even if its ciphertext happens to be decryptable with the same key.
-        manifest_journal = verified.get("journal") or {}
+        # Legacy pre-journal captures may contain explicit JSON null.
+        # Missing provenance is not evidence of an accepted WRITE base:
+        # preserve the verified capture and keep its outcome UNVERIFIED.
+        # Malformed non-mapping metadata must be rejected, not interpreted
+        # as absent authentication or silently promoted to trusted data.
+        manifest_journal = verified.get("journal")
+        if manifest_journal is None:
+            manifest_journal = {}
+        if not isinstance(manifest_journal, dict):
+            raise RecoveryRequired("Recovery Case capture journal metadata is malformed.")
         captured_repository = manifest_journal.get("repository_id")
         if (captured_repository is not None
                 and captured_repository != document.get("repository_id")):
             raise RecoveryRequired("Recovery Case capture belongs to a different repository.")
-        if verified.get("journal", {}).get("base_main_oid") not in {
+        if manifest_journal.get("base_main_oid") not in {
             document.get("base_main_oid"), None
         }:
             raise RecoveryRequired("Recovery Case capture belongs to another WRITE base.")
