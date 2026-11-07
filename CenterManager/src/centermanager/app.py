@@ -166,7 +166,12 @@ def main() -> int:
         # bootstrap can certify subsequent schema changes before login.
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         startup_journal = WriteRecoveryJournal()
-        schema_receipt_before = startup_journal.inspect()
+        manual_reset_main = getattr(sync_provider, "_verified_manual_main_oid", None)
+        # Legacy Recovery may be malformed: it is already archived as raw
+        # evidence. Never parse it as active metadata for this new MAIN session.
+        schema_receipt_before = (
+            None if manual_reset_main is not None else startup_journal.inspect()
+        )
         if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
             startup_journal.assert_replaceable()
 
@@ -184,7 +189,13 @@ def main() -> int:
         # bootstrap, never an existing legacy runtime, can establish its
         # initial CLEAN receipt after Alembic has verified the schema.
         fresh_main = getattr(sync_provider, "_fresh_install_main_oid", None)
-        if fresh_main is not None:
+        if manual_reset_main is not None:
+            startup_journal.record_verified_manual_reset(
+                provider=sync_provider,
+                accepted_main=manual_reset_main,
+                archive=sync_provider._verified_manual_backup_path,
+            )
+        elif fresh_main is not None:
             startup_journal.record_verified_fresh_install(
                 provider=sync_provider, accepted_main=fresh_main
             )
