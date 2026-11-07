@@ -66,6 +66,9 @@ def classify_mismatch(
     wal_pending: bool | None,
     local_files_match: bool | None,
     git_clean: bool | None,
+    repository_match: bool | None = None,
+    head_accepted: bool | None = None,
+    head_upstream: bool | None = None,
     confirmed_unpublished_business_mutations: int | None = None,
 ) -> RecoveryAssessment:
     """Diagnose a local discrepancy; no persisted changes or WRITE decisions.
@@ -87,6 +90,8 @@ def classify_mismatch(
         return RecoveryAssessment(FILE_MISMATCH, "FILE_BYTES_DIFFER")
     if (receipt_status == "CLEAN" and publication == "VERIFIED"
             and db_hash_match is True and wal_pending is False
-            and local_files_match is True and git_clean is True):
+            and local_files_match is True and git_clean is True
+            and repository_match is True and head_accepted is True
+            and head_upstream is True):
         return RecoveryAssessment(CLEAN, "ACCEPTED_CLEAN")
     return RecoveryAssessment(RECOVERY_UNCERTAIN, "PROVENANCE_INCOMPLETE")
