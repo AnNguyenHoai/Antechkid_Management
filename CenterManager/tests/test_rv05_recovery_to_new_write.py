@@ -44,13 +44,20 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
     startup = StartupSynchronization(w.provider)
     assert startup.run()
     assert values(w.journal.database) == ["BASE"]
-    registry = RecoveryCaseRegistry(w.journal)
-    pending = registry.pending_cases()
-    assert len(pending) == 1
-    case = pending[0]
-    captured_path = Path(case["capture_ref"])
+    from centermanager.platform.sync.manual_review_backup import (
+        verify_manual_review_backup,
+    )
+    archived = startup._manual_review_backup
+    verify_manual_review_backup(archived)
+    captured_path = archived / "database"
     assert values(captured_path / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
     assert w.provider.observe_remote_main_commit() == accepted_oid
+
+    # app.py performs this only after schema verification and before login.
+    # The direct service integration fixture already has the current schema.
+    w.journal.record_verified_manual_reset(
+        provider=w.provider, accepted_main=accepted_oid, archive=archived,
+    )
 
     # Recovery reminder is advisory. No acknowledgement is required to get
     # a freshly verified WRITE lease after the safe startup completed.
@@ -90,11 +97,10 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
         ]
         # Earlier LOCAL_UNACCEPTED data must not leak into the new remote MAIN.
         assert values(captured_path / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
-        assert w.journal.verify_capture(captured_path)["files"]["center.db"] == case["capture_db_sha256"]
-        assert registry.get(case["case_id"])["status"] == "PENDING_REVIEW"
+        verify_manual_review_backup(archived)
         assert StartupSynchronization(w.provider).run()
-        assert registry.get(case["case_id"])["status"] == "PENDING_REVIEW"
-        assert len(registry.list_cases()) == 1
+        assert (archived / "database" / "center.db").is_file()
+        assert (archived / "recovery" / "journal.json").is_file()
         assert values(w.journal.database) == ["BASE", "NEW_AUTHORIZED_WRITE"]
     finally:
         cm.shutdown()

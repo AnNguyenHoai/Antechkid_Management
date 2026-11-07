@@ -123,139 +123,106 @@ def test_existing_case_requires_original_capture_still_verified(tmp_path, monkey
         cases.register_from_reconciled(observed_main_oid=MAIN)
 
 
-def test_startup_preflight_enforces_case_before_reset():
+def test_startup_main_preflight_requires_verified_manual_archive():
     path = ROOT / "src" / "centermanager" / "platform" / "sync" / "startup_sync.py"
     tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     methods = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     target = methods["_prepare_authoritative_startup_replacement"]
-    calls = [
-        (ast.unparse(c.func), c.lineno)
-        for c in ast.walk(target) if isinstance(c, ast.Call)
-    ]
-    assert any(fn == "journal.reconcile" for fn, _ in calls)
-    assert sum(fn.endswith(".register_from_reconciled") for fn, _ in calls) == 2
-    pos_reconcile = min(n for fn, n in calls if fn == "journal.reconcile")
-    pos_case = max(n for fn, n in calls if fn.endswith(".register_from_reconciled"))
-    assert pos_reconcile < pos_case
-    assert "reset_to_remote" not in ast.unparse(target)
+    source = ast.unparse(target)
+    assert "get_fetched_remote_main_commit" in source
+    assert "observe_remote_main_commit" in source
+    assert "preserve_workspace_for_manual_review" in source
+    assert "verify_manual_review_backup" in source
+    assert source.index("preserve_workspace_for_manual_review") < source.index("verify_manual_review_backup")
+    assert "register_from_reconciled" not in source
+    assert "reset_to_remote" not in source
 
 
-def test_startup_refuses_to_replace_when_case_persistence_fails(monkeypatch, tmp_path):
-    """A verified local capture without durable case must BLOCK MAIN installation."""
-    from types import SimpleNamespace
+def test_startup_fails_closed_when_manual_archive_cannot_be_persisted(monkeypatch, tmp_path):
     from threading import RLock
-    from centermanager.platform.sync import startup_sync
+    from centermanager.platform.sync import startup_sync, manual_review_backup
     from centermanager.database import mutation_authority
     from centermanager.platform import write_recovery
 
     j = FakeJournal(tmp_path, status="OPEN")
-    j.document["status"] = "OPEN"
-
-    def denied_until_reconciled(*, legacy=False):
-        if j.document["status"] != "RECONCILED":
-            raise RecoveryRequired("local unaccepted changes")
-        return None
-
-    def reconcile(*, base_oid, accepted_main, observe_main):
-        assert base_oid == BASE and accepted_main == MAIN
-        assert observe_main() == MAIN
-        j.document["status"] = "RECONCILED"
-
-    j.assert_replaceable = denied_until_reconciled
-    j.reconcile = reconcile
+    j.journal = tmp_path / "journal.json"
+    j.journal.write_text('{"status":"OPEN"}')
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
-    monkeypatch.setattr(mutation_authority, "gate_for",
-                        lambda: SimpleNamespace(lock=RLock(), closed=True))
-
-    original_register = RecoveryCaseRegistry.register_from_reconciled
-
-    def disk_error(*args, **kwargs):
-        raise OSError("synthetic recovery case disk unavailable")
-
-    monkeypatch.setattr(RecoveryCaseRegistry, "register_from_reconciled", disk_error)
+    monkeypatch.setattr(
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(lock=RLock(), closed=True),
+    )
+    monkeypatch.setattr(
+        manual_review_backup, "preserve_workspace_for_manual_review",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("synthetic disk full")),
+    )
     provider = SimpleNamespace(
         get_fetched_remote_main_commit=lambda: MAIN,
         observe_remote_main_commit=lambda: MAIN,
-        get_local_main_commit=lambda: BASE,
     )
     startup = startup_sync.StartupSynchronization(provider)
-    assert startup._prepare_authoritative_startup_replacement() is False
-    assert j.document["status"] == "RECONCILED"
-    assert startup._startup_reconciled_unaccepted_local is False
-
-    # Even though journal.reconcile already succeeded, a retry must not
-    # silently bypass a missing case when journal.status is RECONCILED.
-    assert startup._prepare_authoritative_startup_replacement() is False
-    monkeypatch.setattr(RecoveryCaseRegistry, "register_from_reconciled", original_register)
+    assert not startup._prepare_authoritative_startup_replacement()
+    assert "synthetic disk full" in startup.recovery_error
+    assert j.inspect()["status"] == "OPEN"
+    assert j.journal.read_text() == '{"status":"OPEN"}'
 
 
-def test_startup_creates_recovery_case_and_reuses_it_after_interruption(monkeypatch, tmp_path):
-    from types import SimpleNamespace
+def test_old_recovery_is_not_automatically_reconciled_or_acked(monkeypatch, tmp_path):
     from threading import RLock
-    from centermanager.platform.sync import startup_sync
+    from centermanager.platform.sync import startup_sync, manual_review_backup
     from centermanager.database import mutation_authority
     from centermanager.platform import write_recovery
 
     j = FakeJournal(tmp_path, status="OPEN")
-    j.document["status"] = "OPEN"
-    j.assert_replaceable = lambda *, legacy=False: (
-        None if j.document["status"] == "RECONCILED"
-        else (_ for _ in ()).throw(RecoveryRequired("unaccepted"))
-    )
-
-    def reconcile(*, base_oid, accepted_main, observe_main):
-        assert observe_main() == MAIN
-        j.document["status"] = "RECONCILED"
-
-    j.reconcile = reconcile
+    j.journal = tmp_path / "journal.json"
+    j.journal.write_text('{"status":"OPEN"}')
+    archive = tmp_path / "manual-review" / "immutable"
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
-    monkeypatch.setattr(mutation_authority, "gate_for",
-                        lambda: SimpleNamespace(lock=RLock(), closed=True))
-    monkeypatch.setattr(RecoveryCaseRegistry, "_key", lambda self: bytes(range(32)))
+    monkeypatch.setattr(
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(lock=RLock(), closed=True),
+    )
+    monkeypatch.setattr(
+        manual_review_backup, "preserve_workspace_for_manual_review",
+        lambda *a, **kw: archive,
+    )
+    monkeypatch.setattr(
+        manual_review_backup, "verify_manual_review_backup",
+        lambda path: None if path == archive else (_ for _ in ()).throw(AssertionError()),
+    )
     provider = SimpleNamespace(
         get_fetched_remote_main_commit=lambda: MAIN,
         observe_remote_main_commit=lambda: MAIN,
-        get_local_main_commit=lambda: BASE,
     )
-
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement()
-    assert j.document["status"] == "RECONCILED"
-    assert len(RecoveryCaseRegistry(j).list_cases()) == 1
-
-    # Simulate a crash after the case is durable but before Git reset; the
-    # next process must recognize the existing case, not duplicate or erase.
-    rebooted = startup_sync.StartupSynchronization(provider)
-    assert rebooted._prepare_authoritative_startup_replacement()
-    assert len(RecoveryCaseRegistry(j).list_cases()) == 1
+    assert startup._manual_review_backup == archive
+    assert startup._manual_reset_requested is True
+    assert startup._startup_reconciled_unaccepted_local is True
+    assert j.inspect()["status"] == "OPEN"
+    assert j.journal.read_text() == '{"status":"OPEN"}'
 
 
-def test_reconciled_case_rejects_main_advance_before_install(monkeypatch, tmp_path):
-    """A previously approved MAIN cannot authorize a different later OID."""
+def test_remote_main_race_rejects_replacement_without_touching_old_case(monkeypatch, tmp_path):
     from threading import RLock
     from centermanager.platform.sync import startup_sync
     from centermanager.database import mutation_authority
     from centermanager.platform import write_recovery
 
-    journal = FakeJournal(tmp_path, status="RECONCILED")
-    journal.assert_replaceable = lambda *, legacy=False: None
-    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: journal)
-    monkeypatch.setattr(mutation_authority, "gate_for",
-                        lambda: SimpleNamespace(lock=RLock(), closed=True))
-    monkeypatch.setattr(RecoveryCaseRegistry, "_key", lambda self: bytes(range(32)))
-    cases = RecoveryCaseRegistry(journal)
-    first = cases.register_from_reconciled(observed_main_oid=MAIN)
-    remote_advanced = "f" * 40
+    j = FakeJournal(tmp_path, status="RECONCILED")
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: j)
+    monkeypatch.setattr(
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(lock=RLock(), closed=True),
+    )
     provider = SimpleNamespace(
-        get_fetched_remote_main_commit=lambda: remote_advanced,
-        observe_remote_main_commit=lambda: remote_advanced,
-        get_local_main_commit=lambda: BASE,
+        get_fetched_remote_main_commit=lambda: MAIN,
+        observe_remote_main_commit=lambda: "f" * 40,
     )
     startup = startup_sync.StartupSynchronization(provider)
-    assert startup._prepare_authoritative_startup_replacement() is False
-    assert "Remote MAIN changed" in startup.recovery_error
-    assert cases.list_cases() == [first]
-    assert journal.inspect()["status"] == "RECONCILED"
+    assert not startup._prepare_authoritative_startup_replacement()
+    assert "MAIN cannot be verified" in startup.recovery_error
+    assert j.inspect()["status"] == "RECONCILED"
 
 
 def test_case_survives_clean_restart_without_automatic_acknowledgement(tmp_path, monkeypatch):
@@ -338,9 +305,12 @@ def test_startup_clean_state_rejects_missing_pinned_case(monkeypatch, tmp_path):
         get_local_main_commit=lambda: MAIN,
     )
     startup = startup_sync.StartupSynchronization(provider)
-    assert not startup._prepare_authoritative_startup_replacement()
-    assert "removed" in startup.recovery_error
+    # An independently verified CLEAN active DB is not held hostage by a
+    # missing historic review-case file. Its absence is an operator-review
+    # concern, not authority to modify the original journal or restore data.
+    assert startup._prepare_authoritative_startup_replacement()
     assert journal.inspect()["status"] == "CLEAN"
+    assert not (cases.root / (original["case_id"] + ".json")).exists()
 
 
 def test_startup_with_active_local_writer_never_creates_case_or_reconciles(monkeypatch, tmp_path):
@@ -367,7 +337,7 @@ def test_startup_with_active_local_writer_never_creates_case_or_reconciles(monke
     )
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement() is False
-    assert "local WRITE editor" in startup.recovery_error
+    assert "active local editor" in startup.recovery_error
     assert not list((tmp_path / "cases").glob("*.json"))
 
 
@@ -392,7 +362,7 @@ def test_unverified_remote_main_never_reconciles_or_creates_case(monkeypatch, tm
     )
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement() is False
-    assert "independently verified" in startup.recovery_error
+    assert "Git MAIN cannot be verified" in startup.recovery_error
     assert j.inspect()["status"] == "OPEN"
     assert not list((tmp_path / "cases").glob("*.json"))
 

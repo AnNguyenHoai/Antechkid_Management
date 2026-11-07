@@ -47,8 +47,16 @@ def test_new_journal_instance_preserves_before_git_main_wins_on_restart(workspac
     sync = StartupSynchronization(workspace.provider)
     assert sync.run()
     assert values(workspace.journal.database) == ["BASE"]
-    receipt = restarted_journal.inspect()
-    assert receipt["status"] == "CLEAN"
-    capture = receipt["last_capture"]
-    restarted_journal.verify_capture(capture)
-    assert values(Path(capture) / "center.db") == original_values
+    from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
+    backup = sync._manual_review_backup
+    verify_manual_review_backup(backup)
+    assert values(backup / "database" / "center.db") == original_values
+    assert (backup / "recovery" / "journal.json").is_file()
+    # A new CLEAN receipt is a separate operation after schema verification;
+    # the original journal remains inside the archive for manual review.
+    restarted_journal.record_verified_manual_reset(
+        provider=workspace.provider,
+        accepted_main=sync._accepted_startup_main_oid,
+        archive=backup,
+    )
+    assert restarted_journal.inspect()["status"] == "CLEAN"

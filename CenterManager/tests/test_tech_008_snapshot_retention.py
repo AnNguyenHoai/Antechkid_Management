@@ -101,12 +101,16 @@ def test_unknown_journal_shape_is_treated_as_recovery_needed(tmp_path):
     assert all(p.exists() for p in created)
 
 
-def test_bootstrap_runs_retention_after_journal_inspection():
+def test_bootstrap_never_prunes_legacy_snapshots_before_verified_main_backup():
     source = (ROOT / "src" / "centermanager" / "platform" / "bootstrap" / "bootstrap_manager.py").read_text(encoding="utf-8")
     inspect_at = source.index("journal_document = WriteRecoveryJournal(paths).inspect()")
-    prune_at = source.index("prune_orphaned_snapshots(")
     detect_at = source.index("repo_state = self._repo_manager.detect()")
-    assert inspect_at < prune_at < detect_at
+    assert inspect_at < detect_at
+    # Orphaned snapshots can be the last recoverable local work. They must
+    # not be removed BEFORE the Git-MAIN-first manual archive is complete.
+    bootstrap_flow = source[source.index("    def run("):detect_at]
+    assert "prune_orphaned_snapshots(" not in bootstrap_flow
+    assert "Snapshot cleanup deferred" in bootstrap_flow
 
 
 def test_app_holds_instance_lock_before_bootstrap():
