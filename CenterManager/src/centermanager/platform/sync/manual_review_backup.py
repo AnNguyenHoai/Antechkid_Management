@@ -31,7 +31,11 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
     destination.mkdir(mode=0o700)
     records = {}
     try:
-        roots = journal._workspace_roots()
+        # Include original Recovery log/outbox/cases as well as DB/WAL and
+        # attachments. Never traverse manual-review itself (it contains this
+        # destination and possibly earlier archives).
+        roots = dict(journal._workspace_roots())
+        roots["recovery"] = journal.root
         for category, location in sorted(roots.items()):
             location = Path(location)
             if not location.exists():
@@ -39,6 +43,8 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
             if location.is_symlink() or not location.is_dir():
                 raise ManualBackupError("Protected workspace root is unsafe.")
             for source in sorted(location.rglob("*")):
+                if category == "recovery" and source.is_relative_to(archive_root):
+                    continue
                 if source.is_symlink():
                     raise ManualBackupError("Symlink in protected workspace; refuse replacement.")
                 if not source.is_file():
