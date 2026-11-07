@@ -305,9 +305,12 @@ def test_startup_clean_state_rejects_missing_pinned_case(monkeypatch, tmp_path):
         get_local_main_commit=lambda: MAIN,
     )
     startup = startup_sync.StartupSynchronization(provider)
-    assert not startup._prepare_authoritative_startup_replacement()
-    assert "removed" in startup.recovery_error
+    # An independently verified CLEAN active DB is not held hostage by a
+    # missing historic review-case file. Its absence is an operator-review
+    # concern, not authority to modify the original journal or restore data.
+    assert startup._prepare_authoritative_startup_replacement()
     assert journal.inspect()["status"] == "CLEAN"
+    assert not (cases.root / (original["case_id"] + ".json")).exists()
 
 
 def test_startup_with_active_local_writer_never_creates_case_or_reconciles(monkeypatch, tmp_path):
@@ -334,7 +337,7 @@ def test_startup_with_active_local_writer_never_creates_case_or_reconciles(monke
     )
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement() is False
-    assert "local WRITE editor" in startup.recovery_error
+    assert "active local editor" in startup.recovery_error
     assert not list((tmp_path / "cases").glob("*.json"))
 
 
@@ -359,7 +362,7 @@ def test_unverified_remote_main_never_reconciles_or_creates_case(monkeypatch, tm
     )
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement() is False
-    assert "independently verified" in startup.recovery_error
+    assert "Git MAIN cannot be verified" in startup.recovery_error
     assert j.inspect()["status"] == "OPEN"
     assert not list((tmp_path / "cases").glob("*.json"))
 
