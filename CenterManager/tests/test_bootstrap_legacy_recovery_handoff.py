@@ -83,18 +83,16 @@ def test_legacy_missing_receipt_reaches_authoritative_sync(monkeypatch, tmp_path
     assert "authoritative-sync" in events
 
 
-def test_corrupt_journal_blocks_before_authoritative_sync(monkeypatch, tmp_path):
+def test_corrupt_historic_journal_does_not_block_authoritative_sync(monkeypatch, tmp_path):
     manager, events, _ = _bootstrap(
         monkeypatch, tmp_path,
         journal_error=RecoveryRequired("Unreadable recovery journal"),
     )
-    class MessageBox:
-        @staticmethod
-        def critical(*args):
-            pass
-    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox", MessageBox)
-    assert manager.run() is False
-    assert "authoritative-sync" not in events
+    assert manager.run() is True
+    assert "metadata-inspected" in events
+    # This is only the bootstrap-routing test; StartupSynchronization must
+    # preserve old DB/WAL/journal before it materializes accepted Git MAIN.
+    assert "authoritative-sync" in events
 
 
 def test_default_runtime_does_not_overwrite_existing_legacy_manifest(
