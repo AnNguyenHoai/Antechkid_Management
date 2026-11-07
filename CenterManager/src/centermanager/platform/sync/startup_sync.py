@@ -178,7 +178,8 @@ class StartupSynchronization:
 
         try:
             from centermanager.platform.write_recovery import WriteRecoveryJournal
-            WriteRecoveryJournal().record_synchronized()
+            if not getattr(self, "_manual_reset_requested", False):
+                WriteRecoveryJournal().record_synchronized()
         except Exception:
             logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
             self._rollback_startup_database_install()
@@ -190,6 +191,10 @@ class StartupSynchronization:
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
+        if getattr(self, "_manual_reset_requested", False):
+            # This one-time capability is consumed by app.py only after
+            # Alembic and identity checks, before login/WRITE.
+            self._provider._verified_manual_main_oid = self._accepted_startup_main_oid
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
             # files were copied and verified before Git MAIN replacement.
@@ -326,118 +331,69 @@ class StartupSynchronization:
             logger.exception("Startup Git rollback failed: retain recovery artifacts; do not proceed")
 
     def _prepare_authoritative_startup_replacement(self) -> bool:
-        """Approve Git-MAIN-wins startup without silently discarding local work.
+        """Git MAIN First: keep ONE active DB and archive unaccepted local bytes.
 
-        Fetch and independently observe exact accepted MAIN before touching the
-        local repository or DB.  When legacy/unaccepted data exist, preserve a
-        verified recovery capture and issue the existing RECONCILED receipt.
-        This never pushes local data or changes remote WRITE ownership.
+        Historical Recovery metadata is evidence for manual review, not a
+        condition for using an independently observed authoritative MAIN.
+        Never overwrite a local DB/WAL/journal until a verified separate copy
+        exists. Nothing from the archive can be published automatically.
         """
-        from centermanager.platform.write_recovery import (
-            WriteRecoveryJournal, RecoveryRequired,
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.sync.manual_review_backup import (
+            preserve_workspace_for_manual_review, verify_manual_review_backup,
         )
         journal = WriteRecoveryJournal()
         try:
-            # Git MAIN wins at process startup, never while this process still
-            # owns an active local editor/mutation gate.
             from centermanager.database.mutation_authority import gate_for
             gate = gate_for()
             with gate.lock:
                 if not gate.closed:
-                    raise RecoveryRequired(
-                        "Cannot replace runtime while a local WRITE editor remains active."
-                    )
-            # Always pin the accepted ref even for an already-clean workspace.
-            # Otherwise a second fetch/reset may silently install another MAIN.
+                    raise RuntimeError("Cannot replace an active local editor.")
             accepted = self._provider.get_fetched_remote_main_commit()
             observed = self._provider.observe_remote_main_commit()
-            if not accepted or not observed or accepted != observed:
-                raise RecoveryRequired(
-                    "Git MAIN cannot be independently verified; local work was not replaced."
-                )
+            if not accepted or accepted != observed:
+                raise RuntimeError("Exact remote Git MAIN cannot be verified.")
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
-            # A legacy workspace WITHOUT a journal can still have business
-            # artifacts (attachments, DB, WAL). This is not a fresh install,
-            # but it may become a clean MAIN generation after we have
-            # durably archived EVERY local file, including Recovery evidence.
-            # It must not be legitimized before the authoritative install and
-            # schema verification succeed.
-            current = journal.inspect()
-            if current is None and not self._initial_main_receipt_allowed:
-                from centermanager.platform.sync.manual_review_backup import (
-                    preserve_workspace_for_manual_review, verify_manual_review_backup,
-                )
-                archive = preserve_workspace_for_manual_review(
-                    journal, reason="legacy-no-receipt-before-main-reset",
-                )
-                verify_manual_review_backup(archive)
-                self._manual_review_backup = archive
-                self._initial_main_receipt_allowed = True
-                self._startup_reconciled_unaccepted_local = True
-                logger.warning(
-                    "Legacy local artifacts archived for manual Recovery review before MAIN install"
-                )
-                # Archive is evidence only; no old local state is published.
-                return True
-            from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+            self._manual_reset_requested = False
+
             try:
-                journal.assert_replaceable(legacy=True)
-            except RecoveryRequired:
-                # Existing journal safety says the runtime cannot yet be
-                # replaced. A previously RECONCILED case cannot be silently
-                # re-created against another base or remote generation.
-                current = journal.inspect()
-                if current and current.get("status") == "RECONCILED":
-                    raise
-            else:
-                current = journal.inspect()
-                if current and current.get("status") == "RECONCILED":
-                    if current.get("accepted_main_oid") != accepted:
-                        raise RecoveryRequired(
-                            "Remote MAIN changed since recovery reconciliation; "
-                            "retain the captured case and explicitly review the new MAIN."
-                        )
-                    # Reconstruct if crash occurred after reconcile but
-                    # before the signed case or journal pin was persisted.
-                    RecoveryCaseRegistry(journal).register_from_reconciled(
-                        observed_main_oid=accepted
-                    )
-                elif current and current.get("rv03_case_id"):
-                    # This incident was already isolated on a prior startup;
-                    # detect missing/modified evidence even after CLEAN.
-                    RecoveryCaseRegistry(journal).verify_pinned_case()
+                document = journal.inspect()
+            except Exception:
+                # Malformed journals are archived as raw evidence, never
+                # interpreted as CLEAN or silently deleted.
+                logger.warning("Legacy Recovery metadata unreadable; archiving original bytes")
+                document = None
+
+            if document and document.get("status") == "CLEAN":
+                try:
+                    journal.assert_replaceable()
+                    return True
+                except Exception:
+                    logger.warning("CLEAN metadata differs from local files; archive before MAIN reset")
+
+            if document is None and not journal.journal.exists() and self._initial_main_receipt_allowed:
+                # A genuinely empty first install needs no obsolete backup.
                 return True
-            existing = journal.inspect()
-            if existing is not None:
-                base = existing.get("base_main_oid")
-                if not base:
-                    raise RecoveryRequired("Recovery base is missing; preserve local data.")
-            else:
-                # For a legacy workspace, its current local commit is the
-                # only defensible base for a newly created recovery receipt.
-                base = self._provider.get_local_main_commit()
-                if not base:
-                    raise RecoveryRequired("Legacy local Git base is unavailable.")
-            journal.reconcile(
-                base_oid=base,
-                accepted_main=accepted,
-                observe_main=self._provider.observe_remote_main_commit,
+
+            archive = preserve_workspace_for_manual_review(
+                journal, reason="manual-review-before-authoritative-main",
             )
-            # RV-03 fail-closed barrier: no Git reset/DB installation until
-            # a signed Recovery Case references the verified WAL-complete
-            # capture, with UNKNOWN Change Log coverage until attested.
-            RecoveryCaseRegistry(journal).register_from_reconciled(observed_main_oid=accepted)
-            journal.assert_replaceable()
+            verify_manual_review_backup(archive)
+            self._manual_review_backup = archive
             self._startup_reconciled_unaccepted_local = True
+            # A previous journal will be archived after verified MAIN install
+            # and schema migration, before the new CLEAN receipt is committed.
+            self._manual_reset_requested = journal.journal.exists()
+            self._initial_main_receipt_allowed = not self._manual_reset_requested
             logger.warning(
-                "Startup: captured unaccepted local workspace; Git MAIN %s will replace it",
-                accepted,
+                "Unpublished local workspace durably preserved for manual review; "
+                "installing only verified Git MAIN"
             )
             return True
         except Exception as exc:
             self.recovery_error = str(exc)
-            logger.exception("Git-authoritative startup preflight blocked safely")
+            logger.exception("Git MAIN replacement refused: local evidence not preserved")
             return False
 
     def _preserve_missing_repository_runtime(self) -> bool:
