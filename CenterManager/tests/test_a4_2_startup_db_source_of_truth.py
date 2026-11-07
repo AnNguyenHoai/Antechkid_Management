@@ -183,8 +183,8 @@ def test_app_refuses_configured_startup_sync_failure():
 
     bootstrap_failure = app_source.index("if not bootstrap.run():")
     app_failure_block = app_source[bootstrap_failure:app_source.index(
-        "        from centermanager.database", bootstrap_failure
-    )] if "        from centermanager.database" in app_source[bootstrap_failure:] else app_source[bootstrap_failure:bootstrap_failure + 4000]
+        "        platform_context = bootstrap.get_context()", bootstrap_failure
+    )]
     # Ordinary bootstrap errors still fail closed. Historic Recovery is the
     # only allowed exception and must be followed by independent MAIN proof.
     assert 'if not getattr(bootstrap, "_recovery_blocked", False):' in app_failure_block
