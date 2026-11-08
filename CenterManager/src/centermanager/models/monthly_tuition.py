@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from centermanager.database.base import Base
@@ -18,6 +18,8 @@ class MonthlyTuitionPlanRecord(Base):
     __tablename__ = "monthly_tuition_plans"
     __table_args__ = (
         UniqueConstraint("class_id", "month", "version", name="uq_monthly_tuition_plan_version"),
+        Index("uq_monthly_tuition_active_class_month", "class_id", "month",
+              unique=True, sqlite_where=text("status = 'ACTIVE'")),
         CheckConstraint("monthly_fee_vnd >= 0", name="ck_monthly_plan_fee_nonnegative"),
         CheckConstraint("version > 0", name="ck_monthly_plan_version_positive"),
         CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'CLOSED')", name="ck_monthly_plan_status"),

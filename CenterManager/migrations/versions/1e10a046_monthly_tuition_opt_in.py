@@ -32,6 +32,9 @@ def upgrade() -> None:
         sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'CLOSED')", name="ck_monthly_plan_status"),
     )
     op.create_index("ix_monthly_plan_class", "monthly_tuition_plans", ["class_id"])
+    op.create_index("uq_monthly_tuition_active_class_month", "monthly_tuition_plans",
+                    ["class_id", "month"], unique=True,
+                    sqlite_where=sa.text("status = 'ACTIVE'"))
     op.create_table(
         "monthly_tuition_allocations",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -91,5 +94,6 @@ def downgrade() -> None:
     op.drop_table("enrollment_monthly_tuition_terms")
     op.drop_index("ix_monthly_allocation_plan", table_name="monthly_tuition_allocations")
     op.drop_table("monthly_tuition_allocations")
+    op.drop_index("uq_monthly_tuition_active_class_month", table_name="monthly_tuition_plans")
     op.drop_index("ix_monthly_plan_class", table_name="monthly_tuition_plans")
     op.drop_table("monthly_tuition_plans")
