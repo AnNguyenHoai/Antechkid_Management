@@ -124,3 +124,26 @@ def test_finance_outcome_command_is_idempotent_and_reconciles(monthly_db, monkey
             db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31)
         )
         assert accrual.monthly_vnd == Decimal("400000")
+
+def test_future_month_enrollment_opt_in_is_explicit(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    import centermanager.services.monthly_tuition_enrollment_service as activation
+    from centermanager.services.monthly_tuition_enrollment_service import (
+        MonthlyTuitionEnrollmentService, MonthlyEnrollmentActivationError
+    )
+    monkeypatch.setattr(activation, "get_current_user",
+                        lambda: SimpleNamespace(username="authorized_manager"))
+    with monthly_db() as db:
+        db.query(EnrollmentMonthlyTuitionTerm).delete()
+        db.commit()
+    service = MonthlyTuitionEnrollmentService(monthly_db)
+    activate = MonthlyTuitionEnrollmentService.activate_future_month.__wrapped__
+    term_id = activate(service, 1, date(2040, 1, 1))
+    with monthly_db() as db:
+        term = db.get(EnrollmentMonthlyTuitionTerm, term_id)
+        assert term.enrollment_id == 1
+        assert term.activated_by == "authorized_manager"
+        # The legacy immutable policy snapshot is still intact.
+        assert db.get(Enrollment, 1).billing_policy_version == "attendance_v2"
+    with pytest.raises(MonthlyEnrollmentActivationError):
+        activate(service, 1, date(2040, 1, 1))
