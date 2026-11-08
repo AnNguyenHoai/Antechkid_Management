@@ -28,9 +28,17 @@ def _revision():
 
 def test_additive_migration_keeps_legacy_contract_and_obligation():
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[
-        Class.__table__, Enrollment.__table__, Session.__table__,
-    ])
+    # Production already has all legacy tables. Recreate that shape here,
+    # excluding only the four NEW tables created by the migration under test.
+    new_tables = {
+        "monthly_tuition_plans", "monthly_tuition_allocations",
+        "enrollment_monthly_tuition_terms", "monthly_tuition_outcomes",
+    }
+    Base.metadata.create_all(
+        engine,
+        tables=[table for table in Base.metadata.sorted_tables
+                if table.name not in new_tables],
+    )
     with DbSession(engine) as db:
         klass = Class(name="Historic class", status="ACTIVE")
         db.add(klass)
