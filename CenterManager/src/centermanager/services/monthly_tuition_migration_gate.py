@@ -52,7 +52,8 @@ def assess_enrollment_migration(evidence: EnrollmentMigrationEvidence) -> Migrat
     )):
         raise ValueError("migration dates must be valid")
     blockers = []
-    if (evidence.requested_effective_date < evidence.review_date.replace(day=1)
+    if (evidence.requested_effective_date <= evidence.review_date
+            or evidence.requested_effective_date < evidence.first_enrollment_date
             or evidence.requested_effective_date.day != 1):
         blockers.append(MigrationBlocker.RETROACTIVE_START)
     if not evidence.legacy_tuition_resolved:
