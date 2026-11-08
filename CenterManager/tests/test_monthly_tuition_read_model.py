@@ -89,3 +89,38 @@ def test_cancelled_session_requires_approved_outcome(monthly_db):
         value = MonthlyTuitionReadModel.project(db, enrollment, sessions, date(2040, 1, 31))
         assert value.cancelled_vnd == Decimal("400000")
         assert value.accrued_vnd == Decimal("400000")
+
+def test_finance_outcome_command_is_idempotent_and_reconciles(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    import centermanager.services.monthly_tuition_outcome_service as outcome_module
+    from centermanager.services.monthly_tuition_outcome_service import (
+        MonthlyTuitionOutcomeService, MonthlyOutcomeError
+    )
+    from centermanager.services.monthly_tuition_ledger_projection import SessionBillingOutcome
+    monkeypatch.setattr(outcome_module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_operator"))
+    with monthly_db() as db:
+        first_session = db.query(Session).order_by(Session.id).first()
+        first_session.status = "Cancelled"
+        db.commit()
+    service = MonthlyTuitionOutcomeService(monthly_db)
+    create = MonthlyTuitionOutcomeService.record_outcome.__wrapped__
+    event_id = create(
+        service, 1, 1, SessionBillingOutcome.CENTRE_CANCELLED_NO_MAKEUP,
+        reason="Center closed", idempotency_key="cancel-1"
+    )
+    assert create(
+        service, 1, 1, SessionBillingOutcome.CENTRE_CANCELLED_NO_MAKEUP,
+        reason="Center closed", idempotency_key="cancel-1"
+    ) == event_id
+    with pytest.raises(MonthlyOutcomeError):
+        create(
+            service, 1, 1, SessionBillingOutcome.CENTRE_CANCELLED_NO_MAKEUP,
+            reason="Different reason", idempotency_key="cancel-1"
+        )
+    with monthly_db() as db:
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
+        accrual = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert accrual.monthly_vnd == Decimal("400000")
