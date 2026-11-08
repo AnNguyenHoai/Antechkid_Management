@@ -67,7 +67,8 @@ class EnrollmentMonthlyTuitionTerm(Base):
 class MonthlyTuitionOutcomeRecord(Base):
     __tablename__ = "monthly_tuition_outcomes"
     __table_args__ = (
-        UniqueConstraint("enrollment_id", "session_id", name="uq_monthly_outcome_enrollment_session"),
+        UniqueConstraint("enrollment_id", "session_id", "revision", name="uq_monthly_outcome_revision"),
+        CheckConstraint("revision > 0", name="ck_monthly_outcome_revision_positive"),
         UniqueConstraint("idempotency_key", name="uq_monthly_outcome_idempotency"),
         CheckConstraint("outcome IN ('BILLABLE', 'RESCHEDULED', 'CENTRE_CANCELLED_NO_MAKEUP')", name="ck_monthly_outcome"),
     )
@@ -76,6 +77,7 @@ class MonthlyTuitionOutcomeRecord(Base):
     enrollment_id: Mapped[int] = mapped_column(ForeignKey("enrollments.id", ondelete="RESTRICT"), nullable=False, index=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id", ondelete="RESTRICT"), nullable=False)
     outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
