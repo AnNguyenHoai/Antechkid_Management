@@ -132,7 +132,13 @@ class MonthlyTuitionReadModel:
                     raise TuitionAccrualUnresolvedError("Session allocation month mismatch")
                 outcome = latest.get(row.session_id)
                 if session.status == SessionStatus.CANCELLED.value and outcome is None:
-                    raise TuitionAccrualUnresolvedError("Cancelled session has no approved billing outcome")
+                    # Later approved decisions must not rewrite earlier as-of
+                    # balances. A cancelled session with *no* decision at all
+                    # is unresolved; do not silently waive or collect it.
+                    if not any(e.session_id == row.session_id for e in outcome_rows):
+                        raise TuitionAccrualUnresolvedError(
+                            "Cancelled session has no approved billing outcome"
+                        )
                 gross += row.amount_vnd
                 if outcome is not None and outcome.outcome == "CENTRE_CANCELLED_NO_MAKEUP":
                     cancelled += row.amount_vnd
