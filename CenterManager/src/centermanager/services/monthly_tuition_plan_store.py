@@ -46,8 +46,7 @@ class MonthlyTuitionPlanStore:
         ).all()
         return [(row.id, row.scheduled_date) for row in sessions
                 if row.scheduled_date.year == month.year
-                and row.scheduled_date.month == month.month
-                and row.status != SessionStatus.CANCELLED.value]
+                and row.scheduled_date.month == month.month]
 
     @staticmethod
     def _active_class(db, class_id: int):
