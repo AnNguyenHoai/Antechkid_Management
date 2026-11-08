@@ -80,7 +80,7 @@ class MonthlyTuitionPlanStore:
                     MonthlyTuitionPlanRecord.month == month,
                 )
             ).all()
-            if any(row.status == "ACTIVE" for row in existing):
+            if any(row.status in ("ACTIVE", "CLOSED") for row in existing):
                 raise MonthlyPlanStorageError("Activated plan exists; do not reprice history")
             version = max((int(row.version) for row in existing), default=0) + 1
             plan = MonthlyTuitionPlanRecord(
