@@ -12,6 +12,8 @@ from typing import Callable
 from sqlalchemy import select
 
 from centermanager.core.permission_guard import require_permission
+from centermanager.core.clock import get_clock
+from centermanager.core.current_user import get_current_user
 from centermanager.models.class_ import Class
 from centermanager.models.monthly_tuition import (
     MonthlyTuitionAllocationRecord, MonthlyTuitionPlanRecord,
@@ -104,14 +106,19 @@ class MonthlyTuitionPlanStore:
             return plan.id
 
     @require_permission("class.update")
-    def activate(self, plan_id: int, actor: str) -> None:
-        if not isinstance(actor, str) or not actor.strip():
-            raise MonthlyPlanStorageError("verified actor is required")
+    def activate(self, plan_id: int) -> None:
+        current_actor = get_current_user()
+        actor = getattr(current_actor, "username", None)
+        if not actor:
+            raise MonthlyPlanStorageError("authenticated actor is required")
         with self._session_factory() as db:
             plan = db.get(MonthlyTuitionPlanRecord, plan_id)
             if plan is None or plan.status != "DRAFT":
                 raise MonthlyPlanStorageError("only an existing draft may activate")
             self._active_class(db, plan.class_id)
+            today = get_clock().today()
+            if (plan.month.year, plan.month.month) <= (today.year, today.month):
+                raise MonthlyPlanStorageError("activation cannot reprice current or prior months")
             other_active = db.scalars(
                 select(MonthlyTuitionPlanRecord).where(
                     MonthlyTuitionPlanRecord.class_id == plan.class_id,
@@ -131,6 +138,9 @@ class MonthlyTuitionPlanStore:
             sessions = {row.id: row for row in db.scalars(
                 select(Session).where(Session.class_id == plan.class_id)
             ).all()}
+            candidate_ids = {sid for sid, _ in self._candidate_sessions(db, plan.class_id, plan.month)}
+            if {row.session_id for row in allocations} != candidate_ids:
+                raise MonthlyPlanStorageError("planned sessions changed; recreate draft")
             if any(row.session_id not in sessions
                    or sessions[row.session_id].scheduled_date != row.original_date
                    or (row.original_date.year, row.original_date.month)
