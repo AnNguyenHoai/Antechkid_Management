@@ -63,6 +63,7 @@ def upgrade() -> None:
         sa.Column("enrollment_id", sa.Integer(), sa.ForeignKey("enrollments.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("session_id", sa.Integer(), sa.ForeignKey("sessions.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("outcome", sa.String(40), nullable=False),
+        sa.Column("replacement_session_id", sa.Integer(), sa.ForeignKey("sessions.id", ondelete="RESTRICT"), nullable=True),
         sa.Column("revision", sa.Integer(), nullable=False),
         sa.Column("reason", sa.String(255), nullable=False),
         sa.Column("idempotency_key", sa.String(120), nullable=False),
@@ -70,6 +71,7 @@ def upgrade() -> None:
         sa.Column("recorded_by", sa.String(100), nullable=False),
         sa.UniqueConstraint("enrollment_id", "session_id", "revision", name="uq_monthly_outcome_revision"),
         sa.CheckConstraint("revision > 0", name="ck_monthly_outcome_revision_positive"),
+        sa.CheckConstraint("(outcome = 'RESCHEDULED' AND replacement_session_id IS NOT NULL) OR (outcome != 'RESCHEDULED' AND replacement_session_id IS NULL)", name="ck_monthly_outcome_replacement"),
         sa.UniqueConstraint("idempotency_key", name="uq_monthly_outcome_idempotency"),
         sa.CheckConstraint(
             "outcome IN ('BILLABLE', 'RESCHEDULED', 'CENTRE_CANCELLED_NO_MAKEUP')",
