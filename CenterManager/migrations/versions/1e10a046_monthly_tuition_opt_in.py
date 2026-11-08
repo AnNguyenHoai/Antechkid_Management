@@ -67,6 +67,7 @@ def upgrade() -> None:
         sa.Column("revision", sa.Integer(), nullable=False),
         sa.Column("reason", sa.String(255), nullable=False),
         sa.Column("idempotency_key", sa.String(120), nullable=False),
+        sa.Column("effective_date", sa.Date(), nullable=False),
         sa.Column("recorded_at", sa.DateTime(), nullable=False),
         sa.Column("recorded_by", sa.String(100), nullable=False),
         sa.UniqueConstraint("enrollment_id", "session_id", "revision", name="uq_monthly_outcome_revision"),
