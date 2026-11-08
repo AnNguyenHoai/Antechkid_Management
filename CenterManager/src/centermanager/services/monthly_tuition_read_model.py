@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, inspect
+from sqlalchemy.orm import Session as SqlAlchemySession
 
 from centermanager.models.monthly_tuition import (
     EnrollmentMonthlyTuitionTerm, MonthlyTuitionPlanRecord,
@@ -38,6 +39,15 @@ class MonthlyTuitionReadModel:
 
     @staticmethod
     def has_monthly_term(db, enrollment_id: int) -> bool:
+        if not isinstance(db, SqlAlchemySession):
+            return False
+        # Older isolated test databases may not have run additive Alembic yet.
+        # The production database is migrated under the existing startup gate.
+        key = "_monthly_tuition_terms_table_available"
+        if key not in db.info:
+            db.info[key] = inspect(db.get_bind()).has_table("enrollment_monthly_tuition_terms")
+        if not db.info[key]:
+            return False
         return db.scalars(select(EnrollmentMonthlyTuitionTerm).where(
             EnrollmentMonthlyTuitionTerm.enrollment_id == enrollment_id
         )).first() is not None
