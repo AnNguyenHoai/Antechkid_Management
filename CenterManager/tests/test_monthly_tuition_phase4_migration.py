@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session as DbSession
 
 from centermanager.database.base import Base
+from centermanager import models  # noqa: F401 - ensure all FKs present
 from centermanager.models.class_ import Class
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.session import Session
