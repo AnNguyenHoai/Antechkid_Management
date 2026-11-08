@@ -28,6 +28,9 @@ class MonthlyAccrualProjection:
     enrollment_id: int
     accrued_vnd: Decimal
     historical_legacy_vnd: Decimal
+    historical_legacy_gross_vnd: Decimal
+    historical_legacy_discount_vnd: Decimal
+    legacy_billable_numbers: tuple[int, ...]
     monthly_vnd: Decimal
     monthly_gross_vnd: Decimal
     cancelled_vnd: Decimal
@@ -138,6 +141,9 @@ class MonthlyTuitionReadModel:
             enrollment_id=int(enrollment.id),
             accrued_vnd=Decimal(legacy.net_accrued) + monthly,
             historical_legacy_vnd=Decimal(legacy.net_accrued),
+            historical_legacy_gross_vnd=Decimal(legacy.gross_accrued),
+            historical_legacy_discount_vnd=Decimal(legacy.discount),
+            legacy_billable_numbers=legacy.billable_session_numbers,
             monthly_vnd=monthly,
             monthly_gross_vnd=Decimal(gross),
             cancelled_vnd=Decimal(cancelled),
