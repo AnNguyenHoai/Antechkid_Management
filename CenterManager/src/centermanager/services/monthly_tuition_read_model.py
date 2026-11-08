@@ -99,7 +99,7 @@ class MonthlyTuitionReadModel:
         )).all()
         latest = {}
         for event in outcome_rows:
-            if event.recorded_at.date() > as_of_date:
+            if event.effective_date > as_of_date:
                 continue
             prior = latest.get(event.session_id)
             if prior is None or event.revision > prior.revision:
