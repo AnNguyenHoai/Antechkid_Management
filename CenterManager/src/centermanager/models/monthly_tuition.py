@@ -88,5 +88,6 @@ class MonthlyTuitionOutcomeRecord(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     recorded_by: Mapped[str] = mapped_column(String(100), nullable=False)
