@@ -26,6 +26,7 @@ from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
 )
+from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel
 
 
 @dataclass(frozen=True)
@@ -156,10 +157,12 @@ class TuitionDetailService:
         as_of_date: date,
         billable_numbers,
         unit_fee: Decimal,
+        monthly_amount_by_number=None,
     ) -> Tuple[TuitionSessionDetail, ...]:
         start = enrollment.enrolled_from_session
         end = enrollment.enrolled_until_session
         billable_set = set(billable_numbers)
+        monthly_amount_by_number = monthly_amount_by_number or {}
         rows: List[TuitionSessionDetail] = []
         for teaching_session in sorted(
             sessions, key=lambda item: (item.session_number, item.id or 0)
@@ -167,12 +170,18 @@ class TuitionDetailService:
             number = teaching_session.session_number
             if start is not None and number < start:
                 continue
-            if end is not None and number > end:
+            if end is not None and number > end and number not in monthly_amount_by_number:
                 continue
-            effective_date = cls._effective_date(teaching_session)
+            effective_date = (
+                teaching_session.scheduled_date
+                if number in monthly_amount_by_number
+                else cls._effective_date(teaching_session)
+            )
             billable = number in billable_set
             if effective_date > as_of_date:
                 explanation = "Sau ngày chốt"
+            elif number in monthly_amount_by_number and billable:
+                explanation = "Học phí tháng · phân bổ theo lịch gốc"
             elif teaching_session.status != SessionStatus.COMPLETED.value:
                 explanation = f"Không tính phí: {teaching_session.status}"
             elif not enrollment.has_tuition_contract:
@@ -190,7 +199,10 @@ class TuitionDetailService:
                     actual_date=teaching_session.actual_date,
                     effective_date=effective_date,
                     billable=billable,
-                    billing_contribution=unit_fee if billable else Decimal("0"),
+                    billing_contribution=(
+                        monthly_amount_by_number.get(number, unit_fee)
+                        if billable else Decimal("0")
+                    ),
                     explanation=explanation,
                 )
             )
@@ -303,23 +315,41 @@ class TuitionDetailService:
 
             configured = enrollment.has_tuition_contract
             billable_numbers = ()
+            monthly_amount_by_number = {}
             gross = Decimal("0")
             recognized_discount = Decimal("0")
             net = Decimal("0")
             if configured:
                 try:
-                    accrual = TuitionAccrualService.calculate_from_records(
-                        enrollment,
-                        sessions,
-                        cutoff,
-                    )
+                    if MonthlyTuitionReadModel.has_monthly_term(db_session, int(enrollment.id)):
+                        monthly = MonthlyTuitionReadModel.project(
+                            db_session, enrollment, sessions, cutoff,
+                        )
+                        by_session_id = {s.id: s for s in sessions}
+                        monthly_amount_by_number = {
+                            by_session_id[sid].session_number: amount
+                            for sid, amount in monthly.monthly_contributions
+                        }
+                        billable_numbers = tuple(sorted(set(
+                            monthly.legacy_billable_numbers
+                        ) | set(monthly_amount_by_number)))
+                        gross = self._amount(
+                            monthly.historical_legacy_gross_vnd + monthly.monthly_vnd
+                        )
+                        recognized_discount = self._amount(
+                            monthly.historical_legacy_discount_vnd
+                        )
+                        net = self._amount(monthly.accrued_vnd)
+                    else:
+                        accrual = TuitionAccrualService.calculate_from_records(
+                            enrollment, sessions, cutoff,
+                        )
+                        billable_numbers = accrual.billable_session_numbers
+                        gross = self._amount(accrual.gross_accrued)
+                        recognized_discount = self._amount(accrual.discount)
+                        net = self._amount(accrual.net_accrued)
                 except TuitionAccrualUnresolvedError:
                     configured = False
-                else:
-                    billable_numbers = accrual.billable_session_numbers
-                    gross = self._amount(accrual.gross_accrued)
-                    recognized_discount = self._amount(accrual.discount)
-                    net = self._amount(accrual.net_accrued)
 
             unit_fee = (
                 self._amount(enrollment.unit_fee)
@@ -332,6 +362,7 @@ class TuitionDetailService:
                 as_of_date=cutoff,
                 billable_numbers=billable_numbers,
                 unit_fee=unit_fee,
+                monthly_amount_by_number=monthly_amount_by_number,
             )
             completed_sessions = sum(
                 1
