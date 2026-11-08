@@ -157,3 +157,22 @@ class MonthlyTuitionPlanStore:
             )
             db.commit()
             mirror_after_successful_commit(db)
+
+    @require_permission("class.update")
+    def close(self, plan_id: int) -> None:
+        """Close a completed month while retaining immutable fee allocations."""
+        with self._session_factory() as db:
+            plan = db.get(MonthlyTuitionPlanRecord, plan_id)
+            if plan is None or plan.status != "ACTIVE":
+                raise MonthlyPlanStorageError("Only an active plan can be closed")
+            today = get_clock().today()
+            if (plan.month.year, plan.month.month) >= (today.year, today.month):
+                raise MonthlyPlanStorageError("Current and future months cannot be closed")
+            plan.status = "CLOSED"
+            record_for_active_write(
+                db, module="tuition", action="CLOSE_MONTHLY_PLAN",
+                entity_type="MonthlyTuitionPlan", entity_id=plan.id,
+                summary_args={"class_id": plan.class_id},
+            )
+            db.commit()
+            mirror_after_successful_commit(db)
