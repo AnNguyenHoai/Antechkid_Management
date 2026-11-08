@@ -147,3 +147,20 @@ def test_future_month_enrollment_opt_in_is_explicit(monthly_db, monkeypatch):
         assert db.get(Enrollment, 1).billing_policy_version == "attendance_v2"
     with pytest.raises(MonthlyEnrollmentActivationError):
         activate(service, 1, date(2040, 1, 1))
+
+def test_outstanding_uses_opt_in_monthly_accrual(monthly_db):
+    from types import SimpleNamespace
+    from centermanager.services.outstanding_service import OutstandingService
+
+    provider = SimpleNamespace(sessions=lambda db: SimpleNamespace(
+        get_by_class=lambda class_id: db.query(Session).filter(
+            Session.class_id == class_id
+        ).all()
+    ))
+    service = OutstandingService(monthly_db, repository_provider=provider)
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        accrued, configured = service._calculate_accrued(
+            db, enrollment, as_of_date=date(2040, 1, 31)
+        )
+        assert configured and accrued == Decimal("800000")
