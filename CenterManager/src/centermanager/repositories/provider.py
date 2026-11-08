@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 from sqlalchemy.orm import Session
 from centermanager.repositories.admin_data_reset_repository import AdminDataResetRepository
+from centermanager.repositories.monthly_tuition_repository import MonthlyTuitionRepository
 from centermanager.repositories.audit_log_repository import AuditLogRepository
 from centermanager.repositories.attendance_repository import AttendanceRepository
 from centermanager.repositories.class_timeline_repository import ClassTimelineRepository
@@ -44,6 +45,7 @@ from centermanager.repositories.timeline_repository import TimelineRepository
 class RepositoryProvider(Protocol):
     """Application-facing factory for persistence adapters."""
     def admin_data_resets(self, session: Session) -> AdminDataResetRepository: ...
+    def monthly_tuition(self, session: Session) -> MonthlyTuitionRepository: ...
     def audit_logs(self, session: Session) -> AuditLogRepository: ...
     def class_timeline(self, session: Session) -> ClassTimelineRepository: ...
     def attendance(self, session: Session) -> AttendanceRepository: ...
@@ -85,6 +87,7 @@ class RepositoryProvider(Protocol):
 class SqlAlchemyRepositoryProvider:
     """Production repository provider backed by SQLAlchemy repositories."""
     def admin_data_resets(self, session: Session) -> AdminDataResetRepository: return AdminDataResetRepository(session)
+    def monthly_tuition(self, session: Session) -> MonthlyTuitionRepository: return MonthlyTuitionRepository(session)
     def audit_logs(self, session: Session) -> AuditLogRepository: return AuditLogRepository(session)
     def class_timeline(self, session: Session) -> ClassTimelineRepository: return ClassTimelineRepository(session)
     def attendance(self, session: Session) -> AttendanceRepository: return AttendanceRepository(session)
