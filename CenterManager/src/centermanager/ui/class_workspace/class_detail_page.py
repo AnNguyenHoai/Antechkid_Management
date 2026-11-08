@@ -31,6 +31,7 @@ from centermanager.ui.design_system.tokens import COLORS, SPACING
 from centermanager.ui.class_workspace.class_form_dialog import ClassFormDialog
 from centermanager.ui.class_workspace.class_assignment_dialog import ClassAssignmentDialog
 from centermanager.ui.class_workspace.class_enrollment_dialog import ClassEnrollmentDialog
+from centermanager.ui.class_workspace.monthly_tuition_plan_dialog import MonthlyTuitionPlanDialog
 from centermanager.ui.class_workspace.class_schedule_widget import ClassScheduleWidget
 from centermanager.ui.session.session_dialog import SessionDialog
 from centermanager.ui.timeline import TimelineWidget
@@ -39,6 +40,9 @@ from centermanager.platform.collaboration import CollaborationManager
 from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
+
+# Fail closed until Phase 4 finance reconciliation and EXE UAT are signed off.
+_MONTHLY_TUITION_UI_ENABLED = False
 
 
 class ClassDetailPage(QWidget):
@@ -124,6 +128,10 @@ class ClassDetailPage(QWidget):
         self.edit_btn.setFixedHeight(34)
         self.edit_btn.clicked.connect(self._on_edit)
         self.entity_header.add_action(self.edit_btn)
+        self.monthly_tuition_btn = SecondaryButton("Học phí tháng")
+        self.monthly_tuition_btn.clicked.connect(self._on_monthly_tuition)
+        self.monthly_tuition_btn.setVisible(_MONTHLY_TUITION_UI_ENABLED)
+        self.entity_header.add_action(self.monthly_tuition_btn)
         container_layout.addWidget(self.entity_header)
 
         # Divider
@@ -396,6 +404,18 @@ class ClassDetailPage(QWidget):
             self.load_class(self._current_class_id)
             self.class_updated.emit()
 
+    def _on_monthly_tuition(self) -> None:
+        if not _MONTHLY_TUITION_UI_ENABLED or self._current_class_id is None:
+            return
+        if not self._collaboration_manager.ensure_write():
+            self._notification_service.notify(
+                "You must be in WRITE mode to change tuition.", "warning"
+            )
+            return
+        factory = self._class_service._session_factory
+        dialog = MonthlyTuitionPlanDialog(self._current_class_id, factory, parent=self)
+        dialog.exec()
+
     def _on_assign_teacher(self) -> None:
         if self._current_class_id is None:
             return
@@ -594,6 +614,7 @@ class ClassDetailPage(QWidget):
         self._write_enabled = enabled
         allowed = enabled and not self._archived_read_only
         self.edit_btn.setEnabled(allowed)
+        self.monthly_tuition_btn.setEnabled(allowed and _MONTHLY_TUITION_UI_ENABLED)
         self.add_session_btn.setEnabled(allowed)
         self._apply_dynamic_write_state()
         self.schedule_widget.set_write_enabled(allowed)
