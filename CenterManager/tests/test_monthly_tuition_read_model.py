@@ -164,3 +164,37 @@ def test_outstanding_uses_opt_in_monthly_accrual(monthly_db):
             db, enrollment, as_of_date=date(2040, 1, 31)
         )
         assert configured and accrued == Decimal("800000")
+
+def test_class_cancellation_is_atomic_and_idempotent(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    import centermanager.services.monthly_tuition_class_cancellation as module
+    from centermanager.services.monthly_tuition_class_cancellation import (
+        MonthlyTuitionClassCancellationService,
+    )
+    monkeypatch.setattr(module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        first = db.query(Session).order_by(Session.id).first()
+        first.status = "Cancelled"
+        db.commit()
+    service = MonthlyTuitionClassCancellationService(monthly_db)
+    apply = MonthlyTuitionClassCancellationService.approve_no_makeup.__wrapped__
+    assert apply(service, 1, 1, reason="Center closure") == 1
+    assert apply(service, 1, 1, reason="Center closure") == 0
+    with monthly_db() as db:
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
+        result = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert result.cancelled_vnd == Decimal("400000")
+
+def test_midmonth_join_uses_only_remaining_original_sessions(monthly_db):
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        enrollment.start_date = date(2040, 1, 8)
+        db.flush()
+        projection = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert projection.monthly_vnd == Decimal("400000")
+        assert projection.cancelled_vnd == Decimal("0")

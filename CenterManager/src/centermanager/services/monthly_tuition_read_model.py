@@ -120,11 +120,17 @@ class MonthlyTuitionReadModel:
                     continue
                 if term.effective_until is not None and original_date > term.effective_until:
                     continue
+                if enrollment.start_date is not None and original_date < enrollment.start_date:
+                    continue
                 if enrollment.end_date is not None and original_date > enrollment.end_date:
                     continue
                 session = by_id.get(row.session_id)
                 if session is None or session.class_id != enrollment.class_id:
                     raise TuitionAccrualUnresolvedError("Monthly plan references missing or foreign session")
+                enrolled_from_number = getattr(enrollment, "enrolled_from_session", None)
+                if (enrolled_from_number is not None
+                        and session.session_number < enrolled_from_number):
+                    continue
                 withdrawn = getattr(enrollment, "withdrawn_from_session", None)
                 if withdrawn is not None and session.session_number >= withdrawn:
                     continue

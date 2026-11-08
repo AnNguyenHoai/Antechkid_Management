@@ -35,3 +35,13 @@ def test_monthly_tuition_schema_creates_in_temporary_sqlite():
     } <= names
     assert "enrollments" in names and "incomes" in names
     engine.dispose()
+
+def test_admin_reset_never_deletes_monthly_tuition_evidence():
+    from centermanager.repositories.admin_data_reset_repository import AdminDataResetRepository
+    protected = AdminDataResetRepository.PROTECTED_TABLES
+    assert {
+        "monthly_tuition_plans",
+        "monthly_tuition_allocations",
+        "enrollment_monthly_tuition_terms",
+        "monthly_tuition_outcomes",
+    } <= set(protected)

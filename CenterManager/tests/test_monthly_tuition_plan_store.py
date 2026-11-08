@@ -77,3 +77,12 @@ def test_activation_creates_immutable_active_version(db_factory, monkeypatch):
         assert db.get(MonthlyTuitionPlanRecord, pid).status == "ACTIVE"
     with pytest.raises(MonthlyPlanStorageError):
         MonthlyTuitionPlanStore.activate.__wrapped__(store, pid)
+
+def test_cancelled_planned_lesson_stays_in_original_allocation(db_factory):
+    with db_factory() as db:
+        first = db.query(Session).order_by(Session.id).first()
+        first.status = "Cancelled"
+        db.commit()
+    preview = MonthlyTuitionPlanStore(db_factory).preview(1, date(2040, 1, 1), 800_000)
+    assert len(preview) == 2
+    assert sum(item.amount_vnd for item in preview) == 800_000
