@@ -187,3 +187,14 @@ def test_class_cancellation_is_atomic_and_idempotent(monthly_db, monkeypatch):
             db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31)
         )
         assert result.cancelled_vnd == Decimal("400000")
+
+def test_midmonth_join_uses_only_remaining_original_sessions(monthly_db):
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        enrollment.start_date = date(2040, 1, 8)
+        db.flush()
+        projection = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert projection.monthly_vnd == Decimal("400000")
+        assert projection.cancelled_vnd == Decimal("0")
