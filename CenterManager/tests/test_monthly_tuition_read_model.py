@@ -82,6 +82,7 @@ def test_cancelled_session_requires_approved_outcome(monthly_db):
             enrollment_id=enrollment.id, session_id=sessions[0].id, revision=1,
             outcome="CENTRE_CANCELLED_NO_MAKEUP", reason="Center closure",
             idempotency_key="centre-cancel-enrollment-1-session-1",
+            effective_date=date(2040, 1, 2),
             recorded_at=datetime(2040, 1, 2), recorded_by="admin",
         ))
         db.flush()
