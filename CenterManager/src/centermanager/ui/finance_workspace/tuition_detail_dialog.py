@@ -117,6 +117,14 @@ class TuitionDetailDialog(QDialog):
             ("Đã đối soát", _money(self._detail.paid)),
             ("Số dư", self._balance_label(self._detail)),
         ]
+        if self._detail.is_monthly_policy:
+            values.extend([
+                ("Học phí tháng trước giảm", _money(self._detail.monthly_gross_accrued)),
+                ("Trung tâm hủy · miễn phí", _money(self._detail.monthly_waived)),
+                ("Sau miễn phí tháng", _money(
+                    self._detail.monthly_gross_accrued - self._detail.monthly_waived
+                )),
+            ])
         for index, (label, value) in enumerate(values):
             row = index // 3
             column = (index % 3) * 2
@@ -152,18 +160,21 @@ class TuitionDetailDialog(QDialog):
     def _session_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        table = QTableWidget(len(self._detail.sessions), 7)
+        table = QTableWidget(len(self._detail.sessions), 9)
         table.setHorizontalHeaderLabels(
-            ["Buổi", "Ngày", "Trạng thái", "Tiêu đề", "Tính phí", "Đóng góp", "Giải thích"]
+            ["Buổi", "Ngày phân bổ gốc", "Ngày lịch hiện tại", "Trạng thái",
+             "Tiêu đề", "Tính phí", "Đóng góp", "Được miễn", "Giải thích"]
         )
         for row, session in enumerate(self._detail.sessions):
             table.setItem(row, 0, self._readonly_item(session.session_number))
             table.setItem(row, 1, self._readonly_item(session.effective_date.strftime("%d/%m/%Y")))
-            table.setItem(row, 2, self._readonly_item(session.status))
-            table.setItem(row, 3, self._readonly_item(session.title))
-            table.setItem(row, 4, self._readonly_item("Có" if session.billable else "Không"))
-            table.setItem(row, 5, self._readonly_item(_money(session.billing_contribution)))
-            table.setItem(row, 6, self._readonly_item(session.explanation))
+            table.setItem(row, 2, self._readonly_item(session.scheduled_date.strftime("%d/%m/%Y")))
+            table.setItem(row, 3, self._readonly_item(session.status))
+            table.setItem(row, 4, self._readonly_item(session.title))
+            table.setItem(row, 5, self._readonly_item("Có" if session.billable else "Không"))
+            table.setItem(row, 6, self._readonly_item(_money(session.billing_contribution)))
+            table.setItem(row, 7, self._readonly_item(_money(session.waived_amount)))
+            table.setItem(row, 8, self._readonly_item(session.explanation))
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setStretchLastSection(True)
         table.setAlternatingRowColors(True)
