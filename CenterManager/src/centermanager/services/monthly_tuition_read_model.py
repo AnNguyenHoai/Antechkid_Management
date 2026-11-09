@@ -80,7 +80,15 @@ class MonthlyTuitionReadModel:
             MonthlyTuitionPlanRecord.class_id == enrollment.class_id,
             MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
         )).all()
-        allocated_ids = {int(row.session_id) for row in all_allocations}
+        # Plans activated for other students BEFORE this Enrollment opts in
+        # must remain legacy for this Enrollment. Exclude only allocations
+        # actually covered by its own future-only monthly term.
+        allocated_ids = {
+            int(row.session_id) for row in all_allocations
+            if row.original_date >= term.effective_from
+            and (term.effective_until is None
+                 or row.original_date <= term.effective_until)
+        }
         legacy_sessions = [
             s for s in sessions
             if s.scheduled_date < term.effective_from and s.id not in allocated_ids
