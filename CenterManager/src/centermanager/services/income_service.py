@@ -759,6 +759,11 @@ class IncomeService:
             raise IncomeValidationError("A reason is required for a non-cash tuition credit.")
 
         payment_period = self._normalize_text(payment_period)
+        if payment_period and payment_period.startswith("TUITION_"):
+            raise IncomeValidationError(
+                "Monthly/quarterly prices cannot be combined with manual credit; "
+                "use an approved adjustment workflow."
+            )
         _, actor_name = self._actor()
         actor = get_current_user()
         received_by = self._normalize_text(received_by) or actor_name
