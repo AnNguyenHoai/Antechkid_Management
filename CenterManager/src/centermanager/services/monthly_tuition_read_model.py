@@ -112,14 +112,27 @@ class MonthlyTuitionReadModel:
         # A replacement lesson is a makeup for an already-billed original,
         # not a new monthly obligation. It may occur in a later month before
         # that month's plan exists; never require a second plan/fee for it.
-        active_replacements = set(db.scalars(select(
-            MonthlyTuitionOutcomeRecord.replacement_session_id
-        ).where(
-            MonthlyTuitionOutcomeRecord.enrollment_id == enrollment.id,
-            MonthlyTuitionOutcomeRecord.replacement_session_id.is_not(None),
-            MonthlyTuitionOutcomeRecord.outcome == "RESCHEDULED",
-            MonthlyTuitionOutcomeRecord.effective_date <= as_of_date,
-        )).all())
+        # Replay the latest approved outcome first. An old RESCHEDULED
+        # revision cannot permanently exempt a replacement after a newer
+        # decision supersedes it.
+        outcome_rows = db.scalars(select(MonthlyTuitionOutcomeRecord).where(
+            MonthlyTuitionOutcomeRecord.enrollment_id == enrollment.id
+        )).all()
+        latest = {}
+        for event in outcome_rows:
+            if event.effective_date > as_of_date:
+                continue
+            prior = latest.get(event.session_id)
+            if prior is None or event.revision > prior.revision:
+                latest[event.session_id] = event
+            elif event.revision == prior.revision:
+                raise TuitionAccrualUnresolvedError("Conflicting event revisions")
+        active_replacements = {
+            event.replacement_session_id
+            for event in latest.values()
+            if event.outcome == "RESCHEDULED"
+            and event.replacement_session_id is not None
+        }
         known_session_months = {
             s.scheduled_date.replace(day=1) for s in sessions
             if s.id not in allocated_ids and s.id not in active_replacements
@@ -142,19 +155,7 @@ class MonthlyTuitionReadModel:
                 "Monthly lesson lacks immutable allocation or approved makeup decision"
             )
 
-        # Outcomes are append-only and versioned; replay uses latest revision.
-        outcome_rows = db.scalars(select(MonthlyTuitionOutcomeRecord).where(
-            MonthlyTuitionOutcomeRecord.enrollment_id == enrollment.id
-        )).all()
-        latest = {}
-        for event in outcome_rows:
-            if event.effective_date > as_of_date:
-                continue
-            prior = latest.get(event.session_id)
-            if prior is None or event.revision > prior.revision:
-                latest[event.session_id] = event
-            elif event.revision == prior.revision:
-                raise TuitionAccrualUnresolvedError("Conflicting event revisions")
+        # The same latest-event replay controls both makeup eligibility and waiver.
         gross, cancelled = 0, 0
         contributions = []
         cancelled_contributions = []
