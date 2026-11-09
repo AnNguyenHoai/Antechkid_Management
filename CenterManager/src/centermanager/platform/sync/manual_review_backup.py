@@ -92,7 +92,7 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
                 # Reserve margin under MAX_PATH for destination creation and
                 # temporary backups, while supporting unicode names in sources.
                 stored_rel = rel
-                if os.name == "nt" and len(os.fspath(destination / rel)) > 225:
+                if len(os.fspath(destination / rel)) > 225:
                     stored_rel = Path("long-paths") / hashlib.sha256(
                         rel.as_posix().encode("utf-8")
                     ).hexdigest()
