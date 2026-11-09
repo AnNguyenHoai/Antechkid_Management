@@ -420,3 +420,35 @@ def test_group_a_f02_cancellation_uses_original_month_after_date_change(monthly_
         )
         assert projection.cancelled_vnd == Decimal("400000")
         assert projection.accrued_vnd == Decimal("400000")
+
+
+def test_group_a_f02_cancellation_cannot_credit_pre_enrollment_session(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    import centermanager.services.monthly_tuition_class_cancellation as module
+    from centermanager.services.monthly_tuition_class_cancellation import MonthlyTuitionClassCancellationService
+    monkeypatch.setattr(module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        enrollment.enrolled_from_session = 2
+        lesson = db.get(Session, 1)
+        lesson.status = "Scheduled"
+        db.commit()
+    result = MonthlyTuitionClassCancellationService(monthly_db)._apply_no_makeup(
+        1, 1, reason="No makeup", cancel_first=True,
+    )
+    assert result == 0
+    with monthly_db() as db:
+        assert db.get(Session, 1).status == "Cancelled"
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 0
+
+
+def test_group_a_f04_factory_builds_real_trusted_preflight(monthly_db, tmp_path):
+    from centermanager.services.monthly_tuition_enrollment_service import MonthlyTuitionEnrollmentService
+    from centermanager.services.monthly_tuition_verified_preflight import VerifiedMonthlyTuitionPreflight
+    service = MonthlyTuitionEnrollmentService.from_verified_backup(
+        monthly_db, backup_path=tmp_path / "backup",
+    )
+    assert isinstance(service._verified_preflight, VerifiedMonthlyTuitionPreflight)
+    # Without a managed verified backup, do not allow fake success.
+    assert service._verified_preflight._backup_verified() is False
