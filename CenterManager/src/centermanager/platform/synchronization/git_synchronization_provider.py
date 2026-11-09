@@ -200,7 +200,8 @@ class GitSynchronizationProvider(SynchronizationProvider):
 
     # ===== Clone =====
 
-    def clone(self, progress_callback: Optional[Callable] = None, *, preclone_capture=None) -> bool:
+    def clone(self, progress_callback: Optional[Callable] = None, *, preclone_capture=None,
+              review_only_startup: bool = False) -> bool:
         if not GIT_AVAILABLE:
             raise GitNotInstalledError("GitPython is not installed")
 
@@ -214,7 +215,16 @@ class GitSynchronizationProvider(SynchronizationProvider):
         logger.info(f"Cloning repository from {self._repository_url} to {self._repo_path}")
 
         from centermanager.platform.write_recovery import require_replaceable
-        if preclone_capture is None:
+        if review_only_startup:
+            # A missing repository can be cloned without touching the old
+            # runtime DB or Recovery journal. The authoritative MAIN proof
+            # is required later before runtime installation/WRITE receipt.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed or (self._repo_path / ".git").exists():
+                    raise RuntimeError("Review-only clone requires no active editor/repository")
+        elif preclone_capture is None:
             require_replaceable()
         else:
             # Narrow migration exception: allow clone only when the existing
