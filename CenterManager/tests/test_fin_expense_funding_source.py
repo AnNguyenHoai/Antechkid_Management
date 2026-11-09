@@ -271,3 +271,70 @@ def test_migration_normalizes_legacy_rows_outside_confirmed_periods(migration_db
     assert result[4] == ("Cash", "Pending", None, None)
     # Inside a CONFIRMED settlement period: untouched.
     assert result[5] == ("TÀI KHOẢN CÔNG TY", "CHƯA HOÀN TRẢ", None, None)
+
+
+def test_october_personal_advance_repaid_in_november_is_november_cashflow(expense_env):
+    """Original spend stays October; company wallet posts only on Nov reimbursement."""
+    factory, service = expense_env
+    expense = _create(service, "PERSONAL", day=date(2026, 10, 10), amount=200_000)
+    with factory.begin() as session:
+        session.add(FinancialSettlement(
+            finance_period_start=date(2026, 10, 1),
+            finance_period_end=date(2026, 10, 31),
+            status=FinancialSettlement.STATUS_CONFIRMED,
+        ))
+    set_clock(Clock(now_fn=lambda: datetime(2026, 11, 9, 9, 0),
+                    today_fn=lambda: date(2026, 11, 9)))
+    paid = service.reimburse_expense(
+        expense.id, wallet="BANK", reimbursement_date=date(2026, 11, 5)
+    )
+    assert paid.incurred_date == date(2026, 10, 10)
+    assert paid.payment_date == date(2026, 11, 5)
+    assert paid.status == "Completed"
+    assert paid.payment_method == "BANK"
+    assert paid.funding_source == Expense.FUNDING_PERSONAL
+    assert float(service.sum_expenses(
+        date_from=date(2026, 10, 1), date_to=date(2026, 10, 31),
+        realized_only=True
+    )) == 0
+    assert float(service.sum_expenses(
+        date_from=date(2026, 11, 1), date_to=date(2026, 11, 30),
+        realized_only=True
+    )) == 200_000
+    with pytest.raises(ExpenseValidationError):
+        service.reimburse_expense(
+            expense.id, wallet="CASH", reimbursement_date=date(2026, 11, 6)
+        )
+    assert service.get_expense(expense.id).payment_date == date(2026, 11, 5)
+
+
+def test_november_reimbursement_cannot_post_into_closed_november(expense_env):
+    factory, service = expense_env
+    expense = _create(service, "PERSONAL", day=date(2026, 10, 10))
+    with factory.begin() as session:
+        session.add(FinancialSettlement(
+            finance_period_start=date(2026, 11, 1),
+            finance_period_end=date(2026, 11, 30),
+            status=FinancialSettlement.STATUS_CONFIRMED,
+        ))
+    set_clock(Clock(now_fn=lambda: datetime(2026, 11, 9, 9, 0),
+                    today_fn=lambda: date(2026, 11, 9)))
+    with pytest.raises(ExpenseValidationError):
+        service.reimburse_expense(expense.id, "BANK", date(2026, 11, 5))
+    still_pending = service.get_expense(expense.id)
+    assert still_pending.status == "Pending"
+    assert still_pending.incurred_date == date(2026, 10, 10)
+
+
+def test_expense_repayment_ui_exposes_direct_button_and_both_dates():
+    root = ROOT / "src" / "centermanager" / "ui" / "finance_workspace"
+    listing = (root / "expense_list_page.py").read_text(encoding="utf-8")
+    detail = (root / "expense_detail_dialog.py").read_text(encoding="utf-8")
+    assert 'SecondaryButton("Hoàn trả khoản đã chọn")' in listing
+    assert 'self.data_table.selection_changed.connect(self._on_expense_selection_changed)' in listing
+    assert 'self.reimburse_btn.clicked.connect(self._reimburse_selected)' in listing
+    assert '"label": "Ngày phát sinh"' in listing
+    assert '"label": "Ngày thanh toán"' in listing
+    assert 'domain_allowed=True' in listing
+    assert 'form.addRow("Ngày phát sinh:", self.incurred_date_label)' in detail
+    assert 'form.addRow("Ngày thanh toán:", self.date_label)' in detail

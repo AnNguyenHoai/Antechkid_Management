@@ -46,6 +46,7 @@ class ExpenseDetailDialog(QDialog):
         self.desc_label.setWordWrap(True)
         self.amount_label = QLabel()
         self.method_label = QLabel()
+        self.incurred_date_label = QLabel()
         self.date_label = QLabel()
         self.paid_by_label = QLabel()
         self.status_label = QLabel()
@@ -56,7 +57,8 @@ class ExpenseDetailDialog(QDialog):
         form.addRow("Description:", self.desc_label)
         form.addRow("Amount:", self.amount_label)
         form.addRow("Payment Method:", self.method_label)
-        form.addRow("Payment Date:", self.date_label)
+        form.addRow("Ngày phát sinh:", self.incurred_date_label)
+        form.addRow("Ngày thanh toán:", self.date_label)
         form.addRow("Paid By:", self.paid_by_label)
         form.addRow("Status:", self.status_label)
         form.addRow("Note:", self.note_label)
@@ -88,7 +90,12 @@ class ExpenseDetailDialog(QDialog):
             self.desc_label.setText(exp.description or "-")
             self.amount_label.setText(f"{exp.amount:,.0f} VND")
             self.method_label.setText(exp.payment_method or "-")
-            self.date_label.setText(exp.payment_date.strftime("%d/%m/%Y"))
+            incurred = getattr(exp, "incurred_date", None) or exp.payment_date
+            self.incurred_date_label.setText(incurred.strftime("%d/%m/%Y"))
+            self.date_label.setText(
+                exp.payment_date.strftime("%d/%m/%Y")
+                if exp.status in ("Completed", "Paid") else "Chưa thanh toán"
+            )
             self.paid_by_label.setText(exp.paid_by or "-")
             self.status_label.setText(exp.status or "-")
             self.note_label.setText(exp.note or "-")

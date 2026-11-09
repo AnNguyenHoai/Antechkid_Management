@@ -74,6 +74,9 @@ class ExpenseListPage(QWidget):
         self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.clicked.connect(self._export_csv)
         top_row.addWidget(self.export_btn)
+        self.reimburse_btn = SecondaryButton("Hoàn trả khoản đã chọn")
+        self.reimburse_btn.clicked.connect(self._reimburse_selected)
+        top_row.addWidget(self.reimburse_btn)
         self.add_btn = PrimaryButton("Thêm chi phí")
         self.add_btn.clicked.connect(self._show_add_dialog)
         top_row.addWidget(self.add_btn)
@@ -114,7 +117,8 @@ class ExpenseListPage(QWidget):
         layout.addWidget(toolbar)
 
         columns = [
-            {"key": "payment_date", "label": "Ngày", "sortable": True},
+            {"key": "incurred_date", "label": "Ngày phát sinh", "sortable": False},
+            {"key": "payment_date", "label": "Ngày thanh toán", "sortable": True},
             {"key": "category", "label": "Danh mục", "sortable": True},
             {"key": "description", "label": "Nội dung", "sortable": True},
             {"key": "amount", "label": "Số tiền", "sortable": True},
@@ -123,6 +127,7 @@ class ExpenseListPage(QWidget):
             {"key": "status", "label": "Trạng thái", "sortable": True},
         ]
         self.data_table = DataTable(columns, page_size=self._page_size, density=TableDensity.COMPACT)
+        self.data_table.selection_changed.connect(self._on_expense_selection_changed)
         self.data_table.sort_requested.connect(self._on_sort)
         self.data_table.page_requested.connect(self._on_page_requested)
         self.data_table.row_double_clicked.connect(self._on_row_double_clicked)
@@ -273,7 +278,10 @@ class ExpenseListPage(QWidget):
 
     def _populate_table(self) -> None:
         data = [{
-            "payment_date": exp.payment_date.strftime("%d/%m/%Y"), "category": exp.category,
+            "incurred_date": (exp.incurred_date or exp.payment_date).strftime("%d/%m/%Y"),
+            "payment_date": (exp.payment_date.strftime("%d/%m/%Y")
+                             if exp.status in ("Completed", "Paid") else "-"),
+            "category": exp.category,
             "description": (exp.description or "")[:50] + ("..." if len(exp.description or "") > 50 else ""),
             "amount": f"{exp.amount:,.0f}", "payment_method": self._wallet_label(exp),
             "paid_by": exp.paid_by or "-", "status": self._status_label(exp),
@@ -308,6 +316,34 @@ class ExpenseListPage(QWidget):
         if funding == "COMPANY":
             return "ĐÃ CHI"
         return exp.status
+
+    def _on_expense_selection_changed(self, rows: list) -> None:
+        """Keep one-click repayment available only for one pending personal advance."""
+        selected = [self._expenses[row] for row in rows if 0 <= row < len(self._expenses)]
+        enabled = (
+            len(selected) == 1 and self._is_personal_pending(selected[0])
+            and self._can_reimburse()
+        )
+        self.reimburse_btn.setEnabled(enabled)
+
+    def _reimburse_selected(self) -> None:
+        selected = self.data_table.table.selectionModel().selectedRows()
+        if len(selected) != 1:
+            return
+        row = selected[0].row()
+        if 0 <= row < len(self._expenses):
+            expense = self._expenses[row]
+            if self._is_personal_pending(expense):
+                self._show_reimburse_dialog(expense)
+
+    def _can_reimburse(self) -> bool:
+        # Finance period of the reimbursement is checked by the service using
+        # the dialog's actual payment date, not by the viewed/old expense period.
+        return can_mutate(
+            write_enabled=self._write_enabled,
+            capability=Capability.FINANCE_EXPENSE_UPDATE,
+            domain_allowed=True,
+        )
 
     def _on_page_requested(self, page: int, page_size: int) -> None:
         self._current_page, self._page_size = page, page_size
@@ -359,7 +395,7 @@ class ExpenseListPage(QWidget):
             menu.addAction("Chứng từ…", lambda: self._show_voucher_dialog(exp.id))
         if self._is_personal_pending(exp):
             reimburse_action = menu.addAction("Hoàn trả…", lambda: self._show_reimburse_dialog(exp))
-            reimburse_action.setEnabled(self._can(Capability.FINANCE_EXPENSE_UPDATE))
+            reimburse_action.setEnabled(self._can_reimburse())
         menu.exec(pos)
 
     def _can_attach_voucher(self) -> bool:
@@ -381,7 +417,11 @@ class ExpenseListPage(QWidget):
         ).exec()
 
     def _show_reimburse_dialog(self, exp) -> None:
-        if not self._ensure_action(Capability.FINANCE_EXPENSE_UPDATE, "reimburse"):
+        if not self._can_reimburse():
+            self._notify("Cần quyền sửa chi phí và phiên WRITE để hoàn trả.")
+            return
+        if self._collaboration_manager is not None and not self._collaboration_manager.ensure_write():
+            self._notify("Cần lấy quyền WRITE trước khi hoàn trả.")
             return
         dialog = ExpenseReimburseDialog(
             self._service,
@@ -466,6 +506,7 @@ class ExpenseListPage(QWidget):
 
     def _apply_action_state(self) -> None:
         self.add_btn.setEnabled(self._can(Capability.FINANCE_EXPENSE_CREATE))
+        self._on_expense_selection_changed(self.data_table.selected_data_indices())
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
