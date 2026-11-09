@@ -137,6 +137,50 @@ class IncomeService:
             raise IncomeValidationError("Amount must be greater than 0.")
         return amount
 
+    @staticmethod
+    def _validate_payment_time_credit_capacity(*, accrued, settled, cash, credit):
+        """Do not turn a noncash tuition waiver into fictitious prepaid credit.
+
+        Called after the exact Enrollment and finance transaction have been
+        resolved and locked. Ordinary *cash* prepayments remain supported.
+        """
+        available = max(
+            Decimal("0"),
+            Decimal(str(accrued)) - Decimal(str(settled)) - Decimal(str(cash)),
+        )
+        if Decimal(str(credit)) > available:
+            raise IncomeValidationError(
+                "Payment-time tuition credit exceeds earned outstanding tuition "
+                "after the cash payment"
+            )
+
+    @staticmethod
+    def _submission_key(value):
+        if value is None:
+            return None  # Legacy/service callers can opt in without rewriting history.
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 120:
+            raise IncomeValidationError("Invalid income submission key")
+        return value.strip()
+
+    @staticmethod
+    def _same_receipt(existing, *, amount, income_type, payment_method,
+                      payment_date, student_id, class_id, enrollment_id,
+                      payment_period, received_by, note):
+        return (
+            existing.status == Income.STATUS_ACTIVE
+            and existing.deleted_at is None
+            and Decimal(str(existing.amount)) == Decimal(str(amount))
+            and existing.income_type == income_type
+            and existing.payment_method == payment_method
+            and existing.payment_date == payment_date
+            and existing.student_id == student_id
+            and existing.class_id == class_id
+            and existing.enrollment_id == enrollment_id
+            and existing.payment_period == payment_period
+            and existing.received_by == received_by
+            and existing.note == note
+        )
+
     def _ensure_payment_time_credit_not_orphaned(self, session, income: Income) -> None:
         """Prevent payment mutations that would detach an immutable credit.
 
@@ -565,7 +609,9 @@ class IncomeService:
         payment_period: Optional[str] = None,
         received_by: Optional[str] = None,
         note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Income:
+        idempotency_key = self._submission_key(idempotency_key)
         amount = self._validate_amount(amount)
         income_type = self._validate_income_type(income_type)
         payment_method = self._validate_payment_method(payment_method)
@@ -590,6 +636,25 @@ class IncomeService:
                 class_name = class_record.name
 
         with self._session_factory() as session:
+            # FIN-03: repository-owned lookup before quote overlap validation;
+            # the original receipt itself already covers its month.
+            income_lookup = self._repository_provider.incomes(session)
+            if idempotency_key is not None:
+                previous = income_lookup.get_by_idempotency_key(idempotency_key)
+                if previous is not None:
+                    if not self._same_receipt(
+                        previous, amount=amount, income_type=income_type,
+                        payment_method=payment_method, payment_date=payment_date,
+                        student_id=student_id, class_id=class_id,
+                        enrollment_id=enrollment_id or previous.enrollment_id,
+                        payment_period=payment_period, received_by=received_by,
+                        note=note,
+                    ) or (enrollment_id is None and income_type == "Tuition"
+                          and previous.enrollment_id is None):
+                        raise IncomeValidationError(
+                            "Income submission key was already used with different details"
+                        )
+                    return previous
             resolved_enrollment = None
             if income_type == "Tuition":
                 resolved_enrollment = self._resolve_tuition_enrollment(
@@ -643,6 +708,7 @@ class IncomeService:
                 received_by=received_by,
                 note=note,
                 status=Income.STATUS_ACTIVE,
+                idempotency_key=idempotency_key,
             )
             repo.add(income)
             repo.flush()
@@ -736,6 +802,7 @@ class IncomeService:
         payment_period: Optional[str] = None,
         received_by: Optional[str] = None,
         note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> tuple[Income, TuitionAdjustment]:
         """Atomically post actual cash/bank received plus one non-cash tuition credit.
 
@@ -743,6 +810,7 @@ class IncomeService:
         settles the remaining tuition obligation without creating a fake wallet
         movement, so accounting cash and tuition settlement stay reconcilable.
         """
+        idempotency_key = self._submission_key(idempotency_key)
         amount = self._validate_amount(amount)
         payment_method = self._validate_payment_method(payment_method)
         if payment_date is None:
@@ -773,6 +841,30 @@ class IncomeService:
         class_name = self._class_name_for_tuition(class_id)
 
         with self._session_factory() as session:
+            # Replayed Save returns its original cash+credit pair. All SQL
+            # reads stay in the repository boundary (EP-ARCH-04).
+            income_lookup = self._repository_provider.incomes(session)
+            adjustment_lookup = self._repository_provider.tuition_adjustments(session)
+            if idempotency_key is not None:
+                previous = income_lookup.get_by_idempotency_key(idempotency_key)
+                if previous is not None:
+                    linked_credit = adjustment_lookup.get_by_idempotency_key(
+                        f"tuition-payment-credit:income:{previous.id}"
+                    )
+                    if not self._same_receipt(
+                        previous, amount=amount, income_type="Tuition",
+                        payment_method=payment_method, payment_date=payment_date,
+                        student_id=student_id, class_id=class_id,
+                        enrollment_id=enrollment_id, payment_period=payment_period,
+                        received_by=received_by, note=note,
+                    ) or linked_credit is None or (
+                        Decimal(str(linked_credit.amount)) != resolved_credit
+                        or linked_credit.reason != resolved_reason
+                    ):
+                        raise IncomeValidationError(
+                            "Income submission key was already used with different details"
+                        )
+                    return previous, linked_credit
             enrollment = self._resolve_tuition_enrollment(
                 session,
                 student_id=int(student_id),
@@ -788,6 +880,38 @@ class IncomeService:
             income_repo = self._repository_provider.incomes(session)
             adjustment_repo = self._repository_provider.tuition_adjustments(session)
 
+            # FIN-01: payment-time discount is a non-cash waiver of *earned*
+            # tuition. Cash may be prepaid, but a waiver may not create an
+            # artificial prepaid credit or exceed the remaining earned debt.
+            # Use the same exact-Enrollment signed settlement calculation as
+            # Outstanding (includes refunds, credits and transfer movements).
+            from centermanager.services.monthly_tuition_read_model import (
+                calculate_effective_tuition_accrual,
+            )
+            from centermanager.services.tuition_accrual_service import (
+                TuitionAccrualUnresolvedError,
+            )
+            try:
+                sessions = self._repository_provider.sessions(session).get_by_class(
+                    enrollment.class_id
+                )
+                accrued = Decimal(str(calculate_effective_tuition_accrual(
+                    session, enrollment, sessions, payment_date,
+                )))
+            except TuitionAccrualUnresolvedError as exc:
+                raise IncomeValidationError(
+                    "Cannot approve a payment-time credit without verified tuition accrual"
+                ) from exc
+            already_settled = Decimal(str(
+                income_repo.sum_active_tuition_for_enrollment(
+                    enrollment.id, as_of_date=payment_date,
+                )
+            ))
+            self._validate_payment_time_credit_capacity(
+                accrued=accrued, settled=already_settled,
+                cash=amount, credit=resolved_credit,
+            )
+
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -802,6 +926,7 @@ class IncomeService:
                 received_by=received_by,
                 note=note,
                 status=Income.STATUS_ACTIVE,
+                idempotency_key=idempotency_key,
             )
             income_repo.add(income)
             income_repo.flush()
@@ -1069,6 +1194,17 @@ class IncomeService:
                         "Monthly/quarterly receipt amount and allocation period cannot be edited; "
                         "void and re-issue through an authorized workflow."
                     )
+
+            # FIN-02: do not allow the edit API to forge an immutable monthly
+            # or quarterly receipt by changing a legacy/free-text period.
+            if payment_period is not None and self._normalize_text(payment_period):
+                proposed_period = self._normalize_text(payment_period)
+                if proposed_period.startswith(("TUITION_MONTH:", "TUITION_QUARTER:")):
+                    if proposed_period != income.payment_period:
+                        raise IncomeValidationError(
+                            "A month/quarter receipt must be created from a verified "
+                            "quote; void and re-issue instead of changing its period"
+                        )
 
             self._ensure_income_period_mutable(session, income)
             self._ensure_payment_time_credit_not_orphaned(session, income)

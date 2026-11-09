@@ -188,10 +188,27 @@ class FinanceAttachmentService:
             if not self._entity_exists(session, entity_type, entity_id):
                 raise FinanceAttachmentValidationError("Khoản thu/chi không tồn tại hoặc đã bị xóa.")
             repo = self._repository_provider.finance_attachments(session)
+            # FIN-04: if the previous upload committed but UI lost its
+            # acknowledgement, return the exact existing voucher instead of
+            # creating duplicate metadata. Ensure runtime content is staged
+            # for the next Git publication before claiming retry success.
+            existing = repo.find_active_sha(entity_type, entity_id, info["sha256"])
+            if existing is not None:
+                # Do not silently recreate a missing Git artifact. Such a
+                # repair needs its own authorized WRITE publication, otherwise
+                # a DB-identical retry could be considered 'clean' and omit
+                # the file from MAIN. Keep the voucher pending for explicit
+                # recovery instead of returning false success.
+                try:
+                    self.resolve_path(existing)
+                except FinanceAttachmentError as exc:
+                    raise FinanceAttachmentValidationError(
+                        "Previously attached voucher content is missing; "
+                        "synchronize/recover the repository before retrying"
+                    ) from exc
+                return existing
             if repo.count_active(entity_type, entity_id) >= self.MAX_FILES_PER_RECORD:
                 raise FinanceAttachmentValidationError("Mỗi khoản tối đa 5 chứng từ.")
-            if repo.exists_active_sha(entity_type, entity_id, info["sha256"]):
-                raise FinanceAttachmentValidationError("Chứng từ này đã được đính kèm cho khoản này.")
             stored_path = self._store_file(Path(source_path), info["sha256"], info["extension"])
             user = get_current_user()
             attachment = FinanceAttachment(

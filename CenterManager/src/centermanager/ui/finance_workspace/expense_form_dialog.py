@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+from uuid import uuid4
 from datetime import date
 from typing import Optional
 from PySide6.QtCore import QDate
@@ -29,6 +30,8 @@ class ExpenseFormDialog(QDialog):
         self._service = expense_service
         self._expense_id = expense_id
         self._is_edit = expense_id is not None
+        self._submission_key = f"expense:{uuid4()}"
+        self._saved_expense_id = None  # primary posting may precede voucher retry
         self._initial_payment_date = initial_payment_date or get_clock().today()
         self._loaded_category: Optional[str] = None
         self._loaded_description: Optional[str] = None
@@ -220,6 +223,12 @@ class ExpenseFormDialog(QDialog):
             self.reject()
 
     def _save(self):
+        # FIN-04: if cash was committed, retry only failed vouchers. Never
+        # re-quote an already covered month or create a second ledger entry.
+        if not self._is_edit and self._saved_expense_id is not None:
+            if self._commit_vouchers(self._saved_expense_id):
+                self.accept()
+            return
         category = self.category_combo.currentText()
         description = self.desc_edit.toPlainText().strip()
         amount = self.amount_spin.value()
@@ -269,8 +278,11 @@ class ExpenseFormDialog(QDialog):
                     paid_by=paid_by or None,
                     status=status,
                     note=note or None,
+                    idempotency_key=self._submission_key,
                 )
-                self._commit_vouchers(getattr(created, "id", None))
+                self._saved_expense_id = getattr(created, "id", None)
+                if not self._commit_vouchers(self._saved_expense_id):
+                    return  # keep original Save key and failed files for retry
             self.accept()
         except ExpenseValidationError as exc:
             QMessageBox.warning(self, "Validation Error", str(exc))
@@ -280,7 +292,7 @@ class ExpenseFormDialog(QDialog):
 
     def _commit_vouchers(self, expense_id) -> None:
         if self.voucher_widget is None or expense_id is None:
-            return
+            return True
         errors = self.voucher_widget.commit_pending(expense_id)
         if errors:
             QMessageBox.warning(
@@ -288,3 +300,5 @@ class ExpenseFormDialog(QDialog):
                 "Chứng từ",
                 "Khoản chi đã được lưu nhưng một số chứng từ chưa đính kèm được:\n" + "\n".join(errors),
             )
+            return False
+        return True
