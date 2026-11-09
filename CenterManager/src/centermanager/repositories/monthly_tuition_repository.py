@@ -14,7 +14,7 @@ from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
 from centermanager.models.monthly_tuition import (
     EnrollmentMonthlyTuitionTerm, MonthlyTuitionAllocationRecord,
-    MonthlyTuitionOutcomeRecord, MonthlyTuitionPlanRecord,
+    MonthlyTuitionOutcomeRecord, MonthlyTuitionPlanRecord, MonthlyClassDefaultRecord,
 )
 from centermanager.models.session import Session as TeachingSession
 
@@ -22,6 +22,13 @@ from centermanager.models.session import Session as TeachingSession
 class MonthlyTuitionRepository:
     def __init__(self, session: Session):
         self._session = session
+
+    def class_default(self, class_id: int):
+        """Repository-owned monthly class policy query (None for legacy)."""
+        return self._session.get(MonthlyClassDefaultRecord, class_id)
+
+    def flush(self) -> None:
+        self._session.flush()
 
     def enrollment(self, enrollment_id: int):
         return self._session.get(Enrollment, enrollment_id)
