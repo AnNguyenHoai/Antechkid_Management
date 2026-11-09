@@ -2,7 +2,7 @@
 """Canonical Enrollment lifecycle service."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Callable, List, Optional
@@ -11,6 +11,10 @@ from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.enrollment import Enrollment
+from centermanager.models.monthly_tuition import (
+    MonthlyClassDefaultRecord, EnrollmentMonthlyTuitionTerm,
+    MonthlyTuitionPlanRecord,
+)
 from centermanager.models.enrollment_freeze import EnrollmentFreeze
 from centermanager.models.session import SessionStatus
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
@@ -372,6 +376,25 @@ class EnrollmentService:
             if student is None or student.deleted_at is not None:
                 raise EnrollmentError("Student not found or inactive.")
             repo = self._repository_provider.enrollments(session)
+            monthly_default = session.get(MonthlyClassDefaultRecord, class_id)
+            if monthly_default is not None:
+                # New monthly enrollments have NO historical tuition to migrate.
+                # Require a published plan before accepting a paid contract.
+                resolved_start = start_date or get_clock().today()
+                start_month = resolved_start.replace(day=1)
+                if start_month < monthly_default.effective_month:
+                    raise EnrollmentValidationError(
+                        "Enrollment starts before monthly class policy begins."
+                    )
+                active_plan = session.query(MonthlyTuitionPlanRecord).filter(
+                    MonthlyTuitionPlanRecord.class_id == class_id,
+                    MonthlyTuitionPlanRecord.month == start_month,
+                    MonthlyTuitionPlanRecord.status == "ACTIVE",
+                ).first()
+                if active_plan is None:
+                    raise EnrollmentValidationError(
+                        "Please activate this class's monthly session plan before enrolling students."
+                    )
             if repo.exists(student_id, class_id, active_only=True):
                 raise EnrollmentAlreadyActiveError("Student already has an active enrollment in this class.")
             if class_obj.capacity is not None and len(repo.get_active_by_class(class_id)) >= class_obj.capacity:
@@ -430,11 +453,26 @@ class EnrollmentService:
                 class_id=class_id,
                 class_name=class_obj.name,
                 course_name=class_obj.course,
-                start_date=start_date or class_obj.start_date or get_clock().today(),
+                start_date=(start_date or get_clock().today()) if monthly_default is not None
+                           else (start_date or class_obj.start_date or get_clock().today()),
                 status=EnrollmentStatus.ACTIVE.value,
                 **tuition_snapshot,
             )
             repo.add(enrollment)
+            if monthly_default is not None:
+                actor_name = getattr(resolved_actor, "username", None)
+                if not actor_name:
+                    raise EnrollmentValidationError("Authenticated actor is required for monthly enrollment.")
+                # Same SQLCipher transaction as Enrollment; no legacy migration,
+                # no admin-only override required for a *new* monthly contract.
+                session.flush()
+                session.add(EnrollmentMonthlyTuitionTerm(
+                    enrollment_id=enrollment.id,
+                    effective_from=start_month,
+                    effective_until=None,
+                    activated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    activated_by=actor_name,
+                ))
             needs_discount_audit = bool(
                 tuition_snapshot["discount_amount"] > 0 and tuition_snapshot.get("discount_source")
             )
