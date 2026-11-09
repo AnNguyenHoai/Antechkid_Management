@@ -58,18 +58,16 @@ class MonthlyTuitionOutcomeService:
             lesson = repo.teaching_session(session_id)
             if enrollment is None or lesson is None or enrollment.class_id != lesson.class_id:
                 raise MonthlyOutcomeError("Session does not belong to Enrollment class")
-            term = repo.term(enrollment_id)
-            if term is None or lesson.scheduled_date < term.effective_from:
-                raise MonthlyOutcomeError("Session is not covered by activated monthly contract")
-            plan = repo.active_plan(
-                enrollment.class_id, lesson.scheduled_date.replace(day=1),
-                allow_closed=True,
+            allocation = repo.active_allocation_for_session(
+                enrollment.class_id, session_id,
             )
-            if plan is None:
-                raise MonthlyOutcomeError("No activated monthly tuition plan for this lesson")
-            allocation = repo.allocation(plan.id, session_id)
             if allocation is None:
-                raise MonthlyOutcomeError("Session has no immutable monthly fee allocation")
+                raise MonthlyOutcomeError("Session has no immutable activated monthly fee allocation")
+            term = repo.term(enrollment_id)
+            if (term is None or allocation.original_date < term.effective_from
+                    or (term.effective_until is not None
+                        and allocation.original_date > term.effective_until)):
+                raise MonthlyOutcomeError("Session is not covered by activated monthly contract")
             if outcome == SessionBillingOutcome.CENTRE_CANCELLED_NO_MAKEUP:
                 if lesson.status != SessionStatus.CANCELLED.value:
                     raise MonthlyOutcomeError("Only a cancelled center lesson can be waived")
