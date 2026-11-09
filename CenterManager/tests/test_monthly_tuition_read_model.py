@@ -317,3 +317,75 @@ def test_group_a_f02_atomic_cancel_waiver_is_idempotent(monthly_db, monkeypatch)
             db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31),
         )
         assert projection.cancelled_vnd == Decimal("400000")
+
+
+def test_group_a_f02_unresolved_monthly_cancellation_does_not_appear_as_zero_debt(monthly_db):
+    from centermanager.services.outstanding_service import OutstandingService
+    from types import SimpleNamespace
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Cancelled"
+        db.flush()
+        provider = SimpleNamespace(sessions=lambda _: SimpleNamespace(
+            get_by_class=lambda class_id: db.query(Session).filter(
+                Session.class_id == class_id,
+            ).all(),
+        ))
+        service = OutstandingService(monthly_db, repository_provider=provider)
+        with pytest.raises(TuitionAccrualUnresolvedError, match="approved billing outcome"):
+            service._calculate_accrued(db, db.get(Enrollment, 1),
+                                       as_of_date=date(2040, 1, 31))
+
+
+def test_group_a_f01_income_picker_uses_same_accrual_as_outstanding(monthly_db):
+    from types import SimpleNamespace
+    from centermanager.services.income_service import IncomeService
+    from centermanager.services.monthly_tuition_read_model import calculate_effective_tuition_accrual
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        provider = SimpleNamespace(
+            students=lambda _: SimpleNamespace(get_by_id=lambda _: SimpleNamespace(
+                full_name="Test student", student_code="S001", status="ACTIVE",
+            )),
+            classes=lambda _: SimpleNamespace(get_by_id=lambda _: db.get(Class, 1)),
+            sessions=lambda _: SimpleNamespace(get_by_class=lambda _: db.query(Session).all()),
+            incomes=lambda _: SimpleNamespace(sum_active_tuition_for_enrollment=lambda *a, **kw: 0),
+        )
+        service = IncomeService.__new__(IncomeService)
+        service._repository_provider = provider
+        choice = service._tuition_choice_from_enrollment(db, enrollment)
+        expected = calculate_effective_tuition_accrual(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31),
+        )
+        # Income picker uses current clock, not the 2040 reporting date.
+        # Before the opt-in month, the same policy projects zero accrued.
+        assert choice.outstanding == Decimal("0")
+        assert expected == Decimal("800000")
+
+
+def test_group_a_f04_verified_backup_write_preflight(tmp_path, monthly_db, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from datetime import datetime
+    import centermanager.services.monthly_tuition_verified_preflight as module
+    from centermanager.services.monthly_tuition_verified_preflight import VerifiedMonthlyTuitionPreflight
+    from centermanager.services.monthly_tuition_migration_gate import assess_enrollment_migration
+    backup = tmp_path / "managed_backup"
+    backup.mkdir()
+    (backup / "manifest.json").write_text(json.dumps({
+        "database_encrypted": True, "created_at": datetime.now().isoformat(),
+    }), encoding="utf-8")
+    monkeypatch.setattr(module, "database_encryption_required", lambda: True)
+    instance = VerifiedMonthlyTuitionPreflight(
+        backup, reconciliation_verifier=lambda db, enrollment: False,
+        backup_service=SimpleNamespace(_validate_backup=lambda path: (True, "")),
+        write_verifier=lambda: True,
+    )
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        evidence = instance(db, enrollment, date(2040, 1, 1))
+        assert assess_enrollment_migration(evidence).may_activate
+        (backup / "manifest.json").write_text(json.dumps({
+            "database_encrypted": False, "created_at": datetime.now().isoformat(),
+        }), encoding="utf-8")
+        evidence = instance(db, enrollment, date(2040, 1, 1))
+        assert not assess_enrollment_migration(evidence).may_activate
