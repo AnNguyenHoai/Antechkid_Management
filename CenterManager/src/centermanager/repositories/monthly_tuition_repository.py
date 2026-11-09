@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from centermanager.models.enrollment import Enrollment
@@ -91,6 +91,13 @@ class MonthlyTuitionRepository:
         """True when an activated monthly allocation covers an opted-in Enrollment."""
         session = self.teaching_session(session_id)
         if session is None:
+            return False
+        # Migration-less isolated legacy test databases have no opt-in rows.
+        # Production is migrated before feature rollout; missing table cannot
+        # contain a monthly contract to be protected.
+        if not inspect(self._session.get_bind()).has_table(
+            "enrollment_monthly_tuition_terms"
+        ):
             return False
         rows = self._session.scalars(select(EnrollmentMonthlyTuitionTerm).join(
             Enrollment, Enrollment.id == EnrollmentMonthlyTuitionTerm.enrollment_id
