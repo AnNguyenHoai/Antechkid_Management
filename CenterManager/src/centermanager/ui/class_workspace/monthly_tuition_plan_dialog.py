@@ -11,10 +11,11 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QDateEdit, QSpinBox,
     QLineEdit, QPushButton, QLabel, QTableWidget, QTableWidgetItem,
-    QHBoxLayout, QMessageBox,
+    QHBoxLayout, QMessageBox, QCheckBox,
 )
 
 from centermanager.services.monthly_tuition_plan_store import MonthlyTuitionPlanStore
+from centermanager.services.monthly_class_schedule_service import MonthlyClassScheduleService
 from centermanager.services.tuition_v1_uat_gate import tuition_v1_uat_enabled
 from centermanager.ui.class_workspace.monthly_tuition_opt_in_dialog import MonthlyTuitionOptInDialog
 
@@ -26,6 +27,8 @@ class MonthlyTuitionPlanDialog(QDialog):
         self.setMinimumWidth(540)
         self._class_id = class_id
         self._store = MonthlyTuitionPlanStore(session_factory)
+        self._schedule_service = MonthlyClassScheduleService(session_factory)
+        self._monthly_settings = self._schedule_service.settings(class_id)
         self._draft_id = None
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -33,16 +36,42 @@ class MonthlyTuitionPlanDialog(QDialog):
         self.month.setCalendarPopup(True)
         self.month.setDisplayFormat("MM/yyyy")
         self.month.setDate(QDate(self.month.date().year(), self.month.date().month(), 1))
+        if self._monthly_settings is not None:
+            first = self._monthly_settings["effective_month"]
+            self.month.setDate(QDate(first.year, first.month, 1))
         self.fee = QSpinBox()
         self.fee.setRange(0, 2_000_000_000)
         self.fee.setSingleStep(50_000)
-        self.fee.setValue(800_000)
+        self.fee.setValue(
+            self._monthly_settings["monthly_fee_vnd"]
+            if self._monthly_settings is not None else 800_000
+        )
+        self.fee.setReadOnly(self._monthly_settings is not None)
         self.fee.setSuffix(" VND")
         self.schedule_version = QLineEdit("manual-v1")
         form.addRow("Tháng áp dụng", self.month)
         form.addRow("Học phí/tháng", self.fee)
         form.addRow("Phiên bản lịch", self.schedule_version)
         root.addLayout(form)
+        self.weekday_checkboxes = []
+        self.generate_btn = QPushButton("Tạo đủ buổi theo lịch tuần")
+        if self._monthly_settings is not None:
+            root.addWidget(QLabel("Chọn đúng số thứ học mỗi tuần để tạo toàn bộ lịch gốc"))
+            days_row = QHBoxLayout()
+            names = ("T2", "T3", "T4", "T5", "T6", "T7", "CN")
+            existing = self._monthly_settings["weekly_days"]
+            suggested = existing or ((5, 6) if self._monthly_settings["sessions_per_week"] == 2 else ())
+            for i, name in enumerate(names):
+                checkbox = QCheckBox(name)
+                checkbox.setChecked(i in suggested)
+                checkbox.setEnabled(not bool(existing))
+                days_row.addWidget(checkbox)
+                self.weekday_checkboxes.append(checkbox)
+            root.addLayout(days_row)
+            root.addWidget(self.generate_btn)
+            self.generate_btn.clicked.connect(self._generate_month_sessions)
+        else:
+            self.generate_btn.setVisible(False)
         self.notice = QLabel("Xem trước trước khi lưu. Kích hoạt sẽ đóng băng giá từng buổi.")
         self.notice.setWordWrap(True)
         root.addWidget(self.notice)
@@ -69,6 +98,41 @@ class MonthlyTuitionPlanDialog(QDialog):
         self.month.dateChanged.connect(self._invalidate_draft)
         self.fee.valueChanged.connect(self._invalidate_draft)
         self.schedule_version.textChanged.connect(self._invalidate_draft)
+
+    def _generate_month_sessions(self):
+        if self._monthly_settings is None:
+            return
+        weekdays = tuple(i for i, checked in enumerate(self.weekday_checkboxes)
+                         if checked.isChecked())
+        if len(weekdays) != self._monthly_settings["sessions_per_week"]:
+            QMessageBox.warning(
+                self, "Lịch tuần không hợp lệ",
+                f"Chọn đúng {self._monthly_settings['sessions_per_week']} thứ học."
+            )
+            return
+        choice = QMessageBox.question(
+            self, "Tạo lịch gốc",
+            f"Tạo buổi học tháng {self._month_date():%m/%Y} theo lịch đã chọn? "
+            "Các buổi gốc sẽ được dùng để phân bổ học phí. "
+            "Không tự tạo điểm danh hoặc Income.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            count = self._schedule_service.create_month_sessions(
+                self._class_id, self._month_date(), weekdays
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Không thể tạo lịch", str(exc))
+            return
+        for checked in self.weekday_checkboxes:
+            checked.setEnabled(False)
+        self.notice.setText(
+            f"Đã có đủ {count} buổi. Xem trước, lưu nháp và kích hoạt kế hoạch tháng."
+        )
+        self.preview()
 
     def _invalidate_draft(self):
         self._draft_id = None
