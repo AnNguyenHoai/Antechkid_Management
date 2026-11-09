@@ -194,16 +194,31 @@ class FinanceAttachmentService:
             # for the next Git publication before claiming retry success.
             existing = repo.find_active_sha(entity_type, entity_id, info["sha256"])
             if existing is not None:
-                stored_path = self._store_file(
-                    Path(source_path), info["sha256"], info["extension"]
-                )
-                if existing.stored_path != stored_path:
-                    # Historical blob may live in a different month: ensure
-                    # its own original path is still accessible for Git sync.
-                    if not self.resolve_path(existing).is_file():
-                        raise FinanceAttachmentValidationError(
-                            "Existing voucher content is missing; reconcile before retry"
-                        )
+                try:
+                    # Published or local original content still exists: no new
+                    # metadata and no duplicate content-addressed file.
+                    if self.resolve_path(existing).is_file():
+                        return existing
+                except FinanceAttachmentError:
+                    pass
+                # Repair only the original immutable path, not a newly
+                # dated alternative. Git Finish Editing will stage it again.
+                relative = Path(existing.stored_path)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise FinanceAttachmentValidationError("Invalid stored voucher path")
+                target = self._attachments_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                handle, temporary = tempfile.mkstemp(prefix=".voucher_", dir=target.parent)
+                os.close(handle)
+                try:
+                    shutil.copyfile(source_path, temporary)
+                    # Temp files have no extension; validate the digest
+                    # directly against the authenticated source identity.
+                    if hashlib.sha256(Path(temporary).read_bytes()).hexdigest() != existing.sha256:
+                        raise FinanceAttachmentValidationError("Voucher digest changed during retry")
+                    os.replace(temporary, target)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
                 return existing
             if repo.count_active(entity_type, entity_id) >= self.MAX_FILES_PER_RECORD:
                 raise FinanceAttachmentValidationError("Mỗi khoản tối đa 5 chứng từ.")
