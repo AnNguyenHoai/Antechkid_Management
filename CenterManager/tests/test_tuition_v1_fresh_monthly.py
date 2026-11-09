@@ -166,3 +166,58 @@ def test_production_class_dialog_offers_monthly_without_exposing_legacy_uat():
     assert 'kwargs["monthly_fee_vnd"]' in dialog
     detail = (root / "class_workspace" / "class_detail_page.py").read_text(encoding="utf-8")
     assert 'or monthly_policy is not None' in detail
+
+
+def test_new_class_creation_persists_monthly_default_atomically(monkeypatch):
+    from datetime import timedelta
+    import centermanager.services.class_service as class_module
+    from centermanager.services.class_service import ClassService
+    from centermanager.core.clock import get_clock
+
+    today = get_clock().today()
+    first = today.replace(day=1)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(class_module, "get_current_user", lambda: SimpleNamespace(username="admin"))
+    monkeypatch.setattr(class_module, "record_for_active_write", lambda *a, **kw: None)
+    monkeypatch.setattr(class_module, "mirror_after_successful_commit", lambda *a, **kw: None)
+    try:
+        service = ClassService(factory)
+        monthly = service.create_class(
+            "New monthly", start_date=first, end_date=first + timedelta(days=90),
+            course_fee=0, duration_months=4, planned_sessions=40, sessions_per_week=2,
+            monthly_fee_vnd=700000, monthly_effective_month=first,
+        )
+        assert service.get_monthly_class_default(monthly.id) == (700000, first)
+        legacy = service.create_class(
+            "Old style", start_date=first, end_date=first + timedelta(days=90),
+            course_fee=2800000, duration_months=4, planned_sessions=32, sessions_per_week=2,
+        )
+        assert service.get_monthly_class_default(legacy.id) is None
+        with factory() as db:
+            assert db.query(MonthlyClassDefaultRecord).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_monthly_policy_rejects_dual_legacy_fee(monkeypatch):
+    from datetime import timedelta
+    from centermanager.services.class_service import ClassService, ClassValidationError
+    from centermanager.core.clock import get_clock
+    today = get_clock().today()
+    first = today.replace(day=1)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    try:
+        with pytest.raises(ClassValidationError, match="legacy course fee"):
+            ClassService(factory).create_class(
+                "Invalid dual pricing", start_date=first, end_date=first + timedelta(days=90),
+                course_fee=2800000, duration_months=4, planned_sessions=40,
+                sessions_per_week=2, monthly_fee_vnd=700000, monthly_effective_month=first,
+            )
+        with factory() as db:
+            assert db.query(Class).count() == 0
+    finally:
+        engine.dispose()
