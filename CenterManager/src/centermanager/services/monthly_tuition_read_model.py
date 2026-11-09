@@ -128,6 +128,19 @@ class MonthlyTuitionReadModel:
         }
         if known_session_months - set(by_month):
             raise TuitionAccrualUnresolvedError("Missing activated monthly tuition plan")
+        # Once a class/month plan is ACTIVE, a newly inserted ordinary session
+        # must not be silently free or accidentally billed as an extra lesson.
+        # Only an explicit RESCHEDULED replacement is exempt from allocation.
+        if any(
+            s.id not in allocated_ids and s.id not in active_replacements
+            and term.effective_from <= s.scheduled_date <= as_of_date
+            and (term.effective_until is None
+                 or s.scheduled_date <= term.effective_until)
+            for s in sessions
+        ):
+            raise TuitionAccrualUnresolvedError(
+                "Monthly lesson lacks immutable allocation or approved makeup decision"
+            )
 
         # Outcomes are append-only and versioned; replay uses latest revision.
         outcome_rows = db.scalars(select(MonthlyTuitionOutcomeRecord).where(
