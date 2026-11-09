@@ -153,8 +153,12 @@ def prepare(package: Path, target: Path, remote: Path) -> None:
     upgrade_fresh_runtime_database_to_head()
     engine = create_production_engine(echo=False)
     try:
+        from centermanager.database.mutation_authority import system_mutation_permit
         Session = sessionmaker(bind=engine)
-        with Session() as session:
+        # This helper has already proven target/remote absent and created
+        # an entirely new SQLCipher container. Seeding baseline users/roles
+        # is bootstrap maintenance, NOT an interactive Git WRITE session.
+        with system_mutation_permit("bootstrap"), Session() as session:
             seed_roles_and_permissions(session)
     finally:
         engine.dispose()
