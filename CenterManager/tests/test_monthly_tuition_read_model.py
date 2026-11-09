@@ -375,6 +375,9 @@ def test_group_a_f04_verified_backup_write_preflight(tmp_path, monthly_db, monke
         "database_encrypted": True, "created_at": datetime.now().isoformat(),
     }), encoding="utf-8")
     monkeypatch.setattr(module, "database_encryption_required", lambda: True)
+    with monthly_db() as db:
+        db.query(EnrollmentMonthlyTuitionTerm).delete()
+        db.commit()
     instance = VerifiedMonthlyTuitionPreflight(
         backup, reconciliation_verifier=lambda db, enrollment: False,
         backup_service=SimpleNamespace(_validate_backup=lambda path: (True, "")),
