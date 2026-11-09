@@ -87,6 +87,17 @@ class MonthlyTuitionRepository:
         )).all()
         return plan, tuple(allocations)
 
+    def active_quoted_payment_periods(self, enrollment_id: int) -> tuple[str, ...]:
+        """Existing real tuition receipts; VOIDED rows cannot block a reissue."""
+        values = self._session.scalars(select(Income.payment_period).where(
+            Income.enrollment_id == enrollment_id,
+            Income.income_type == "Tuition",
+            Income.status == Income.STATUS_ACTIVE,
+            Income.deleted_at.is_(None),
+            Income.payment_period.is_not(None),
+        )).all()
+        return tuple(str(value) for value in values if value is not None)
+
     def active_allocation_for_session(self, class_id: int, session_id: int):
         """Find the immutable original monthly plan, irrespective of reschedule."""
         rows = self._session.scalars(select(MonthlyTuitionAllocationRecord).join(
