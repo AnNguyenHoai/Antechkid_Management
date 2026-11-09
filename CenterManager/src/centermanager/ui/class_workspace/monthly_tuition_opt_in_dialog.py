@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.platform.backup.backup_service import BackupService
-from centermanager.repositories.provider import create_default_repository_provider
 from centermanager.services.monthly_tuition_enrollment_service import (
     MonthlyTuitionEnrollmentService,
 )
@@ -30,7 +29,7 @@ class MonthlyTuitionOptInDialog(QDialog):
             raise PermissionError("Tuition Engine V1 UAT mode is disabled")
         self._class_id = int(class_id)
         self._factory = session_factory
-        self._provider = create_default_repository_provider()
+        self._service = MonthlyTuitionEnrollmentService(session_factory)
         self._backup_path = None
         self.setWindowTitle("THỬ NGHIỆM · Chuyển học sinh sang học phí tháng")
         self.setMinimumWidth(560)
@@ -74,15 +73,15 @@ class MonthlyTuitionOptInDialog(QDialog):
 
     def _reload_enrollments(self) -> None:
         self.enrollment.clear()
-        with self._factory() as db:
-            rows = self._provider.enrollments(db).get_active_by_class(self._class_id)
-            for row in rows:
-                current = self._provider.monthly_tuition(db).term(row.id)
-                name = getattr(row.student, "full_name", None) or f"Student #{row.student_id}"
-                state = "đã chuyển" if current is not None else "chưa chuyển"
-                self.enrollment.addItem(f"{name} · Enrollment #{row.id} ({state})", row.id)
-                if current is not None:
-                    self.enrollment.model().item(self.enrollment.count() - 1).setEnabled(False)
+        for enrollment_id, name, already_monthly in self._service.list_class_enrollments(
+            self._class_id
+        ):
+            state = "đã chuyển" if already_monthly else "chưa chuyển"
+            self.enrollment.addItem(
+                f"{name} · Enrollment #{enrollment_id} ({state})", enrollment_id,
+            )
+            if already_monthly:
+                self.enrollment.model().item(self.enrollment.count() - 1).setEnabled(False)
         self._clear_stale_backup()
 
     def _clear_stale_backup(self, *_args) -> None:
@@ -127,7 +126,6 @@ class MonthlyTuitionOptInDialog(QDialog):
         try:
             service = MonthlyTuitionEnrollmentService.from_verified_backup(
                 self._factory, backup_path=self._backup_path,
-                repository_provider=self._provider,
             )
             service.activate_future_month(int(enrollment_id), first)
         except Exception as exc:
