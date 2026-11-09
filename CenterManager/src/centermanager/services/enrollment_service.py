@@ -380,7 +380,9 @@ class EnrollmentService:
             if monthly_default is not None:
                 # New monthly enrollments have NO historical tuition to migrate.
                 # Require a published plan before accepting a paid contract.
-                resolved_start = start_date or get_clock().today()
+                resolved_start = start_date or max(
+                    get_clock().today(), class_obj.start_date or get_clock().today()
+                )
                 start_month = resolved_start.replace(day=1)
                 if start_month < monthly_default.effective_month:
                     raise EnrollmentValidationError(
@@ -453,8 +455,8 @@ class EnrollmentService:
                 class_id=class_id,
                 class_name=class_obj.name,
                 course_name=class_obj.course,
-                start_date=(start_date or get_clock().today()) if monthly_default is not None
-                           else (start_date or class_obj.start_date or get_clock().today()),
+                start_date=(resolved_start if monthly_default is not None
+                           else (start_date or class_obj.start_date or get_clock().today())),
                 status=EnrollmentStatus.ACTIVE.value,
                 **tuition_snapshot,
             )
