@@ -90,6 +90,8 @@ class MonthlyTuitionClassCancellationService:
                         or (term.effective_until is not None and allocation.original_date > term.effective_until)
                         or (enrollment.start_date is not None and allocation.original_date < enrollment.start_date)
                         or (enrollment.end_date is not None and allocation.original_date > enrollment.end_date)
+                        or (enrollment.enrolled_from_session is not None
+                            and lesson.session_number < enrollment.enrolled_from_session)
                         or (enrollment.withdrawn_from_session is not None
                             and lesson.session_number >= enrollment.withdrawn_from_session)):
                     continue
