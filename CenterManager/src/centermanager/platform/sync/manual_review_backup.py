@@ -18,12 +18,60 @@ class ManualBackupError(RuntimeError):
     pass
 
 
-def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
-    """Copy and verify every existing protected workspace file before replace.
+def _native_path(path: Path) -> Path:
+    """Use Windows extended-length filesystem paths for existing evidence.
 
-    The caller must already have stopped the writer. On a partial copy, leave
-    all source bytes untouched and refuse MAIN replacement; a later boot can
-    retry into another archive. No source file is unlinked or renamed.
+    Long-path policy/registry flags cannot be assumed on customer workstations.
+    The prefix is for local file I/O only, never stored in the signed manifest.
+    """
+    absolute = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as reader:
+        for block in iter(lambda: reader.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _workspace_files(location: Path, category: str, archive_root: Path):
+    """Iterate protected files without descending into prior manual archives."""
+    top = _native_path(location)
+    def _on_error(exc):
+        raise ManualBackupError("Cannot enumerate protected workspace evidence") from exc
+
+    for current, directories, files in os.walk(top, topdown=True, onerror=_on_error):
+        folder = Path(current)
+        safe_directories = []
+        for name in sorted(directories):
+            child = folder / name
+            if category == "recovery" and name == "manual-review" and folder == top:
+                continue  # Never archive prior archives or the destination itself.
+            if child.is_symlink():
+                raise ManualBackupError("Symlink in protected workspace; refuse replacement.")
+            safe_directories.append(name)
+        directories[:] = safe_directories
+        for name in sorted(files):
+            source = folder / name
+            if source.is_symlink():
+                raise ManualBackupError("Symlink in protected workspace; refuse replacement.")
+            if source.is_file():
+                yield source, Path(category) / source.relative_to(top)
+
+
+def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
+    """Preserve all local evidence before Git MAIN replacement.
+
+    Short paths keep the previous readable archive layout. Long paths are
+    flattened by *relative-path digest* and indexed in manifest v2, avoiding
+    WinError 206 even when prior recovery captures have deeply nested folders.
+    No original workspace file is modified or removed.
     """
     archive_root = Path(journal.root) / "manual-review"
     archive_root.mkdir(parents=True, exist_ok=True)
@@ -31,12 +79,7 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
     destination.mkdir(mode=0o700)
     records = {}
     try:
-        # Include original Recovery log/outbox/cases as well as DB/WAL and
-        # attachments. Never traverse manual-review itself (it contains this
-        # destination and possibly earlier archives).
         roots = dict(journal._workspace_roots())
-        # Include machine-bound DPAPI/config evidence when it exists, so
-        # workstation reprovisioning cannot destroy the only usable legacy key.
         roots["config"] = journal.runtime / "Config"
         roots["recovery"] = journal.root
         for category, location in sorted(roots.items()):
@@ -45,15 +88,15 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
                 continue
             if location.is_symlink() or not location.is_dir():
                 raise ManualBackupError("Protected workspace root is unsafe.")
-            for source in sorted(location.rglob("*")):
-                if category == "recovery" and source.is_relative_to(archive_root):
-                    continue
-                if source.is_symlink():
-                    raise ManualBackupError("Symlink in protected workspace; refuse replacement.")
-                if not source.is_file():
-                    continue
-                rel = Path(category) / source.relative_to(location)
-                target = destination / rel
+            for source, rel in _workspace_files(location, category, archive_root):
+                # Reserve margin under MAX_PATH for destination creation and
+                # temporary backups, while supporting unicode names in sources.
+                stored_rel = rel
+                if os.name == "nt" and len(os.fspath(destination / rel)) > 225:
+                    stored_rel = Path("long-paths") / hashlib.sha256(
+                        rel.as_posix().encode("utf-8")
+                    ).hexdigest()
+                target = destination / stored_rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 digest = hashlib.sha256()
                 with source.open("rb") as reader, target.open("xb") as writer:
@@ -62,22 +105,30 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
                         digest.update(data)
                     writer.flush()
                     os.fsync(writer.fileno())
-                copied = hashlib.sha256(target.read_bytes()).hexdigest()
-                original = hashlib.sha256(source.read_bytes()).hexdigest()
+                copied = _hash_file(target)
+                original = _hash_file(source)
                 if copied != digest.hexdigest() or copied != original:
                     raise ManualBackupError("Manual Recovery backup checksum mismatch.")
-                records[rel.as_posix()] = copied
+                # Legacy short-path entries stay readable. Flattened paths
+                # retain their full original logical names in the manifest.
+                records[rel.as_posix()] = (
+                    copied if stored_rel == rel else
+                    {"sha256": copied, "stored_path": stored_rel.as_posix()}
+                )
         if not records:
             raise ManualBackupError("No local artifacts found to preserve.")
         manifest = destination / "manifest.json"
         with manifest.open("x", encoding="utf-8") as writer:
-            json.dump({"format": 1, "reason": reason, "files": records}, writer, sort_keys=True)
+            json.dump(
+                {"format": 2, "reason": reason, "files": records},
+                writer, sort_keys=True, ensure_ascii=False,
+            )
             writer.flush()
             os.fsync(writer.fileno())
         return destination
     except Exception:
-        # The incomplete archive is never accepted as evidence or as MAIN.
-        # Keep copies for diagnostics if deletion is not possible.
+        # Incomplete archives are never accepted as evidence or Git MAIN.
+        # No original file is removed and replacement is denied by caller.
         raise
 
 
@@ -88,14 +139,29 @@ def verify_manual_review_backup(archive: Path) -> None:
     try:
         document = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
         records = document["files"]
-        if document["format"] != 1 or not isinstance(records, dict) or not records:
+        if document["format"] not in (1, 2) or not isinstance(records, dict) or not records:
             raise ValueError("invalid manifest")
-        for rel, expected in records.items():
-            path = archive / rel
-            if (not isinstance(rel, str) or not isinstance(expected, str)
+        for logical_path, entry in records.items():
+            if isinstance(entry, str):
+                expected = entry
+                stored = logical_path
+            elif document["format"] == 2 and isinstance(entry, dict):
+                expected = entry.get("sha256")
+                stored = entry.get("stored_path")
+            else:
+                raise ManualBackupError("Manual Recovery backup manifest entry invalid.")
+            if not isinstance(logical_path, str) or not isinstance(stored, str):
+                raise ManualBackupError("Manual Recovery backup path invalid.")
+            # All stored paths must remain relative and inside this archive.
+            relative = Path(stored)
+            if (relative.is_absolute() or not relative.parts
+                    or any(part in (".", "..") for part in relative.parts)):
+                raise ManualBackupError("Manual Recovery backup path unsafe.")
+            path = archive / relative
+            if (not isinstance(expected, str) or len(expected) != 64
                     or not path.resolve().is_relative_to(archive.resolve())
                     or path.is_symlink() or not path.is_file()
-                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected):
+                    or _hash_file(path) != expected):
                 raise ManualBackupError("Manual Recovery backup verification failed.")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ManualBackupError("Manual Recovery backup metadata is incomplete.") from exc
