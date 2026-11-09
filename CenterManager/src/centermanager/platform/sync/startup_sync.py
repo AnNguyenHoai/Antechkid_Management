@@ -142,7 +142,7 @@ class StartupSynchronization:
             return False
 
         # A local WRITE receipt may be absent or unresolved after an EXE upgrade.
-        # Remote MAIN wins only after fresh Git proof and a durable local capture.
+        # Verified remote MAIN wins; Recovery only queues manual review.
         if not self._prepare_authoritative_startup_replacement():
             return False
 
@@ -178,7 +178,8 @@ class StartupSynchronization:
 
         try:
             from centermanager.platform.write_recovery import WriteRecoveryJournal
-            if not getattr(self, "_manual_reset_requested", False):
+            if not getattr(self, "_manual_reset_requested", False) and not getattr(
+                    self, "_review_only_reset_requested", False):
                 WriteRecoveryJournal().record_synchronized()
         except Exception:
             logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
@@ -187,7 +188,14 @@ class StartupSynchronization:
             self._rollback_startup_git_repository()
             self._complete_failed_startup_rollback()
             return False
-        self._finalize_startup_database_install()
+        if getattr(self, "_review_only_reset_requested", False):
+            # The old encrypted database and WAL are the most detailed
+            # possible manual review evidence. Leave the already-atomic
+            # rollback generation in place rather than recopying deep captures.
+            self._startup_db_install_backup = None
+            logger.warning("Previous local database/WAL retained under startup-rollbacks for review")
+        else:
+            self._finalize_startup_database_install()
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
@@ -196,6 +204,11 @@ class StartupSynchronization:
             # Alembic and identity checks, before login/WRITE.
             self._provider._verified_manual_main_oid = self._accepted_startup_main_oid
             self._provider._verified_manual_backup_path = str(self._manual_review_backup.resolve())
+        if getattr(self, "_review_only_reset_requested", False):
+            self._provider._verified_review_main_oid = self._accepted_startup_main_oid
+            self._provider._review_notice_path = (
+                str(self._review_notice_path) if self._review_notice_path else None
+            )
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
             # files were copied and verified before Git MAIN replacement.
@@ -332,20 +345,19 @@ class StartupSynchronization:
             logger.exception("Startup Git rollback failed: retain recovery artifacts; do not proceed")
 
     def _prepare_authoritative_startup_replacement(self) -> bool:
-        """Git MAIN First: keep ONE active DB and archive unaccepted local bytes.
+        """Authoritative Git MAIN startup; local Recovery is advisory.
 
-        Historical Recovery metadata is evidence for manual review, not a
-        condition for using an independently observed authoritative MAIN.
-        Never overwrite a local DB/WAL/journal until a verified separate copy
-        exists. Nothing from the archive can be published automatically.
+        Review evidence is indexed without copying the historical recovery
+        capture tree. Old runtime SQLCipher/WAL bytes are separately retained
+        in startup-rollbacks by the atomic installer. Failure to log a notice
+        must not prevent login; it only withholds a fresh WRITE receipt.
         """
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-        from centermanager.platform.sync.manual_review_backup import (
-            preserve_workspace_for_manual_review, verify_manual_review_backup,
-        )
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        from centermanager.database.mutation_authority import gate_for
+
         journal = WriteRecoveryJournal()
         try:
-            from centermanager.database.mutation_authority import gate_for
             gate = gate_for()
             with gate.lock:
                 if not gate.closed:
@@ -357,44 +369,43 @@ class StartupSynchronization:
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
             self._manual_reset_requested = False
+            self._review_only_reset_requested = False
+            self._review_notice_path = None
 
             try:
                 document = journal.inspect()
             except Exception:
-                # Malformed journals are archived as raw evidence, never
-                # interpreted as CLEAN or silently deleted.
-                logger.warning("Legacy Recovery metadata unreadable; archiving original bytes")
+                logger.warning("Unreadable old Recovery journal; review notification required")
                 document = None
 
-            if document and document.get("status") == "CLEAN":
+            if document is not None and document.get("status") == "CLEAN":
                 try:
                     journal.assert_replaceable()
                     return True
                 except Exception:
-                    logger.warning("CLEAN metadata differs from local files; archive before MAIN reset")
+                    logger.warning("CLEAN receipt differs from runtime; use verified MAIN, notify review")
 
-            if document is None and not journal.journal.exists() and self._initial_main_receipt_allowed:
-                # A genuinely empty first install needs no obsolete backup.
+            if (document is None and not journal.journal.exists()
+                    and self._initial_main_receipt_allowed):
                 return True
 
-            archive = preserve_workspace_for_manual_review(
-                journal, reason="manual-review-before-authoritative-main",
-            )
-            verify_manual_review_backup(archive)
-            self._manual_review_backup = archive
-            self._startup_reconciled_unaccepted_local = True
-            # A previous journal will be archived after verified MAIN install
-            # and schema migration, before the new CLEAN receipt is committed.
-            self._manual_reset_requested = journal.journal.exists()
-            self._initial_main_receipt_allowed = not self._manual_reset_requested
-            logger.warning(
-                "Unpublished local workspace durably preserved for manual review; "
-                "installing only verified Git MAIN"
-            )
+            self._review_only_reset_requested = True
+            self._initial_main_receipt_allowed = False
+            try:
+                self._review_notice_path = RecoveryReviewNotices(journal).record(
+                    observed_main_oid=accepted,
+                )
+            except Exception:
+                # A failed optional notice is not grounds to deny startup.
+                # The old journal remains untouched; do not stamp WRITE CLEAN.
+                logger.exception(
+                    "Recovery review notice unavailable; will use Git MAIN READ "
+                    "without minting a new WRITE receipt"
+                )
             return True
         except Exception as exc:
             self.recovery_error = str(exc)
-            logger.exception("Git MAIN replacement refused: local evidence not preserved")
+            logger.exception("Cannot authenticate authoritative MAIN startup")
             return False
 
     def _preserve_missing_repository_runtime(self) -> bool:
@@ -480,7 +491,9 @@ class StartupSynchronization:
                 return False
             # Do not let provider.reset_to_remote() fetch a different generation
             # after a recovery capture has already pinned the accepted commit.
-            if getattr(self, "_manual_review_backup", None) is not None:
+            if getattr(self, "_review_only_reset_requested", False):
+                self._provider.reset_verified_main_for_review(accepted)
+            elif getattr(self, "_manual_review_backup", None) is not None:
                 # The generic Git mutation gate correctly refuses to reset
                 # a dirty journal. The narrowly scoped provider command can
                 # operate only on the exact verified MAIN after the ORIGINAL
@@ -724,7 +737,20 @@ class StartupSynchronization:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
         manual_archive = getattr(self, "_manual_review_backup", None)
-        if manual_archive is None:
+        if getattr(self, "_review_only_reset_requested", False):
+            # Startup-scoped exception only. Remote MAIN must still be
+            # freshly observed, writer closed, and source commit pinned.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active writer prevents MAIN install")
+            accepted = self._accepted_startup_main_oid
+            if (self._provider.get_fetched_remote_main_commit() != accepted
+                    or self._provider.observe_remote_main_commit() != accepted
+                    or self._provider.get_local_main_commit() != accepted):
+                raise RuntimeError("Authoritative MAIN changed before install")
+        elif manual_archive is None:
             require_replaceable()
         else:
             # A verified manual archive replaces ONLY the old startup
