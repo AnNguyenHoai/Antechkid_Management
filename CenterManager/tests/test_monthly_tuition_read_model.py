@@ -452,3 +452,30 @@ def test_group_a_f04_factory_builds_real_trusted_preflight(monthly_db, tmp_path)
     assert isinstance(service._verified_preflight, VerifiedMonthlyTuitionPreflight)
     # Without a managed verified backup, do not allow fake success.
     assert service._verified_preflight._backup_verified() is False
+
+
+def test_group_a_f03_quote_blocks_duplicate_cash_and_overlapping_quarter(monthly_db):
+    from centermanager.models.income import Income
+    from centermanager.services.monthly_tuition_quote_service import (
+        MonthlyTuitionQuoteError, MonthlyTuitionQuoteService,
+    )
+    service = MonthlyTuitionQuoteService(monthly_db)
+    with monthly_db() as db:
+        payment = Income(
+            student_id=1, class_id=1, enrollment_id=1,
+            amount=800000, income_type="Tuition", payment_method="BANK",
+            payment_date=date(2039, 12, 20),
+            payment_period="TUITION_MONTH:2040-01-01",
+            status=Income.STATUS_ACTIVE,
+        )
+        db.add(payment)
+        db.commit()
+        payment_id = payment.id
+    with pytest.raises(MonthlyTuitionQuoteError, match="already covers"):
+        service.quote(1, date(2040, 1, 1), 1)
+    with pytest.raises(MonthlyTuitionQuoteError, match="already covers"):
+        service.quote(1, date(2040, 1, 1), 3)
+    with monthly_db() as db:
+        db.get(Income, payment_id).status = Income.STATUS_VOIDED
+        db.commit()
+    assert service.quote(1, date(2040, 1, 1), 1).amount_vnd == 800000
