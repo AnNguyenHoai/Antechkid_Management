@@ -2,7 +2,7 @@
 """
 Class repository - data access for Class entity.
 """
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 import re
 
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload, with_loader_criter
 from sqlalchemy import or_
 
 from centermanager.models.class_ import Class
+from centermanager.models.monthly_tuition import MonthlyClassDefaultRecord
 from centermanager.models.class_fee_history import ClassFeeHistory
 from centermanager.models.enrollment import Enrollment
 from centermanager.repositories.base import BaseRepository
@@ -18,6 +19,23 @@ from centermanager.repositories.base import BaseRepository
 class ClassRepository(BaseRepository[Class]):
     def __init__(self, session: Session) -> None:
         super().__init__(session, Class)
+
+    def get_monthly_default(self, class_id: int) -> Optional[MonthlyClassDefaultRecord]:
+        """Read the first-class monthly policy; no row denotes legacy COURSE."""
+        return self._session.get(MonthlyClassDefaultRecord, class_id)
+
+    def create_monthly_default(
+        self, *, class_id: int, monthly_fee_vnd: int,
+        effective_month: date, created_at: datetime, created_by: str,
+    ) -> MonthlyClassDefaultRecord:
+        policy = MonthlyClassDefaultRecord(
+            class_id=class_id, monthly_fee_vnd=monthly_fee_vnd,
+            effective_month=effective_month, created_at=created_at,
+            created_by=created_by,
+        )
+        self._session.add(policy)
+        self._session.flush()
+        return policy
 
     def get_by_name(self, name: str) -> Optional[Class]:
         return self._session.query(Class).filter(Class.name == name).first()
