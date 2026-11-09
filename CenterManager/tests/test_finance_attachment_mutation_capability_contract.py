@@ -19,6 +19,7 @@ from centermanager.core.current_user import CurrentUserContext
 from centermanager.models.expense import Expense
 from centermanager.models.finance_attachment import FinanceAttachment
 from centermanager.services.finance_attachment_service import FinanceAttachmentService
+from centermanager.services.permission_service import PermissionDeniedError
 from tests.test_e1b2a_post_publish_consistency import reporting, remote_rows  # noqa: F401
 
 
@@ -109,3 +110,18 @@ def test_voucher_insert_requires_write_even_with_finance_capability(reporting):
                 uploaded_at=datetime(2026, 11, 9),
             ))
         db.rollback()
+
+
+def test_service_requires_target_specific_finance_write_capability(reporting, tmp_path):
+    w = reporting
+    service = FinanceAttachmentService(w.factory, tmp_path / "vouchers")
+    # A finance.income capability does not authorize attaching to an Expense,
+    # even though both entity types share the SQLCipher metadata table.
+    with CurrentUserContext(_principal({"finance.income.create"})):
+        with pytest.raises(PermissionDeniedError):
+            service._require_mutation("EXPENSE")
+        service._require_mutation("INCOME")
+    with CurrentUserContext(_principal({"finance.expense.update"})):
+        service._require_mutation("EXPENSE")
+        with pytest.raises(PermissionDeniedError):
+            service._require_mutation("INCOME")
