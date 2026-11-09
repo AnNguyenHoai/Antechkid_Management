@@ -208,6 +208,10 @@ class StartupSynchronization:
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
+        if getattr(self, "_review_only_reset_requested", False):
+            self._review_only_finance_safe = (
+                self._isolate_unpublished_finance_vouchers_for_review()
+            )
         if getattr(self, "_manual_reset_requested", False):
             # This one-time capability is consumed by app.py only after
             # Alembic and identity checks, before login/WRITE.
@@ -217,6 +221,9 @@ class StartupSynchronization:
             self._provider._verified_review_main_oid = self._accepted_startup_main_oid
             self._provider._review_notice_path = (
                 str(self._review_notice_path) if self._review_notice_path else None
+            )
+            self._provider._review_finance_isolated = (
+                getattr(self, "_review_only_finance_safe", False)
             )
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
@@ -618,6 +625,34 @@ class StartupSynchronization:
         for _, backup in moved_sidecars:
             backup.unlink(missing_ok=True)
         self._startup_db_install_backup = None
+
+    def _isolate_unpublished_finance_vouchers_for_review(self) -> bool:
+        """Prevent unaccepted runtime voucher blobs from leaking into later pushes.
+
+        FinanceAttachmentService resolves published content from the Git
+        repository if the runtime copy is absent. A stale pre-MAIN runtime
+        directory must never be staged by a subsequent Finish Editing.
+        """
+        import uuid
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+
+        current = self._paths.attachment_dir / "Finance"
+        if not current.exists() and not current.is_symlink():
+            return True
+        if current.is_symlink() or not current.is_dir():
+            logger.error("Unsafe legacy Finance attachment directory; keep WRITE disabled")
+            return False
+        target = WriteRecoveryJournal().root / "startup-finance" / uuid.uuid4().hex
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Same-volume atomic directory move; avoids recursive copy/WinError
+            # 206 and preserves all old voucher bytes for manual review.
+            os.replace(current, target)
+            logger.warning("Old local Finance vouchers isolated from Git MAIN runtime")
+            return True
+        except OSError:
+            logger.exception("Unable to quarantine old local Finance vouchers; WRITE remains gated")
+            return False
 
     def _prepare_startup_assets(self) -> None:
         """Stage MAIN assets and retain an immutable, non-runtime rollback copy.
