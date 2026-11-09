@@ -319,7 +319,7 @@ def test_unresolved_historical_contract_never_invents_tuition():
 def test_outstanding_source_reuses_tuition06_and_tuition07_without_legacy_fee_formula():
     source = SERVICE_SOURCE.read_text(encoding="utf-8")
 
-    assert "TuitionAccrualService.calculate_from_records" in source
+    assert "calculate_effective_tuition_accrual" in source
     assert "sum_active_tuition_for_enrollment" in source
     assert "ClassFeeHistory" not in source
     assert "get_tuition_sum_grouped" not in source
