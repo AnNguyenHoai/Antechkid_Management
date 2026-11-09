@@ -16,6 +16,12 @@ def mutation_permissions(table, action, column=None):
         'finance_periods': ('finance.period.manage',),
         'financial_settlements': ('finance.settlement.create', 'finance.settlement.update', 'finance.settlement.confirm', 'finance.settlement.reopen'),
         'tuition_adjustments': ('finance.income.create', 'finance.income.update', 'finance.income.delete'),
+        # Accounting voucher metadata belongs to either Income or Expense.
+        # FinanceAttachmentService validates the actual target and requires
+        # its corresponding create/update capability before any INSERT/UPDATE.
+        # Never admit finance.view or unrelated business roles for mutations.
+        'finance_attachments': ('finance.income.create', 'finance.income.update',
+                                'finance.expense.create', 'finance.expense.update'),
         # New monthly classes create their default in the same transaction
         # as ClassService.create_class(). Keep the DB-level capability floor
         # aligned with the initiating class aggregate (including later edits).
