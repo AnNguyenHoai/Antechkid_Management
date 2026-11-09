@@ -465,6 +465,33 @@ class ClassService:
                 sessions_per_week=candidate_weekly,
                 require_complete=require_complete_contract,
             )
+            monthly_default = session.get(MonthlyClassDefaultRecord, class_id)
+            if monthly_default is not None:
+                if candidate_course_fee != 0:
+                    raise ClassValidationError(
+                        "MONTHLY class cannot be assigned a legacy course fee."
+                    )
+                if candidate_start_date is None or (
+                    candidate_start_date.replace(day=1) != monthly_default.effective_month
+                ):
+                    raise ClassValidationError(
+                        "MONTHLY class first billing month is immutable."
+                    )
+                current_sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+                candidate_end = class_obj.end_date if end_date is UNSET else end_date
+                if current_sessions:
+                    if (
+                        candidate_start_date != class_obj.start_date
+                        or candidate_end != class_obj.end_date
+                        or candidate_weekly != class_obj.sessions_per_week
+                    ):
+                        raise ClassValidationError(
+                            "MONTHLY class timetable is frozen after teaching sessions exist."
+                        )
+                    if candidate_planned < max(int(row.session_number) for row in current_sessions):
+                        raise ClassValidationError(
+                            "Planned Sessions cannot be less than generated monthly sessions."
+                        )
 
             if start_date is not UNSET:
                 old = class_obj.start_date.strftime("%d/%m/%Y") if class_obj.start_date else "(none)"
