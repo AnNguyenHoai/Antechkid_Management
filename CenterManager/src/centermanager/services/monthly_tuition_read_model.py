@@ -35,6 +35,8 @@ class MonthlyAccrualProjection:
     monthly_gross_vnd: Decimal
     cancelled_vnd: Decimal
     monthly_contributions: tuple[tuple[int, Decimal], ...]
+    monthly_cancelled_contributions: tuple[tuple[int, Decimal], ...] = ()
+    monthly_original_dates: tuple[tuple[int, date], ...] = ()
 
 
 class MonthlyTuitionReadModel:
@@ -68,7 +70,29 @@ class MonthlyTuitionReadModel:
         by_id = {int(s.id): s for s in sessions if s.id is not None}
         if not getattr(enrollment, "has_tuition_contract", False):
             raise TuitionAccrualUnresolvedError("Historical Enrollment tuition is unresolved")
-        legacy_sessions = [s for s in sessions if s.scheduled_date < term.effective_from]
+        # Original activated allocations own the billing month. Rescheduling a
+        # January lesson to February must not convert it to February tuition
+        # or accidentally recalculate it as historical legacy accrual.
+        all_allocations = db.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id,
+        ).where(
+            MonthlyTuitionPlanRecord.class_id == enrollment.class_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        # Plans activated for other students BEFORE this Enrollment opts in
+        # must remain legacy for this Enrollment. Exclude only allocations
+        # actually covered by its own future-only monthly term.
+        allocated_ids = {
+            int(row.session_id) for row in all_allocations
+            if row.original_date >= term.effective_from
+            and (term.effective_until is None
+                 or row.original_date <= term.effective_until)
+        }
+        legacy_sessions = [
+            s for s in sessions
+            if s.scheduled_date < term.effective_from and s.id not in allocated_ids
+        ]
         legacy = TuitionAccrualService.calculate_from_records(
             enrollment, legacy_sessions, as_of_date
         )
@@ -85,15 +109,12 @@ class MonthlyTuitionReadModel:
                 raise TuitionAccrualUnresolvedError("Multiple activated plans for one month")
             by_month[plan.month] = plan
 
-        known_session_months = {
-            s.scheduled_date.replace(day=1) for s in sessions
-            if term.effective_from <= s.scheduled_date <= as_of_date
-            and (term.effective_until is None or s.scheduled_date <= term.effective_until)
-        }
-        if known_session_months - set(by_month):
-            raise TuitionAccrualUnresolvedError("Missing activated monthly tuition plan")
-
-        # Outcomes are append-only and versioned; replay uses latest revision.
+        # A replacement lesson is a makeup for an already-billed original,
+        # not a new monthly obligation. It may occur in a later month before
+        # that month's plan exists; never require a second plan/fee for it.
+        # Replay the latest approved outcome first. An old RESCHEDULED
+        # revision cannot permanently exempt a replacement after a newer
+        # decision supersedes it.
         outcome_rows = db.scalars(select(MonthlyTuitionOutcomeRecord).where(
             MonthlyTuitionOutcomeRecord.enrollment_id == enrollment.id
         )).all()
@@ -106,8 +127,39 @@ class MonthlyTuitionReadModel:
                 latest[event.session_id] = event
             elif event.revision == prior.revision:
                 raise TuitionAccrualUnresolvedError("Conflicting event revisions")
+        active_replacements = {
+            event.replacement_session_id
+            for event in latest.values()
+            if event.outcome == "RESCHEDULED"
+            and event.replacement_session_id is not None
+        }
+        known_session_months = {
+            s.scheduled_date.replace(day=1) for s in sessions
+            if s.id not in allocated_ids and s.id not in active_replacements
+            and term.effective_from <= s.scheduled_date <= as_of_date
+            and (term.effective_until is None or s.scheduled_date <= term.effective_until)
+        }
+        if known_session_months - set(by_month):
+            raise TuitionAccrualUnresolvedError("Missing activated monthly tuition plan")
+        # Once a class/month plan is ACTIVE, a newly inserted ordinary session
+        # must not be silently free or accidentally billed as an extra lesson.
+        # Only an explicit RESCHEDULED replacement is exempt from allocation.
+        if any(
+            s.id not in allocated_ids and s.id not in active_replacements
+            and term.effective_from <= s.scheduled_date <= as_of_date
+            and (term.effective_until is None
+                 or s.scheduled_date <= term.effective_until)
+            for s in sessions
+        ):
+            raise TuitionAccrualUnresolvedError(
+                "Monthly lesson lacks immutable allocation or approved makeup decision"
+            )
+
+        # The same latest-event replay controls both makeup eligibility and waiver.
         gross, cancelled = 0, 0
         contributions = []
+        cancelled_contributions = []
+        original_dates = []
         for plan in by_month.values():
             allocations = db.scalars(select(MonthlyTuitionAllocationRecord).where(
                 MonthlyTuitionAllocationRecord.plan_id == plan.id
@@ -146,8 +198,10 @@ class MonthlyTuitionReadModel:
                             "Cancelled session has no approved billing outcome"
                         )
                 gross += row.amount_vnd
+                original_dates.append((row.session_id, original_date))
                 if outcome is not None and outcome.outcome == "CENTRE_CANCELLED_NO_MAKEUP":
                     cancelled += row.amount_vnd
+                    cancelled_contributions.append((row.session_id, Decimal(row.amount_vnd)))
                 else:
                     contributions.append((row.session_id, Decimal(row.amount_vnd)))
         monthly = Decimal(gross - cancelled)
@@ -162,6 +216,8 @@ class MonthlyTuitionReadModel:
             monthly_gross_vnd=Decimal(gross),
             cancelled_vnd=Decimal(cancelled),
             monthly_contributions=tuple(sorted(contributions)),
+            monthly_cancelled_contributions=tuple(sorted(cancelled_contributions)),
+            monthly_original_dates=tuple(sorted(original_dates)),
         )
 
 

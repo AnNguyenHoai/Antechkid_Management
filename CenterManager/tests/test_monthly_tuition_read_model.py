@@ -479,3 +479,309 @@ def test_group_a_f03_quote_blocks_duplicate_cash_and_overlapping_quarter(monthly
         db.get(Income, payment_id).status = Income.STATUS_VOIDED
         db.commit()
     assert service.quote(1, date(2040, 1, 1), 1).amount_vnd == 800000
+
+
+# Group B: immutable billing date, explainable gross/waiver and finance/recovery regression.
+
+def test_f05_reschedule_across_months_keeps_january_accrual(monthly_db):
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        original = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert original.accrued_vnd == Decimal("800000")
+        db.get(Session, 1).scheduled_date = date(2040, 2, 14)
+        db.flush()
+        january = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31)
+        )
+        february = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 2, 28)
+        )
+        assert january.accrued_vnd == original.accrued_vnd == february.accrued_vnd
+        assert dict(january.monthly_original_dates)[1] == date(2040, 1, 1)
+        db.get(Session, 1).scheduled_date = date(2039, 12, 20)
+        db.flush()
+        earlier = MonthlyTuitionReadModel.project(
+            db, enrollment, db.query(Session).all(), date(2040, 1, 31)
+        )
+        assert earlier.accrued_vnd == original.accrued_vnd
+
+
+def test_f05_legacy_session_delete_guard_preserves_immutable_allocation(monthly_db):
+    from centermanager.services.session_service import SessionService, SessionValidationError
+    service = SessionService(monthly_db)
+    with monthly_db() as db:
+        with pytest.raises(SessionValidationError, match="monthly tuition allocations"):
+            service._protect_monthly_billing(db, db.get(Session, 1))
+        assert db.query(MonthlyTuitionAllocationRecord).count() == 2
+
+
+def test_f06_explainable_monthly_gross_waiver_and_original_dates(monthly_db):
+    from centermanager.models.student import Student
+    from centermanager.services.tuition_detail_service import TuitionDetailService
+    from centermanager.models.monthly_tuition import MonthlyTuitionOutcomeRecord
+    with monthly_db() as db:
+        db.add(Student(id=1, student_code="STU001", full_name="AnTechKids Test"))
+        lesson = db.get(Session, 1)
+        lesson.status = "Cancelled"
+        lesson.scheduled_date = date(2040, 2, 15)
+        db.add(MonthlyTuitionOutcomeRecord(
+            enrollment_id=1, session_id=1, revision=1,
+            outcome="CENTRE_CANCELLED_NO_MAKEUP", reason="Closed",
+            idempotency_key="f06-cancel-1", effective_date=date(2040, 1, 2),
+            recorded_at=datetime(2040, 1, 2), recorded_by="manager",
+        ))
+        db.commit()
+    result = TuitionDetailService(monthly_db).get_detail(1, as_of_date=date(2040, 1, 31))
+    assert result.is_monthly_policy
+    assert result.monthly_gross_accrued == Decimal("800000")
+    assert result.monthly_waived == Decimal("400000")
+    assert result.gross_accrued == Decimal("800000")
+    assert result.recognized_discount == Decimal("400000")
+    assert result.net_accrued == Decimal("400000")
+    assert result.gross_accrued - result.recognized_discount == result.net_accrued
+    assert result.sessions[0].original_billing_date == date(2040, 1, 1)
+    assert result.sessions[0].scheduled_date == date(2040, 2, 15)
+    assert result.sessions[0].waived_amount == Decimal("400000")
+    assert result.sessions[0].billing_contribution == Decimal("0")
+
+
+def test_f07_cancellation_rollback_preserves_session_wallet_and_outcomes(monthly_db, monkeypatch):
+    import centermanager.services.monthly_tuition_class_cancellation as module
+    from centermanager.services.monthly_tuition_class_cancellation import (
+        MonthlyTuitionClassCancellationService,
+    )
+    from types import SimpleNamespace
+    monkeypatch.setattr(module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Scheduled"
+        db.commit()
+    def force_recovery_failure(*args, **kwargs):
+        raise RuntimeError("simulated WRITE/recovery outbox refusal")
+    monkeypatch.setattr(module, "record_for_active_write", force_recovery_failure)
+    with pytest.raises(RuntimeError, match="recovery outbox"):
+        MonthlyTuitionClassCancellationService(monthly_db)._apply_no_makeup(
+            1, 1, reason="No makeup", cancel_first=True,
+        )
+    with monthly_db() as db:
+        assert db.get(Session, 1).status == "Scheduled"
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 0
+        from centermanager.models.income import Income
+        assert db.query(Income).count() == 0
+
+
+def test_f07_wallet_income_outstanding_and_repeated_waiver(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    from centermanager.models.income import Income
+    from centermanager.services.monthly_tuition_read_model import calculate_effective_tuition_accrual
+    from centermanager.services.outstanding_service import OutstandingService
+    from centermanager.services.monthly_tuition_class_cancellation import (
+        MonthlyTuitionClassCancellationService,
+    )
+    import centermanager.services.monthly_tuition_class_cancellation as module
+    monkeypatch.setattr(module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Scheduled"
+        db.add(Income(student_id=1, class_id=1, enrollment_id=1, amount=800000,
+                      income_type="Tuition", payment_method="BANK",
+                      payment_date=date(2039, 12, 20),
+                      payment_period="TUITION_MONTH:2040-01-01",
+                      status=Income.STATUS_ACTIVE))
+        db.commit()
+    cancellation = MonthlyTuitionClassCancellationService(monthly_db)
+    assert cancellation._apply_no_makeup(1, 1, reason="Center closed", cancel_first=True) == 1
+    assert cancellation._apply_no_makeup(1, 1, reason="Center closed", cancel_first=True) == 0
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        sessions = db.query(Session).all()
+        accrued = calculate_effective_tuition_accrual(
+            db, enrollment, sessions, date(2040, 1, 31),
+        )
+        paid = sum(Decimal(str(row.amount)) for row in db.query(Income).all())
+        provider = type("SessionProvider", (), {
+            "sessions": lambda self, session: type("Repo", (), {
+                "get_by_class": lambda self, class_id: sessions
+            })()
+        })()
+        resolved, configured = OutstandingService(
+            monthly_db, repository_provider=provider,
+        )._calculate_accrued(db, enrollment, as_of_date=date(2040, 1, 31))
+        assert configured and resolved == accrued == Decimal("400000")
+        assert paid == Decimal("800000")
+        assert paid - accrued == Decimal("400000")
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
+        assert db.query(Income).count() == 1
+
+
+def test_f05_reopening_monthly_cancelled_lesson_requires_finance_reversal(monthly_db):
+    from centermanager.services.session_service import SessionService, SessionValidationError
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Cancelled"
+        db.commit()
+    service = SessionService(monthly_db)
+    with pytest.raises(SessionValidationError, match="monthly tuition allocations"):
+        SessionService.update_session.__wrapped__(service, 1, status="Scheduled")
+    with monthly_db() as db:
+        assert db.get(Session, 1).status == "Cancelled"
+        assert db.query(MonthlyTuitionAllocationRecord).count() == 2
+
+
+def test_f05_approved_replacement_makeup_in_next_month_has_no_second_fee(monthly_db):
+    with monthly_db() as db:
+        replacement = Session(
+            class_id=1, session_number=3, title="Makeup",
+            scheduled_date=date(2040, 2, 9), status="Scheduled",
+        )
+        db.add(replacement)
+        db.flush()
+        db.add(MonthlyTuitionOutcomeRecord(
+            enrollment_id=1, session_id=1, revision=1,
+            outcome="RESCHEDULED", reason="Official makeup",
+            replacement_session_id=replacement.id,
+            idempotency_key="f05-replacement-1",
+            effective_date=date(2040, 1, 2),
+            recorded_at=datetime(2040, 1, 2), recorded_by="manager",
+        ))
+        db.flush()
+        full = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(),
+            date(2040, 2, 28),
+        )
+        assert full.accrued_vnd == Decimal("800000")
+        assert full.cancelled_vnd == Decimal("0")
+        assert set(dict(full.monthly_contributions)) == {1, 2}
+
+
+def test_f06_detail_fails_closed_on_unresolved_activated_contract(monthly_db):
+    from centermanager.models.student import Student
+    from centermanager.services.tuition_detail_service import TuitionDetailService
+    with monthly_db() as db:
+        db.add(Student(id=1, student_code="STU001", full_name="AnTechKids Test"))
+        db.get(Enrollment, 1).agreed_course_fee = None
+        db.commit()
+    with pytest.raises(TuitionAccrualUnresolvedError, match="unresolved historical"):
+        TuitionDetailService(monthly_db).get_detail(
+            1, as_of_date=date(2040, 1, 31),
+        )
+
+
+def test_f05_pre_optin_active_class_plan_stays_legacy_for_later_joiner(monthly_db):
+    with monthly_db() as db:
+        term = db.query(EnrollmentMonthlyTuitionTerm).one()
+        term.effective_from = date(2040, 2, 1)
+        lesson = Session(class_id=1, session_number=3, title="Feb lesson",
+                         scheduled_date=date(2040, 2, 8), status="Completed")
+        db.add(lesson)
+        db.flush()
+        plan = MonthlyTuitionPlanRecord(
+            class_id=1, month=date(2040, 2, 1), version=1,
+            monthly_fee_vnd=500000, schedule_version="feb", status="ACTIVE",
+        )
+        db.add(plan)
+        db.flush()
+        db.add(MonthlyTuitionAllocationRecord(
+            plan_id=plan.id, session_id=lesson.id,
+            original_date=lesson.scheduled_date, amount_vnd=500000,
+        ))
+        db.flush()
+        projected = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(),
+            date(2040, 2, 28),
+        )
+        assert projected.historical_legacy_vnd == Decimal("800000")
+        assert projected.monthly_vnd == Decimal("500000")
+        assert projected.accrued_vnd == Decimal("1300000")
+
+
+def test_f05_unallocated_new_ordinary_session_blocks_silent_underbilling(monthly_db):
+    with monthly_db() as db:
+        db.add(Session(class_id=1, session_number=3, title="Unplanned extra",
+                       scheduled_date=date(2040, 1, 15), status="Completed"))
+        db.flush()
+        with pytest.raises(TuitionAccrualUnresolvedError, match="immutable allocation"):
+            MonthlyTuitionReadModel.project(
+                db, db.get(Enrollment, 1), db.query(Session).all(),
+                date(2040, 1, 31),
+            )
+
+
+def test_f05_revised_makeup_outcome_must_not_keep_old_replacement_exempt(monthly_db):
+    from centermanager.services.tuition_accrual_service import TuitionAccrualUnresolvedError
+    with monthly_db() as db:
+        replacement = Session(class_id=1, session_number=3, title="Superseded makeup",
+                              scheduled_date=date(2040, 2, 11), status="Scheduled")
+        db.add(replacement)
+        db.flush()
+        db.add_all([
+            MonthlyTuitionOutcomeRecord(
+                enrollment_id=1, session_id=1, revision=1,
+                outcome="RESCHEDULED", replacement_session_id=replacement.id,
+                reason="Initial makeup", idempotency_key="f05-revised-1",
+                effective_date=date(2040, 1, 2),
+                recorded_at=datetime(2040, 1, 2), recorded_by="manager",
+            ),
+            MonthlyTuitionOutcomeRecord(
+                enrollment_id=1, session_id=1, revision=2,
+                outcome="CENTRE_CANCELLED_NO_MAKEUP",
+                reason="Superseded makeup", idempotency_key="f05-revised-2",
+                effective_date=date(2040, 1, 3),
+                recorded_at=datetime(2040, 1, 3), recorded_by="manager",
+            ),
+        ])
+        db.flush()
+        with pytest.raises(TuitionAccrualUnresolvedError, match="Missing activated monthly tuition plan"):
+            MonthlyTuitionReadModel.project(
+                db, db.get(Enrollment, 1), db.query(Session).all(),
+                date(2040, 2, 28),
+            )
+
+
+def test_f07_detail_income_outstanding_agree_after_cancel_and_prepaid(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    from centermanager.models.student import Student
+    from centermanager.models.income import Income
+    from centermanager.services.tuition_detail_service import TuitionDetailService
+    from centermanager.services.outstanding_service import OutstandingService
+    from centermanager.services.monthly_tuition_class_cancellation import (
+        MonthlyTuitionClassCancellationService,
+    )
+    import centermanager.services.monthly_tuition_class_cancellation as cancel_module
+    monkeypatch.setattr(cancel_module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        db.add(Student(id=1, student_code="F07-STU", full_name="F07 Student"))
+        db.get(Session, 1).status = "Scheduled"
+        db.add(Income(
+            student_id=1, class_id=1, enrollment_id=1,
+            amount=800000, income_type="Tuition",
+            payment_method="BANK", payment_date=date(2040, 1, 1),
+            payment_period="TUITION_MONTH:2040-01-01",
+            status=Income.STATUS_ACTIVE,
+        ))
+        db.commit()
+    service = MonthlyTuitionClassCancellationService(monthly_db)
+    assert service._apply_no_makeup(1, 1, reason="No makeup", cancel_first=True) == 1
+    detail = TuitionDetailService(monthly_db).get_detail(
+        1, as_of_date=date(2040, 1, 31),
+    )
+    assert detail.monthly_gross_accrued == Decimal("800000")
+    assert detail.monthly_waived == Decimal("400000")
+    assert detail.net_accrued == Decimal("400000")
+    assert detail.paid == Decimal("800000")
+    assert detail.prepaid_amount == Decimal("400000")
+    assert detail.balance == Decimal("-400000")
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        provider = SimpleNamespace(sessions=lambda session: SimpleNamespace(
+            get_by_class=lambda _: session.query(Session).all(),
+        ))
+        accrued, configured = OutstandingService(
+            monthly_db, repository_provider=provider,
+        )._calculate_accrued(db, enrollment, as_of_date=date(2040, 1, 31))
+        assert configured and accrued == detail.net_accrued
+    with monthly_db() as db:
+        assert db.query(Income).count() == 1
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
