@@ -653,3 +653,16 @@ def test_f05_approved_replacement_makeup_in_next_month_has_no_second_fee(monthly
         assert full.accrued_vnd == Decimal("800000")
         assert full.cancelled_vnd == Decimal("0")
         assert set(dict(full.monthly_contributions)) == {1, 2}
+
+
+def test_f06_detail_fails_closed_on_unresolved_activated_contract(monthly_db):
+    from centermanager.models.student import Student
+    from centermanager.services.tuition_detail_service import TuitionDetailService
+    with monthly_db() as db:
+        db.add(Student(id=1, student_code="STU001", full_name="AnTechKids Test"))
+        db.get(Enrollment, 1).agreed_course_fee = None
+        db.commit()
+    with pytest.raises(TuitionAccrualUnresolvedError, match="unresolved historical"):
+        TuitionDetailService(monthly_db).get_detail(
+            1, as_of_date=date(2040, 1, 31),
+        )
