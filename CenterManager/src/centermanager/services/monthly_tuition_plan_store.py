@@ -24,6 +24,7 @@ from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
 from centermanager.models.attendance import Attendance
 from centermanager.services.monthly_tuition_ledger_projection import allocate_by_session_id
+from centermanager.services.monthly_class_schedule_service import month_dates
 from centermanager.services.recovery_change_outbox import (
     mirror_after_successful_commit, record_for_active_write,
 )
@@ -53,6 +54,25 @@ class MonthlyTuitionPlanStore:
                 and row.scheduled_date.month == month.month]
 
     @staticmethod
+    def _assert_complete_month(db, class_id: int, month: date) -> None:
+        policy = db.get(MonthlyClassDefaultRecord, class_id)
+        if policy is None:  # Existing legacy opt-in remains unchanged.
+            return
+        klass = db.get(Class, class_id)
+        if not policy.weekly_days or klass.start_date is None:
+            raise MonthlyPlanStorageError(
+                "Monthly class has no weekly schedule. Generate the month sessions first."
+            )
+        weekdays = tuple(int(day) for day in policy.weekly_days.split(","))
+        expected = month_dates(klass.start_date, klass.end_date, month, weekdays)
+        actual = [day for _, day in MonthlyTuitionPlanStore._candidate_sessions(db, class_id, month)]
+        if not expected or sorted(actual) != list(expected):
+            raise MonthlyPlanStorageError(
+                "Monthly sessions do not match the configured weekly timetable. "
+                "Generate/reconcile the full schedule before activating tuition."
+            )
+
+    @staticmethod
     def _active_class(db, class_id: int):
         class_record = db.get(Class, class_id)
         if class_record is None:
@@ -63,6 +83,7 @@ class MonthlyTuitionPlanStore:
     def preview(self, class_id: int, month: date, fee_vnd: int):
         with self._session_factory() as db:
             self._active_class(db, class_id)
+            self._assert_complete_month(db, class_id, month)
             return allocate_by_session_id(
                 fee_vnd, self._candidate_sessions(db, class_id, month)
             )
@@ -74,6 +95,7 @@ class MonthlyTuitionPlanStore:
             raise MonthlyPlanStorageError("schedule_version is required")
         with self._session_factory() as db:
             self._active_class(db, class_id)
+            self._assert_complete_month(db, class_id, month)
             default = db.get(MonthlyClassDefaultRecord, class_id)
             if default is not None:
                 if month < default.effective_month or fee_vnd != default.monthly_fee_vnd:
@@ -125,6 +147,7 @@ class MonthlyTuitionPlanStore:
             if plan is None or plan.status != "DRAFT":
                 raise MonthlyPlanStorageError("only an existing draft may activate")
             self._active_class(db, plan.class_id)
+            self._assert_complete_month(db, plan.class_id, plan.month)
             today = get_clock().today()
             if (plan.month.year, plan.month.month) <= (today.year, today.month):
                 default = db.get(MonthlyClassDefaultRecord, plan.class_id)
