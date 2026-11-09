@@ -308,6 +308,9 @@ def test_group_a_f02_atomic_cancel_waiver_is_idempotent(monthly_db, monkeypatch)
     )
     monkeypatch.setattr(module, "get_current_user",
                         lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Scheduled"
+        db.commit()
     service = MonthlyTuitionClassCancellationService(monthly_db)
     assert service._apply_no_makeup(1, 1, reason="No makeup", cancel_first=True) == 1
     assert service._apply_no_makeup(1, 1, reason="No makeup", cancel_first=True) == 0
