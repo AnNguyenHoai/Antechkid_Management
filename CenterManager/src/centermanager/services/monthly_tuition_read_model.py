@@ -35,6 +35,8 @@ class MonthlyAccrualProjection:
     monthly_gross_vnd: Decimal
     cancelled_vnd: Decimal
     monthly_contributions: tuple[tuple[int, Decimal], ...]
+    monthly_cancelled_contributions: tuple[tuple[int, Decimal], ...] = ()
+    monthly_original_dates: tuple[tuple[int, date], ...] = ()
 
 
 class MonthlyTuitionReadModel:
@@ -68,7 +70,21 @@ class MonthlyTuitionReadModel:
         by_id = {int(s.id): s for s in sessions if s.id is not None}
         if not getattr(enrollment, "has_tuition_contract", False):
             raise TuitionAccrualUnresolvedError("Historical Enrollment tuition is unresolved")
-        legacy_sessions = [s for s in sessions if s.scheduled_date < term.effective_from]
+        # Original activated allocations own the billing month. Rescheduling a
+        # January lesson to February must not convert it to February tuition
+        # or accidentally recalculate it as historical legacy accrual.
+        all_allocations = db.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id,
+        ).where(
+            MonthlyTuitionPlanRecord.class_id == enrollment.class_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        allocated_ids = {int(row.session_id) for row in all_allocations}
+        legacy_sessions = [
+            s for s in sessions
+            if s.scheduled_date < term.effective_from and s.id not in allocated_ids
+        ]
         legacy = TuitionAccrualService.calculate_from_records(
             enrollment, legacy_sessions, as_of_date
         )
@@ -87,7 +103,8 @@ class MonthlyTuitionReadModel:
 
         known_session_months = {
             s.scheduled_date.replace(day=1) for s in sessions
-            if term.effective_from <= s.scheduled_date <= as_of_date
+            if s.id not in allocated_ids
+            and term.effective_from <= s.scheduled_date <= as_of_date
             and (term.effective_until is None or s.scheduled_date <= term.effective_until)
         }
         if known_session_months - set(by_month):
@@ -108,6 +125,8 @@ class MonthlyTuitionReadModel:
                 raise TuitionAccrualUnresolvedError("Conflicting event revisions")
         gross, cancelled = 0, 0
         contributions = []
+        cancelled_contributions = []
+        original_dates = []
         for plan in by_month.values():
             allocations = db.scalars(select(MonthlyTuitionAllocationRecord).where(
                 MonthlyTuitionAllocationRecord.plan_id == plan.id
@@ -146,8 +165,10 @@ class MonthlyTuitionReadModel:
                             "Cancelled session has no approved billing outcome"
                         )
                 gross += row.amount_vnd
+                original_dates.append((row.session_id, original_date))
                 if outcome is not None and outcome.outcome == "CENTRE_CANCELLED_NO_MAKEUP":
                     cancelled += row.amount_vnd
+                    cancelled_contributions.append((row.session_id, Decimal(row.amount_vnd)))
                 else:
                     contributions.append((row.session_id, Decimal(row.amount_vnd)))
         monthly = Decimal(gross - cancelled)
@@ -162,6 +183,8 @@ class MonthlyTuitionReadModel:
             monthly_gross_vnd=Decimal(gross),
             cancelled_vnd=Decimal(cancelled),
             monthly_contributions=tuple(sorted(contributions)),
+            monthly_cancelled_contributions=tuple(sorted(cancelled_contributions)),
+            monthly_original_dates=tuple(sorted(original_dates)),
         )
 
 
