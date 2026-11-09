@@ -36,7 +36,7 @@ from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
 )
-from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel
+from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel, calculate_effective_tuition_accrual
 
 logger = logging.getLogger(__name__)
 
@@ -136,19 +136,15 @@ class OutstandingService:
             enrollment.class_id
         )
         try:
-            if MonthlyTuitionReadModel.has_monthly_term(session, int(enrollment.id)):
-                monthly = MonthlyTuitionReadModel.project(
-                    session, enrollment, sessions, as_of_date
-                )
-                return self._amount(monthly.accrued_vnd), True
-            accrual = TuitionAccrualService.calculate_from_records(
-                enrollment,
-                sessions,
-                as_of_date,
+            accrued = calculate_effective_tuition_accrual(
+                session, enrollment, sessions, as_of_date,
             )
         except TuitionAccrualUnresolvedError:
+            if MonthlyTuitionReadModel.has_monthly_term(session, int(enrollment.id)):
+                # Never misreport genuine monthly debt as "not configured".
+                raise
             return Decimal("0"), False
-        return self._amount(accrual.net_accrued), True
+        return self._amount(accrued), True
 
     def _calculate_from_enrollment(
         self,
