@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy.orm import sessionmaker
 
+from centermanager.services.monthly_tuition_read_model import calculate_effective_tuition_accrual
 from centermanager.services.recovery_change_outbox import record_for_active_write, mirror_after_successful_commit
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
@@ -213,10 +214,10 @@ class TuitionAdjustmentService:
                     from centermanager.services.tuition_accrual_service import TuitionAccrualService, TuitionAccrualUnresolvedError
                     sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
                     try:
-                        accrual = TuitionAccrualService.calculate_from_records(enrollment, sessions, effective_date)
+                        accrued = calculate_effective_tuition_accrual(session, enrollment, sessions, effective_date)
                     except TuitionAccrualUnresolvedError as exc:
                         raise TuitionAdjustmentValidationError("Enrollment tuition accrual is unresolved.") from exc
-                    prepaid = max(_money(settled - Decimal(accrual.net_accrued)), Decimal("0.00"))
+                    prepaid = max(_money(settled - Decimal(accrued)), Decimal("0.00"))
                     if value > prepaid:
                         raise TuitionAdjustmentValidationError(f"Prepaid refund {value} exceeds available prepaid credit {prepaid}.")
                 accounting_config, accounting_period_start = self._ensure_date_mutable(session, effective_date)
@@ -295,8 +296,8 @@ class TuitionAdjustmentService:
                     )
                     try:
                         sessions = self._repository_provider.sessions(session).get_by_class(enrollment.class_id)
-                        accrual = TuitionAccrualService.calculate_from_records(
-                            enrollment, sessions, effective_date,
+                        accrued = calculate_effective_tuition_accrual(
+                            session, enrollment, sessions, effective_date,
                         )
                     except TuitionAccrualUnresolvedError as exc:
                         raise TuitionAdjustmentValidationError(
