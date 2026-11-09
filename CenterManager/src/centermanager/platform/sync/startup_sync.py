@@ -700,6 +700,16 @@ class StartupSynchronization:
         if saved is None:
             return
         copies, staged = saved
+        if getattr(self, "_review_only_reset_requested", False):
+            # Historical Employee attachments/metadata can contain manual
+            # evidence not captured in the Recovery operation index.
+            # Preserve the already-staged old asset generations for review.
+            # Never load them as runtime or publish them to MAIN.
+            if staged is not None and staged.exists():
+                shutil.rmtree(staged)
+            self._startup_assets = None
+            logger.warning("Prior local assets retained under startup-assets for manual review")
+            return
         for _, backup, _ in copies:
             if backup.is_dir():
                 shutil.rmtree(backup)
