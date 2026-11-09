@@ -34,7 +34,11 @@ class EnrollmentPricingDialog(QDialog):
         self._service = enrollment_service
         self._class_id = int(class_id)
         self._preview = None
-        self._monthly_policy = self._service.get_monthly_class_default(self._class_id)
+        raw_monthly_policy = self._service.get_monthly_class_default(self._class_id)
+        self._monthly_policy = (
+            raw_monthly_policy if isinstance(raw_monthly_policy, tuple)
+            and len(raw_monthly_policy) == 2 else None
+        )
         self._can_override = AuthorizationService.allows(
             get_current_user(), Capability.TUITION_ENROLLMENT_OVERRIDE
         )
