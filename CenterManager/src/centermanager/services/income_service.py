@@ -138,6 +138,23 @@ class IncomeService:
         return amount
 
     @staticmethod
+    def _validate_payment_time_credit_capacity(*, accrued, settled, cash, credit):
+        """Do not turn a noncash tuition waiver into fictitious prepaid credit.
+
+        Called after the exact Enrollment and finance transaction have been
+        resolved and locked. Ordinary *cash* prepayments remain supported.
+        """
+        available = max(
+            Decimal("0"),
+            Decimal(str(accrued)) - Decimal(str(settled)) - Decimal(str(cash)),
+        )
+        if Decimal(str(credit)) > available:
+            raise IncomeValidationError(
+                "Payment-time tuition credit exceeds earned outstanding tuition "
+                "after the cash payment"
+            )
+
+    @staticmethod
     def _submission_key(value):
         if value is None:
             return None  # Legacy/service callers can opt in without rewriting history.
@@ -892,14 +909,10 @@ class IncomeService:
                     enrollment.id, as_of_date=payment_date,
                 )
             ))
-            available_for_credit = max(
-                Decimal("0"), accrued - already_settled - Decimal(str(amount)),
+            self._validate_payment_time_credit_capacity(
+                accrued=accrued, settled=already_settled,
+                cash=amount, credit=resolved_credit,
             )
-            if resolved_credit > available_for_credit:
-                raise IncomeValidationError(
-                    "Payment-time tuition credit exceeds earned outstanding tuition "
-                    "after the cash payment"
-                )
 
             income = Income(
                 student_id=student_id,
