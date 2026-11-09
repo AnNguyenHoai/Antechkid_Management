@@ -273,7 +273,8 @@ class ExpenseFormDialog(QDialog):
                     note=note or None,
                     idempotency_key=self._submission_key,
                 )
-                self._commit_vouchers(getattr(created, "id", None))
+                if not self._commit_vouchers(getattr(created, "id", None)):
+                    return  # keep original Save key and failed files for retry
             self.accept()
         except ExpenseValidationError as exc:
             QMessageBox.warning(self, "Validation Error", str(exc))
@@ -283,7 +284,7 @@ class ExpenseFormDialog(QDialog):
 
     def _commit_vouchers(self, expense_id) -> None:
         if self.voucher_widget is None or expense_id is None:
-            return
+            return True
         errors = self.voucher_widget.commit_pending(expense_id)
         if errors:
             QMessageBox.warning(
@@ -291,3 +292,5 @@ class ExpenseFormDialog(QDialog):
                 "Chứng từ",
                 "Khoản chi đã được lưu nhưng một số chứng từ chưa đính kèm được:\n" + "\n".join(errors),
             )
+            return False
+        return True
