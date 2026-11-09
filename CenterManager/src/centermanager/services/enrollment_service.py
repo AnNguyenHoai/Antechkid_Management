@@ -11,10 +11,6 @@ from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.enrollment import Enrollment
-from centermanager.models.monthly_tuition import (
-    MonthlyClassDefaultRecord, EnrollmentMonthlyTuitionTerm,
-    MonthlyTuitionPlanRecord,
-)
 from centermanager.models.enrollment_freeze import EnrollmentFreeze
 from centermanager.models.session import SessionStatus
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
@@ -376,7 +372,9 @@ class EnrollmentService:
             if student is None or student.deleted_at is not None:
                 raise EnrollmentError("Student not found or inactive.")
             repo = self._repository_provider.enrollments(session)
-            monthly_default = session.get(MonthlyClassDefaultRecord, class_id)
+            monthly_factory = getattr(self._repository_provider, "monthly_tuition", None)
+            monthly_repo = monthly_factory(session) if callable(monthly_factory) else None
+            monthly_default = monthly_repo.class_default(class_id) if monthly_repo else None
             if monthly_default is not None:
                 # New monthly enrollments have NO historical tuition to migrate.
                 # Require a published plan before accepting a paid contract.
@@ -388,11 +386,7 @@ class EnrollmentService:
                     raise EnrollmentValidationError(
                         "Enrollment starts before monthly class policy begins."
                     )
-                active_plan = session.query(MonthlyTuitionPlanRecord).filter(
-                    MonthlyTuitionPlanRecord.class_id == class_id,
-                    MonthlyTuitionPlanRecord.month == start_month,
-                    MonthlyTuitionPlanRecord.status == "ACTIVE",
-                ).first()
+                active_plan = monthly_repo.active_plan(class_id, start_month)
                 if active_plan is None:
                     raise EnrollmentValidationError(
                         "Please activate this class's monthly session plan before enrolling students."
@@ -467,14 +461,13 @@ class EnrollmentService:
                     raise EnrollmentValidationError("Authenticated actor is required for monthly enrollment.")
                 # Same SQLCipher transaction as Enrollment; no legacy migration,
                 # no admin-only override required for a *new* monthly contract.
-                session.flush()
-                session.add(EnrollmentMonthlyTuitionTerm(
+                repo.flush()
+                monthly_repo.create_term(
                     enrollment_id=enrollment.id,
                     effective_from=start_month,
-                    effective_until=None,
+                    actor_name=actor_name,
                     activated_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                    activated_by=actor_name,
-                ))
+                )
             needs_discount_audit = bool(
                 tuition_snapshot["discount_amount"] > 0 and tuition_snapshot.get("discount_source")
             )
