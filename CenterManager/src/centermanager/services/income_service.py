@@ -39,6 +39,7 @@ from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
 from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel, calculate_effective_tuition_accrual
+from centermanager.services.monthly_tuition_quote_service import MonthlyTuitionQuoteService, MonthlyTuitionQuoteError
 from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
@@ -606,6 +607,25 @@ class IncomeService:
                     "Student was not enrolled in the selected class on the payment date."
                 )
 
+            if payment_period and payment_period.startswith("TUITION_"):
+                if income_type != "Tuition" or resolved_enrollment is None:
+                    raise IncomeValidationError("Monthly/quarterly quote requires an exact Tuition Enrollment")
+                try:
+                    kind, first_month = payment_period.split(":", 1)
+                    if kind not in ("TUITION_MONTH", "TUITION_QUARTER"):
+                        raise ValueError("Unrecognized tuition quote period")
+                    quote = MonthlyTuitionQuoteService(
+                        self._session_factory, self._repository_provider,
+                    ).quote_in_session(
+                        session, int(resolved_enrollment.id), date.fromisoformat(first_month),
+                        1 if kind == "TUITION_MONTH" else 3,
+                    )
+                except (MonthlyTuitionQuoteError, ValueError) as exc:
+                    raise IncomeValidationError(f"Invalid tuition quote: {exc}") from exc
+                if Decimal(str(amount)) != Decimal(quote.amount_vnd):
+                    raise IncomeValidationError(
+                        "Monthly/quarterly receipt must exactly match the verified quote"
+                    )
             repo = self._repository_provider.incomes(session)
             finance_period, finance_period_start = self._resolve_finance_period(session, payment_date)
             self._ensure_period_start_mutable(session, finance_period_start)
