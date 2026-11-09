@@ -20,6 +20,7 @@ from centermanager.models.expense import Expense
 from centermanager.models.finance_attachment import FinanceAttachment
 from centermanager.services.finance_attachment_service import FinanceAttachmentService
 from centermanager.services.permission_service import PermissionDeniedError
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401
 from tests.test_e1b2a_post_publish_consistency import reporting, remote_rows  # noqa: F401
 
 
