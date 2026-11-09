@@ -163,3 +163,18 @@ class MonthlyTuitionReadModel:
             cancelled_vnd=Decimal(cancelled),
             monthly_contributions=tuple(sorted(contributions)),
         )
+
+
+def calculate_effective_tuition_accrual(db, enrollment, sessions, as_of_date):
+    """Canonical policy router shared by all tuition-facing finance services.
+
+    Monthly opt-in may not silently fall back to legacy. Any unresolved
+    monthly pricing/evidence must remain an explicit blocking error.
+    """
+    if MonthlyTuitionReadModel.has_monthly_term(db, int(enrollment.id)):
+        return MonthlyTuitionReadModel.project(
+            db, enrollment, sessions, as_of_date,
+        ).accrued_vnd
+    return TuitionAccrualService.calculate_from_records(
+        enrollment, sessions, as_of_date,
+    ).net_accrued
