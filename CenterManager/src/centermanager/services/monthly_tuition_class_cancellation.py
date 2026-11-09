@@ -33,7 +33,17 @@ class MonthlyTuitionClassCancellationService:
 
     @require_permission("finance.income.create")
     def approve_no_makeup(self, class_id: int, session_id: int, *, reason: str) -> int:
-        """One durable cancellation for every eligible monthly Enrollment."""
+        """Approve a previously cancelled lesson, for migration/repair only."""
+        return self._apply_no_makeup(class_id, session_id, reason=reason, cancel_first=False)
+
+    @require_permission("lesson.cancel")
+    @require_permission("finance.income.create")
+    def cancel_with_no_makeup(self, class_id: int, session_id: int, *, reason: str) -> int:
+        """Atomically cancel a teaching lesson and waive each monthly allocation."""
+        return self._apply_no_makeup(class_id, session_id, reason=reason, cancel_first=True)
+
+    def _apply_no_makeup(self, class_id: int, session_id: int, *, reason: str,
+                         cancel_first: bool) -> int:
         if not reason or not reason.strip() or len(reason.strip()) > 255:
             raise MonthlyClassCancellationError("A concise cancellation reason is required")
         actor = get_current_user()
@@ -44,8 +54,12 @@ class MonthlyTuitionClassCancellationService:
             lesson = db.get(Session, session_id)
             if lesson is None or lesson.class_id != class_id:
                 raise MonthlyClassCancellationError("Session/class identity mismatch")
-            if lesson.status != SessionStatus.CANCELLED.value:
+            if lesson.status != SessionStatus.CANCELLED.value and not cancel_first:
                 raise MonthlyClassCancellationError("Lesson must be cancelled first")
+            if cancel_first and lesson.status == SessionStatus.COMPLETED.value:
+                raise MonthlyClassCancellationError("Cannot cancel a completed lesson")
+            if cancel_first:
+                lesson.status = SessionStatus.CANCELLED.value
             plan = db.scalars(select(MonthlyTuitionPlanRecord).where(
                 MonthlyTuitionPlanRecord.class_id == class_id,
                 MonthlyTuitionPlanRecord.month == lesson.scheduled_date.replace(day=1),
@@ -93,7 +107,7 @@ class MonthlyTuitionClassCancellationService:
                 )
                 db.add(event)
                 count += 1
-            if not count:
+            if not count and not cancel_first:
                 return 0
             db.flush()
             record_for_active_write(
