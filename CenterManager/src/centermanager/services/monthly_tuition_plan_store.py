@@ -17,8 +17,12 @@ from centermanager.core.current_user import get_current_user
 from centermanager.models.class_ import Class
 from centermanager.models.monthly_tuition import (
     MonthlyTuitionAllocationRecord, MonthlyTuitionPlanRecord,
+    MonthlyClassDefaultRecord,
 )
 from centermanager.models.session import Session, SessionStatus
+from centermanager.models.enrollment import Enrollment
+from centermanager.models.income import Income
+from centermanager.models.attendance import Attendance
 from centermanager.services.monthly_tuition_ledger_projection import allocate_by_session_id
 from centermanager.services.recovery_change_outbox import (
     mirror_after_successful_commit, record_for_active_write,
@@ -70,6 +74,12 @@ class MonthlyTuitionPlanStore:
             raise MonthlyPlanStorageError("schedule_version is required")
         with self._session_factory() as db:
             self._active_class(db, class_id)
+            default = db.get(MonthlyClassDefaultRecord, class_id)
+            if default is not None:
+                if month < default.effective_month or fee_vnd != default.monthly_fee_vnd:
+                    raise MonthlyPlanStorageError(
+                        "Monthly plan must match the class billing policy and effective period."
+                    )
             allocations = allocate_by_session_id(
                 fee_vnd, self._candidate_sessions(db, class_id, month)
             )
@@ -117,7 +127,29 @@ class MonthlyTuitionPlanStore:
             self._active_class(db, plan.class_id)
             today = get_clock().today()
             if (plan.month.year, plan.month.month) <= (today.year, today.month):
-                raise MonthlyPlanStorageError("activation cannot reprice current or prior months")
+                default = db.get(MonthlyClassDefaultRecord, plan.class_id)
+                # The only exception is an *initial current-month* monthly
+                # bootstrap on an entirely unused business database. Never
+                # let this path reprice a legacy enrollment or collected cash.
+                is_current = (plan.month.year, plan.month.month) == (today.year, today.month)
+                initial_month = (
+                    default is not None and default.effective_month == plan.month
+                    and default.created_at.date().replace(day=1) == plan.month
+                )
+                any_cash = db.query(Income.id).first() is not None
+                any_contract = db.query(Enrollment.id).first() is not None
+                any_completed = db.query(Session.id).filter(
+                    Session.status != SessionStatus.SCHEDULED.value
+                ).first() is not None
+                any_attendance = db.query(Attendance.id).first() is not None
+                if not (
+                    is_current and initial_month and not any_cash
+                    and not any_contract and not any_completed and not any_attendance
+                ):
+                    raise MonthlyPlanStorageError(
+                        "Current/past month activation is restricted to an unused "
+                        "new monthly database in its first billing month."
+                    )
             other_active = db.scalars(
                 select(MonthlyTuitionPlanRecord).where(
                     MonthlyTuitionPlanRecord.class_id == plan.class_id,
