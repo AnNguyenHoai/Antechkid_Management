@@ -14,6 +14,7 @@ from centermanager.core.clock import get_clock
 from centermanager.database.encryption import database_encryption_required
 from centermanager.database.mutation_authority import gate_for
 from centermanager.platform.backup.backup_service import BackupService
+from centermanager.repositories.provider import create_default_repository_provider
 from centermanager.services.monthly_tuition_migration_gate import EnrollmentMigrationEvidence
 
 
@@ -25,13 +26,14 @@ class VerifiedMonthlyTuitionPreflight:
     """
 
     def __init__(self, backup_path, *, reconciliation_verifier,
-                 backup_service=None, write_verifier=None):
+                 backup_service=None, write_verifier=None, repository_provider=None):
         self._backup_path = Path(backup_path).resolve()
         if not callable(reconciliation_verifier):
             raise ValueError("A live reconciliation verifier is mandatory")
         self._reconciliation_verifier = reconciliation_verifier
         self._backup_service = backup_service or BackupService()
         self._write_verifier = write_verifier or self._check_write
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     @staticmethod
     def _check_write() -> bool:
@@ -61,8 +63,6 @@ class VerifiedMonthlyTuitionPreflight:
             return False
 
     def __call__(self, db, enrollment, effective_from):
-        repo = db
-        del repo
         # Lack of an explicit reconciliation result is conservatively blocked.
         try:
             unresolved = self._reconciliation_verifier(db, enrollment)
@@ -80,21 +80,17 @@ class VerifiedMonthlyTuitionPreflight:
             review_date=get_clock().today(),
             first_enrollment_date=enrollment.start_date or get_clock().today(),
             legacy_tuition_resolved=bool(enrollment.has_tuition_contract),
-            has_unattributed_payment=bool(self._unattributed(db, enrollment)),
-            already_monthly=bool(self._already_monthly(db, enrollment)),
+            has_unattributed_payment=bool(
+                self._repository_provider.monthly_tuition(db).unattributed_tuition_receipt(
+                    enrollment.student_id, enrollment.class_id,
+                )
+            ),
+            already_monthly=bool(
+                self._repository_provider.monthly_tuition(db).term(enrollment.id)
+                is not None
+            ),
             has_unresolved_reconciliation=unresolved,
             encrypted_backup_verified=self._backup_verified(),
             write_authority_verified=write_valid,
         )
 
-    @staticmethod
-    def _unattributed(db, enrollment):
-        from centermanager.repositories.monthly_tuition_repository import MonthlyTuitionRepository
-        return MonthlyTuitionRepository(db).unattributed_tuition_receipt(
-            enrollment.student_id, enrollment.class_id,
-        )
-
-    @staticmethod
-    def _already_monthly(db, enrollment):
-        from centermanager.repositories.monthly_tuition_repository import MonthlyTuitionRepository
-        return MonthlyTuitionRepository(db).term(enrollment.id) is not None
