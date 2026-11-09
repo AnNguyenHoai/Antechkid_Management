@@ -11,6 +11,7 @@ from centermanager.core.capabilities import Capability
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.models.enrollment import Enrollment
+from centermanager.models.monthly_tuition import MonthlyClassDefaultRecord
 from centermanager.models.enrollment_freeze import EnrollmentFreeze
 from centermanager.models.session import SessionStatus
 from centermanager.repositories.provider import RepositoryProvider, SqlAlchemyRepositoryProvider
@@ -375,6 +376,8 @@ class EnrollmentService:
             monthly_factory = getattr(self._repository_provider, "monthly_tuition", None)
             monthly_repo = monthly_factory(session) if callable(monthly_factory) else None
             monthly_default = monthly_repo.class_default(class_id) if monthly_repo else None
+            if not isinstance(monthly_default, MonthlyClassDefaultRecord):
+                monthly_default = None  # legacy/mocked providers cannot activate a new policy
             if monthly_default is not None:
                 # New monthly enrollments have NO historical tuition to migrate.
                 # Require a published plan before accepting a paid contract.
