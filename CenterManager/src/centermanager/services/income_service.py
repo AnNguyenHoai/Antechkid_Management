@@ -1059,6 +1059,16 @@ class IncomeService:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be edited.")
+            if (income.payment_period or "").startswith(("TUITION_MONTH:", "TUITION_QUARTER:")):
+                # An accepted month/quarter quote is evidence of one original
+                # cash receipt. Never let edit mode silently invalidate it.
+                if (amount is not None and Decimal(str(amount)) != Decimal(str(income.amount))) or (
+                    payment_period is not None and payment_period != income.payment_period
+                ):
+                    raise IncomeValidationError(
+                        "Monthly/quarterly receipt amount and allocation period cannot be edited; "
+                        "void and re-issue through an authorized workflow."
+                    )
 
             self._ensure_income_period_mutable(session, income)
             self._ensure_payment_time_credit_not_orphaned(session, income)
