@@ -398,3 +398,25 @@ def test_group_a_f04_verified_backup_write_preflight(tmp_path, monthly_db, monke
         }), encoding="utf-8")
         evidence = instance(db, enrollment, date(2040, 1, 1))
         assert not assess_enrollment_migration(evidence).may_activate
+
+
+def test_group_a_f02_cancellation_uses_original_month_after_date_change(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    import centermanager.services.monthly_tuition_class_cancellation as module
+    from centermanager.services.monthly_tuition_class_cancellation import MonthlyTuitionClassCancellationService
+    monkeypatch.setattr(module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        lesson = db.get(Session, 1)
+        lesson.status = "Scheduled"
+        lesson.scheduled_date = date(2040, 2, 2)
+        db.commit()
+    assert MonthlyTuitionClassCancellationService(monthly_db)._apply_no_makeup(
+        1, 1, reason="Rescheduled then no makeup", cancel_first=True,
+    ) == 1
+    with monthly_db() as db:
+        projection = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(), date(2040, 1, 31),
+        )
+        assert projection.cancelled_vnd == Decimal("400000")
+        assert projection.accrued_vnd == Decimal("400000")
