@@ -385,6 +385,15 @@ class EnrollmentService:
                     get_clock().today(), class_obj.start_date or get_clock().today()
                 )
                 start_month = resolved_start.replace(day=1)
+                if (
+                    class_obj.start_date is None
+                    or resolved_start < class_obj.start_date
+                    or (class_obj.end_date is not None
+                        and resolved_start > class_obj.end_date)
+                ):
+                    raise EnrollmentValidationError(
+                        "Monthly Enrollment start must fall within the Class dates."
+                    )
                 if start_month < monthly_default.effective_month:
                     raise EnrollmentValidationError(
                         "Enrollment starts before monthly class policy begins."
