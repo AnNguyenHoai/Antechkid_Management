@@ -164,3 +164,51 @@ def test_no_runtime_db_but_legacy_business_material_is_not_discarded(
     assert (fake._manual_review_backup / "attachments" / "receipt.bin").read_bytes() == b"personal receipt"
     assert (fake._manual_review_backup / "config" / "database_key.dpapi").read_bytes() == b"old Windows DPAPI key"
     verify_manual_review_backup(fake._manual_review_backup)
+
+
+def test_long_nested_recovery_capture_is_preserved_in_short_flat_archive(legacy):
+    """WinError 206 regression: archive adds ~50 chars to an existing capture."""
+    deep = (legacy.root / "captures" / ("c" * 32) / "exports"
+            / "SessionReports" / "Class_1_K3_Scratch"
+            / "Lesson_3_Học về Function")
+    deep.mkdir(parents=True)
+    source = deep / "report.txt"
+    source.write_bytes(b"preserve this unpublished lesson report")
+
+    archive = preserve_workspace_for_manual_review(legacy, reason="win206")
+    verify_manual_review_backup(archive)
+    logical = "recovery/" + source.relative_to(legacy.root).as_posix()
+    manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["format"] == 2
+    entry = manifest["files"][logical]
+    assert isinstance(entry, dict)
+    assert entry["stored_path"].startswith("long-paths/")
+    stored = archive / entry["stored_path"]
+    assert len(str(stored)) < len(str(archive / logical))
+    assert stored.read_bytes() == source.read_bytes()
+    assert source.read_bytes() == b"preserve this unpublished lesson report"
+
+    stored.write_bytes(b"tampered")
+    with pytest.raises(ManualBackupError):
+        verify_manual_review_backup(archive)
+    assert source.read_bytes() == b"preserve this unpublished lesson report"
+
+
+def test_prior_manual_archives_are_not_recursively_backed_up(legacy):
+    previous = legacy.root / "manual-review" / ("b" * 32) / "recovery" / "captures"
+    previous.mkdir(parents=True)
+    (previous / "old.txt").write_text("historical archive", encoding="utf-8")
+    archive = preserve_workspace_for_manual_review(legacy, reason="avoid-recursion")
+    verify_manual_review_backup(archive)
+    document = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+    assert not any("manual-review" in name for name in document["files"])
+
+
+def test_legacy_format_one_manifest_remains_verifiable(legacy):
+    archive = preserve_workspace_for_manual_review(legacy, reason="old-version")
+    manifest = archive / "manifest.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    assert all(isinstance(value, str) for value in document["files"].values())
+    document["format"] = 1
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    verify_manual_review_backup(archive)
