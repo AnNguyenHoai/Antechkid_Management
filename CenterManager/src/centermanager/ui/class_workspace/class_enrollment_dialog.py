@@ -167,6 +167,10 @@ class ClassEnrollmentDialog(QDialog):
             return
 
         enrollment_kwargs = None
+        # MONTHLY enrollment charges depend on EACH student's actual start date.
+        # Never reuse a single student's historical backfill date for a
+        # multi-select batch (legacy COURSE can continue sharing the snapshot).
+        monthly_class = self._class_service.get_monthly_class_default(self._class_id) is not None
         for item in items:
             student_id = item.data(Qt.ItemDataRole.UserRole)
             try:
@@ -203,12 +207,16 @@ class ClassEnrollmentDialog(QDialog):
                         logger.info("Restored enrollment %s for student %s", candidate.id, student_id)
                         continue
 
-                if enrollment_kwargs is None:
+                if enrollment_kwargs is None or monthly_class:
                     pricing = EnrollmentPricingDialog(
                         self._class_service,
                         self._class_id,
                         parent=self,
                     )
+                    if monthly_class:
+                        pricing.setWindowTitle(
+                            f"Nhập học phí tháng · {item.text()}"
+                        )
                     if pricing.exec() != QDialog.DialogCode.Accepted:
                         break
                     enrollment_kwargs = pricing.enrollment_kwargs()
