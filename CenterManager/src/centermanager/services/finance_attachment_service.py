@@ -194,31 +194,18 @@ class FinanceAttachmentService:
             # for the next Git publication before claiming retry success.
             existing = repo.find_active_sha(entity_type, entity_id, info["sha256"])
             if existing is not None:
+                # Do not silently recreate a missing Git artifact. Such a
+                # repair needs its own authorized WRITE publication, otherwise
+                # a DB-identical retry could be considered 'clean' and omit
+                # the file from MAIN. Keep the voucher pending for explicit
+                # recovery instead of returning false success.
                 try:
-                    # Published or local original content still exists: no new
-                    # metadata and no duplicate content-addressed file.
-                    if self.resolve_path(existing).is_file():
-                        return existing
-                except FinanceAttachmentError:
-                    pass
-                # Repair only the original immutable path, not a newly
-                # dated alternative. Git Finish Editing will stage it again.
-                relative = Path(existing.stored_path)
-                if relative.is_absolute() or ".." in relative.parts:
-                    raise FinanceAttachmentValidationError("Invalid stored voucher path")
-                target = self._attachments_root / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                handle, temporary = tempfile.mkstemp(prefix=".voucher_", dir=target.parent)
-                os.close(handle)
-                try:
-                    shutil.copyfile(source_path, temporary)
-                    # Temp files have no extension; validate the digest
-                    # directly against the authenticated source identity.
-                    if hashlib.sha256(Path(temporary).read_bytes()).hexdigest() != existing.sha256:
-                        raise FinanceAttachmentValidationError("Voucher digest changed during retry")
-                    os.replace(temporary, target)
-                finally:
-                    Path(temporary).unlink(missing_ok=True)
+                    self.resolve_path(existing)
+                except FinanceAttachmentError as exc:
+                    raise FinanceAttachmentValidationError(
+                        "Previously attached voucher content is missing; "
+                        "synchronize/recover the repository before retrying"
+                    ) from exc
                 return existing
             if repo.count_active(entity_type, entity_id) >= self.MAX_FILES_PER_RECORD:
                 raise FinanceAttachmentValidationError("Mỗi khoản tối đa 5 chứng từ.")
