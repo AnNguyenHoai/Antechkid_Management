@@ -40,6 +40,8 @@ class TuitionSessionDetail:
     billable: bool
     billing_contribution: Decimal
     explanation: str
+    original_billing_date: Optional[date] = None
+    waived_amount: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,9 @@ class TuitionDetailReadModel:
     sessions: Tuple[TuitionSessionDetail, ...]
     payments: Tuple[TuitionPaymentDetail, ...]
     settlement_ledger: Tuple[TuitionSettlementDetail, ...]
+    monthly_gross_accrued: Decimal = Decimal("0")
+    monthly_waived: Decimal = Decimal("0")
+    is_monthly_policy: bool = False
 
 
 class TuitionDetailNotFoundError(LookupError):
@@ -158,11 +163,18 @@ class TuitionDetailService:
         billable_numbers,
         unit_fee: Decimal,
         monthly_amount_by_number=None,
+        monthly_waived_by_number=None,
+        monthly_original_date_by_number=None,
     ) -> Tuple[TuitionSessionDetail, ...]:
         start = enrollment.enrolled_from_session
         end = enrollment.enrolled_until_session
         billable_set = set(billable_numbers)
         monthly_amount_by_number = monthly_amount_by_number or {}
+        monthly_waived_by_number = monthly_waived_by_number or {}
+        monthly_original_date_by_number = monthly_original_date_by_number or {}
+        monthly_numbers = (
+            set(monthly_amount_by_number) | set(monthly_waived_by_number)
+        )
         rows: List[TuitionSessionDetail] = []
         for teaching_session in sorted(
             sessions, key=lambda item: (item.session_number, item.id or 0)
@@ -170,16 +182,18 @@ class TuitionDetailService:
             number = teaching_session.session_number
             if start is not None and number < start:
                 continue
-            if end is not None and number > end and number not in monthly_amount_by_number:
+            if end is not None and number > end and number not in monthly_numbers:
                 continue
             effective_date = (
-                teaching_session.scheduled_date
-                if number in monthly_amount_by_number
+                monthly_original_date_by_number.get(number, teaching_session.scheduled_date)
+                if number in monthly_numbers
                 else cls._effective_date(teaching_session)
             )
             billable = number in billable_set
             if effective_date > as_of_date:
                 explanation = "Sau ngày chốt"
+            elif number in monthly_waived_by_number:
+                explanation = "Trung tâm hủy không học bù · miễn phần học phí tháng"
             elif number in monthly_amount_by_number and billable:
                 explanation = "Học phí tháng · phân bổ theo lịch gốc"
             elif teaching_session.status != SessionStatus.COMPLETED.value:
@@ -204,6 +218,8 @@ class TuitionDetailService:
                         if billable else Decimal("0")
                     ),
                     explanation=explanation,
+                    original_billing_date=monthly_original_date_by_number.get(number),
+                    waived_amount=monthly_waived_by_number.get(number, Decimal("0")),
                 )
             )
         return tuple(rows)
@@ -316,6 +332,11 @@ class TuitionDetailService:
             configured = enrollment.has_tuition_contract
             billable_numbers = ()
             monthly_amount_by_number = {}
+            monthly_waived_by_number = {}
+            monthly_original_date_by_number = {}
+            monthly_gross = Decimal("0")
+            monthly_waived = Decimal("0")
+            is_monthly_policy = False
             gross = Decimal("0")
             recognized_discount = Decimal("0")
             net = Decimal("0")
@@ -325,7 +346,18 @@ class TuitionDetailService:
                         monthly = MonthlyTuitionReadModel.project(
                             db_session, enrollment, sessions, cutoff,
                         )
+                        is_monthly_policy = True
                         by_session_id = {s.id: s for s in sessions}
+                        monthly_gross = self._amount(monthly.monthly_gross_vnd)
+                        monthly_waived = self._amount(monthly.cancelled_vnd)
+                        monthly_waived_by_number = {
+                            by_session_id[sid].session_number: amount
+                            for sid, amount in monthly.monthly_cancelled_contributions
+                        }
+                        monthly_original_date_by_number = {
+                            by_session_id[sid].session_number: original_date
+                            for sid, original_date in monthly.monthly_original_dates
+                        }
                         monthly_amount_by_number = {
                             by_session_id[sid].session_number: amount
                             for sid, amount in monthly.monthly_contributions
@@ -334,10 +366,10 @@ class TuitionDetailService:
                             monthly.legacy_billable_numbers
                         ) | set(monthly_amount_by_number)))
                         gross = self._amount(
-                            monthly.historical_legacy_gross_vnd + monthly.monthly_vnd
+                            monthly.historical_legacy_gross_vnd + monthly_gross
                         )
                         recognized_discount = self._amount(
-                            monthly.historical_legacy_discount_vnd
+                            monthly.historical_legacy_discount_vnd + monthly_waived
                         )
                         net = self._amount(monthly.accrued_vnd)
                     else:
@@ -349,6 +381,8 @@ class TuitionDetailService:
                         recognized_discount = self._amount(accrual.discount)
                         net = self._amount(accrual.net_accrued)
                 except TuitionAccrualUnresolvedError:
+                    if MonthlyTuitionReadModel.has_monthly_term(db_session, int(enrollment.id)):
+                        raise  # fail closed for incomplete monthly accounting evidence
                     configured = False
 
             unit_fee = (
@@ -363,6 +397,8 @@ class TuitionDetailService:
                 billable_numbers=billable_numbers,
                 unit_fee=unit_fee,
                 monthly_amount_by_number=monthly_amount_by_number,
+                monthly_waived_by_number=monthly_waived_by_number,
+                monthly_original_date_by_number=monthly_original_date_by_number,
             )
             completed_sessions = sum(
                 1
@@ -418,4 +454,7 @@ class TuitionDetailService:
                 sessions=session_rows,
                 payments=self._payment_rows(payments),
                 settlement_ledger=settlement_rows,
+                monthly_gross_accrued=monthly_gross,
+                monthly_waived=monthly_waived,
+                is_monthly_policy=is_monthly_policy,
             )
