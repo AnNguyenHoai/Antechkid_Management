@@ -39,6 +39,7 @@ class AdminDataResetRepository:
         "role_permissions",
         "audit_logs",
         "recovery_change_outbox",  # Immutable unaccepted edits; never destructively reset
+        "monthly_class_defaults",  # Persisted billing contract: never reset silently
         "monthly_tuition_plans", "monthly_tuition_allocations",
         "enrollment_monthly_tuition_terms", "monthly_tuition_outcomes",
         # Tuition contracts and cancellation evidence must never be reset silently.

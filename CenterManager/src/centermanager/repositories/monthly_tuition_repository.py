@@ -10,11 +10,12 @@ from datetime import date, datetime
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
+from centermanager.models.class_ import Class
 from centermanager.models.enrollment import Enrollment
 from centermanager.models.income import Income
 from centermanager.models.monthly_tuition import (
     EnrollmentMonthlyTuitionTerm, MonthlyTuitionAllocationRecord,
-    MonthlyTuitionOutcomeRecord, MonthlyTuitionPlanRecord,
+    MonthlyTuitionOutcomeRecord, MonthlyTuitionPlanRecord, MonthlyClassDefaultRecord,
 )
 from centermanager.models.session import Session as TeachingSession
 
@@ -22,6 +23,31 @@ from centermanager.models.session import Session as TeachingSession
 class MonthlyTuitionRepository:
     def __init__(self, session: Session):
         self._session = session
+
+    def class_record(self, class_id: int):
+        return self._session.get(Class, class_id)
+
+    def plans_for_month(self, class_id: int, month: date):
+        return self._session.scalars(select(MonthlyTuitionPlanRecord).where(
+            MonthlyTuitionPlanRecord.class_id == class_id,
+            MonthlyTuitionPlanRecord.month == month,
+        )).all()
+
+    def sessions_for_class(self, class_id: int):
+        return self._session.scalars(select(TeachingSession).where(
+            TeachingSession.class_id == class_id,
+        )).all()
+
+    def add_month_sessions(self, sessions) -> None:
+        self._session.add_all(sessions)
+        self._session.flush()
+
+    def class_default(self, class_id: int):
+        """Repository-owned monthly class policy query (None for legacy)."""
+        return self._session.get(MonthlyClassDefaultRecord, class_id)
+
+    def flush(self) -> None:
+        self._session.flush()
 
     def enrollment(self, enrollment_id: int):
         return self._session.get(Enrollment, enrollment_id)

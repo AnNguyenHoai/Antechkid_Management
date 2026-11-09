@@ -263,6 +263,10 @@ class ClassDetailPage(QWidget):
             self._show_empty()
 
     def _populate(self, class_obj: Class) -> None:
+        monthly_policy = self._class_service.get_monthly_class_default(int(class_obj.id))
+        self.monthly_tuition_btn.setVisible(
+            _MONTHLY_TUITION_UI_ENABLED or monthly_policy is not None
+        )
         self.entity_header.set_identity(
             title=class_obj.name,
             identifier=class_obj.name,
@@ -408,20 +412,24 @@ class ClassDetailPage(QWidget):
             self.class_updated.emit()
 
     def _on_monthly_tuition(self) -> None:
-        if not _MONTHLY_TUITION_UI_ENABLED or self._current_class_id is None:
+        if self._current_class_id is None:
+            return
+        policy = self._class_service.get_monthly_class_default(self._current_class_id)
+        if not _MONTHLY_TUITION_UI_ENABLED and policy is None:
             return
         if not self._collaboration_manager.ensure_write():
             self._notification_service.notify(
                 "You must be in WRITE mode to change tuition.", "warning"
             )
             return
-        accepted, ok = QInputDialog.getText(
-            self, "Tuition V1 · Chỉ dùng DB nháp",
-            "XÁC NHẬN chỉ đang sử dụng bản sao SQLCipher, không phải DB chạy thật. "
-            "Nhập UAT để mở:",
-        )
-        if not ok or accepted.strip() != "UAT":
-            return
+        if policy is None and _MONTHLY_TUITION_UI_ENABLED:
+            accepted, ok = QInputDialog.getText(
+                self, "Tuition V1 · Chỉ dùng DB nháp",
+                "XÁC NHẬN chỉ đang sử dụng bản sao SQLCipher, không phải DB chạy thật. "
+                "Nhập UAT để mở:",
+            )
+            if not ok or accepted.strip() != "UAT":
+                return
         factory = self._class_service._session_factory
         dialog = MonthlyTuitionPlanDialog(self._current_class_id, factory, parent=self)
         dialog.exec()
@@ -624,7 +632,7 @@ class ClassDetailPage(QWidget):
         self._write_enabled = enabled
         allowed = enabled and not self._archived_read_only
         self.edit_btn.setEnabled(allowed)
-        self.monthly_tuition_btn.setEnabled(allowed and _MONTHLY_TUITION_UI_ENABLED)
+        self.monthly_tuition_btn.setEnabled(allowed and self.monthly_tuition_btn.isVisible())
         self.add_session_btn.setEnabled(allowed)
         self._apply_dynamic_write_state()
         self.schedule_widget.set_write_enabled(allowed)

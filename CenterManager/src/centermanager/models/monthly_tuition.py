@@ -14,6 +14,24 @@ from sqlalchemy.orm import Mapped, mapped_column
 from centermanager.database.base import Base
 
 
+class MonthlyClassDefaultRecord(Base):
+    """Explicit billing policy for new classes; absence means legacy COURSE."""
+
+    __tablename__ = "monthly_class_defaults"
+    __table_args__ = (
+        CheckConstraint("monthly_fee_vnd >= 0", name="ck_monthly_class_fee_nonnegative"),
+    )
+
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("classes.id", ondelete="RESTRICT"), primary_key=True
+    )
+    monthly_fee_vnd: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_month: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    weekly_days: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
 class MonthlyTuitionPlanRecord(Base):
     __tablename__ = "monthly_tuition_plans"
     __table_args__ = (

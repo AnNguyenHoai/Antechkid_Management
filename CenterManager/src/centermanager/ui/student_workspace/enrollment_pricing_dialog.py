@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
+    QDateEdit,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -32,15 +34,26 @@ class EnrollmentPricingDialog(QDialog):
         self._service = enrollment_service
         self._class_id = int(class_id)
         self._preview = None
+        raw_monthly_policy = self._service.get_monthly_class_default(self._class_id)
+        self._monthly_policy = (
+            raw_monthly_policy if isinstance(raw_monthly_policy, tuple)
+            and len(raw_monthly_policy) == 2 else None
+        )
         self._can_override = AuthorizationService.allows(
             get_current_user(), Capability.TUITION_ENROLLMENT_OVERRIDE
         )
         self.setWindowTitle("Enrollment tuition terms")
         self.setMinimumWidth(480)
         self._build_ui()
-        self._load_default_preview()
+        if self._monthly_policy is None:
+            self._load_default_preview()
+        else:
+            self._reload_monthly_preview()
 
     def _build_ui(self) -> None:
+        if self._monthly_policy is not None:
+            self._build_monthly_ui()
+            return
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"])
         layout.setSpacing(SPACING["md"])
@@ -113,6 +126,69 @@ class EnrollmentPricingDialog(QDialog):
         self.buttons.accepted.connect(self._accept_if_valid)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+
+    def _build_monthly_ui(self) -> None:
+        """Fresh MONTHLY class: date-based onboarding, never legacy fee override."""
+        self.setWindowTitle("Đăng ký học phí tháng · Ngày nhập học thực tế")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["lg"]
+        )
+        note = QLabel(
+            "Chọn NGÀY NHẬP HỌC THỰC TẾ (có thể là 01/11/2026 khi "
+            "nhập lại dữ liệu vào ngày 09/11). Học phí tháng đầu chỉ "
+            "tính các buổi có lịch gốc từ ngày nhập học. "
+            "Không tự tạo Income/điểm danh.", self,
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.monthly_start_date = QDateEdit(self)
+        self.monthly_start_date.setCalendarPopup(True)
+        self.monthly_start_date.setDisplayFormat("dd/MM/yyyy")
+        # Start at the first month of the class rather than today's date,
+        # so a fresh-DB historical backfill does not silently lose obligations.
+        first = self._service.get_class(self._class_id).start_date
+        if first is None:
+            raise EnrollmentValidationError("Monthly class has no start date.")
+        self.monthly_start_date.setDate(QDate(first.year, first.month, first.day))
+        self.monthly_start_date.setMinimumDate(QDate(first.year, first.month, first.day))
+        form.addRow("Ngày bắt đầu nhập học *", self.monthly_start_date)
+        self.monthly_preview_label = QLabel("—", self)
+        self.monthly_preview_label.setWordWrap(True)
+        form.addRow("Học phí tháng đầu", self.monthly_preview_label)
+        layout.addLayout(form)
+        self.error_label = QLabel("", self)
+        self.error_label.setWordWrap(True)
+        layout.addWidget(self.error_label)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok,
+            parent=self,
+        )
+        self.buttons.accepted.connect(self._accept_if_valid)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        self.monthly_start_date.dateChanged.connect(self._reload_monthly_preview)
+
+    def _reload_monthly_preview(self, *_args) -> None:
+        try:
+            chosen = self.monthly_start_date.date().toPython()
+            preview = self._service.preview_new_monthly_enrollment(
+                self._class_id, chosen
+            )
+            self._preview = preview
+            self.monthly_preview_label.setText(
+                f"{preview['remaining_sessions']}/{preview['planned_sessions']} "
+                f"buổi tháng {preview['month']:%m/%Y} · "
+                f"{preview['first_month_amount_vnd']:,.0f} VND"
+            )
+            self.error_label.clear()
+            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+        except Exception as exc:
+            self._preview = None
+            self.monthly_preview_label.setText("—")
+            self.error_label.setText(str(exc))
+            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 
     @staticmethod
     def _money_text(value) -> str:
@@ -187,6 +263,9 @@ class EnrollmentPricingDialog(QDialog):
     def _accept_if_valid(self) -> None:
         if self._preview is None:
             return
+        if self._monthly_policy is not None:
+            self.accept()
+            return
         if self.discount_enabled.isChecked() and self._preview["discount_amount"] > 0:
             if not self.discount_reason.text().strip():
                 self.error_label.setText("A reason is required for a manual discount.")
@@ -208,6 +287,11 @@ class EnrollmentPricingDialog(QDialog):
     def enrollment_kwargs(self) -> dict:
         if self._preview is None:
             raise EnrollmentValidationError("Enrollment pricing is unavailable.")
+        if self._monthly_policy is not None:
+            return {
+                "start_date": self.monthly_start_date.date().toPython(),
+                "enrolled_from_session": 1,
+            }
         result = {
             "enrolled_from_session": self._preview["enrolled_from_session"],
             "enrolled_until_session": self._preview["enrolled_until_session"],

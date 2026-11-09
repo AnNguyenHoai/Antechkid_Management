@@ -1,0 +1,81 @@
+name: Tuition V1 Production Candidate Windows EXE
+
+on:
+  push:
+    branches:
+      - "feat/tuition-v1-production-fresh-monthly"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    if: github.ref == 'refs/heads/feat/tuition-v1-production-fresh-monthly'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: CenterManager
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: CenterManager/requirements*.txt
+      - name: Install release dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Package production-mode candidate (not approved)
+        run: python build_release.py
+      - name: Verify source identity and encrypted DB exclusion
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = "release/CenterManager-v$version-windows-x64"
+          $zip = "$package.zip"
+          if (!(Test-Path $zip)) { throw "Candidate ZIP missing" }
+          $manifest = Get-Content "$package/RELEASE_MANIFEST.json" -Raw | ConvertFrom-Json
+          if ($manifest.source_commit -ne $env:GITHUB_SHA.ToLower()) {
+            throw "Candidate source commit mismatch"
+          }
+          $sensitive = Get-ChildItem -Path $package -Recurse -File |
+            Where-Object { $_.Name -in @("center.db","database_key.dpapi","git_config.dpapi") }
+          if ($sensitive) { throw "Candidate package includes sensitive runtime data" }
+          Write-Host "PRODUCTION MODE CANDIDATE ONLY, NO PRODUCTION APPROVAL: $env:GITHUB_SHA"
+      - name: Smoke initialize fresh encrypted monthly SQLCipher DB and local Git MAIN
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = (Resolve-Path "release/CenterManager-v$version-windows-x64").Path
+          $target = Join-Path $env:RUNNER_TEMP "ATK-BLANK"
+          $remote = Join-Path $env:RUNNER_TEMP "ATK-BLANK-REMOTE.git"
+          python scripts/prepare_sec06_isolated_uat.py --package $package --target $target --remote $remote --apply --confirm PREPARE-ISOLATED-SEC06-UAT
+          if ($LASTEXITCODE -ne 0) { throw "Encrypted blank production DB bootstrap FAILED" }
+          $repoPath = Join-Path $target "runtime/repository"
+          foreach ($relative in @("database/center.db", "database/center.db.identity.json", "manifest.json")) {
+            if (!(Test-Path (Join-Path $repoPath $relative))) {
+              throw "Missing mandatory signed Git MAIN artifact: $relative"
+            }
+          }
+          $db = Join-Path $repoPath "database/center.db"
+          $header = [System.IO.File]::ReadAllBytes($db)[0..15]
+          $plain = [System.Text.Encoding]::ASCII.GetString($header)
+          if ($plain -eq "SQLite format 3" + [char]0) {
+            throw "Fresh production DB unexpectedly plaintext"
+          }
+          $branch = git -C $repoPath branch --show-current
+          if ($branch -ne "main") { throw "Fresh Git MAIN missing" }
+          Write-Host "PASS: SQLCipher DB, SEC-05 signed sidecar, canonical manifest and local Git MAIN"
+
+      - name: Upload Windows candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TuitionV1-ProductionCandidate-Windows-${{ github.sha }}
+          path: |
+            CenterManager/release/*.zip
+            CenterManager/release/*.zip.sha256
+          if-no-files-found: error

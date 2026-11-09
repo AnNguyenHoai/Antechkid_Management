@@ -10,6 +10,8 @@ from centermanager.services.recovery_change_outbox import record_for_active_writ
 from centermanager.core.clock import get_clock
 from centermanager.services.timeline_actor import resolve_timeline_actor
 from centermanager.models.class_ import Class
+from centermanager.models.monthly_tuition import MonthlyClassDefaultRecord
+from centermanager.core.current_user import get_current_user
 from centermanager.models.student import Student
 from centermanager.models.class_timeline_event import ClassTimelineEventType
 from centermanager.models.enrollment import Enrollment
@@ -189,6 +191,8 @@ class ClassService:
         duration_months: Optional[int] = None,
         planned_sessions: Optional[int] = None,
         sessions_per_week: Optional[int] = None,
+        monthly_fee_vnd: Optional[int] = None,
+        monthly_effective_month: Optional[date] = None,
     ) -> Class:
         norm_name = self._validate_name(name)
         norm_course = self._normalize_text(course)
@@ -210,6 +214,22 @@ class ClassService:
             sessions_per_week=sessions_per_week,
             require_complete=has_new_contract_input,
         )
+
+        if monthly_fee_vnd is not None:
+            if type(monthly_fee_vnd) is not int or monthly_fee_vnd <= 0:
+                raise ClassValidationError("Monthly fee must be a positive whole VND amount.")
+            if (type(monthly_effective_month) is not date
+                    or monthly_effective_month.day != 1):
+                raise ClassValidationError("Monthly policy must begin on the first day of a month.")
+            current = get_clock().today()
+            if (monthly_effective_month.year, monthly_effective_month.month) < (current.year, current.month):
+                raise ClassValidationError("New monthly classes cannot begin in a past month.")
+            if start_date is None or start_date.replace(day=1) != monthly_effective_month:
+                raise ClassValidationError("New monthly class must start in its first billing month.")
+            if resolved_course_fee not in (None, 0):
+                raise ClassValidationError("Monthly class must not also define a legacy course fee.")
+        elif monthly_effective_month is not None:
+            raise ClassValidationError("Monthly effective month requires a monthly fee.")
 
         with self._session_factory() as session:
             class_code = self._generate_class_code(session)
@@ -237,6 +257,18 @@ class ClassService:
                     fee=class_obj.fee,
                     source="CLASS_CREATE",
                 )
+            if monthly_fee_vnd is not None:
+                actor = get_current_user()
+                actor_name = getattr(actor, "username", None)
+                if not actor_name:
+                    raise ClassValidationError("Authenticated manager required for monthly billing setup.")
+                repo.create_monthly_default(
+                    class_id=class_obj.id,
+                    monthly_fee_vnd=monthly_fee_vnd,
+                    effective_month=monthly_effective_month,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    created_by=actor_name,
+                )
             record_for_active_write(
                 session, module="class", action="CREATE",
                 entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
@@ -259,6 +291,58 @@ class ClassService:
                 class_name=class_obj.name,
             ))
             return class_obj
+
+    def get_monthly_class_default(self, class_id: int):
+        """Read-only monthly class policy for UI; absent means legacy COURSE."""
+        if type(class_id) is not int or class_id <= 0:
+            raise ClassValidationError("Invalid class ID.")
+        with self._session_factory() as session:
+            policy = self._repository_provider.classes(session).get_monthly_default(class_id)
+            if policy is None:
+                return None
+            return (policy.monthly_fee_vnd, policy.effective_month)
+
+    def preview_new_monthly_enrollment(self, class_id: int, start_date: date) -> dict:
+        """Read-only onboarding quote based on original immutable allocations.
+
+        The enrollment is not created by preview. The actual EnrollmentService
+        revalidates the activated month inside its eventual WRITE transaction.
+        """
+        if type(start_date) is not date:
+            raise ClassValidationError("An explicit Enrollment start date is required.")
+        with self._session_factory() as session:
+            repo = self._repository_provider.classes(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise ClassValidationError("Class not found.")
+            monthly_factory = getattr(self._repository_provider, "monthly_tuition", None)
+            if not callable(monthly_factory):
+                raise ClassValidationError("Monthly tuition storage is unavailable.")
+            monthly = monthly_factory(session)
+            policy = monthly.class_default(class_id)
+            if not isinstance(policy, MonthlyClassDefaultRecord):
+                raise ClassValidationError("Class is not configured for monthly tuition.")
+            month = start_date.replace(day=1)
+            if (
+                class_obj.start_date is None or start_date < class_obj.start_date
+                or month < policy.effective_month
+                or (class_obj.end_date is not None and start_date > class_obj.end_date)
+            ):
+                raise ClassValidationError("Enrollment start date is outside the monthly class period.")
+            plan, allocations = monthly.monthly_plan_allocations(class_id, month)
+            if plan is None or not allocations:
+                raise ClassValidationError("Activate the monthly class plan before enrolling.")
+            if sum(row.amount_vnd for row in allocations) != plan.monthly_fee_vnd:
+                raise ClassValidationError("Monthly plan allocations do not match its fee.")
+            applicable = [row for row in allocations if row.original_date >= start_date]
+            return {
+                "start_date": start_date,
+                "month": month,
+                "planned_sessions": len(allocations),
+                "remaining_sessions": len(applicable),
+                "monthly_fee_vnd": int(plan.monthly_fee_vnd),
+                "first_month_amount_vnd": sum(row.amount_vnd for row in applicable),
+            }
 
     def get_class(self, class_id: int) -> Class:
         with self._session_factory() as session:
@@ -423,6 +507,35 @@ class ClassService:
                 sessions_per_week=candidate_weekly,
                 require_complete=require_complete_contract,
             )
+            monthly_default = repo.get_monthly_default(class_id)
+            if not isinstance(monthly_default, MonthlyClassDefaultRecord):
+                monthly_default = None
+            if monthly_default is not None:
+                if candidate_course_fee != 0:
+                    raise ClassValidationError(
+                        "MONTHLY class cannot be assigned a legacy course fee."
+                    )
+                if candidate_start_date is None or (
+                    candidate_start_date.replace(day=1) != monthly_default.effective_month
+                ):
+                    raise ClassValidationError(
+                        "MONTHLY class first billing month is immutable."
+                    )
+                current_sessions = self._repository_provider.sessions(session).get_by_class(class_id)
+                candidate_end = class_obj.end_date if end_date is UNSET else end_date
+                if current_sessions:
+                    if (
+                        candidate_start_date != class_obj.start_date
+                        or candidate_end != class_obj.end_date
+                        or candidate_weekly != class_obj.sessions_per_week
+                    ):
+                        raise ClassValidationError(
+                            "MONTHLY class timetable is frozen after teaching sessions exist."
+                        )
+                    if candidate_planned < max(int(row.session_number) for row in current_sessions):
+                        raise ClassValidationError(
+                            "Planned Sessions cannot be less than generated monthly sessions."
+                        )
 
             if start_date is not UNSET:
                 old = class_obj.start_date.strftime("%d/%m/%Y") if class_obj.start_date else "(none)"

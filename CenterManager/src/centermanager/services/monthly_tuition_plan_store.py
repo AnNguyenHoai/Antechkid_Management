@@ -17,9 +17,14 @@ from centermanager.core.current_user import get_current_user
 from centermanager.models.class_ import Class
 from centermanager.models.monthly_tuition import (
     MonthlyTuitionAllocationRecord, MonthlyTuitionPlanRecord,
+    MonthlyClassDefaultRecord,
 )
 from centermanager.models.session import Session, SessionStatus
+from centermanager.models.enrollment import Enrollment
+from centermanager.models.income import Income
+from centermanager.models.attendance import Attendance
 from centermanager.services.monthly_tuition_ledger_projection import allocate_by_session_id
+from centermanager.services.monthly_class_schedule_service import month_dates
 from centermanager.services.recovery_change_outbox import (
     mirror_after_successful_commit, record_for_active_write,
 )
@@ -49,6 +54,25 @@ class MonthlyTuitionPlanStore:
                 and row.scheduled_date.month == month.month]
 
     @staticmethod
+    def _assert_complete_month(db, class_id: int, month: date) -> None:
+        policy = db.get(MonthlyClassDefaultRecord, class_id)
+        if policy is None:  # Existing legacy opt-in remains unchanged.
+            return
+        klass = db.get(Class, class_id)
+        if not policy.weekly_days or klass.start_date is None:
+            raise MonthlyPlanStorageError(
+                "Monthly class has no weekly schedule. Generate the month sessions first."
+            )
+        weekdays = tuple(int(day) for day in policy.weekly_days.split(","))
+        expected = month_dates(klass.start_date, klass.end_date, month, weekdays)
+        actual = [day for _, day in MonthlyTuitionPlanStore._candidate_sessions(db, class_id, month)]
+        if not expected or sorted(actual) != list(expected):
+            raise MonthlyPlanStorageError(
+                "Monthly sessions do not match the configured weekly timetable. "
+                "Generate/reconcile the full schedule before activating tuition."
+            )
+
+    @staticmethod
     def _active_class(db, class_id: int):
         class_record = db.get(Class, class_id)
         if class_record is None:
@@ -59,6 +83,7 @@ class MonthlyTuitionPlanStore:
     def preview(self, class_id: int, month: date, fee_vnd: int):
         with self._session_factory() as db:
             self._active_class(db, class_id)
+            self._assert_complete_month(db, class_id, month)
             return allocate_by_session_id(
                 fee_vnd, self._candidate_sessions(db, class_id, month)
             )
@@ -70,6 +95,13 @@ class MonthlyTuitionPlanStore:
             raise MonthlyPlanStorageError("schedule_version is required")
         with self._session_factory() as db:
             self._active_class(db, class_id)
+            self._assert_complete_month(db, class_id, month)
+            default = db.get(MonthlyClassDefaultRecord, class_id)
+            if default is not None:
+                if month < default.effective_month or fee_vnd != default.monthly_fee_vnd:
+                    raise MonthlyPlanStorageError(
+                        "Monthly plan must match the class billing policy and effective period."
+                    )
             allocations = allocate_by_session_id(
                 fee_vnd, self._candidate_sessions(db, class_id, month)
             )
@@ -115,9 +147,66 @@ class MonthlyTuitionPlanStore:
             if plan is None or plan.status != "DRAFT":
                 raise MonthlyPlanStorageError("only an existing draft may activate")
             self._active_class(db, plan.class_id)
+            self._assert_complete_month(db, plan.class_id, plan.month)
             today = get_clock().today()
             if (plan.month.year, plan.month.month) <= (today.year, today.month):
-                raise MonthlyPlanStorageError("activation cannot reprice current or prior months")
+                default = db.get(MonthlyClassDefaultRecord, plan.class_id)
+                # The only exception is an *initial current-month* monthly
+                # bootstrap on an entirely unused business database. Never
+                # let this path reprice a legacy enrollment or collected cash.
+                is_current = (plan.month.year, plan.month.month) == (today.year, today.month)
+                initial_month = (
+                    default is not None and default.effective_month == plan.month
+                    and default.created_at.date().replace(day=1) == plan.month
+                )
+                # A fresh workspace may enter several classes sequentially.
+                # It is not necessary to activate *every* class before the
+                # first student is registered, but no historical/legacy data
+                # may be implicitly re-priced by the current-month exception.
+                all_classes = db.query(Class).all()
+                monthly_policies = {
+                    row.class_id: row
+                    for row in db.query(MonthlyClassDefaultRecord).all()
+                }
+                fresh_monthly_workspace = bool(all_classes) and all(
+                    row.id in monthly_policies
+                    and monthly_policies[row.id].effective_month == plan.month
+                    and monthly_policies[row.id].created_at.date().replace(day=1) == plan.month
+                    and row.start_date is not None
+                    and row.start_date.replace(day=1) == plan.month
+                    for row in all_classes
+                )
+                existing_enrollment = db.query(Enrollment.id).filter(
+                    Enrollment.class_id == plan.class_id
+                ).first() is not None
+                target_income = db.query(Income.id).filter(
+                    Income.class_id == plan.class_id
+                ).first() is not None
+                target_completed = db.query(Session.id).filter(
+                    Session.class_id == plan.class_id,
+                    Session.status != SessionStatus.SCHEDULED.value,
+                ).first() is not None
+                target_attendance = db.query(Attendance.id).join(
+                    Session, Session.id == Attendance.session_id
+                ).filter(Session.class_id == plan.class_id).first() is not None
+                # Foreign or unassigned historical receipts are not evidence
+                # of a pristine all-monthly opening workspace.
+                unassigned_cash = db.query(Income.id).filter(
+                    (Income.class_id.is_(None))
+                    | (Income.payment_date < plan.month)
+                ).first() is not None
+                if not (
+                    is_current and initial_month and fresh_monthly_workspace
+                    and not existing_enrollment and not target_income
+                    and not target_completed and not target_attendance
+                    and not unassigned_cash
+                ):
+                    raise MonthlyPlanStorageError(
+                        "Current-month activation is allowed only for a newly "
+                        "created MONTHLY class with no own Enrollment/Income/"
+                        "attendance/completed lessons, inside an all-monthly "
+                        "fresh workspace without historical receipts."
+                    )
             other_active = db.scalars(
                 select(MonthlyTuitionPlanRecord).where(
                     MonthlyTuitionPlanRecord.class_id == plan.class_id,

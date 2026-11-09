@@ -128,6 +128,19 @@ class ClassFormDialog(QDialog):
         self.planned_sessions_spin.setSuffix(" sessions")
         form.addRow("Planned Sessions *", self.planned_sessions_spin)
 
+        self.billing_policy_combo = QComboBox()
+        self.billing_policy_combo.addItem("Theo khóa (giữ nguyên)", "COURSE")
+        self.billing_policy_combo.addItem("Theo tháng (lớp mới)", "MONTHLY")
+        self.billing_policy_combo.currentIndexChanged.connect(self._refresh_billing_policy)
+        form.addRow("Chính sách học phí", self.billing_policy_combo)
+
+        self.monthly_fee_spin = QSpinBox()
+        self.monthly_fee_spin.setRange(0, 99999999)
+        self.monthly_fee_spin.setSingleStep(50000)
+        self.monthly_fee_spin.setSuffix(" VND/tháng")
+        self.monthly_fee_spin.setValue(700000)
+        form.addRow("Học phí tháng *", self.monthly_fee_spin)
+
         self.course_fee_spin = QSpinBox()
         self.course_fee_spin.setRange(0, 99999999)
         self.course_fee_spin.setSuffix(" VND")
@@ -169,12 +182,29 @@ class ClassFormDialog(QDialog):
         self.sessions_per_week_spin.valueChanged.connect(self._refresh_course_preview)
         self.planned_sessions_spin.valueChanged.connect(self._refresh_course_preview)
         self.course_fee_spin.valueChanged.connect(self._refresh_course_preview)
+        self.monthly_fee_spin.valueChanged.connect(self._refresh_course_preview)
+        self._refresh_billing_policy()
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def _refresh_billing_policy(self, *_args) -> None:
+        monthly = self.billing_policy_combo.currentData() == "MONTHLY"
+        self.monthly_fee_spin.setVisible(monthly)
+        self.course_fee_spin.setVisible(not monthly)
+        self.unit_fee_value.setText("Theo bảng phân bổ tháng" if monthly else "—")
+        self._refresh_course_preview()
 
     def _load_class(self) -> None:
         try:
             class_obj = self._service.get_class(self._class_id)
+            monthly_policy = self._service.get_monthly_class_default(int(self._class_id))
+            self.billing_policy_combo.setCurrentIndex(
+                self.billing_policy_combo.findData("MONTHLY" if monthly_policy else "COURSE")
+            )
+            self.billing_policy_combo.setEnabled(False)
+            if monthly_policy:
+                self.monthly_fee_spin.setValue(int(monthly_policy[0]))
+                self.monthly_fee_spin.setEnabled(False)
             self.name_edit.setText(class_obj.name)
             self.course_edit.setText(class_obj.course or "")
             self._loaded_contract_complete = class_obj.has_course_contract
@@ -227,8 +257,12 @@ class ClassFormDialog(QDialog):
         planned = self.planned_sessions_spin.value()
         fee = self.course_fee_spin.value()
 
+        monthly = self.billing_policy_combo.currentData() == "MONTHLY"
         per_session = _unit_fee(fee, planned)
-        self.unit_fee_value.setText(_format_vnd(per_session) if per_session is not None else "—")
+        self.unit_fee_value.setText(
+            "Tự phân bổ theo lịch tháng" if monthly
+            else (_format_vnd(per_session) if per_session is not None else "—")
+        )
 
         planned_end = _planned_end_date(start, duration)
         self.planned_end_value.setText(
@@ -238,7 +272,10 @@ class ClassFormDialog(QDialog):
         if duration > 0 and weekly > 0 and planned > 0:
             self.course_summary.setText(
                 f"{duration} months · {weekly} sessions/week · {planned} planned sessions · "
-                f"{_format_vnd(fee)} total"
+                + (
+                    f"{_format_vnd(self.monthly_fee_spin.value())}/month (requires activated session plan)"
+                    if monthly else f"{_format_vnd(fee)} total"
+                )
             )
         elif self._is_edit and not self._loaded_contract_complete:
             self.course_summary.setText(
@@ -285,7 +322,8 @@ class ClassFormDialog(QDialog):
             duration_months = self.duration_months_spin.value()
             planned_sessions = self.planned_sessions_spin.value()
             sessions_per_week = self.sessions_per_week_spin.value()
-            course_fee = self.course_fee_spin.value()
+            course_fee = (0 if self.billing_policy_combo.currentData() == "MONTHLY"
+                          else self.course_fee_spin.value())
             kwargs.update(
                 course_fee=course_fee,
                 duration_months=duration_months,
@@ -293,6 +331,16 @@ class ClassFormDialog(QDialog):
                 sessions_per_week=sessions_per_week,
                 end_date=_planned_end_date(start_date, duration_months),
             )
+
+        if not self._is_edit and self.billing_policy_combo.currentData() == "MONTHLY":
+            if self.monthly_fee_spin.value() <= 0:
+                self._feedback.warning(
+                    "Monthly fee must be greater than zero.",
+                    title="Missing monthly tuition", key="class-validation",
+                )
+                return
+            kwargs["monthly_fee_vnd"] = self.monthly_fee_spin.value()
+            kwargs["monthly_effective_month"] = start_date.replace(day=1)
 
         try:
             if self._is_edit:
