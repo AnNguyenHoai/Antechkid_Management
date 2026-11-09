@@ -46,8 +46,13 @@ class FinanceAttachmentRepository:
     def count_active(self, entity_type: str, entity_id: int) -> int:
         return self._active(entity_type, entity_id).count()
 
+    def find_active_sha(self, entity_type: str, entity_id: int, sha256: str) -> Optional[FinanceAttachment]:
+        return self._active(entity_type, entity_id).filter(
+            FinanceAttachment.sha256 == sha256
+        ).first()
+
     def exists_active_sha(self, entity_type: str, entity_id: int, sha256: str) -> bool:
-        return self._active(entity_type, entity_id).filter(FinanceAttachment.sha256 == sha256).first() is not None
+        return self.find_active_sha(entity_type, entity_id, sha256) is not None
 
     def count_active_for(self, entity_type: str, entity_ids: Iterable[int]) -> Dict[int, int]:
         ids = list({int(i) for i in entity_ids})
