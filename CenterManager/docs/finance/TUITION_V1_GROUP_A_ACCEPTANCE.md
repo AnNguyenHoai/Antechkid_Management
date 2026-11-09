@@ -18,14 +18,14 @@ The original Enrollment and Income historical rows are not rewritten.
 ## F-03: one/month or three/month Tuition Income
 - Read-only quote computes remaining original Session allocations for exact Enrollment; a three-month request requires all three activated plans.
 - Operator previews month/quarter before posting. One `IncomeService.create_income` call creates **one genuine receipt**. Payment-period tag identifies quote; it does not modify the canonical accounting period derived from payment date.
-- Backend recalculates/validates price within posting transaction; rejects manual-credit combination and editing amount/period of an already quoted receipt. Existing refund/void procedures remain audited.
+- Backend recalculates/validates price within posting transaction; rejects overlapping ACTIVE month/quarter receipt periods (including cross-month quarter overlaps), manual-credit combination and editing amount/period of an already quoted receipt. Voiding an original receipt allows a separately authorized reissue. Existing refund/void procedures remain audited.
 - No prepaid accrual is recognized before each original session due date; Income is cash received, not earned revenue.
 
 ## F-04: safe opt-in mandatory migration preflight
 - Future effective first-of-month only; requires historical Enrollment contract and known Enrollment.start_date.
 - `MonthlyTuitionEnrollmentService` rejects opt-in if no trusted verifier is injected; rejects stale/mismatched evidence and all `assess_enrollment_migration` blockers.
 - `VerifiedMonthlyTuitionPreflight` checks managed encrypted backup integrity (within 1h), active WRITE authority and trusted reconciliation callback, plus live SQLCipher Enrollment evidence.
-- **Operator integration still required**: release composition must provide the trusted backup path and a reconciler. Do not replace it with boolean UI checkbox/claims.
+- `MonthlyTuitionEnrollmentService.from_verified_backup(...)` composes a trusted runtime verifier with managed backup path and conservative canonical reconciliation checks (duplicate Enrollment, freeze, transfer, adjustment history). This is available to rollout orchestration, but the live monthly plan UI stays gated until full acceptance; never replace evidence with a boolean UI checkbox.
 
 ## Remaining cross-group release gates
 - Explicit production SQLCipher backup/restore evidence, confirmed FinancePeriod and 8/9/10 UAT, archive/transfer/multi-client crash scenarios, finance reconciliation, open UI and packaging remain under Group B/release acceptance, not a Group A CI shortcut.
