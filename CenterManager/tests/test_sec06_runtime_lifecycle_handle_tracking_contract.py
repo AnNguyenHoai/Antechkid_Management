@@ -4,6 +4,10 @@ from centermanager.database import engine as database_engine
 
 
 def test_runtime_lifecycle_routes_readonly_sqlcipher_open_through_runtime_guard(monkeypatch):
+    # This unit test checks the tracked lifecycle adapter, not maintenance
+    # fencing. Isolate its process-global gate from previous full-suite tests;
+    # monkeypatch restores the original state after this test.
+    monkeypatch.setattr(database_engine, "_runtime_db_maintenance", False)
     captured = {}
 
     class _Connection:
