@@ -60,6 +60,7 @@ class IncomeFormDialog(QDialog):
         self._identity_unresolved = False
         self._initial_edit_values = None
         self._credit_only_command_key = f"tuition-credit-only:{uuid4()}"
+        self._submission_key = f"income:{uuid4()}"
         self._monthly_quote = None
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
@@ -782,6 +783,7 @@ class IncomeFormDialog(QDialog):
                         payment_period=payment_period or None,
                         received_by=received_by or None,
                         note=create_note,
+                        idempotency_key=self._submission_key,
                     )
                 else:
                     created = self._income_service.create_income(
@@ -795,6 +797,7 @@ class IncomeFormDialog(QDialog):
                         payment_period=payment_period or None,
                         received_by=received_by or None,
                         note=create_note,
+                        idempotency_key=self._submission_key,
                     )
                 if isinstance(created, tuple):
                     created = created[0]
