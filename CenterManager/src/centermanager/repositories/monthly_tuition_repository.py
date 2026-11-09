@@ -77,6 +77,29 @@ class MonthlyTuitionRepository:
             MonthlyTuitionOutcomeRecord.session_id == session_id,
         )).all()
 
+    def has_monthly_billing_for_session(self, session_id: int) -> bool:
+        """True when an activated monthly allocation covers an opted-in Enrollment."""
+        session = self.teaching_session(session_id)
+        if session is None:
+            return False
+        rows = self._session.scalars(select(EnrollmentMonthlyTuitionTerm).join(
+            Enrollment, Enrollment.id == EnrollmentMonthlyTuitionTerm.enrollment_id
+        ).where(Enrollment.class_id == session.class_id)).all()
+        if not rows:
+            return False
+        allocations = self._session.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id
+        ).where(
+            MonthlyTuitionAllocationRecord.session_id == session_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        return any(
+            term.effective_from <= allocation.original_date
+            and (term.effective_until is None or allocation.original_date <= term.effective_until)
+            for term in rows for allocation in allocations
+        )
+
     def create_term(self, *, enrollment_id: int, effective_from: date,
                     actor_name: str, activated_at: datetime):
         term = EnrollmentMonthlyTuitionTerm(
