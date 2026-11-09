@@ -299,3 +299,64 @@ def test_monthly_class_onboarding_rejects_before_class_start(monthly_factory):
         EnrollmentService(monthly_factory).enroll(
             1, 1, start_date=date(2026, 10, 31), enrolled_from_session=1
         )
+
+
+def test_multi_class_fresh_db_can_activate_november_sequentially(monthly_factory):
+    """Founder can input one class and students at a time, not pre-build all."""
+    schedule = MonthlyClassScheduleService(monthly_factory)
+    MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+        schedule, 1, date(2026, 11, 1), (5, 6)
+    )
+    store = MonthlyTuitionPlanStore(monthly_factory)
+    first = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+        store, 1, date(2026, 11, 1), 700000, "weekly:5,6"
+    )
+    MonthlyTuitionPlanStore.activate.__wrapped__(store, first)
+    EnrollmentService(monthly_factory).enroll(
+        1, 1, start_date=date(2026, 11, 1), enrolled_from_session=1
+    )
+    with monthly_factory() as db:
+        second = Class(
+            name="K3 Python", start_date=date(2026, 11, 1),
+            end_date=date(2027, 2, 28), status="ACTIVE",
+            course_fee=0, duration_months=4, planned_sessions=40,
+            sessions_per_week=2,
+        )
+        db.add(second)
+        db.flush()
+        second_id = second.id
+        db.add(MonthlyClassDefaultRecord(
+            class_id=second_id, monthly_fee_vnd=800000,
+            effective_month=date(2026, 11, 1),
+            created_at=datetime(2026, 11, 9), created_by="admin",
+        ))
+        db.commit()
+    MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+        schedule, second_id, date(2026, 11, 1), (5, 6)
+    )
+    second_draft = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+        store, second_id, date(2026, 11, 1), 800000, "weekly:5,6"
+    )
+    MonthlyTuitionPlanStore.activate.__wrapped__(store, second_draft)
+    with monthly_factory() as db:
+        assert db.get(MonthlyTuitionPlanRecord, second_draft).status == "ACTIVE"
+
+
+def test_fresh_month_bootstrap_rejects_mixed_legacy_class(monthly_factory):
+    with monthly_factory() as db:
+        db.add(Class(
+            name="Historical legacy class", status="ACTIVE",
+            start_date=date(2025, 11, 1), course_fee=2000000,
+            duration_months=4, planned_sessions=32, sessions_per_week=2,
+        ))
+        db.commit()
+    schedule = MonthlyClassScheduleService(monthly_factory)
+    MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+        schedule, 1, date(2026, 11, 1), (5, 6)
+    )
+    store = MonthlyTuitionPlanStore(monthly_factory)
+    draft = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+        store, 1, date(2026, 11, 1), 700000, "weekly:5,6"
+    )
+    with pytest.raises(MonthlyPlanStorageError, match="all-monthly"):
+        MonthlyTuitionPlanStore.activate.__wrapped__(store, draft)
