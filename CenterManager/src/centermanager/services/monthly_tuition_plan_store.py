@@ -159,19 +159,53 @@ class MonthlyTuitionPlanStore:
                     default is not None and default.effective_month == plan.month
                     and default.created_at.date().replace(day=1) == plan.month
                 )
-                any_cash = db.query(Income.id).first() is not None
-                any_contract = db.query(Enrollment.id).first() is not None
-                any_completed = db.query(Session.id).filter(
-                    Session.status != SessionStatus.SCHEDULED.value
+                # A fresh workspace may enter several classes sequentially.
+                # It is not necessary to activate *every* class before the
+                # first student is registered, but no historical/legacy data
+                # may be implicitly re-priced by the current-month exception.
+                all_classes = db.query(Class).all()
+                monthly_policies = {
+                    row.class_id: row
+                    for row in db.query(MonthlyClassDefaultRecord).all()
+                }
+                fresh_monthly_workspace = bool(all_classes) and all(
+                    row.id in monthly_policies
+                    and monthly_policies[row.id].effective_month == plan.month
+                    and monthly_policies[row.id].created_at.date().replace(day=1) == plan.month
+                    and row.start_date is not None
+                    and row.start_date.replace(day=1) == plan.month
+                    for row in all_classes
+                )
+                existing_enrollment = db.query(Enrollment.id).filter(
+                    Enrollment.class_id == plan.class_id
                 ).first() is not None
-                any_attendance = db.query(Attendance.id).first() is not None
+                target_income = db.query(Income.id).filter(
+                    Income.class_id == plan.class_id
+                ).first() is not None
+                target_completed = db.query(Session.id).filter(
+                    Session.class_id == plan.class_id,
+                    Session.status != SessionStatus.SCHEDULED.value,
+                ).first() is not None
+                target_attendance = db.query(Attendance.id).join(
+                    Session, Session.id == Attendance.session_id
+                ).filter(Session.class_id == plan.class_id).first() is not None
+                # Foreign or unassigned historical receipts are not evidence
+                # of a pristine all-monthly opening workspace.
+                unassigned_cash = db.query(Income.id).filter(
+                    (Income.class_id.is_(None))
+                    | (Income.payment_date < plan.month)
+                ).first() is not None
                 if not (
-                    is_current and initial_month and not any_cash
-                    and not any_contract and not any_completed and not any_attendance
+                    is_current and initial_month and fresh_monthly_workspace
+                    and not existing_enrollment and not target_income
+                    and not target_completed and not target_attendance
+                    and not unassigned_cash
                 ):
                     raise MonthlyPlanStorageError(
-                        "Current/past month activation is restricted to an unused "
-                        "new monthly database in its first billing month."
+                        "Current-month activation is allowed only for a newly "
+                        "created MONTHLY class with no own Enrollment/Income/"
+                        "attendance/completed lessons, inside an all-monthly "
+                        "fresh workspace without historical receipts."
                     )
             other_active = db.scalars(
                 select(MonthlyTuitionPlanRecord).where(
