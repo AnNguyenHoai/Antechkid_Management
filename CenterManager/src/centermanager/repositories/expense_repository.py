@@ -38,6 +38,12 @@ class ExpenseRepository(BaseRepository[Expense]):
         """Materialize pending Expense identity inside the caller transaction."""
         self._session.flush()
 
+    def get_by_idempotency_key(self, key: str) -> Optional[Expense]:
+        """Fetch a durable Save command from the authoritative ledger."""
+        return self._session.query(Expense).filter(
+            Expense.idempotency_key == key
+        ).first()
+
     def get_by_id(self, expense_id: int) -> Optional[Expense]:
         return self._session.query(Expense).filter(
             Expense.id == expense_id,
