@@ -302,6 +302,48 @@ class ClassService:
                 return None
             return (policy.monthly_fee_vnd, policy.effective_month)
 
+    def preview_new_monthly_enrollment(self, class_id: int, start_date: date) -> dict:
+        """Read-only onboarding quote based on original immutable allocations.
+
+        The enrollment is not created by preview. The actual EnrollmentService
+        revalidates the activated month inside its eventual WRITE transaction.
+        """
+        if type(start_date) is not date:
+            raise ClassValidationError("An explicit Enrollment start date is required.")
+        with self._session_factory() as session:
+            repo = self._repository_provider.classes(session)
+            class_obj = repo.get_by_id(class_id)
+            if class_obj is None or class_obj.deleted_at is not None:
+                raise ClassValidationError("Class not found.")
+            monthly_factory = getattr(self._repository_provider, "monthly_tuition", None)
+            if not callable(monthly_factory):
+                raise ClassValidationError("Monthly tuition storage is unavailable.")
+            monthly = monthly_factory(session)
+            policy = monthly.class_default(class_id)
+            if not isinstance(policy, MonthlyClassDefaultRecord):
+                raise ClassValidationError("Class is not configured for monthly tuition.")
+            month = start_date.replace(day=1)
+            if (
+                class_obj.start_date is None or start_date < class_obj.start_date
+                or month < policy.effective_month
+                or (class_obj.end_date is not None and start_date > class_obj.end_date)
+            ):
+                raise ClassValidationError("Enrollment start date is outside the monthly class period.")
+            plan, allocations = monthly.monthly_plan_allocations(class_id, month)
+            if plan is None or not allocations:
+                raise ClassValidationError("Activate the monthly class plan before enrolling.")
+            if sum(row.amount_vnd for row in allocations) != plan.monthly_fee_vnd:
+                raise ClassValidationError("Monthly plan allocations do not match its fee.")
+            applicable = [row for row in allocations if row.original_date >= start_date]
+            return {
+                "start_date": start_date,
+                "month": month,
+                "planned_sessions": len(allocations),
+                "remaining_sessions": len(applicable),
+                "monthly_fee_vnd": int(plan.monthly_fee_vnd),
+                "first_month_amount_vnd": sum(row.amount_vnd for row in applicable),
+            }
+
     def get_class(self, class_id: int) -> Class:
         with self._session_factory() as session:
             repo = self._repository_provider.classes(session)
