@@ -137,6 +137,32 @@ class ExpenseService:
             raise ExpenseValidationError("Amount must be greater than 0")
         return amount
 
+    @staticmethod
+    def _submission_key(value):
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 120:
+            raise ExpenseValidationError("Invalid expense submission key")
+        return value.strip()
+
+    @staticmethod
+    def _same_expense(existing, *, category, description, amount, payment_method,
+                      payment_date, paid_by, status, note, funding_source):
+        from decimal import Decimal
+        return (
+            existing.deleted_at is None
+            and existing.category == category
+            and existing.description == description
+            and Decimal(str(existing.amount)) == Decimal(str(amount))
+            and existing.payment_method == payment_method
+            and existing.payment_date == payment_date
+            and existing.paid_by == paid_by
+            and existing.status == status
+            and existing.note == note
+            and existing.funding_source == funding_source
+        )
+
+
     def _validate_category(self, category: str) -> str:
         valid = ["Teacher Salary", "Office Rent", "Electricity", "Water", "Internet", "Equipment", "Marketing", "Office Supply", "Maintenance", "Transportation", "Other"]
         if category not in valid:
@@ -232,7 +258,8 @@ class ExpenseService:
     @require_permission("finance.expense.create")
     def create_expense(self, category: str, description: str, amount: float, payment_method: str,
                        payment_date: date, paid_by: Optional[str] = None, status: Optional[str] = None,
-                       note: Optional[str] = None) -> Expense:
+                       note: Optional[str] = None, idempotency_key: Optional[str] = None) -> Expense:
+        idempotency_key = self._submission_key(idempotency_key)
         category = self._validate_category(category)
         description = self._normalize_text(description)
         if not description:
@@ -245,6 +272,21 @@ class ExpenseService:
         paid_by = self._normalize_text(paid_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
         with self._session_factory() as session:
+            if idempotency_key is not None:
+                previous = session.query(Expense).filter(
+                    Expense.idempotency_key == idempotency_key
+                ).first()
+                if previous is not None:
+                    if not self._same_expense(
+                        previous, category=category, description=description,
+                        amount=amount, payment_method=payment_method,
+                        payment_date=payment_date, paid_by=paid_by,
+                        status=status, note=note, funding_source=funding_source,
+                    ):
+                        raise ExpenseValidationError(
+                            "Expense submission key was already used with different details"
+                        )
+                    return previous
             period_id = self._resolve_posting_period_id(session, payment_date, status)
             if status == "Completed":
                 self._ensure_date_mutable(session, payment_date)
@@ -253,6 +295,7 @@ class ExpenseService:
                               payment_date=payment_date, finance_period_id=period_id,
                               paid_by=paid_by, status=status, note=note,
                               funding_source=funding_source,
+                              idempotency_key=idempotency_key,
                               incurred_date=payment_date if funding_source == Expense.FUNDING_PERSONAL else None)
             repo.add(expense)
             repo.flush()
