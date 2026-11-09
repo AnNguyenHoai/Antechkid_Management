@@ -614,3 +614,16 @@ def test_f07_wallet_income_outstanding_and_repeated_waiver(monthly_db, monkeypat
         assert paid - accrued == Decimal("400000")
         assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
         assert db.query(Income).count() == 1
+
+
+def test_f05_reopening_monthly_cancelled_lesson_requires_finance_reversal(monthly_db):
+    from centermanager.services.session_service import SessionService, SessionValidationError
+    with monthly_db() as db:
+        db.get(Session, 1).status = "Cancelled"
+        db.commit()
+    service = SessionService(monthly_db)
+    with pytest.raises(SessionValidationError, match="monthly tuition allocations"):
+        SessionService.update_session.__wrapped__(service, 1, status="Scheduled")
+    with monthly_db() as db:
+        assert db.get(Session, 1).status == "Cancelled"
+        assert db.query(MonthlyTuitionAllocationRecord).count() == 2
