@@ -38,6 +38,8 @@ from centermanager.services.finance_ledger_guard import (
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
+from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel, calculate_effective_tuition_accrual
+from centermanager.services.monthly_tuition_quote_service import MonthlyTuitionQuoteService, MonthlyTuitionQuoteError
 from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
@@ -392,15 +394,18 @@ class IncomeService:
         accrued = Decimal("0")
         if configured:
             try:
-                accrual = TuitionAccrualService.calculate_from_records(
-                    enrollment,
+                accrued = Decimal(str(calculate_effective_tuition_accrual(
+                    session, enrollment,
                     self._repository_provider.sessions(session).get_by_class(
                         enrollment.class_id
                     ),
                     get_clock().today(),
-                )
-                accrued = Decimal(str(accrual.net_accrued or 0))
+                ) or 0))
             except TuitionAccrualUnresolvedError:
+                if MonthlyTuitionReadModel.has_monthly_term(session, int(enrollment.id)):
+                    raise IncomeValidationError(
+                        "Monthly tuition evidence is incomplete; payment projection is blocked."
+                    )
                 configured = False
 
         paid = Decimal(
@@ -602,6 +607,25 @@ class IncomeService:
                     "Student was not enrolled in the selected class on the payment date."
                 )
 
+            if payment_period and payment_period.startswith("TUITION_"):
+                if income_type != "Tuition" or resolved_enrollment is None:
+                    raise IncomeValidationError("Monthly/quarterly quote requires an exact Tuition Enrollment")
+                try:
+                    kind, first_month = payment_period.split(":", 1)
+                    if kind not in ("TUITION_MONTH", "TUITION_QUARTER"):
+                        raise ValueError("Unrecognized tuition quote period")
+                    quote = MonthlyTuitionQuoteService(
+                        self._session_factory, self._repository_provider,
+                    ).quote_in_session(
+                        session, int(resolved_enrollment.id), date.fromisoformat(first_month),
+                        1 if kind == "TUITION_MONTH" else 3,
+                    )
+                except (MonthlyTuitionQuoteError, ValueError) as exc:
+                    raise IncomeValidationError(f"Invalid tuition quote: {exc}") from exc
+                if Decimal(str(amount)) != Decimal(quote.amount_vnd):
+                    raise IncomeValidationError(
+                        "Monthly/quarterly receipt must exactly match the verified quote"
+                    )
             repo = self._repository_provider.incomes(session)
             finance_period, finance_period_start = self._resolve_finance_period(session, payment_date)
             self._ensure_period_start_mutable(session, finance_period_start)
@@ -735,6 +759,11 @@ class IncomeService:
             raise IncomeValidationError("A reason is required for a non-cash tuition credit.")
 
         payment_period = self._normalize_text(payment_period)
+        if payment_period and payment_period.startswith("TUITION_"):
+            raise IncomeValidationError(
+                "Monthly/quarterly prices cannot be combined with manual credit; "
+                "use an approved adjustment workflow."
+            )
         _, actor_name = self._actor()
         actor = get_current_user()
         received_by = self._normalize_text(received_by) or actor_name
@@ -1030,6 +1059,16 @@ class IncomeService:
                 raise IncomeNotFoundError(f"Income with id {income_id} not found or deleted.")
             if income.status != Income.STATUS_ACTIVE:
                 raise IncomeValidationError("Only ACTIVE income can be edited.")
+            if (income.payment_period or "").startswith(("TUITION_MONTH:", "TUITION_QUARTER:")):
+                # An accepted month/quarter quote is evidence of one original
+                # cash receipt. Never let edit mode silently invalidate it.
+                if (amount is not None and Decimal(str(amount)) != Decimal(str(income.amount))) or (
+                    payment_period is not None and payment_period != income.payment_period
+                ):
+                    raise IncomeValidationError(
+                        "Monthly/quarterly receipt amount and allocation period cannot be edited; "
+                        "void and re-issue through an authorized workflow."
+                    )
 
             self._ensure_income_period_mutable(session, income)
             self._ensure_payment_time_credit_not_orphaned(session, income)

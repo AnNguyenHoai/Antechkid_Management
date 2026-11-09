@@ -80,7 +80,10 @@ def test_income_service_projects_signed_outstanding_for_picker():
     assert "def search_tuition_enrollment_choices(" in source
     assert "search_tuition_payment_candidates(" in source
     assert "sum_active_tuition_for_enrollment(" in source
-    assert "TuitionAccrualService.calculate_from_records(" in source
+    # Opted-in Enrollment must use the canonical policy router, never legacy
+    # accrual unconditionally (which would misstate monthly prepayments).
+    assert "calculate_effective_tuition_accrual(" in source
+    assert "MonthlyTuitionReadModel.has_monthly_term(" in source
 
 
 def test_picker_is_search_first_debounced_and_uses_clear_status_modes():

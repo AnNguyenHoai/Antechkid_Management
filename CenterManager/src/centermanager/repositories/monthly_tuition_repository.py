@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from centermanager.models.enrollment import Enrollment
@@ -76,6 +76,71 @@ class MonthlyTuitionRepository:
             MonthlyTuitionOutcomeRecord.enrollment_id == enrollment_id,
             MonthlyTuitionOutcomeRecord.session_id == session_id,
         )).all()
+
+    def monthly_plan_allocations(self, class_id: int, month: date):
+        """Return an activated plan with its immutable per-session allocations."""
+        plan = self.active_plan(class_id, month, allow_closed=True)
+        if plan is None:
+            return None, ()
+        allocations = self._session.scalars(select(MonthlyTuitionAllocationRecord).where(
+            MonthlyTuitionAllocationRecord.plan_id == plan.id
+        )).all()
+        return plan, tuple(allocations)
+
+    def active_quoted_payment_periods(self, enrollment_id: int) -> tuple[str, ...]:
+        """Existing real tuition receipts; VOIDED rows cannot block a reissue."""
+        values = self._session.scalars(select(Income.payment_period).where(
+            Income.enrollment_id == enrollment_id,
+            Income.income_type == "Tuition",
+            Income.status == Income.STATUS_ACTIVE,
+            Income.deleted_at.is_(None),
+            Income.payment_period.is_not(None),
+        )).all()
+        return tuple(str(value) for value in values if value is not None)
+
+    def active_allocation_for_session(self, class_id: int, session_id: int):
+        """Find the immutable original monthly plan, irrespective of reschedule."""
+        rows = self._session.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id,
+        ).where(
+            MonthlyTuitionAllocationRecord.session_id == session_id,
+            MonthlyTuitionPlanRecord.class_id == class_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        if len(rows) > 1:
+            raise ValueError("Ambiguous activated billing allocation")
+        return rows[0] if rows else None
+
+    def has_monthly_billing_for_session(self, session_id: int) -> bool:
+        """True when an activated monthly allocation covers an opted-in Enrollment."""
+        session = self.teaching_session(session_id)
+        if session is None:
+            return False
+        # Migration-less isolated legacy test databases have no opt-in rows.
+        # Production is migrated before feature rollout; missing table cannot
+        # contain a monthly contract to be protected.
+        if not inspect(self._session.get_bind()).has_table(
+            "enrollment_monthly_tuition_terms"
+        ):
+            return False
+        rows = self._session.scalars(select(EnrollmentMonthlyTuitionTerm).join(
+            Enrollment, Enrollment.id == EnrollmentMonthlyTuitionTerm.enrollment_id
+        ).where(Enrollment.class_id == session.class_id)).all()
+        if not rows:
+            return False
+        allocations = self._session.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id
+        ).where(
+            MonthlyTuitionAllocationRecord.session_id == session_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        return any(
+            term.effective_from <= allocation.original_date
+            and (term.effective_until is None or allocation.original_date <= term.effective_until)
+            for term in rows for allocation in allocations
+        )
 
     def create_term(self, *, enrollment_id: int, effective_from: date,
                     actor_name: str, activated_at: datetime):

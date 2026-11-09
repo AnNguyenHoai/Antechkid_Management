@@ -10,11 +10,12 @@ from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDateEdit,
     QTimeEdit, QComboBox, QPushButton, QHBoxLayout,
-    QMessageBox, QPlainTextEdit, QWidget
+    QMessageBox, QPlainTextEdit, QWidget, QInputDialog
 )
 
 from centermanager.models.session import SessionStatus
 from centermanager.services.session_service import SessionService, SessionValidationError
+from centermanager.services.monthly_tuition_class_cancellation import MonthlyTuitionClassCancellationService
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,37 @@ class SessionDialog(QDialog):
                 )
             self.accept()
         except SessionValidationError as e:
+            if (self._is_edit
+                    and status == SessionStatus.CANCELLED.value
+                    and "monthly tuition allocations" in str(e)):
+                confirmed = QMessageBox.question(
+                    self, "Hủy buổi có học phí tháng",
+                    "Buổi học đã có phân bổ học phí tháng. Hủy không học bù "
+                    "sẽ giảm đúng phần học phí của buổi này cho các học sinh "
+                    "đủ điều kiện. Các chỉnh sửa khác trong form này không được lưu. "
+                    "Xác nhận tiếp tục?",
+                )
+                if confirmed != QMessageBox.StandardButton.Yes:
+                    return
+                reason, ok = QInputDialog.getText(
+                    self, "Lý do hủy không học bù",
+                    "Nhập lý do để lưu bằng chứng điều chỉnh học phí:",
+                )
+                if not ok or not reason.strip():
+                    return
+                try:
+                    cancel = MonthlyTuitionClassCancellationService(
+                        self._service._session_factory,
+                    )
+                    cancel.cancel_with_no_makeup(
+                        self._class_id, int(self._session_id),
+                        reason=reason.strip(),
+                    )
+                    self.accept()
+                except Exception as exc:
+                    logger.exception("Atomic monthly class cancellation failed")
+                    QMessageBox.critical(self, "Không thể hủy buổi học", str(exc))
+                return
             QMessageBox.warning(self, "Validation Error", str(e))
         except Exception as e:
             logger.exception("Error saving session")

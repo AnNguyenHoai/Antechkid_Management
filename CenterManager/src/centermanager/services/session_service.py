@@ -94,6 +94,20 @@ class SessionService:
             )
         return class_obj
 
+    def _protect_monthly_billing(self, db_session, session_obj: Session) -> None:
+        """Legacy mutation paths must not leave a monthly cancellation unresolved."""
+        factory = getattr(self._repository_provider, "monthly_tuition", None)
+        if not callable(factory):
+            # Legacy test doubles and pre-migration embedders carry no opt-in
+            # tuition capabilities. Production provider always exposes it.
+            return
+        monthly = factory(db_session)
+        if monthly.has_monthly_billing_for_session(int(session_obj.id)):
+            raise SessionValidationError(
+                "This lesson has monthly tuition allocations. "
+                "Use the authorized atomic centre-cancellation billing command."
+            )
+
     # ----- CRUD -----
 
     @require_permission("lesson.create")
@@ -244,6 +258,9 @@ class SessionService:
 
             if status is not None:
                 new_status = self._validate_status(status)
+                if (new_status == SessionStatus.CANCELLED.value
+                        and session_obj.status != new_status):
+                    self._protect_monthly_billing(db_session, session_obj)
                 if session_obj.status != new_status:
                     changes.append(f"status: '{session_obj.status}' -> '{new_status}'")
                 session_obj.status = new_status
@@ -295,6 +312,7 @@ class SessionService:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
             if session_obj.status == SessionStatus.CANCELLED.value:
                 raise SessionValidationError("Session already cancelled.")
+            self._protect_monthly_billing(db_session, session_obj)
             session_obj.status = SessionStatus.CANCELLED.value
             record_for_active_write(
                 db_session, module="session", action="CANCEL",
