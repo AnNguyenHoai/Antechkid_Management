@@ -10,6 +10,8 @@ from centermanager.services.recovery_change_outbox import record_for_active_writ
 from centermanager.core.clock import get_clock
 from centermanager.services.timeline_actor import resolve_timeline_actor
 from centermanager.models.class_ import Class
+from centermanager.models.monthly_tuition import MonthlyClassDefaultRecord
+from centermanager.core.current_user import get_current_user
 from centermanager.models.student import Student
 from centermanager.models.class_timeline_event import ClassTimelineEventType
 from centermanager.models.enrollment import Enrollment
@@ -189,6 +191,8 @@ class ClassService:
         duration_months: Optional[int] = None,
         planned_sessions: Optional[int] = None,
         sessions_per_week: Optional[int] = None,
+        monthly_fee_vnd: Optional[int] = None,
+        monthly_effective_month: Optional[date] = None,
     ) -> Class:
         norm_name = self._validate_name(name)
         norm_course = self._normalize_text(course)
@@ -210,6 +214,22 @@ class ClassService:
             sessions_per_week=sessions_per_week,
             require_complete=has_new_contract_input,
         )
+
+        if monthly_fee_vnd is not None:
+            if type(monthly_fee_vnd) is not int or monthly_fee_vnd <= 0:
+                raise ClassValidationError("Monthly fee must be a positive whole VND amount.")
+            if (type(monthly_effective_month) is not date
+                    or monthly_effective_month.day != 1):
+                raise ClassValidationError("Monthly policy must begin on the first day of a month.")
+            current = get_clock().today()
+            if (monthly_effective_month.year, monthly_effective_month.month) < (current.year, current.month):
+                raise ClassValidationError("New monthly classes cannot begin in a past month.")
+            if start_date is None or start_date.replace(day=1) != monthly_effective_month:
+                raise ClassValidationError("New monthly class must start in its first billing month.")
+            if resolved_course_fee not in (None, 0):
+                raise ClassValidationError("Monthly class must not also define a legacy course fee.")
+        elif monthly_effective_month is not None:
+            raise ClassValidationError("Monthly effective month requires a monthly fee.")
 
         with self._session_factory() as session:
             class_code = self._generate_class_code(session)
@@ -237,6 +257,18 @@ class ClassService:
                     fee=class_obj.fee,
                     source="CLASS_CREATE",
                 )
+            if monthly_fee_vnd is not None:
+                actor = get_current_user()
+                actor_name = getattr(actor, "username", None)
+                if not actor_name:
+                    raise ClassValidationError("Authenticated manager required for monthly billing setup.")
+                session.add(MonthlyClassDefaultRecord(
+                    class_id=class_obj.id,
+                    monthly_fee_vnd=monthly_fee_vnd,
+                    effective_month=monthly_effective_month,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    created_by=actor_name,
+                ))
             record_for_active_write(
                 session, module="class", action="CREATE",
                 entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
@@ -259,6 +291,16 @@ class ClassService:
                 class_name=class_obj.name,
             ))
             return class_obj
+
+    def get_monthly_class_default(self, class_id: int):
+        """Read-only monthly class policy for UI; absent means legacy COURSE."""
+        if type(class_id) is not int or class_id <= 0:
+            raise ClassValidationError("Invalid class ID.")
+        with self._session_factory() as session:
+            policy = session.get(MonthlyClassDefaultRecord, class_id)
+            if policy is None:
+                return None
+            return (policy.monthly_fee_vnd, policy.effective_month)
 
     def get_class(self, class_id: int) -> Class:
         with self._session_factory() as session:
