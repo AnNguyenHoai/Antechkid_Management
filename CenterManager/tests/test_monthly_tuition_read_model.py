@@ -336,10 +336,14 @@ def test_group_a_f02_unresolved_monthly_cancellation_does_not_appear_as_zero_deb
                                        as_of_date=date(2040, 1, 31))
 
 
-def test_group_a_f01_income_picker_uses_same_accrual_as_outstanding(monthly_db):
+def test_group_a_f01_income_picker_uses_same_accrual_as_outstanding(monthly_db, monkeypatch):
     from types import SimpleNamespace
     from centermanager.services.income_service import IncomeService
+    import centermanager.services.income_service as income_module
     from centermanager.services.monthly_tuition_read_model import calculate_effective_tuition_accrual
+    monkeypatch.setattr(income_module, "get_clock", lambda: SimpleNamespace(
+        today=lambda: date(2040, 1, 31),
+    ))
     with monthly_db() as db:
         enrollment = db.get(Enrollment, 1)
         provider = SimpleNamespace(
@@ -356,10 +360,8 @@ def test_group_a_f01_income_picker_uses_same_accrual_as_outstanding(monthly_db):
         expected = calculate_effective_tuition_accrual(
             db, enrollment, db.query(Session).all(), date(2040, 1, 31),
         )
-        # Income picker uses current clock, not the 2040 reporting date.
-        # Before the opt-in month, the same policy projects zero accrued.
-        assert choice.outstanding == Decimal("0")
-        assert expected == Decimal("800000")
+        assert choice.outstanding == expected == Decimal("800000")
+        assert choice.balance_state == "OWED"
 
 
 def test_group_a_f04_verified_backup_write_preflight(tmp_path, monthly_db, monkeypatch):
