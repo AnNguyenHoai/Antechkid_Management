@@ -282,11 +282,14 @@ def test_backfill_onboarding_ui_exposes_date_and_does_not_use_legacy_override():
         / "ui" / "student_workspace" / "enrollment_pricing_dialog.py"
     )
     source = path.read_text(encoding="utf-8")
-    assert "self._monthly_policy = self._service.get_monthly_class_default(" in source
+    assert "raw_monthly_policy = self._service.get_monthly_class_default(" in source
     assert "self.monthly_start_date = QDateEdit(self)" in source
     assert "preview_new_monthly_enrollment(" in source
     assert '"start_date": self.monthly_start_date.date().toPython()' in source
     assert '"enrolled_from_session": 1' in source
+    multi_dialog = (path.parents[1] / "class_workspace" / "class_enrollment_dialog.py").read_text(encoding="utf-8")
+    assert "if enrollment_kwargs is None or monthly_class:" in multi_dialog
+    assert "pricing.setWindowTitle(" in multi_dialog
 
 
 def test_monthly_class_onboarding_rejects_before_class_start(monthly_factory):
