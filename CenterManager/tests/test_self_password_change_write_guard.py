@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import update
 
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401
 from tests.test_e1b2a_post_publish_consistency import reporting, remote_rows  # noqa: F401
 from centermanager.core.current_user import CurrentUserContext
 from centermanager.database.mutation_authority import (
