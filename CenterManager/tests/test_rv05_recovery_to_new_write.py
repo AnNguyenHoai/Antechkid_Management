@@ -44,19 +44,22 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
     startup = StartupSynchronization(w.provider)
     assert startup.run()
     assert values(w.journal.database) == ["BASE"]
-    from centermanager.platform.sync.manual_review_backup import (
-        verify_manual_review_backup,
-    )
-    archived = startup._manual_review_backup
-    verify_manual_review_backup(archived)
-    captured_path = archived / "database"
-    assert values(captured_path / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    queue = RecoveryReviewNotices(w.journal)
+    notices = queue.pending()
+    assert len(notices) == 1
+    archived = w.journal.root / "startup-rollbacks"
+    kept = list(archived.glob("*/center.db"))
+    assert kept
+    captured_db = kept[-1]
+    assert values(captured_db) == ["BASE", "LOCAL_UNACCEPTED"]
     assert w.provider.observe_remote_main_commit() == accepted_oid
 
-    # app.py performs this only after schema verification and before login.
-    # The direct service integration fixture already has the current schema.
-    w.journal.record_verified_manual_reset(
-        provider=w.provider, accepted_main=accepted_oid, archive=archived,
+    # The app seals a new CLEAN receipt after MAIN/schema checks. No Recovery
+    # case acknowledgement is required to acquire a new WRITE lease.
+    w.journal.record_verified_review_reset(
+        provider=w.provider, accepted_main=accepted_oid,
+        notice_path=w.provider._review_notice_path,
     )
 
     # Recovery reminder is advisory. No acknowledgement is required to get
@@ -96,11 +99,11 @@ def test_a_plus_ten_recovery_then_independent_write_and_finish(workspace, tmp_pa
             "BASE", "NEW_AUTHORIZED_WRITE"
         ]
         # Earlier LOCAL_UNACCEPTED data must not leak into the new remote MAIN.
-        assert values(captured_path / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
-        verify_manual_review_backup(archived)
+        assert values(captured_db) == ["BASE", "LOCAL_UNACCEPTED"]
+        assert not queue.pending() == []
         assert StartupSynchronization(w.provider).run()
-        assert (archived / "database" / "center.db").is_file()
-        assert (archived / "recovery" / "journal.json").is_file()
+        assert captured_db.is_file()
+        assert queue.pending()  # Skip does not acknowledge pending recovery.
         assert values(w.journal.database) == ["BASE", "NEW_AUTHORIZED_WRITE"]
     finally:
         cm.shutdown()
