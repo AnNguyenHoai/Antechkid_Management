@@ -343,6 +343,9 @@ class SessionService:
                 raise SessionNotFoundError(f"Session {session_id} not found.")
 
             self._require_active_class(db_session, session_obj.class_id)
+            # Removing a lesson with an immutable monthly allocation would
+            # destroy the original billing evidence and break Outstanding.
+            self._protect_monthly_billing(db_session, session_obj)
             class_id = session_obj.class_id
             deleted_session_id = session_obj.id
 
