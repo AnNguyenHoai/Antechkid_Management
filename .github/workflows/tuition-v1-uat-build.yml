@@ -1,0 +1,55 @@
+name: Tuition V1 UAT Windows build
+
+on:
+  push:
+    branches:
+      - "feat/tuition-v1-uat-activation-gate"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-uat:
+    if: github.ref == 'refs/heads/feat/tuition-v1-uat-activation-gate'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: CenterManager
+    steps:
+      - name: Checkout experimental branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: CenterManager/requirements*.txt
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Compile and package isolated Windows UAT EXE
+        run: python build_release.py
+      - name: Verify UAT package exists
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $zip = "release/CenterManager-v$version-windows-x64.zip"
+          if (!(Test-Path $zip)) { throw "UAT ZIP missing: $zip" }
+          $manifest = "release/CenterManager-v$version-windows-x64/RELEASE_MANIFEST.json"
+          if (!(Test-Path $manifest)) { throw "UAT manifest missing" }
+          $identity = Get-Content $manifest -Raw | ConvertFrom-Json
+          if ($identity.source_commit -ne $env:GITHUB_SHA.ToLower()) {
+            throw "UAT package source commit mismatch"
+          }
+          Write-Host "UAT ONLY, NOT APPROVED FOR PRODUCTION. Commit: $env:GITHUB_SHA"
+      - name: Upload UAT ZIP (not a production release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TuitionV1-UAT-Windows-${{ github.sha }}
+          path: |
+            CenterManager/release/*.zip
+            CenterManager/release/*.zip.sha256
+          if-no-files-found: error
