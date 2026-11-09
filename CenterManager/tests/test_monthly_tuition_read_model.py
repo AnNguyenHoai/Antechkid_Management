@@ -706,3 +706,82 @@ def test_f05_unallocated_new_ordinary_session_blocks_silent_underbilling(monthly
                 db, db.get(Enrollment, 1), db.query(Session).all(),
                 date(2040, 1, 31),
             )
+
+
+def test_f05_revised_makeup_outcome_must_not_keep_old_replacement_exempt(monthly_db):
+    from centermanager.services.tuition_accrual_service import TuitionAccrualUnresolvedError
+    with monthly_db() as db:
+        replacement = Session(class_id=1, session_number=3, title="Superseded makeup",
+                              scheduled_date=date(2040, 2, 11), status="Scheduled")
+        db.add(replacement)
+        db.flush()
+        db.add_all([
+            MonthlyTuitionOutcomeRecord(
+                enrollment_id=1, session_id=1, revision=1,
+                outcome="RESCHEDULED", replacement_session_id=replacement.id,
+                reason="Initial makeup", idempotency_key="f05-revised-1",
+                effective_date=date(2040, 1, 2),
+                recorded_at=datetime(2040, 1, 2), recorded_by="manager",
+            ),
+            MonthlyTuitionOutcomeRecord(
+                enrollment_id=1, session_id=1, revision=2,
+                outcome="CENTRE_CANCELLED_NO_MAKEUP",
+                reason="Superseded makeup", idempotency_key="f05-revised-2",
+                effective_date=date(2040, 1, 3),
+                recorded_at=datetime(2040, 1, 3), recorded_by="manager",
+            ),
+        ])
+        db.flush()
+        with pytest.raises(TuitionAccrualUnresolvedError, match="Missing activated monthly tuition plan"):
+            MonthlyTuitionReadModel.project(
+                db, db.get(Enrollment, 1), db.query(Session).all(),
+                date(2040, 2, 28),
+            )
+
+
+def test_f07_detail_income_outstanding_agree_after_cancel_and_prepaid(monthly_db, monkeypatch):
+    from types import SimpleNamespace
+    from centermanager.models.student import Student
+    from centermanager.models.income import Income
+    from centermanager.services.tuition_detail_service import TuitionDetailService
+    from centermanager.services.outstanding_service import OutstandingService
+    from centermanager.services.monthly_tuition_class_cancellation import (
+        MonthlyTuitionClassCancellationService,
+    )
+    import centermanager.services.monthly_tuition_class_cancellation as cancel_module
+    monkeypatch.setattr(cancel_module, "get_current_user",
+                        lambda: SimpleNamespace(username="finance_manager"))
+    with monthly_db() as db:
+        db.add(Student(id=1, student_code="F07-STU", full_name="F07 Student"))
+        db.get(Session, 1).status = "Scheduled"
+        db.add(Income(
+            student_id=1, class_id=1, enrollment_id=1,
+            amount=800000, income_type="Tuition",
+            payment_method="BANK", payment_date=date(2040, 1, 1),
+            payment_period="TUITION_MONTH:2040-01-01",
+            status=Income.STATUS_ACTIVE,
+        ))
+        db.commit()
+    service = MonthlyTuitionClassCancellationService(monthly_db)
+    assert service._apply_no_makeup(1, 1, reason="No makeup", cancel_first=True) == 1
+    detail = TuitionDetailService(monthly_db).get_detail(
+        1, as_of_date=date(2040, 1, 31),
+    )
+    assert detail.monthly_gross_accrued == Decimal("800000")
+    assert detail.monthly_waived == Decimal("400000")
+    assert detail.net_accrued == Decimal("400000")
+    assert detail.paid == Decimal("800000")
+    assert detail.prepaid_amount == Decimal("400000")
+    assert detail.balance == Decimal("-400000")
+    with monthly_db() as db:
+        enrollment = db.get(Enrollment, 1)
+        provider = SimpleNamespace(sessions=lambda session: SimpleNamespace(
+            get_by_class=lambda _: session.query(Session).all(),
+        ))
+        accrued, configured = OutstandingService(
+            monthly_db, repository_provider=provider,
+        )._calculate_accrued(db, enrollment, as_of_date=date(2040, 1, 31))
+        assert configured and accrued == detail.net_accrued
+    with monthly_db() as db:
+        assert db.query(Income).count() == 1
+        assert db.query(MonthlyTuitionOutcomeRecord).count() == 1
