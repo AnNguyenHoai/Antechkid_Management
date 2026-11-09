@@ -77,7 +77,11 @@ class GuardedConnection:
                     from centermanager.core.current_user import get_current_user
                     actor = get_current_user()
                     self_password = (arg1 == 'users' and action == sqlite3.SQLITE_UPDATE
-                                     and arg2 in {'password_hash', 'force_password_change', 'login_attempts', 'locked_until'}
+                                     # SQLAlchemy TimestampMixin also includes updated_at in this
+                                     # self-password UPDATE. It is safe only inside the
+                                     # already-verified, actor-bound password context.
+                                     and arg2 in {'password_hash', 'force_password_change',
+                                                  'login_attempts', 'locked_until', 'updated_at'}
                                      and actor is not None
                                      and getattr(_local, 'password_user_id', None) == str(actor.id))
                     self_employee = (arg1 == 'employees' and action == sqlite3.SQLITE_INSERT
