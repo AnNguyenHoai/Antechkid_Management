@@ -1550,6 +1550,42 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def is_configured(self) -> bool:
         return bool(self._repository_url)
 
+    def reset_verified_main_for_review(self, accepted_oid: str) -> bool:
+        """Startup-only Git MAIN reset when Recovery requires manual review.
+
+        Requires a fresh exact remote observation and a closed local writer.
+        No local changes are ever pushed or merged. The old runtime DB/WAL are
+        moved to startup-rollbacks by StartupSynchronization, not published.
+        """
+        import re
+        import subprocess
+        from centermanager.database.mutation_authority import gate_for
+
+        if not re.fullmatch(r"[0-9a-f]{40}", accepted_oid or ""):
+            raise RuntimeError("Invalid authoritative MAIN revision.")
+        gate = gate_for()
+        with gate.lock:
+            if not gate.closed:
+                raise RuntimeError("Active editor prevents Git MAIN startup reset.")
+            if (self.get_fetched_remote_main_commit() != accepted_oid
+                    or self.observe_remote_main_commit() != accepted_oid):
+                raise RuntimeError("Git MAIN cannot be authenticated for startup reset.")
+            if not self._git_executable:
+                raise RuntimeError("Git is unavailable for startup reset.")
+            with self._git_command_lock:
+                for args in (["reset", "--hard", accepted_oid], ["clean", "-fd"]):
+                    result = subprocess.run(
+                        [self._git_executable, *args],
+                        cwd=str(self._repo_path), capture_output=True,
+                        env=self._get_env(), check=False, timeout=60,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError("Could not reset to authenticated Git MAIN.")
+        if (self.get_local_main_commit() != accepted_oid
+                or self.observe_remote_main_commit() != accepted_oid):
+            raise RuntimeError("Remote MAIN changed during startup reset.")
+        return True
+
     def reset_verified_main_after_manual_backup(self, accepted_oid: str, archive) -> bool:
         """Single-purpose startup reset after complete manual evidence backup.
 
