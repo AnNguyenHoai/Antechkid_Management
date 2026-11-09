@@ -73,7 +73,7 @@ def test_fee_history_preserves_old_fee_after_later_change():
 
 def test_outstanding_v2_no_longer_uses_class_fee_history_as_obligation():
     source = _outstanding_source()
-    assert "TuitionAccrualService.calculate_from_records" in source
+    assert "calculate_effective_tuition_accrual" in source
     assert "get_fee_version_for_date" not in source
     assert "ClassFeeHistory" not in source
 
