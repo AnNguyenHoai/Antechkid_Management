@@ -71,6 +71,28 @@ class MonthlyTuitionQuoteService:
             raise MonthlyTuitionQuoteError("Enrollment must activate monthly tuition first")
         if enrollment.status != "ACTIVE" or enrollment.reconciled_into_enrollment_id is not None:
             raise MonthlyTuitionQuoteError("Only an active canonical Enrollment can receive a future quote")
+        requested_months = {_next_month(start_month, i) for i in range(month_count)}
+        for period in repo.active_quoted_payment_periods(enrollment_id):
+            if not period.startswith(("TUITION_MONTH:", "TUITION_QUARTER:")):
+                continue
+            try:
+                kind, start = period.split(":", 1)
+                paid_month = date.fromisoformat(start)
+                if paid_month.day != 1 or kind not in ("TUITION_MONTH", "TUITION_QUARTER"):
+                    raise ValueError("Malformed billing receipt")
+                covers = {
+                    _next_month(paid_month, i)
+                    for i in range(1 if kind == "TUITION_MONTH" else 3)
+                }
+            except (ValueError, OverflowError) as exc:
+                raise MonthlyTuitionQuoteError(
+                    "Previous quoted Tuition receipt metadata must be reconciled"
+                ) from exc
+            if requested_months & covers:
+                raise MonthlyTuitionQuoteError(
+                    "An ACTIVE Tuition receipt already covers a requested month; "
+                    "review/void the original before collecting again"
+                )
         lines = []
         for offset in range(month_count):
             month = _next_month(start_month, offset)
