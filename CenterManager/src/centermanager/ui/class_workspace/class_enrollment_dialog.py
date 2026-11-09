@@ -170,7 +170,8 @@ class ClassEnrollmentDialog(QDialog):
         # MONTHLY enrollment charges depend on EACH student's actual start date.
         # Never reuse a single student's historical backfill date for a
         # multi-select batch (legacy COURSE can continue sharing the snapshot).
-        monthly_class = self._class_service.get_monthly_class_default(self._class_id) is not None
+        monthly_policy = self._class_service.get_monthly_class_default(self._class_id)
+        monthly_class = isinstance(monthly_policy, tuple) and len(monthly_policy) == 2
         for item in items:
             student_id = item.data(Qt.ItemDataRole.UserRole)
             try:
