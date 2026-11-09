@@ -97,8 +97,26 @@ class MonthlyClassScheduleService:
             expected_dates = month_dates(klass.start_date, klass.end_date, month, weekdays)
             if not expected_dates:
                 raise MonthlyClassScheduleError("No teaching dates for this class/month.")
+            # Legacy contract snapshots use a finite max Session number. Do not
+            # silently create more teaching sessions than that upper bound.
+            # A MONTHLY class may edit its planned upper bound before enrolling.
+            if klass.end_date is not None:
+                total = sum(
+                    1 for offset in range((klass.end_date - klass.start_date).days + 1)
+                    if (klass.start_date.fromordinal(klass.start_date.toordinal() + offset).weekday()
+                        in weekdays)
+                )
+                if klass.planned_sessions is None or klass.planned_sessions < total:
+                    raise MonthlyClassScheduleError(
+                        f"Class Planned Sessions must cover at least {total} calendar lessons "
+                        "for the selected teaching weekdays. Update the class first."
+                    )
             existing = db.scalars(select(Session).where(Session.class_id == class_id)).all()
             in_month = [row for row in existing if row.scheduled_date.replace(day=1) == month]
+            if not in_month and any(row.scheduled_date.replace(day=1) > month for row in existing):
+                raise MonthlyClassScheduleError(
+                    "Generate earlier missing months first, to keep session numbers chronological."
+                )
             if in_month:
                 dates = tuple(sorted(row.scheduled_date for row in in_month))
                 if dates == expected_dates and policy.weekly_days == selected:
