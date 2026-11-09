@@ -60,13 +60,19 @@ class MonthlyTuitionClassCancellationService:
                 raise MonthlyClassCancellationError("Cannot cancel a completed lesson")
             if cancel_first:
                 lesson.status = SessionStatus.CANCELLED.value
-            plan = db.scalars(select(MonthlyTuitionPlanRecord).where(
+            plans = db.scalars(select(MonthlyTuitionPlanRecord).join(
+                MonthlyTuitionAllocationRecord,
+                MonthlyTuitionAllocationRecord.plan_id == MonthlyTuitionPlanRecord.id,
+            ).where(
                 MonthlyTuitionPlanRecord.class_id == class_id,
-                MonthlyTuitionPlanRecord.month == lesson.scheduled_date.replace(day=1),
+                MonthlyTuitionAllocationRecord.session_id == session_id,
                 MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
-            )).first()
-            if plan is None:
-                raise MonthlyClassCancellationError("No activated tuition plan for this class/month")
+            )).all()
+            if len(plans) != 1:
+                raise MonthlyClassCancellationError(
+                    "Exactly one activated original tuition plan is required"
+                )
+            plan = plans[0]
             allocation = db.scalars(select(MonthlyTuitionAllocationRecord).where(
                 MonthlyTuitionAllocationRecord.plan_id == plan.id,
                 MonthlyTuitionAllocationRecord.session_id == session_id,
@@ -80,10 +86,10 @@ class MonthlyTuitionClassCancellationService:
             count = 0
             for term in terms:
                 enrollment = db.get(Enrollment, term.enrollment_id)
-                if (term.effective_from > lesson.scheduled_date
-                        or (term.effective_until is not None and lesson.scheduled_date > term.effective_until)
-                        or (enrollment.start_date is not None and lesson.scheduled_date < enrollment.start_date)
-                        or (enrollment.end_date is not None and lesson.scheduled_date > enrollment.end_date)
+                if (term.effective_from > allocation.original_date
+                        or (term.effective_until is not None and allocation.original_date > term.effective_until)
+                        or (enrollment.start_date is not None and allocation.original_date < enrollment.start_date)
+                        or (enrollment.end_date is not None and allocation.original_date > enrollment.end_date)
                         or (enrollment.withdrawn_from_session is not None
                             and lesson.session_number >= enrollment.withdrawn_from_session)):
                     continue
