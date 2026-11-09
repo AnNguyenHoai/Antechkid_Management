@@ -117,7 +117,7 @@ def test_credit_only_cap_is_enforced_after_write_reservation():
     credit = source.split("def credit_adjustment(", 1)[1]
     assert "cap_to_outstanding: bool = False" in credit
     assert "if cap_to_outstanding:" in credit
-    assert "TuitionAccrualService.calculate_from_records(" in credit
+    assert "calculate_effective_tuition_accrual(" in credit
     assert "sum_active_tuition_for_enrollment(" in credit
     assert "value > owed" in credit
     assert credit.index("adjustments.acquire_command_lock(") < credit.index("if cap_to_outstanding:")
