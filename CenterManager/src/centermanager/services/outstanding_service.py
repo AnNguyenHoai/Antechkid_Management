@@ -36,6 +36,7 @@ from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
 )
+from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,11 @@ class OutstandingService:
             enrollment.class_id
         )
         try:
+            if MonthlyTuitionReadModel.has_monthly_term(session, int(enrollment.id)):
+                monthly = MonthlyTuitionReadModel.project(
+                    session, enrollment, sessions, as_of_date
+                )
+                return self._amount(monthly.accrued_vnd), True
             accrual = TuitionAccrualService.calculate_from_records(
                 enrollment,
                 sessions,

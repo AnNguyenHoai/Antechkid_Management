@@ -44,6 +44,8 @@ This inventory is the committed architecture classification for application serv
 | `home_dashboard_service.py` | PASS | repository-owned | — |
 | `income_service.py` | PASS | repository-owned | — |
 | `monthly_attendance_exception_service.py` | PASS | repository-owned monthly attendance, enrollment and session reads | — |
+| `monthly_tuition_enrollment_service.py` | PASS | RepositoryProvider.monthly_tuition; historical contract validation and SQLCipher transaction orchestration | — |
+| `monthly_tuition_outcome_service.py` | PASS | RepositoryProvider.monthly_tuition; idempotent outcome validation and transaction orchestration | — |
 | `outstanding_service.py` | PASS | repository-owned | — |
 | `parent_service.py` | PASS | repository-owned | — |
 | `permission_service.py` | PASS | repository-owned | — |
