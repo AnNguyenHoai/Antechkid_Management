@@ -89,11 +89,15 @@ def test_git_main_startup_archives_old_journal_and_allows_single_runtime(
         _manual_review_backup=None,
     )
     assert StartupSynchronization._prepare_authoritative_startup_replacement(fake)
-    assert fake._manual_reset_requested
+    assert fake._review_only_reset_requested
     assert fake._accepted_startup_main_oid == oid
-    assert fake._startup_reconciled_unaccepted_local
-    verify_manual_review_backup(fake._manual_review_backup)
-    assert (fake._manual_review_backup / "recovery" / "journal.json").read_text() == broken_journal
+    assert fake._manual_review_backup is None
+    assert fake._review_notice_path is not None
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    review = RecoveryReviewNotices(legacy)
+    doc = review.validate_notice(fake._review_notice_path)
+    assert doc["status"] == "PENDING_REVIEW"
+    assert (review.root / doc["journal_file"]).read_text() == broken_journal
 
 
 def test_no_journal_but_existing_business_data_preserved_for_initial_main_receipt(
@@ -119,9 +123,12 @@ def test_no_journal_but_existing_business_data_preserved_for_initial_main_receip
         _manual_review_backup=None,
     )
     assert StartupSynchronization._prepare_authoritative_startup_replacement(fake)
-    assert fake._initial_main_receipt_allowed
+    assert fake._review_only_reset_requested
+    assert not fake._initial_main_receipt_allowed
     assert not fake._manual_reset_requested
-    assert (fake._manual_review_backup / "database" / "center.db").read_bytes() == b"unpublished local"
+    # Old database is untouched until the later atomic Git MAIN installation,
+    # which retains its original bytes in startup-rollbacks for review.
+    assert legacy.database.read_bytes() == b"unpublished local"
 
 
 def test_archive_rejects_symlinked_workspace_without_overwriting_original(legacy, tmp_path):
@@ -160,7 +167,7 @@ def test_no_runtime_db_but_legacy_business_material_is_not_discarded(
         _manual_review_backup=None,
     )
     assert StartupSynchronization._prepare_authoritative_startup_replacement(fake)
-    assert fake._initial_main_receipt_allowed is True
-    assert (fake._manual_review_backup / "attachments" / "receipt.bin").read_bytes() == b"personal receipt"
-    assert (fake._manual_review_backup / "config" / "database_key.dpapi").read_bytes() == b"old Windows DPAPI key"
-    verify_manual_review_backup(fake._manual_review_backup)
+    assert fake._review_only_reset_requested
+    assert fake._initial_main_receipt_allowed is False
+    assert (legacy.runtime / "Attachment" / "receipt.bin").read_bytes() == b"personal receipt"
+    assert (legacy.runtime / "Config" / "database_key.dpapi").read_bytes() == b"old Windows DPAPI key"
