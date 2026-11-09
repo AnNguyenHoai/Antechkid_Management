@@ -383,6 +383,16 @@ class ExpenseService:
             before = self._audit_snapshot(expense)
             original_date = expense.payment_date
             original_status = expense.status
+            # EXP-01: an already reimbursed personal advance has a realized
+            # company-wallet posting. Ordinary Edit may not reverse it back to
+            # a Pending/Personal advance; reversal requires a dedicated,
+            # audited accounting operation.
+            if (expense.funding_source == Expense.FUNDING_PERSONAL
+                    and original_status == "Completed"
+                    and status is not None and self._validate_status(status) != "Completed"):
+                raise ExpenseValidationError(
+                    "A reimbursed personal advance cannot be made Pending by Edit"
+                )
             if original_status == "Completed":
                 self._ensure_date_mutable(session, original_date)
 
