@@ -694,3 +694,15 @@ def test_f05_pre_optin_active_class_plan_stays_legacy_for_later_joiner(monthly_d
         assert projected.historical_legacy_vnd == Decimal("800000")
         assert projected.monthly_vnd == Decimal("500000")
         assert projected.accrued_vnd == Decimal("1300000")
+
+
+def test_f05_unallocated_new_ordinary_session_blocks_silent_underbilling(monthly_db):
+    with monthly_db() as db:
+        db.add(Session(class_id=1, session_number=3, title="Unplanned extra",
+                       scheduled_date=date(2040, 1, 15), status="Completed"))
+        db.flush()
+        with pytest.raises(TuitionAccrualUnresolvedError, match="immutable allocation"):
+            MonthlyTuitionReadModel.project(
+                db, db.get(Enrollment, 1), db.query(Session).all(),
+                date(2040, 1, 31),
+            )
