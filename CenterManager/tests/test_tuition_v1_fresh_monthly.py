@@ -363,3 +363,51 @@ def test_fresh_month_bootstrap_rejects_mixed_legacy_class(monthly_factory):
     )
     with pytest.raises(MonthlyPlanStorageError, match="all-monthly"):
         MonthlyTuitionPlanStore.activate.__wrapped__(store, draft)
+
+
+@pytest.mark.parametrize(
+    ("month", "expected"),
+    [
+        (date(2026, 11, 1), 9),
+        (date(2026, 12, 1), 8),
+        (date(2027, 1, 1), 10),
+        (date(2027, 2, 1), 8),
+    ],
+)
+def test_weekend_monthly_calendar_has_exact_real_session_count(month, expected):
+    """Nov 2026 fresh-start contract must never assume eight lessons/month."""
+    days = month_dates(date(2026, 11, 1), date(2027, 2, 28), month, (5, 6))
+    assert len(days) == expected
+    assert len(set(days)) == expected
+    assert all(day.replace(day=1) == month for day in days)
+
+
+def test_four_consecutive_monthly_plans_preserve_full_fee_at_8_9_10_sessions(monthly_factory):
+    """Integrated calendar-to-immutable-allocation regression for a fresh class."""
+    schedule = MonthlyClassScheduleService(monthly_factory)
+    store = MonthlyTuitionPlanStore(monthly_factory)
+    expected_by_month = [
+        (date(2026, 11, 1), 9),
+        (date(2026, 12, 1), 8),
+        (date(2027, 1, 1), 10),
+        (date(2027, 2, 1), 8),
+    ]
+    session_ids = set()
+    for month, expected in expected_by_month:
+        count = MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+            schedule, 1, month, (5, 6)
+        )
+        assert count == expected
+        plan_id = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+            store, 1, month, 700000, "weekly:5,6"
+        )
+        MonthlyTuitionPlanStore.activate.__wrapped__(store, plan_id)
+        with monthly_factory() as db:
+            allocations = db.scalars(select(MonthlyTuitionAllocationRecord).where(
+                MonthlyTuitionAllocationRecord.plan_id == plan_id
+            )).all()
+            assert len(allocations) == expected
+            assert sum(line.amount_vnd for line in allocations) == 700000
+            assert all(line.session_id not in session_ids for line in allocations)
+            session_ids.update(line.session_id for line in allocations)
+    assert len(session_ids) == 35
