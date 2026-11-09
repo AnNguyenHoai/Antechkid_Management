@@ -27,6 +27,7 @@ def test_monthly_default_table_supports_create_class_write():
     """New class + its MONTHLY policy share a single SQLCipher transaction."""
     assert "class.create" in mutation_permissions("monthly_class_defaults", 18)
     assert "class.update" in mutation_permissions("monthly_class_defaults", 23)
+    assert "lesson.create" in mutation_permissions("monthly_class_defaults", 23)
     assert mutation_permissions("nonexistent_monthly_table", 18) == ()
 
 
