@@ -87,6 +87,20 @@ class MonthlyTuitionRepository:
         )).all()
         return plan, tuple(allocations)
 
+    def active_allocation_for_session(self, class_id: int, session_id: int):
+        """Find the immutable original monthly plan, irrespective of reschedule."""
+        rows = self._session.scalars(select(MonthlyTuitionAllocationRecord).join(
+            MonthlyTuitionPlanRecord,
+            MonthlyTuitionPlanRecord.id == MonthlyTuitionAllocationRecord.plan_id,
+        ).where(
+            MonthlyTuitionAllocationRecord.session_id == session_id,
+            MonthlyTuitionPlanRecord.class_id == class_id,
+            MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
+        )).all()
+        if len(rows) > 1:
+            raise ValueError("Ambiguous activated billing allocation")
+        return rows[0] if rows else None
+
     def has_monthly_billing_for_session(self, session_id: int) -> bool:
         """True when an activated monthly allocation covers an opted-in Enrollment."""
         session = self.teaching_session(session_id)
