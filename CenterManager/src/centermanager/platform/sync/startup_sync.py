@@ -65,7 +65,16 @@ class StartupSynchronization:
                 not self._repo_path.is_dir() or any(self._repo_path.iterdir())
             ))
         )
-        recovery_material = has_material(journal.root)
+        # Recovery is advisory; detecting its presence must not recursively
+        # enumerate potentially enormous/deep historical captures. A single
+        # directory entry suffices to classify this as a nonfresh install.
+        recovery_root = Path(journal.root)
+        recovery_material = (
+            recovery_root.is_symlink()
+            or (recovery_root.exists() and (
+                not recovery_root.is_dir() or any(recovery_root.iterdir())
+            ))
+        )
         business_material = any(
             has_material(roots[name], allow_placeholders=True)
             for name in ('database', 'attachments', 'legacy-attachments')
