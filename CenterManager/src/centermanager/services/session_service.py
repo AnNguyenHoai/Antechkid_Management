@@ -258,8 +258,13 @@ class SessionService:
 
             if status is not None:
                 new_status = self._validate_status(status)
-                if (new_status == SessionStatus.CANCELLED.value
-                        and session_obj.status != new_status):
+                if new_status != session_obj.status and (
+                    new_status == SessionStatus.CANCELLED.value
+                    or session_obj.status == SessionStatus.CANCELLED.value
+                ):
+                    # Reopening a financially waived monthly session would
+                    # leave its immutable no-makeup outcome active. Require
+                    # a separate audited financial reversal workflow.
                     self._protect_monthly_billing(db_session, session_obj)
                 if session_obj.status != new_status:
                     changes.append(f"status: '{session_obj.status}' -> '{new_status}'")
