@@ -666,3 +666,31 @@ def test_f06_detail_fails_closed_on_unresolved_activated_contract(monthly_db):
         TuitionDetailService(monthly_db).get_detail(
             1, as_of_date=date(2040, 1, 31),
         )
+
+
+def test_f05_pre_optin_active_class_plan_stays_legacy_for_later_joiner(monthly_db):
+    with monthly_db() as db:
+        term = db.query(EnrollmentMonthlyTuitionTerm).one()
+        term.effective_from = date(2040, 2, 1)
+        lesson = Session(class_id=1, session_number=3, title="Feb lesson",
+                         scheduled_date=date(2040, 2, 8), status="Completed")
+        db.add(lesson)
+        db.flush()
+        plan = MonthlyTuitionPlanRecord(
+            class_id=1, month=date(2040, 2, 1), version=1,
+            monthly_fee_vnd=500000, schedule_version="feb", status="ACTIVE",
+        )
+        db.add(plan)
+        db.flush()
+        db.add(MonthlyTuitionAllocationRecord(
+            plan_id=plan.id, session_id=lesson.id,
+            original_date=lesson.scheduled_date, amount_vnd=500000,
+        ))
+        db.flush()
+        projected = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(),
+            date(2040, 2, 28),
+        )
+        assert projected.historical_legacy_vnd == Decimal("800000")
+        assert projected.monthly_vnd == Decimal("500000")
+        assert projected.accrued_vnd == Decimal("1300000")
