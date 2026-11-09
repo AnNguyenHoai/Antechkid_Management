@@ -718,6 +718,7 @@ class WriteRecoveryJournal:
         if (not accepted_main or not notice_path
                 or getattr(provider, '_verified_review_main_oid', None) != accepted_main
                 or getattr(provider, '_review_notice_path', None) != str(notice_path)
+                or not getattr(provider, '_review_finance_isolated', False)
                 or provider.observe_remote_main_commit() != accepted_main):
             raise RecoveryRequired('Verified MAIN/review notice evidence unavailable')
         notices = RecoveryReviewNotices(self)
@@ -747,6 +748,7 @@ class WriteRecoveryJournal:
         _json(self.journal, receipt)
         delattr(provider, '_verified_review_main_oid')
         delattr(provider, '_review_notice_path')
+        delattr(provider, '_review_finance_isolated')
         self.assert_replaceable()
         logger.warning(
             'Git MAIN installed with independent Recovery review pending; '
