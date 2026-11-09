@@ -30,6 +30,7 @@ def monthly_db():
         db.flush()
         enrollment = Enrollment(
             class_id=klass.id, student_id=1, status="ACTIVE",
+            start_date=date(2039, 12, 1),
             agreed_course_fee=Decimal("800000"), planned_sessions=2,
             unit_fee=Decimal("400000"), enrolled_from_session=1,
             enrolled_until_session=2, discount_amount=Decimal("0"),
@@ -142,7 +143,7 @@ def test_future_month_enrollment_opt_in_is_explicit(monthly_db, monkeypatch):
     def verified_preflight(db, enrollment, effective_date):
         return EnrollmentMigrationEvidence(
             enrollment_id=enrollment.id, requested_effective_date=effective_date,
-            review_date=today, first_enrollment_date=enrollment.start_date or today,
+            review_date=today, first_enrollment_date=enrollment.start_date,
             legacy_tuition_resolved=enrollment.has_tuition_contract,
             has_unattributed_payment=False, already_monthly=False,
             has_unresolved_reconciliation=False,
@@ -234,7 +235,7 @@ def test_group_a_f04_rejects_activation_without_verified_backup_or_write(monthly
     def failed_preflight(db, enrollment, start):
         return EnrollmentMigrationEvidence(
             enrollment_id=enrollment.id, requested_effective_date=start,
-            review_date=today, first_enrollment_date=today,
+            review_date=today, first_enrollment_date=date(2039, 12, 1),
             legacy_tuition_resolved=True, has_unattributed_payment=False,
             already_monthly=False, has_unresolved_reconciliation=False,
             encrypted_backup_verified=False, write_authority_verified=True,
