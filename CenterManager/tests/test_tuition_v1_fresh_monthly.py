@@ -221,3 +221,81 @@ def test_monthly_policy_rejects_dual_legacy_fee(monkeypatch):
             assert db.query(Class).count() == 0
     finally:
         engine.dispose()
+
+
+def test_backfill_november_1_preserves_full_monthly_tuition(monthly_factory):
+    schedule = MonthlyClassScheduleService(monthly_factory)
+    MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+        schedule, 1, date(2026, 11, 1), (5, 6)
+    )
+    store = MonthlyTuitionPlanStore(monthly_factory)
+    pid = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+        store, 1, date(2026, 11, 1), 700000, "weekly:5,6"
+    )
+    MonthlyTuitionPlanStore.activate.__wrapped__(store, pid)
+    onboarding = __import__(
+        "centermanager.services.class_service", fromlist=["ClassService"]
+    ).ClassService(monthly_factory)
+    preview = onboarding.preview_new_monthly_enrollment(1, date(2026, 11, 1))
+    assert preview["planned_sessions"] == 9
+    assert preview["remaining_sessions"] == 9
+    assert preview["first_month_amount_vnd"] == 700000
+    enrollment = EnrollmentService(monthly_factory).enroll(
+        1, 1, start_date=date(2026, 11, 1), enrolled_from_session=1
+    )
+    quote = MonthlyTuitionQuoteService(monthly_factory).quote(
+        enrollment.id, date(2026, 11, 1), 1
+    )
+    assert quote.amount_vnd == 700000
+    assert quote.lines[0].chargeable_sessions == 9
+
+
+def test_backfill_november_9_bills_only_remaining_original_sessions(monthly_factory):
+    schedule = MonthlyClassScheduleService(monthly_factory)
+    MonthlyClassScheduleService.create_month_sessions.__wrapped__(
+        schedule, 1, date(2026, 11, 1), (5, 6)
+    )
+    store = MonthlyTuitionPlanStore(monthly_factory)
+    pid = MonthlyTuitionPlanStore.create_draft.__wrapped__(
+        store, 1, date(2026, 11, 1), 700000, "weekly:5,6"
+    )
+    MonthlyTuitionPlanStore.activate.__wrapped__(store, pid)
+    from centermanager.services.class_service import ClassService
+    preview = ClassService(monthly_factory).preview_new_monthly_enrollment(
+        1, date(2026, 11, 9)
+    )
+    assert preview["remaining_sessions"] == 6
+    enrollment = EnrollmentService(monthly_factory).enroll(
+        1, 1, start_date=date(2026, 11, 9), enrolled_from_session=1
+    )
+    quote = MonthlyTuitionQuoteService(monthly_factory).quote(
+        enrollment.id, date(2026, 11, 1), 1
+    )
+    assert quote.amount_vnd == preview["first_month_amount_vnd"]
+    assert quote.lines[0].chargeable_sessions == 6
+
+
+def test_backfill_onboarding_ui_exposes_date_and_does_not_use_legacy_override():
+    from pathlib import Path
+    path = (
+        Path(__file__).resolve().parents[1] / "src" / "centermanager"
+        / "ui" / "student_workspace" / "enrollment_pricing_dialog.py"
+    )
+    source = path.read_text(encoding="utf-8")
+    assert "self._monthly_policy = self._service.get_monthly_class_default(" in source
+    assert "self.monthly_start_date = QDateEdit(self)" in source
+    assert "preview_new_monthly_enrollment(" in source
+    assert '"start_date": self.monthly_start_date.date().toPython()' in source
+    assert '"enrolled_from_session": 1' in source
+
+
+def test_monthly_class_onboarding_rejects_before_class_start(monthly_factory):
+    from centermanager.services.class_service import ClassService, ClassValidationError
+    with pytest.raises(ClassValidationError, match="outside"):
+        ClassService(monthly_factory).preview_new_monthly_enrollment(
+            1, date(2026, 10, 31)
+        )
+    with pytest.raises(EnrollmentValidationError):
+        EnrollmentService(monthly_factory).enroll(
+            1, 1, start_date=date(2026, 10, 31), enrolled_from_session=1
+        )
