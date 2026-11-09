@@ -308,7 +308,7 @@ class TuitionAdjustmentService:
                             enrollment_id, as_of_date=effective_date
                         )
                     )
-                    owed = max(_money(accrual.net_accrued) - settled, Decimal("0.00"))
+                    owed = max(_money(accrued) - settled, Decimal("0.00"))
                     if value > owed:
                         raise TuitionAdjustmentValidationError(
                             "Non-cash waiver exceeds accrued tuition still owed for this Enrollment."
