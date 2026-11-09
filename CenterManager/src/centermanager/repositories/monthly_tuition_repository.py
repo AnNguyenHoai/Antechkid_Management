@@ -77,6 +77,16 @@ class MonthlyTuitionRepository:
             MonthlyTuitionOutcomeRecord.session_id == session_id,
         )).all()
 
+    def monthly_plan_allocations(self, class_id: int, month: date):
+        """Return an activated plan with its immutable per-session allocations."""
+        plan = self.active_plan(class_id, month, allow_closed=True)
+        if plan is None:
+            return None, ()
+        allocations = self._session.scalars(select(MonthlyTuitionAllocationRecord).where(
+            MonthlyTuitionAllocationRecord.plan_id == plan.id
+        )).all()
+        return plan, tuple(allocations)
+
     def has_monthly_billing_for_session(self, session_id: int) -> bool:
         """True when an activated monthly allocation covers an opted-in Enrollment."""
         session = self.teaching_session(session_id)
