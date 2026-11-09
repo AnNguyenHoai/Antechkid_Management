@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from centermanager.services.monthly_tuition_plan_store import MonthlyTuitionPlanStore
+from centermanager.services.tuition_v1_uat_gate import tuition_v1_uat_enabled
+from centermanager.ui.class_workspace.monthly_tuition_opt_in_dialog import MonthlyTuitionOptInDialog
 
 
 class MonthlyTuitionPlanDialog(QDialog):
@@ -53,13 +55,16 @@ class MonthlyTuitionPlanDialog(QDialog):
         self.save_btn = QPushButton("Lưu bản nháp")
         self.activate_btn = QPushButton("Kích hoạt")
         self.activate_btn.setEnabled(False)
+        self.enrollment_btn = QPushButton("Chuyển học sinh (UAT)")
+        self.enrollment_btn.setVisible(tuition_v1_uat_enabled())
         self.close_btn = QPushButton("Đóng")
-        for button in (self.preview_btn, self.save_btn, self.activate_btn, self.close_btn):
+        for button in (self.preview_btn, self.save_btn, self.activate_btn, self.enrollment_btn, self.close_btn):
             bar.addWidget(button)
         root.addLayout(bar)
         self.preview_btn.clicked.connect(self.preview)
         self.save_btn.clicked.connect(self.save_draft)
         self.activate_btn.clicked.connect(self.activate)
+        self.enrollment_btn.clicked.connect(self._open_enrollment_opt_in)
         self.close_btn.clicked.connect(self.reject)
         self.month.dateChanged.connect(self._invalidate_draft)
         self.fee.valueChanged.connect(self._invalidate_draft)
@@ -121,3 +126,10 @@ class MonthlyTuitionPlanDialog(QDialog):
         self.activate_btn.setEnabled(False)
         self.save_btn.setEnabled(False)
         self.notice.setText("Đã kích hoạt. Dữ liệu phân bổ là bất biến.")
+
+    def _open_enrollment_opt_in(self):
+        if not tuition_v1_uat_enabled():
+            return
+        MonthlyTuitionOptInDialog(
+            self._class_id, self._store._session_factory, parent=self,
+        ).exec()
