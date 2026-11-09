@@ -329,6 +329,16 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._show_pending_review_notices)
             pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
             count = len(pending)
+            if pending and not review_pending:
+                # Legacy signed cases use the existing Reviewed/Skip dialog.
+                # Only after login; close/skip leaves them pending next boot.
+                from centermanager.ui.recovery_cases_dialog import RecoveryCasesDialog
+                registry = RecoveryCaseRegistry(WriteRecoveryJournal())
+                QTimer.singleShot(
+                    0, lambda: RecoveryCasesDialog(
+                        self, pending_only=True, registry=registry
+                    ).exec()
+                )
             archives = len(self._manual_review_archives())
             if not count and not archives and not review_pending:
                 self._recovery_pending_action.setVisible(False)
