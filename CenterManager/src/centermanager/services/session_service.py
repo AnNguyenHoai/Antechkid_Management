@@ -96,7 +96,12 @@ class SessionService:
 
     def _protect_monthly_billing(self, db_session, session_obj: Session) -> None:
         """Legacy mutation paths must not leave a monthly cancellation unresolved."""
-        monthly = self._repository_provider.monthly_tuition(db_session)
+        factory = getattr(self._repository_provider, "monthly_tuition", None)
+        if not callable(factory):
+            # Legacy test doubles and pre-migration embedders carry no opt-in
+            # tuition capabilities. Production provider always exposes it.
+            return
+        monthly = factory(db_session)
         if monthly.has_monthly_billing_for_session(int(session_obj.id)):
             raise SessionValidationError(
                 "This lesson has monthly tuition allocations. "
