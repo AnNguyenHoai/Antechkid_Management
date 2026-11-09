@@ -41,8 +41,11 @@ from centermanager.platform.notification import NotificationService
 
 logger = logging.getLogger(__name__)
 
-# Fail closed until Phase 4 finance reconciliation and EXE UAT are signed off.
-_MONTHLY_TUITION_UI_ENABLED = False
+# The normal executable stays closed. Only a locally opted-in UAT session
+# may expose the unfinished rollout controls; no automatic migration happens.
+from centermanager.services.tuition_v1_uat_gate import tuition_v1_uat_enabled
+
+_MONTHLY_TUITION_UI_ENABLED = tuition_v1_uat_enabled()
 
 
 class ClassDetailPage(QWidget):
@@ -411,6 +414,13 @@ class ClassDetailPage(QWidget):
             self._notification_service.notify(
                 "You must be in WRITE mode to change tuition.", "warning"
             )
+            return
+        accepted, ok = QInputDialog.getText(
+            self, "Tuition V1 · Chỉ dùng DB nháp",
+            "XÁC NHẬN chỉ đang sử dụng bản sao SQLCipher, không phải DB chạy thật. "
+            "Nhập UAT để mở:",
+        )
+        if not ok or accepted.strip() != "UAT":
             return
         factory = self._class_service._session_factory
         dialog = MonthlyTuitionPlanDialog(self._current_class_id, factory, parent=self)
