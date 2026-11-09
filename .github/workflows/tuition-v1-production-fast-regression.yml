@@ -1,0 +1,35 @@
+name: Tuition V1 Production Fast Regression
+
+on:
+  push:
+    branches:
+      - "feat/tuition-v1-production-fresh-monthly"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: CenterManager
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: |
+            CenterManager/requirements.txt
+            CenterManager/requirements-dev.txt
+      - name: Install
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+      - name: Targeted tuition/architecture/schema tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest -q tests/test_tuition_v1_fresh_monthly.py tests/test_tuition_v1_uat_activation.py tests/test_monthly_tuition_plan_store.py tests/test_monthly_tuition_phase4_migration.py tests/test_monthly_tuition_schema.py tests/test_ui_service_dependency_boundary.py
