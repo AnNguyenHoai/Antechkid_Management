@@ -788,6 +788,42 @@ class IncomeService:
             income_repo = self._repository_provider.incomes(session)
             adjustment_repo = self._repository_provider.tuition_adjustments(session)
 
+            # FIN-01: payment-time discount is a non-cash waiver of *earned*
+            # tuition. Cash may be prepaid, but a waiver may not create an
+            # artificial prepaid credit or exceed the remaining earned debt.
+            # Use the same exact-Enrollment signed settlement calculation as
+            # Outstanding (includes refunds, credits and transfer movements).
+            from centermanager.services.monthly_tuition_read_model import (
+                calculate_effective_tuition_accrual,
+            )
+            from centermanager.services.tuition_accrual_service import (
+                TuitionAccrualUnresolvedError,
+            )
+            try:
+                sessions = self._repository_provider.sessions(session).get_by_class(
+                    enrollment.class_id
+                )
+                accrued = Decimal(str(calculate_effective_tuition_accrual(
+                    session, enrollment, sessions, payment_date,
+                )))
+            except TuitionAccrualUnresolvedError as exc:
+                raise IncomeValidationError(
+                    "Cannot approve a payment-time credit without verified tuition accrual"
+                ) from exc
+            already_settled = Decimal(str(
+                income_repo.sum_active_tuition_for_enrollment(
+                    enrollment.id, as_of_date=payment_date,
+                )
+            ))
+            available_for_credit = max(
+                Decimal("0"), accrued - already_settled - Decimal(str(amount)),
+            )
+            if resolved_credit > available_for_credit:
+                raise IncomeValidationError(
+                    "Payment-time tuition credit exceeds earned outstanding tuition "
+                    "after the cash payment"
+                )
+
             income = Income(
                 student_id=student_id,
                 class_id=class_id,
@@ -1069,6 +1105,17 @@ class IncomeService:
                         "Monthly/quarterly receipt amount and allocation period cannot be edited; "
                         "void and re-issue through an authorized workflow."
                     )
+
+            # FIN-02: do not allow the edit API to forge an immutable monthly
+            # or quarterly receipt by changing a legacy/free-text period.
+            if payment_period is not None and self._normalize_text(payment_period):
+                proposed_period = self._normalize_text(payment_period)
+                if proposed_period.startswith(("TUITION_MONTH:", "TUITION_QUARTER:")):
+                    if proposed_period != income.payment_period:
+                        raise IncomeValidationError(
+                            "A month/quarter receipt must be created from a verified "
+                            "quote; void and re-issue instead of changing its period"
+                        )
 
             self._ensure_income_period_mutable(session, income)
             self._ensure_payment_time_credit_not_orphaned(session, income)
