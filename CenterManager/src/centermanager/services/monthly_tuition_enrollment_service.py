@@ -33,6 +33,50 @@ class MonthlyTuitionEnrollmentService:
         # Refuse activation by default: a caller-provided checkbox is not proof.
         self._verified_preflight = verified_preflight
 
+    @classmethod
+    def from_verified_backup(cls, session_factory, *, backup_path,
+                             repository_provider: RepositoryProvider | None = None):
+        """Construct an opt-in command with real backup/WRITE/reconciliation checks.
+
+        No caller-supplied boolean switches can mark an unresolved contract
+        reconciled. A verified backup must exist before this method is called.
+        """
+        from centermanager.services.monthly_tuition_verified_preflight import (
+            VerifiedMonthlyTuitionPreflight,
+        )
+        provider = repository_provider or create_default_repository_provider()
+
+        def unresolved_reconciliation(db, enrollment):
+            # Previously duplicated or transferred contracts need deliberate
+            # manual review; none may be silently repriced by monthly opt-in.
+            rows = provider.enrollments(db).get_by_student_and_class(
+                enrollment.student_id, enrollment.class_id
+            )
+            if any(
+                row.id != enrollment.id
+                and row.reconciled_into_enrollment_id is None
+                and row.reconciliation_reviewed_at is None
+                for row in rows
+            ):
+                return True
+            if provider.enrollment_freezes(db).list_for_enrollment(enrollment.id):
+                return True
+            if provider.enrollment_transfers(db).has_for_enrollment(enrollment.id):
+                return True
+            if provider.tuition_adjustments(db).has_for_enrollment(enrollment.id):
+                return True
+            return False
+
+        verified = VerifiedMonthlyTuitionPreflight(
+            backup_path,
+            reconciliation_verifier=unresolved_reconciliation,
+            repository_provider=provider,
+        )
+        return cls(
+            session_factory, repository_provider=provider,
+            verified_preflight=verified,
+        )
+
     @require_permission("tuition.enrollment.override")
     def activate_future_month(self, enrollment_id: int, effective_from: date) -> int:
         actor = get_current_user()
