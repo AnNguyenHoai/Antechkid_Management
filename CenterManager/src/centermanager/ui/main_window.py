@@ -222,6 +222,8 @@ class MainWindow(QMainWindow):
         recovery_menu = self.menuBar().addMenu("Khôi phục")
         recovery_history = recovery_menu.addAction("Danh sách Recovery Case")
         recovery_history.triggered.connect(self._show_recovery_case_history)
+        recovery_log_action = recovery_menu.addAction("Kiểm tra log Recovery")
+        recovery_log_action.triggered.connect(self._show_pending_review_notices)
         self._recovery_pending_action = recovery_menu.addAction("Recovery: đang kiểm tra...")
         self._recovery_pending_action.triggered.connect(self._show_recovery_case_history)
         self._recovery_pending_action.setVisible(False)
@@ -249,6 +251,63 @@ class MainWindow(QMainWindow):
                 archives.append(candidate)
         return archives
 
+    def _show_pending_review_notices(self) -> None:
+        """User-only acknowledgement; never changes database or WRITE lease."""
+        from pathlib import Path
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+
+        queue = RecoveryReviewNotices(WriteRecoveryJournal())
+        try:
+            pending = queue.pending()
+        except Exception:
+            logger.exception("Recovery review queue unavailable")
+            self.statusBar().showMessage(
+                "Không thể mở danh sách log Recovery; kiểm tra thư mục recovery", 20000
+            )
+            return
+
+        for item in pending:
+            while True:
+                dialog = QMessageBox(self)
+                dialog.setWindowTitle("Recovery — Cần kiểm tra dữ liệu")
+                dialog.setIcon(QMessageBox.Icon.Warning)
+                dialog.setText(
+                    "Trung tâm đang sử dụng dữ liệu chính thức từ Git MAIN.\n"
+                    "Có ghi nhận thay đổi local cần kiểm tra thủ công."
+                )
+                dialog.setInformativeText(
+                    "Log chỉ là danh mục thao tác, có thể không đủ giá trị "
+                    "để nhập lại. Hãy đối chiếu với số dư, thu chi và công nợ "
+                    "trên Git MAIN trước khi cập nhật.\n"
+                    "Đã kiểm tra: không nhắc lại case này. "
+                    "Để lần sau: sẽ tiếp tục nhắc khi khởi động."
+                )
+                open_button = dialog.addButton("Mở thư mục log", QMessageBox.ButtonRole.ActionRole)
+                reviewed_button = dialog.addButton("Đã kiểm tra", QMessageBox.ButtonRole.AcceptRole)
+                skip_button = dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
+                dialog.setDefaultButton(skip_button)
+                dialog.exec()
+                choice = dialog.clickedButton()
+                if choice is open_button:
+                    QDesktopServices.openUrl(
+                        QUrl.fromLocalFile(str(Path(queue.journal.root)))
+                    )
+                    continue
+                if choice is reviewed_button:
+                    try:
+                        queue.acknowledge(item["id"])
+                    except Exception:
+                        logger.exception("Recovery review acknowledgment could not be saved")
+                        QMessageBox.warning(
+                            self, "Recovery", "Không ghi được trạng thái Đã kiểm tra. "
+                            "Lần khởi động sau sẽ nhắc lại."
+                        )
+                    break
+                return  # Skip or close never acknowledges any event.
+
     def _show_pending_recovery_cases(self) -> None:
         """Non-modal reminder: never withhold the main window for case review.
 
@@ -257,16 +316,26 @@ class MainWindow(QMainWindow):
         never acknowledges or erases Recovery evidence.
         """
         from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         try:
+            review_pending = RecoveryReviewNotices(WriteRecoveryJournal()).pending()
+            if review_pending:
+                self._recovery_pending_action.setText(
+                    f"Cần kiểm tra {len(review_pending)} log Recovery"
+                )
+                self._recovery_pending_action.setVisible(True)
+                # Show after the main window is constructed and login complete.
+                QTimer.singleShot(0, self._show_pending_review_notices)
             pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
             count = len(pending)
             archives = len(self._manual_review_archives())
-            if not count and not archives:
+            if not count and not archives and not review_pending:
                 self._recovery_pending_action.setVisible(False)
                 return
             self._recovery_pending_action.setText(
-                f"Cần kiểm tra {count} Recovery Case, {archives} backup thủ công"
+                f"Cần kiểm tra {len(review_pending)} log, {count} case, "
+                f"{archives} backup Recovery"
             )
             self._recovery_pending_action.setVisible(True)
             self.statusBar().showMessage(
