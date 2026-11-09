@@ -272,10 +272,9 @@ class ExpenseService:
         paid_by = self._normalize_text(paid_by) or (get_current_user().full_name if get_current_user() else "System")
         note = self._normalize_text(note)
         with self._session_factory() as session:
+            repo = self._repository_provider.expenses(session)
             if idempotency_key is not None:
-                previous = session.query(Expense).filter(
-                    Expense.idempotency_key == idempotency_key
-                ).first()
+                previous = repo.get_by_idempotency_key(idempotency_key)
                 if previous is not None:
                     if not self._same_expense(
                         previous, category=category, description=description,
