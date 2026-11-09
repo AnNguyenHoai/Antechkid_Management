@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+from uuid import uuid4
 from datetime import date
 from typing import Optional
 from PySide6.QtCore import QDate
@@ -29,6 +30,7 @@ class ExpenseFormDialog(QDialog):
         self._service = expense_service
         self._expense_id = expense_id
         self._is_edit = expense_id is not None
+        self._submission_key = f"expense:{uuid4()}"
         self._initial_payment_date = initial_payment_date or get_clock().today()
         self._loaded_category: Optional[str] = None
         self._loaded_description: Optional[str] = None
@@ -269,6 +271,7 @@ class ExpenseFormDialog(QDialog):
                     paid_by=paid_by or None,
                     status=status,
                     note=note or None,
+                    idempotency_key=self._submission_key,
                 )
                 self._commit_vouchers(getattr(created, "id", None))
             self.accept()
