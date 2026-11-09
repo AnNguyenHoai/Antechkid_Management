@@ -19,6 +19,7 @@ def upgrade() -> None:
         sa.Column("monthly_fee_vnd", sa.Integer(), nullable=False),
         sa.Column("effective_month", sa.Date(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("weekly_days", sa.String(30), nullable=True),
         sa.Column("created_by", sa.String(100), nullable=False),
         sa.CheckConstraint("monthly_fee_vnd >= 0", name="ck_monthly_class_fee_nonnegative"),
     )
