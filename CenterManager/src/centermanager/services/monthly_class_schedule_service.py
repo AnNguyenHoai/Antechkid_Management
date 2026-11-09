@@ -9,13 +9,10 @@ from calendar import monthrange
 from datetime import date
 from typing import Callable
 
-from sqlalchemy import select
-
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
-from centermanager.models.class_ import Class
-from centermanager.models.monthly_tuition import (
-    MonthlyClassDefaultRecord, MonthlyTuitionPlanRecord,
+from centermanager.repositories.provider import (
+    RepositoryProvider, create_default_repository_provider,
 )
 from centermanager.models.session import Session, SessionStatus
 from centermanager.services.recovery_change_outbox import (
@@ -44,14 +41,19 @@ def month_dates(start: date, end: date | None, month: date, weekdays: tuple[int,
 
 
 class MonthlyClassScheduleService:
-    def __init__(self, session_factory: Callable):
+    def __init__(
+        self, session_factory: Callable,
+        repository_provider: RepositoryProvider | None = None,
+    ):
         self._session_factory = session_factory
+        self._repository_provider = repository_provider or create_default_repository_provider()
 
     def settings(self, class_id: int):
         """Read-only month planner UI contract; old classes have no policy."""
         with self._session_factory() as db:
-            klass = db.get(Class, class_id)
-            policy = db.get(MonthlyClassDefaultRecord, class_id)
+            repo = self._repository_provider.monthly_tuition(db)
+            klass = repo.class_record(class_id)
+            policy = repo.class_default(class_id)
             if klass is None or policy is None:
                 return None
             selected = tuple(int(day) for day in policy.weekly_days.split(",")) if policy.weekly_days else ()
@@ -71,8 +73,9 @@ class MonthlyClassScheduleService:
         if len(weekdays) > 7:
             raise MonthlyClassScheduleError("At most seven distinct days per week.")
         with self._session_factory() as db:
-            klass = db.get(Class, class_id)
-            policy = db.get(MonthlyClassDefaultRecord, class_id)
+            repo = self._repository_provider.monthly_tuition(db)
+            klass = repo.class_record(class_id)
+            policy = repo.class_default(class_id)
             if (klass is None or policy is None or klass.deleted_at is not None
                     or klass.status != "ACTIVE"):
                 raise MonthlyClassScheduleError("Only active monthly classes can generate sessions.")
@@ -85,11 +88,10 @@ class MonthlyClassScheduleService:
                 raise MonthlyClassScheduleError(
                     "Class weekdays are already fixed; explicit timetable migration required."
                 )
-            plans = db.scalars(select(MonthlyTuitionPlanRecord).where(
-                MonthlyTuitionPlanRecord.class_id == class_id,
-                MonthlyTuitionPlanRecord.month == month,
-                MonthlyTuitionPlanRecord.status.in_(("ACTIVE", "CLOSED")),
-            )).all()
+            plans = [
+                p for p in repo.plans_for_month(class_id, month)
+                if p.status in ("ACTIVE", "CLOSED")
+            ]
             if plans:
                 raise MonthlyClassScheduleError("Monthly plan already activated. Timetable is frozen.")
             if klass.start_date is None:
@@ -111,7 +113,7 @@ class MonthlyClassScheduleService:
                         f"Class Planned Sessions must cover at least {total} calendar lessons "
                         "for the selected teaching weekdays. Update the class first."
                     )
-            existing = db.scalars(select(Session).where(Session.class_id == class_id)).all()
+            existing = repo.sessions_for_class(class_id)
             in_month = [row for row in existing if row.scheduled_date.replace(day=1) == month]
             if not in_month and any(row.scheduled_date.replace(day=1) > month for row in existing):
                 raise MonthlyClassScheduleError(
@@ -130,13 +132,15 @@ class MonthlyClassScheduleService:
                 raise MonthlyClassScheduleError("Authenticated actor required.")
             highest = max((row.session_number for row in existing), default=0)
             policy.weekly_days = selected
-            for offset, scheduled in enumerate(expected_dates, start=1):
-                db.add(Session(
+            new_sessions = [
+                Session(
                     class_id=class_id, session_number=highest + offset,
                     title=f"Buổi {highest + offset}",
                     scheduled_date=scheduled, status=SessionStatus.SCHEDULED.value,
-                ))
-            db.flush()
+                )
+                for offset, scheduled in enumerate(expected_dates, start=1)
+            ]
+            repo.add_month_sessions(new_sessions)
             record_for_active_write(
                 db, module="tuition", action="GENERATE_MONTHLY_SESSIONS",
                 entity_type="Class", entity_id=class_id,
