@@ -330,6 +330,13 @@ class TuitionDetailService:
                 )
 
             configured = enrollment.has_tuition_contract
+            is_monthly_term = MonthlyTuitionReadModel.has_monthly_term(
+                db_session, int(enrollment.id),
+            )
+            if is_monthly_term and not configured:
+                raise TuitionAccrualUnresolvedError(
+                    "Monthly Enrollment has unresolved historical tuition contract"
+                )
             billable_numbers = ()
             monthly_amount_by_number = {}
             monthly_waived_by_number = {}
@@ -342,7 +349,7 @@ class TuitionDetailService:
             net = Decimal("0")
             if configured:
                 try:
-                    if MonthlyTuitionReadModel.has_monthly_term(db_session, int(enrollment.id)):
+                    if is_monthly_term:
                         monthly = MonthlyTuitionReadModel.project(
                             db_session, enrollment, sessions, cutoff,
                         )
@@ -381,7 +388,7 @@ class TuitionDetailService:
                         recognized_discount = self._amount(accrual.discount)
                         net = self._amount(accrual.net_accrued)
                 except TuitionAccrualUnresolvedError:
-                    if MonthlyTuitionReadModel.has_monthly_term(db_session, int(enrollment.id)):
+                    if is_monthly_term:
                         raise  # fail closed for incomplete monthly accounting evidence
                     configured = False
 
