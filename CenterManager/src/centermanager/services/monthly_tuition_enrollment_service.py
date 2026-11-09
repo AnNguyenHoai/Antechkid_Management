@@ -33,6 +33,28 @@ class MonthlyTuitionEnrollmentService:
         # Refuse activation by default: a caller-provided checkbox is not proof.
         self._verified_preflight = verified_preflight
 
+    def list_class_enrollments(self, class_id: int):
+        """Read-only Enrollment selector for UAT UI; UI never opens repositories.
+
+        Return only basic presentation values and opt-in status, not mutable
+        SQLAlchemy model instances that could escape a closed session.
+        """
+        if type(class_id) is not int or class_id <= 0:
+            raise MonthlyEnrollmentActivationError("Class ID must be positive")
+        with self._session_factory() as db:
+            enrollment_repo = self._repository_provider.enrollments(db)
+            monthly_repo = self._repository_provider.monthly_tuition(db)
+            rows = enrollment_repo.get_active_by_class(class_id)
+            return tuple(
+                (
+                    int(enrollment.id),
+                    getattr(enrollment.student, "full_name", None)
+                    or f"Student #{enrollment.student_id}",
+                    monthly_repo.term(enrollment.id) is not None,
+                )
+                for enrollment in rows
+            )
+
     @classmethod
     def from_verified_backup(cls, session_factory, *, backup_path,
                              repository_provider: RepositoryProvider | None = None):
