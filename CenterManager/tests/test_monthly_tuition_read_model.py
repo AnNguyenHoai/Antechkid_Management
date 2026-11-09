@@ -627,3 +627,29 @@ def test_f05_reopening_monthly_cancelled_lesson_requires_finance_reversal(monthl
     with monthly_db() as db:
         assert db.get(Session, 1).status == "Cancelled"
         assert db.query(MonthlyTuitionAllocationRecord).count() == 2
+
+
+def test_f05_approved_replacement_makeup_in_next_month_has_no_second_fee(monthly_db):
+    with monthly_db() as db:
+        replacement = Session(
+            class_id=1, session_number=3, title="Makeup",
+            scheduled_date=date(2040, 2, 9), status="Scheduled",
+        )
+        db.add(replacement)
+        db.flush()
+        db.add(MonthlyTuitionOutcomeRecord(
+            enrollment_id=1, session_id=1, revision=1,
+            outcome="RESCHEDULED", reason="Official makeup",
+            replacement_session_id=replacement.id,
+            idempotency_key="f05-replacement-1",
+            effective_date=date(2040, 1, 2),
+            recorded_at=datetime(2040, 1, 2), recorded_by="manager",
+        ))
+        db.flush()
+        full = MonthlyTuitionReadModel.project(
+            db, db.get(Enrollment, 1), db.query(Session).all(),
+            date(2040, 2, 28),
+        )
+        assert full.accrued_vnd == Decimal("800000")
+        assert full.cancelled_vnd == Decimal("0")
+        assert set(dict(full.monthly_contributions)) == {1, 2}
