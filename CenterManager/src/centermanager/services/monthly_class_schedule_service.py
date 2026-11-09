@@ -144,7 +144,10 @@ class MonthlyClassScheduleService:
             record_for_active_write(
                 db, module="tuition", action="GENERATE_MONTHLY_SESSIONS",
                 entity_type="Class", entity_id=class_id,
-                summary_args={"class_id": class_id, "month": month.isoformat(), "count": len(expected_dates)},
+                # Recovery outbox accepts a strict identifier/count allowlist; month
+                # is part of the committed Class/Session rows, not free-form
+                # journal metadata. Use an approved count key.
+                summary_args={"class_id": class_id, "changed_count": len(expected_dates)},
             )
             db.commit()
             mirror_after_successful_commit(db)

@@ -16,9 +16,17 @@ def mutation_permissions(table, action, column=None):
         'finance_periods': ('finance.period.manage',),
         'financial_settlements': ('finance.settlement.create', 'finance.settlement.update', 'finance.settlement.confirm', 'finance.settlement.reopen'),
         'tuition_adjustments': ('finance.income.create', 'finance.income.update', 'finance.income.delete'),
+        # New monthly classes create their default in the same transaction
+        # as ClassService.create_class(). Keep the DB-level capability floor
+        # aligned with the initiating class aggregate (including later edits).
+        # Month-session generation freezes weekly_days under lesson.create.
+        'monthly_class_defaults': ('class.create', 'class.update', 'lesson.create'),
         'monthly_tuition_plans': ('class.update',),
         'monthly_tuition_allocations': ('class.update',),
-        'enrollment_monthly_tuition_terms': ('tuition.enrollment.override',),
+        # A new monthly enrollment creates its term atomically under the
+        # standard enrollment permissions. Historical opt-in retains the
+        # explicit tuition.enrollment.override service-level authorization.
+        'enrollment_monthly_tuition_terms': ('student.update', 'class.update', 'tuition.enrollment.override'),
         'monthly_tuition_outcomes': ('finance.income.create',),
         'users': ('user.' + verb, 'user.manage', 'user.reset_password'),
         'roles': ('role.manage',), 'role_permissions': ('role.manage',),
