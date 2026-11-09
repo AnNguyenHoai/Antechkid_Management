@@ -506,6 +506,7 @@ class ExpenseListPage(QWidget):
 
     def _apply_action_state(self) -> None:
         self.add_btn.setEnabled(self._can(Capability.FINANCE_EXPENSE_CREATE))
+        self._on_expense_selection_changed(self.data_table.selected_data_indices())
 
     def set_write_enabled(self, enabled: bool) -> None:
         self._write_enabled = bool(enabled)
