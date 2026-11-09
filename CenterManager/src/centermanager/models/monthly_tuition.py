@@ -28,6 +28,7 @@ class MonthlyClassDefaultRecord(Base):
     monthly_fee_vnd: Mapped[int] = mapped_column(Integer, nullable=False)
     effective_month: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    weekly_days: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
