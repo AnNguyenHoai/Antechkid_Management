@@ -52,6 +52,10 @@ class MonthlyTuitionEnrollmentService:
                 raise MonthlyEnrollmentActivationError("Only canonical active Enrollment can switch")
             if not enrollment.has_tuition_contract:
                 raise MonthlyEnrollmentActivationError("Historical tuition snapshot is unresolved")
+            if enrollment.start_date is None:
+                raise MonthlyEnrollmentActivationError(
+                    "Historical Enrollment start date must be reconciled before monthly opt-in"
+                )
             if repo.term(enrollment.id) is not None:
                 raise MonthlyEnrollmentActivationError("Enrollment already opted into monthly tuition")
             if repo.unattributed_tuition_receipt(enrollment.student_id, enrollment.class_id):
@@ -74,7 +78,7 @@ class MonthlyTuitionEnrollmentService:
             if (evidence.enrollment_id != enrollment.id
                     or evidence.requested_effective_date != effective_from
                     or evidence.review_date != today
-                    or evidence.first_enrollment_date != (enrollment.start_date or today)
+                    or evidence.first_enrollment_date != enrollment.start_date
                     or evidence.legacy_tuition_resolved != enrollment.has_tuition_contract
                     or evidence.has_unattributed_payment != repo.unattributed_tuition_receipt(
                         enrollment.student_id, enrollment.class_id)
