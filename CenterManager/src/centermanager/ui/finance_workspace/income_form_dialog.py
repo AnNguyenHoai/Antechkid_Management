@@ -26,6 +26,7 @@ from centermanager.core.current_user import get_current_user
 from centermanager.core.wallet import WalletMappingError, resolve_wallet
 from centermanager.services.class_service import ClassService
 from centermanager.services.income_service import IncomeService, IncomeValidationError
+from centermanager.services.monthly_tuition_quote_service import MonthlyTuitionQuoteService, MonthlyTuitionQuoteError
 from centermanager.services.tuition_adjustment_service import TuitionAdjustmentValidationError
 from centermanager.services.student_service import StudentService
 from centermanager.ui.design_system.components import AutoClearDoubleSpinBox
@@ -59,6 +60,7 @@ class IncomeFormDialog(QDialog):
         self._identity_unresolved = False
         self._initial_edit_values = None
         self._credit_only_command_key = f"tuition-credit-only:{uuid4()}"
+        self._monthly_quote = None
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(620)
@@ -164,6 +166,27 @@ class IncomeFormDialog(QDialog):
                 self.period_combo.addItem(period, period)
         form.addRow("Kỳ thanh toán (ghi chú)", self.period_combo)
 
+        # Opt-in monthly quotes are read-only. Cash is still posted as ONE
+        # authorized Income, including a 3-month advance payment.
+        self.monthly_mode_combo = QComboBox()
+        self.monthly_mode_combo.addItem("Thu thông thường", 0)
+        self.monthly_mode_combo.addItem("Theo tháng", 1)
+        self.monthly_mode_combo.addItem("Theo quý (3 tháng)", 3)
+        form.addRow("Học phí tháng/quý", self.monthly_mode_combo)
+        self.monthly_start_edit = QDateEdit()
+        self.monthly_start_edit.setCalendarPopup(True)
+        self.monthly_start_edit.setDisplayFormat("MM/yyyy")
+        start_month = get_clock().today().replace(day=1)
+        self.monthly_start_edit.setDate(QDate(start_month.year, start_month.month, 1))
+        form.addRow("Tháng bắt đầu", self.monthly_start_edit)
+        self.monthly_quote_button = QPushButton("Tính học phí tháng/quý")
+        self.monthly_quote_button.clicked.connect(self._preview_monthly_quote)
+        form.addRow("Bảng phân bổ", self.monthly_quote_button)
+        self.monthly_quote_label = QLabel("Chỉ áp dụng Enrollment đã chuyển sang học phí tháng.")
+        self.monthly_quote_label.setWordWrap(True)
+        form.addRow("", self.monthly_quote_label)
+
+
         self.received_by_edit = QLineEdit()
         current_user = get_current_user()
         if current_user:
@@ -218,12 +241,48 @@ class IncomeFormDialog(QDialog):
         is_tuition = self.type_combo.currentText() == "Tuition"
         use_picker = not self._is_edit and is_student and is_tuition
 
+        for widget in (
+            self.monthly_mode_combo, self.monthly_start_edit,
+            self.monthly_quote_button, self.monthly_quote_label,
+        ):
+            self._set_field_visible(widget, use_picker)
         self._set_field_visible(self.tuition_picker, use_picker)
         if use_picker and self.tuition_picker.results.count() == 0:
             self.tuition_picker.refresh()
         self._set_field_visible(self.student_combo, is_student and not use_picker)
         self._set_field_visible(self.class_combo, is_student and not use_picker)
         self._set_enrollment_visible(self._is_edit and is_student and is_tuition)
+
+    def _preview_monthly_quote(self) -> None:
+        self._monthly_quote = None
+        count = int(self.monthly_mode_combo.currentData() or 0)
+        if count not in (1, 3):
+            self.monthly_quote_label.setText("Chọn thu theo tháng hoặc quý để xem phân bổ.")
+            return
+        choice = self.tuition_picker.selected_choice()
+        if choice is None:
+            QMessageBox.warning(self, "Enrollment", "Chọn chính xác Enrollment học phí trước.")
+            return
+        start = self.monthly_start_edit.date().toPython().replace(day=1)
+        try:
+            service = MonthlyTuitionQuoteService(
+                self._income_service._session_factory,
+                self._income_service._repository_provider,
+            )
+            quote = service.quote(choice.enrollment_id, start, count)
+        except (MonthlyTuitionQuoteError, ValueError) as exc:
+            QMessageBox.warning(self, "Chưa thể tính học phí", str(exc))
+            return
+        self._monthly_quote = quote
+        self.amount_spin.setValue(float(quote.amount_vnd))
+        breakdown = "; ".join(
+            f"{line.month.month:02d}/{line.month.year}: {line.amount_vnd:,.0f}đ"
+            for line in quote.lines
+        )
+        self.monthly_quote_label.setText(
+            f"Học phí dự kiến: {quote.amount_vnd:,.0f}đ. {breakdown}. "
+            "Thu tiền một lần, cấn trừ học phí theo từng buổi."
+        )
 
     def _set_credit_fields_visible(self, visible: bool) -> None:
         widgets = (
@@ -631,6 +690,35 @@ class IncomeFormDialog(QDialog):
             return
         payment_date = self.date_edit.date().toPython()
         payment_period = self.period_combo.currentData()
+        if not self._is_edit and int(self.monthly_mode_combo.currentData() or 0) in (1, 3):
+            quote = self._monthly_quote
+            choice = self.tuition_picker.selected_choice()
+            if quote is None or choice is None or quote.enrollment_id != choice.enrollment_id:
+                QMessageBox.warning(self, "Học phí", "Cần tính lại học phí cho Enrollment đã chọn.")
+                return
+            start = self.monthly_start_edit.date().toPython().replace(day=1)
+            months = int(self.monthly_mode_combo.currentData())
+            try:
+                quote_now = MonthlyTuitionQuoteService(
+                    self._income_service._session_factory,
+                    self._income_service._repository_provider,
+                ).quote(choice.enrollment_id, start, months)
+            except (MonthlyTuitionQuoteError, ValueError) as exc:
+                QMessageBox.warning(self, "Học phí", f"Không thể xác minh bảng phân bổ: {exc}")
+                return
+            if quote_now != quote or amount != float(quote.amount_vnd):
+                QMessageBox.warning(
+                    self, "Học phí",
+                    "Lịch hoặc số tiền đã thay đổi. Tính lại học phí trước khi lưu."
+                )
+                return
+            if self.credit_enabled.isChecked():
+                QMessageBox.warning(
+                    self, "Học phí",
+                    "Không kết hợp điều chỉnh học phí thủ công với bảng phân bổ tháng/quý."
+                )
+                return
+            payment_period = quote.payment_period
         received_by = self.received_by_edit.text().strip()
         note = self.note_edit.text().strip()
 
