@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Callable
 
 from centermanager.core.clock import get_clock
 from centermanager.core.current_user import get_current_user
 from centermanager.core.permission_guard import require_permission
 from centermanager.repositories.provider import (
     RepositoryProvider, create_default_repository_provider,
+)
+from centermanager.services.monthly_tuition_migration_gate import (
+    EnrollmentMigrationEvidence, assess_enrollment_migration,
 )
 from centermanager.services.recovery_change_outbox import (
     mirror_after_successful_commit, record_for_active_write,
@@ -19,9 +23,15 @@ class MonthlyEnrollmentActivationError(ValueError):
 
 
 class MonthlyTuitionEnrollmentService:
-    def __init__(self, session_factory, repository_provider: RepositoryProvider | None = None):
+    def __init__(
+        self, session_factory, repository_provider: RepositoryProvider | None = None,
+        verified_preflight: Callable | None = None,
+    ):
         self._session_factory = session_factory
         self._repository_provider = repository_provider or create_default_repository_provider()
+        # Must be supplied by a trusted SQLCipher backup/WRITE verifier at rollout.
+        # Refuse activation by default: a caller-provided checkbox is not proof.
+        self._verified_preflight = verified_preflight
 
     @require_permission("tuition.enrollment.override")
     def activate_future_month(self, enrollment_id: int, effective_from: date) -> int:
@@ -51,6 +61,30 @@ class MonthlyTuitionEnrollmentService:
             if repo.active_plan(enrollment.class_id, effective_from) is None:
                 raise MonthlyEnrollmentActivationError(
                     "Active monthly plan for effective month is required"
+                )
+            if self._verified_preflight is None:
+                raise MonthlyEnrollmentActivationError(
+                    "Verified encrypted backup and WRITE preflight are required before monthly opt-in"
+                )
+            evidence = self._verified_preflight(db, enrollment, effective_from)
+            if not isinstance(evidence, EnrollmentMigrationEvidence):
+                raise MonthlyEnrollmentActivationError("Trusted preflight returned invalid evidence")
+            # Evidence is linked to the *current* DB enrollment/date, not a stale
+            # proof copied from some other student or month.
+            if (evidence.enrollment_id != enrollment.id
+                    or evidence.requested_effective_date != effective_from
+                    or evidence.review_date != today
+                    or evidence.first_enrollment_date != (enrollment.start_date or today)
+                    or evidence.legacy_tuition_resolved != enrollment.has_tuition_contract
+                    or evidence.has_unattributed_payment != repo.unattributed_tuition_receipt(
+                        enrollment.student_id, enrollment.class_id)
+                    or evidence.already_monthly != (repo.term(enrollment.id) is not None)):
+                raise MonthlyEnrollmentActivationError("Preflight evidence is stale or inconsistent")
+            result = assess_enrollment_migration(evidence)
+            if not result.may_activate:
+                raise MonthlyEnrollmentActivationError(
+                    "Monthly opt-in preflight blocked: "
+                    + ", ".join(item.value for item in result.blockers)
                 )
             term = repo.create_term(
                 enrollment_id=enrollment.id, effective_from=effective_from,
