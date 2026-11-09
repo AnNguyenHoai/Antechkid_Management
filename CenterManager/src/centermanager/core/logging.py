@@ -38,6 +38,27 @@ class RedactingFormatter(logging.Formatter):
         return redact_sensitive_text(super().format(record))
 
 
+class EncodingSafeStreamHandler(logging.StreamHandler):
+    """Log Unicode safely even when a frozen Windows console uses cp1252.
+
+    Keep the original stream; only unencodable text is ASCII-escaped. The
+    UTF-8 rotating file handler remains the complete authoritative log.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            rendered = self.format(record) + self.terminator
+            try:
+                self.stream.write(rendered)
+            except UnicodeEncodeError:
+                self.stream.write(
+                    rendered.encode("ascii", errors="backslashreplace").decode("ascii")
+                )
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 def setup_logging(
     log_dir: Path,
     app_name: str = "CenterManager",
@@ -56,7 +77,7 @@ def setup_logging(
     root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = EncodingSafeStreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, console_level.upper(), logging.INFO))
     console_handler.setFormatter(
         RedactingFormatter("%(levelname)s - %(name)s - %(message)s")
