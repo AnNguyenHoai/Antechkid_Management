@@ -262,13 +262,13 @@ class ClassService:
                 actor_name = getattr(actor, "username", None)
                 if not actor_name:
                     raise ClassValidationError("Authenticated manager required for monthly billing setup.")
-                session.add(MonthlyClassDefaultRecord(
+                repo.create_monthly_default(
                     class_id=class_obj.id,
                     monthly_fee_vnd=monthly_fee_vnd,
                     effective_month=monthly_effective_month,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     created_by=actor_name,
-                ))
+                )
             record_for_active_write(
                 session, module="class", action="CREATE",
                 entity_type="Class", entity_id=class_obj.id, entity_object=class_obj,
@@ -297,7 +297,7 @@ class ClassService:
         if type(class_id) is not int or class_id <= 0:
             raise ClassValidationError("Invalid class ID.")
         with self._session_factory() as session:
-            policy = session.get(MonthlyClassDefaultRecord, class_id)
+            policy = self._repository_provider.classes(session).get_monthly_default(class_id)
             if policy is None:
                 return None
             return (policy.monthly_fee_vnd, policy.effective_month)
@@ -465,7 +465,9 @@ class ClassService:
                 sessions_per_week=candidate_weekly,
                 require_complete=require_complete_contract,
             )
-            monthly_default = session.get(MonthlyClassDefaultRecord, class_id)
+            monthly_default = repo.get_monthly_default(class_id)
+            if not isinstance(monthly_default, MonthlyClassDefaultRecord):
+                monthly_default = None
             if monthly_default is not None:
                 if candidate_course_fee != 0:
                     raise ClassValidationError(
