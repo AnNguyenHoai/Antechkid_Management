@@ -786,6 +786,7 @@ class IncomeService:
         payment_period: Optional[str] = None,
         received_by: Optional[str] = None,
         note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> tuple[Income, TuitionAdjustment]:
         """Atomically post actual cash/bank received plus one non-cash tuition credit.
 
@@ -793,6 +794,7 @@ class IncomeService:
         settles the remaining tuition obligation without creating a fake wallet
         movement, so accounting cash and tuition settlement stay reconcilable.
         """
+        idempotency_key = self._submission_key(idempotency_key)
         amount = self._validate_amount(amount)
         payment_method = self._validate_payment_method(payment_method)
         if payment_date is None:
@@ -823,6 +825,31 @@ class IncomeService:
         class_name = self._class_name_for_tuition(class_id)
 
         with self._session_factory() as session:
+            # Repeated Save must return the original cash+credit pair rather
+            # than evaluating the new balance (which the first Save changed).
+            if idempotency_key is not None:
+                previous = session.query(Income).filter(
+                    Income.idempotency_key == idempotency_key
+                ).first()
+                if previous is not None:
+                    linked_credit = session.query(TuitionAdjustment).filter(
+                        TuitionAdjustment.idempotency_key ==
+                        f"tuition-payment-credit:income:{previous.id}"
+                    ).first()
+                    if not self._same_receipt(
+                        previous, amount=amount, income_type="Tuition",
+                        payment_method=payment_method, payment_date=payment_date,
+                        student_id=student_id, class_id=class_id,
+                        enrollment_id=enrollment_id, payment_period=payment_period,
+                        received_by=received_by, note=note,
+                    ) or linked_credit is None or (
+                        Decimal(str(linked_credit.amount)) != resolved_credit
+                        or linked_credit.reason != resolved_reason
+                    ):
+                        raise IncomeValidationError(
+                            "Income submission key was already used with different details"
+                        )
+                    return previous, linked_credit
             enrollment = self._resolve_tuition_enrollment(
                 session,
                 student_id=int(student_id),
@@ -888,6 +915,7 @@ class IncomeService:
                 received_by=received_by,
                 note=note,
                 status=Income.STATUS_ACTIVE,
+                idempotency_key=idempotency_key,
             )
             income_repo.add(income)
             income_repo.flush()
