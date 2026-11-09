@@ -19,7 +19,8 @@ def mutation_permissions(table, action, column=None):
         # New monthly classes create their default in the same transaction
         # as ClassService.create_class(). Keep the DB-level capability floor
         # aligned with the initiating class aggregate (including later edits).
-        'monthly_class_defaults': ('class.create', 'class.update'),
+        # Month-session generation freezes weekly_days under lesson.create.
+        'monthly_class_defaults': ('class.create', 'class.update', 'lesson.create'),
         'monthly_tuition_plans': ('class.update',),
         'monthly_tuition_allocations': ('class.update',),
         # A new monthly enrollment creates its term atomically under the
