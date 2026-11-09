@@ -636,12 +636,11 @@ class IncomeService:
                 class_name = class_record.name
 
         with self._session_factory() as session:
-            # FIN-03: read an existing exact command *before* quote overlap
-            # validation; the original receipt itself already covers its month.
+            # FIN-03: repository-owned lookup before quote overlap validation;
+            # the original receipt itself already covers its month.
+            income_lookup = self._repository_provider.incomes(session)
             if idempotency_key is not None:
-                previous = session.query(Income).filter(
-                    Income.idempotency_key == idempotency_key
-                ).first()
+                previous = income_lookup.get_by_idempotency_key(idempotency_key)
                 if previous is not None:
                     if not self._same_receipt(
                         previous, amount=amount, income_type=income_type,
@@ -842,17 +841,16 @@ class IncomeService:
         class_name = self._class_name_for_tuition(class_id)
 
         with self._session_factory() as session:
-            # Repeated Save must return the original cash+credit pair rather
-            # than evaluating the new balance (which the first Save changed).
+            # Replayed Save returns its original cash+credit pair. All SQL
+            # reads stay in the repository boundary (EP-ARCH-04).
+            income_lookup = self._repository_provider.incomes(session)
+            adjustment_lookup = self._repository_provider.tuition_adjustments(session)
             if idempotency_key is not None:
-                previous = session.query(Income).filter(
-                    Income.idempotency_key == idempotency_key
-                ).first()
+                previous = income_lookup.get_by_idempotency_key(idempotency_key)
                 if previous is not None:
-                    linked_credit = session.query(TuitionAdjustment).filter(
-                        TuitionAdjustment.idempotency_key ==
+                    linked_credit = adjustment_lookup.get_by_idempotency_key(
                         f"tuition-payment-credit:income:{previous.id}"
-                    ).first()
+                    )
                     if not self._same_receipt(
                         previous, amount=amount, income_type="Tuition",
                         payment_method=payment_method, payment_date=payment_date,
