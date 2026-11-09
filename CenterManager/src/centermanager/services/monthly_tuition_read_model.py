@@ -101,9 +101,20 @@ class MonthlyTuitionReadModel:
                 raise TuitionAccrualUnresolvedError("Multiple activated plans for one month")
             by_month[plan.month] = plan
 
+        # A replacement lesson is a makeup for an already-billed original,
+        # not a new monthly obligation. It may occur in a later month before
+        # that month's plan exists; never require a second plan/fee for it.
+        active_replacements = set(db.scalars(select(
+            MonthlyTuitionOutcomeRecord.replacement_session_id
+        ).where(
+            MonthlyTuitionOutcomeRecord.enrollment_id == enrollment.id,
+            MonthlyTuitionOutcomeRecord.replacement_session_id.is_not(None),
+            MonthlyTuitionOutcomeRecord.outcome == "RESCHEDULED",
+            MonthlyTuitionOutcomeRecord.effective_date <= as_of_date,
+        )).all())
         known_session_months = {
             s.scheduled_date.replace(day=1) for s in sessions
-            if s.id not in allocated_ids
+            if s.id not in allocated_ids and s.id not in active_replacements
             and term.effective_from <= s.scheduled_date <= as_of_date
             and (term.effective_until is None or s.scheduled_date <= term.effective_until)
         }
