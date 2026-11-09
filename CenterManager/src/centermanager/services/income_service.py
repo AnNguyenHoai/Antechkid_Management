@@ -38,6 +38,7 @@ from centermanager.services.finance_ledger_guard import (
 from centermanager.services.permission_service import PermissionService
 from centermanager.services.student_service import StudentService
 from centermanager.services.timeline_service import TimelineService
+from centermanager.services.monthly_tuition_read_model import MonthlyTuitionReadModel, calculate_effective_tuition_accrual
 from centermanager.services.tuition_accrual_service import (
     TuitionAccrualService,
     TuitionAccrualUnresolvedError,
@@ -392,15 +393,18 @@ class IncomeService:
         accrued = Decimal("0")
         if configured:
             try:
-                accrual = TuitionAccrualService.calculate_from_records(
-                    enrollment,
+                accrued = Decimal(str(calculate_effective_tuition_accrual(
+                    session, enrollment,
                     self._repository_provider.sessions(session).get_by_class(
                         enrollment.class_id
                     ),
                     get_clock().today(),
-                )
-                accrued = Decimal(str(accrual.net_accrued or 0))
+                ) or 0))
             except TuitionAccrualUnresolvedError:
+                if MonthlyTuitionReadModel.has_monthly_term(session, int(enrollment.id)):
+                    raise IncomeValidationError(
+                        "Monthly tuition evidence is incomplete; payment projection is blocked."
+                    )
                 configured = False
 
         paid = Decimal(
