@@ -169,3 +169,19 @@ def test_fin03_migration_and_ui_command_keys_exist():
         assert "idempotency_key=self._submission_key" in src
     widget_src = (root / "src/centermanager/ui/finance_workspace/voucher_attachment_widget.py").read_text()
     assert "self._pending = failed" in widget_src
+
+
+def test_fin04_missing_committed_voucher_fails_closed(expense_env, tmp_path):
+    factory, service = expense_env
+    expense = _create(service, "BANK")
+    root = tmp_path / "isolated-runtime" / "Attachment"
+    voucher = tmp_path / "missing.jpg"
+    voucher.write_bytes(bytes([255, 216, 255, 224]) + b"synthetic-jpeg")
+    attachments = FinanceAttachmentService(factory, root)
+    item = attachments.add_attachment("EXPENSE", expense.id, voucher)
+    (root / item.stored_path).unlink()
+    with pytest.raises(Exception, match="content is missing"):
+        attachments.add_attachment("EXPENSE", expense.id, voucher)
+    with factory() as db:
+        from centermanager.models.finance_attachment import FinanceAttachment
+        assert db.query(FinanceAttachment).count() == 1
