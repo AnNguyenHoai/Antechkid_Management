@@ -160,14 +160,14 @@ def test_fin04_failed_pending_upload_is_retained_for_retry(qtbot, tmp_path):
 
 def test_fin03_migration_and_ui_command_keys_exist():
     root = Path(__file__).resolve().parents[1]
-    migration = (root / "migrations/versions/1e10a048_finance_submission_keys.py").read_text()
+    migration = (root / "migrations/versions/1e10a048_finance_submission_keys.py").read_text(encoding="utf-8")
     assert 'down_revision = "1e10a047"' in migration
     assert '"idempotency_key"' in migration
     assert "unique=True" in migration
     for filename in ("income_form_dialog.py", "expense_form_dialog.py"):
-        src = (root / "src/centermanager/ui/finance_workspace" / filename).read_text()
+        src = (root / "src/centermanager/ui/finance_workspace" / filename).read_text(encoding="utf-8")
         assert "idempotency_key=self._submission_key" in src
-    widget_src = (root / "src/centermanager/ui/finance_workspace/voucher_attachment_widget.py").read_text()
+    widget_src = (root / "src/centermanager/ui/finance_workspace/voucher_attachment_widget.py").read_text(encoding="utf-8")
     assert "self._pending = failed" in widget_src
 
 
