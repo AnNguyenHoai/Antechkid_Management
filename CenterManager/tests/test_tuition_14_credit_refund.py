@@ -63,7 +63,7 @@ def test_refund_guards_origin_prepaid_period_audit_and_idempotency_contracts():
     assert "exceeds refundable tuition" in source
     assert "prepaid_only" in source
     assert "exceeds available prepaid credit" in source
-    assert "TuitionAccrualService.calculate_from_records" in source
+    assert "calculate_effective_tuition_accrual" in source
     assert "FinanceLedgerGuard.ensure_date_mutable" in source
     assert 'action="TUITION_REFUND"' in source
     assert 'module="tuition"' in source
