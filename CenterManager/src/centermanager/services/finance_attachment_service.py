@@ -188,10 +188,25 @@ class FinanceAttachmentService:
             if not self._entity_exists(session, entity_type, entity_id):
                 raise FinanceAttachmentValidationError("Khoản thu/chi không tồn tại hoặc đã bị xóa.")
             repo = self._repository_provider.finance_attachments(session)
+            # FIN-04: if the previous upload committed but UI lost its
+            # acknowledgement, return the exact existing voucher instead of
+            # creating duplicate metadata. Ensure runtime content is staged
+            # for the next Git publication before claiming retry success.
+            existing = repo.find_active_sha(entity_type, entity_id, info["sha256"])
+            if existing is not None:
+                stored_path = self._store_file(
+                    Path(source_path), info["sha256"], info["extension"]
+                )
+                if existing.stored_path != stored_path:
+                    # Historical blob may live in a different month: ensure
+                    # its own original path is still accessible for Git sync.
+                    if not self.resolve_path(existing).is_file():
+                        raise FinanceAttachmentValidationError(
+                            "Existing voucher content is missing; reconcile before retry"
+                        )
+                return existing
             if repo.count_active(entity_type, entity_id) >= self.MAX_FILES_PER_RECORD:
                 raise FinanceAttachmentValidationError("Mỗi khoản tối đa 5 chứng từ.")
-            if repo.exists_active_sha(entity_type, entity_id, info["sha256"]):
-                raise FinanceAttachmentValidationError("Chứng từ này đã được đính kèm cho khoản này.")
             stored_path = self._store_file(Path(source_path), info["sha256"], info["extension"])
             user = get_current_user()
             attachment = FinanceAttachment(
