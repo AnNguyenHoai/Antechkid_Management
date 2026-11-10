@@ -78,3 +78,27 @@ def test_voucher_batch_lookup_excludes_deleted_and_other_types():
         assert [item.original_filename for item in matches[12]] == ["second.pdf"]
         assert repo.list_active_for("INCOME", []) == {}
     engine.dispose()
+
+
+def test_recovery_status_action_shows_empty_information_dialog(monkeypatch):
+    from centermanager.ui.main_window import MainWindow
+    from centermanager.platform import recovery_case_registry, recovery_review_notices, write_recovery
+    from PySide6.QtWidgets import QMessageBox
+
+    prompts = []
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
+    monkeypatch.setattr(
+        recovery_review_notices, "RecoveryReviewNotices",
+        lambda _journal: SimpleNamespace(pending=lambda: []),
+    )
+    monkeypatch.setattr(
+        recovery_case_registry, "RecoveryCaseRegistry",
+        lambda _journal: SimpleNamespace(list_cases=lambda: []),
+    )
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        lambda *_args: prompts.append(_args[2]) if len(_args) > 2 else None,
+    )
+    fake_window = SimpleNamespace(_manual_review_archives=lambda: [])
+    MainWindow._show_recovery_status(fake_window)
+    assert prompts == ["Không có Recovery nào cần kiểm tra."]
