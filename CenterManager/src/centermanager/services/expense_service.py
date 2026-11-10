@@ -394,22 +394,52 @@ class ExpenseService:
             total = repo.count_active(**kwargs)
             rows = repo.list_active(offset=0, limit=max(total, 1), sort_by=sort_by,
                                     ascending=ascending, **kwargs) if total else []
+            vouchers_by_id = self._repository_provider.finance_attachments(
+                session
+            ).list_active_for("EXPENSE", (row.id for row in rows))
+        from centermanager.services.finance_csv_vouchers import voucher_csv_fields
         directory = os.path.dirname(os.path.abspath(destination))
         fd, temp_path = tempfile.mkstemp(prefix=".expense_export_", suffix=".csv", dir=directory)
         try:
             with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
-                writer.writerow(["Date", "Category", "Description", "Amount", "Payment Method", "Paid By", "Status", "Note"])
+                writer.writerow(["Transaction ID", "Date", "Category", "Description", "Amount", "Payment Method", "Paid By", "Status", "Note", "Voucher Count", "Voucher Filenames", "Voucher SHA256"])
                 for expense in rows:
-                    writer.writerow([expense.payment_date.isoformat(), expense.category, expense.description or "",
+                    writer.writerow([expense.id, expense.payment_date.isoformat(), expense.category, expense.description or "",
                                      f"{expense.amount:.2f}", expense.payment_method, expense.paid_by or "",
-                                     expense.status, expense.note or ""])
+                                     expense.status, expense.note or "",
+                                     *voucher_csv_fields(vouchers_by_id.get(expense.id, []))])
             os.replace(temp_path, destination)
         except Exception:
             try: os.unlink(temp_path)
             except OSError: pass
             raise
         return total
+
+    @require_permission("finance.view")
+    def export_expenses_zip(self, destination: str, **filters) -> int:
+        """Export Expense CSV and verified original vouchers into one portable ZIP."""
+        import csv as _csv
+        import io as _io
+        from centermanager.services.finance_csv_vouchers import (
+            csv_transaction_ids, write_voucher_zip,
+        )
+        fd, temporary_csv = tempfile.mkstemp(prefix=".expense_zip_source_", suffix=".csv")
+        os.close(fd)
+        try:
+            count = self.export_expenses_csv(temporary_csv, **filters)
+            with open(temporary_csv, encoding="utf-8-sig", newline="") as handle:
+                csv_text = handle.read()
+            ids = csv_transaction_ids(csv_text)
+            with self._session_factory() as session:
+                vouchers = self._repository_provider.finance_attachments(
+                    session
+                ).list_active_for("EXPENSE", ids)
+            write_voucher_zip(destination, csv_text, "EXPENSE", vouchers)
+            return count
+        finally:
+            if os.path.exists(temporary_csv):
+                os.unlink(temporary_csv)
 
     @require_permission("finance.expense.update")
     def update_expense(self, expense_id: int, category: Optional[str] = None, description: Optional[str] = None,
