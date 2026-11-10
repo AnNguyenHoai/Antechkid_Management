@@ -12,7 +12,7 @@ def test_export_filtered_fetches_all_server_pages_and_keeps_sorting():
             calls.append(kwargs)
             offset = (kwargs["page"] - 1) * kwargs["per_page"]
             return students[offset:offset + kwargs["per_page"]], len(students)
-    page = object.__new__(StudentListPage)
+    page = SimpleNamespace()
     page._advanced_filter_active = False
     page._advanced_filter_criteria = None
     page._student_service = Students()
@@ -29,7 +29,7 @@ def test_export_filtered_fetches_all_server_pages_and_keeps_sorting():
 
 
 def test_advanced_filter_export_reuses_complete_visible_set_without_other_query():
-    page = object.__new__(StudentListPage)
+    page = SimpleNamespace()
     page._advanced_filter_active = True
     page._advanced_filter_criteria = object()
     page._filtered = [SimpleNamespace(id=4), SimpleNamespace(id=7)]
@@ -42,7 +42,7 @@ def test_export_aborts_when_result_set_changes_mid_pagination():
             if kwargs["page"] == 1:
                 return [SimpleNamespace(id=i) for i in range(250)], 251
             return [], 250
-    page = object.__new__(StudentListPage)
+    page = SimpleNamespace()
     page._advanced_filter_active = False
     page._advanced_filter_criteria = None
     page._student_service = Students()
