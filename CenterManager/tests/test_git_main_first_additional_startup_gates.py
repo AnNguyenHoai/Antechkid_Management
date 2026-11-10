@@ -151,13 +151,23 @@ def test_modern_notice_only_covers_exact_old_session(tmp_path):
     root = tmp_path / "runtime.write-recovery"
     root.mkdir()
     journal_file = root / "journal.json"
-    journal_file.write_text('{"session_id":"session-a","status":"OPEN"}', encoding="utf-8")
+    journal_file.write_text(
+        json.dumps({"session_id":"session-a","status":"OPEN",
+                    "rv03_case_id":"a" * 64}), encoding="utf-8"
+    )
     journal = SimpleNamespace(root=root, journal=journal_file, runtime=tmp_path / "runtime")
     notices = RecoveryReviewNotices(journal)
     path = notices.record(observed_main_oid="a" * 40)
     notices.acknowledge(path.stem)
-    assert notices.covers_legacy_case({"write_session_id": "session-a"})
-    assert not notices.covers_legacy_case({"write_session_id": "session-b"})
+    assert notices.covers_legacy_case({
+        "write_session_id": "session-a", "case_id": "a" * 64,
+    })
+    assert not notices.covers_legacy_case({
+        "write_session_id": "session-a", "case_id": "b" * 64,
+    })
+    assert not notices.covers_legacy_case({
+        "write_session_id": "session-b", "case_id": "a" * 64,
+    })
     assert not notices.covers_legacy_case({"write_session_id": None})
 
 
