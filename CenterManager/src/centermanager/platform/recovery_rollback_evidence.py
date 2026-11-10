@@ -19,6 +19,11 @@ _FILES = ("center.db", "center.db-wal", "center.db-shm", "center.db-journal", "d
 _DOMAIN = b"AnTechKids/REC635/startup-rollback-proof/v1\0"
 
 
+# Startup hashing must be bounded: oversized old DBs are preserved but
+# remain UNVERIFIED until an explicitly requested offline review.
+_MAX_STARTUP_PROOF_BYTES = 128 * 1024 * 1024
+
+
 def _hash(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -85,6 +90,14 @@ def bind_startup_rollback(notices, notice_path: Path, rollback_dir: Path, *,
                 shutil.copyfileobj(stream, target)
                 target.flush()
                 os.fsync(target.fileno())
+    # Refuse expensive synchronous startup proofs before hashing a large DB.
+    # Caller logs this as UNAVAILABLE and still starts from verified Git MAIN.
+    total_bytes = sum(
+        (directory / name).stat().st_size
+        for name in _FILES if (directory / name).is_file()
+    )
+    if total_bytes > _MAX_STARTUP_PROOF_BYTES:
+        raise ValueError("Recovery backup exceeds bounded startup proof budget")
     files = {}
     for name in _FILES:
         path = directory / name
