@@ -111,8 +111,68 @@ def compare_identity_and_monthly_plans(old_db, main_db):
         plans_b.append(row)
     identity = ("mapped_class_id", "month", "version")
     values = ("monthly_fee_vnd", "schedule_version", "status")
-    findings.extend(_matching(plans_a, plans_b, identity, values,
-                              "monthly_tuition_plans")[0])
+    plan_results, plan_crosswalk = _matching(
+        plans_a, plans_b, identity, values, "monthly_tuition_plans"
+    )
+    findings.extend(plan_results)
+
+    # Compare per-date session allocation totals only for uniquely mapped
+    # monthly plans. A plan whose allocation sum does not equal its own
+    # immutable fee is inconsistent and must be UNKNOWN.
+    allocation_fields = ("plan_id", "original_date", "amount_vnd")
+    old_alloc = _load(old_db, "monthly_tuition_allocations", allocation_fields)
+    main_alloc = _load(main_db, "monthly_tuition_allocations", allocation_fields)
+    if old_alloc is None or main_alloc is None:
+        findings.append({
+            "entity": "monthly_tuition_allocations",
+            "status": "UNKNOWN", "reason": "SCHEMA_INCOMPATIBLE",
+        })
+    else:
+        def breakdown(rows, plan_id):
+            selected = [row for row in rows if row["plan_id"] == plan_id]
+            per_date = {}
+            for row in selected:
+                day = row["original_date"]
+                if day is None or row["amount_vnd"] is None:
+                    return None
+                per_date.setdefault(str(day), [0, Decimal("0")])
+                per_date[str(day)][0] += 1
+                per_date[str(day)][1] += Decimal(str(row["amount_vnd"]))
+            return {
+                day: {"count": count, "total_vnd": str(amount.quantize(Decimal("0.0001")))}
+                for day, (count, amount) in sorted(per_date.items())
+            }
+
+        for row in plans_old:
+            matched_id = plan_crosswalk.get(row["id"])
+            finding = {"entity": "monthly_tuition_allocations",
+                       "recovery_plan_id": row["id"],
+                       "main_plan_id": matched_id,
+                       "coverage": "PER_ORIGINAL_DATE_COUNT_AND_AMOUNT_ONLY"}
+            if matched_id is None:
+                finding.update(status="UNKNOWN", reason="PLAN_IDENTITY_UNRESOLVED")
+            else:
+                source_breakdown = breakdown(old_alloc, row["id"])
+                main_breakdown = breakdown(main_alloc, matched_id)
+                main_plan = next((p for p in plans_main if p["id"] == matched_id), None)
+                if (source_breakdown is None or main_breakdown is None or main_plan is None
+                        or not source_breakdown or not main_breakdown):
+                    finding.update(status="UNKNOWN", reason="INCOMPLETE_ALLOCATION_SNAPSHOT")
+                else:
+                    old_total = sum(Decimal(v["total_vnd"]) for v in source_breakdown.values())
+                    new_total = sum(Decimal(v["total_vnd"]) for v in main_breakdown.values())
+                    if (old_total != Decimal(str(row["monthly_fee_vnd"]))
+                            or new_total != Decimal(str(main_plan["monthly_fee_vnd"]))):
+                        finding.update(status="UNKNOWN", reason="ALLOCATION_SUM_INCONSISTENT")
+                    else:
+                        finding.update(
+                            status=("PRESENT_IDENTICAL" if source_breakdown == main_breakdown
+                                    else "PRESENT_DIFFERENT"),
+                            reason="AGGREGATED_DAY_LEVEL_ONLY",
+                            recovery_dates=source_breakdown,
+                            main_dates=main_breakdown,
+                        )
+            findings.append(finding)
     return {"findings": findings, "mapped_classes": len(mapping["classes"])}
 
 
