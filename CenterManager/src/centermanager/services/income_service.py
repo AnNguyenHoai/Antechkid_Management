@@ -1298,18 +1298,24 @@ class IncomeService:
                 sort_by=sort_by,
                 ascending=ascending,
             )
+            vouchers_by_id = self._repository_provider.finance_attachments(
+                session
+            ).list_active_for("INCOME", (row.id for row in records))
 
+        from centermanager.services.finance_csv_vouchers import voucher_csv_fields
         output = io.StringIO(newline="")
         writer = csv.writer(output)
         writer.writerow([
-            "Payment Date", "Source", "Student", "Class", "Enrollment ID",
+            "Transaction ID", "Payment Date", "Source", "Student", "Class", "Enrollment ID",
             "Tuition Attribution", "Income Type", "Amount", "Payment Method",
             "Payment Period", "Finance Period Start", "Received By", "Note",
             "Status", "Voided At", "Voided By", "Void Reason",
+            "Voucher Count", "Voucher Filenames", "Voucher SHA256",
         ])
         for income in records:
             linked = income.student_id is not None
             writer.writerow([
+                income.id,
                 income.payment_date.isoformat(),
                 "STUDENT_PAYMENT" if linked else "OTHER_INCOME",
                 income.student.full_name if linked and income.student else "",
@@ -1327,5 +1333,21 @@ class IncomeService:
                 income.voided_at.isoformat() if income.voided_at else "",
                 income.voided_by or "",
                 income.void_reason or "",
+                *voucher_csv_fields(vouchers_by_id.get(income.id, [])),
             ])
         return output.getvalue()
+
+    @require_permission("finance.view")
+    def export_incomes_zip(self, destination: str, **filters) -> None:
+        """Export CSV and original voucher files for precisely the same filtered records."""
+        from centermanager.services.finance_csv_vouchers import (
+            csv_transaction_ids, write_voucher_zip,
+        )
+        csv_text = self.export_incomes_csv(**filters)
+        ids = csv_transaction_ids(csv_text)
+        with self._session_factory() as session:
+            vouchers = self._repository_provider.finance_attachments(
+                session
+            ).list_active_for("INCOME", ids)
+        write_voucher_zip(destination, csv_text, "INCOME", vouchers)
+
