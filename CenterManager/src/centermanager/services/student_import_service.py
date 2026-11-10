@@ -116,6 +116,7 @@ class StudentImportService:
 
                 student = self._student_service.create_student(
                     full_name=str(full_name).strip(),
+                    student_code=str(code).strip() if code else None,
                     preferred_name=str(row[2]).strip() if row[2] else None,
                     date_of_birth=dob,
                     gender=str(row[4]).strip() if row[4] else None,
