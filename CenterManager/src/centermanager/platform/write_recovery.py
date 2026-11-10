@@ -708,6 +708,55 @@ class WriteRecoveryJournal:
         self.assert_replaceable()
         logger.info('Fresh-install WRITE recovery receipt initialized after schema migration')
 
+    def record_verified_review_reset(self, *, provider, accepted_main, notice_path):
+        """Seal CLEAN only after a review notice preserved the old journal.
+
+        Acknowledgement is never required to open the app or receive WRITE.
+        This receipt does not auto-replay local edits or authorize a Git push.
+        """
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        if (not accepted_main or not notice_path
+                or getattr(provider, '_verified_review_main_oid', None) != accepted_main
+                or getattr(provider, '_review_notice_path', None) != str(notice_path)
+                or not getattr(provider, '_review_finance_isolated', False)
+                or not getattr(provider, '_review_employee_safe', False)
+                or provider.observe_remote_main_commit() != accepted_main):
+            raise RecoveryRequired('Verified MAIN/review notice evidence unavailable')
+        notices = RecoveryReviewNotices(self)
+        notice = notices.validate_notice(Path(notice_path))
+        if notice.get('observed_main_oid') != accepted_main:
+            raise RecoveryRequired('Review notice bound to another MAIN generation')
+        repo_db = self.repository / 'database' / 'center.db'
+        if (not self.database.is_file() or self._wal_pending()
+                or not repo_db.is_file()
+                or self._git('rev-parse', 'HEAD') != accepted_main
+                or self._git('rev-parse', '@{upstream}') != accepted_main
+                or self._git('status', '--porcelain', '--untracked-files=all')):
+            raise RecoveryRequired('New Git MAIN generation not ready for WRITE receipt')
+        # Never claim evidence completeness; only the original metadata log
+        # and independently moved old SQLCipher/WAL can be used for review.
+        receipt = dict(
+            format=1, runtime=str(self.runtime), repository=str(self.repository),
+            database=str(self.database), repository_id=self._repository_id(),
+            session_id='main-review-' + uuid.uuid4().hex,
+            base_main_oid=accepted_main, published_oid=accepted_main,
+            status='CLEAN', publication='VERIFIED', release='VERIFIED',
+            published_runtime_sha256=_hash(self.database),
+            accepted_local_files=self._local_files(),
+            review_notice_id=notice['id'],
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _json(self.journal, receipt)
+        delattr(provider, '_verified_review_main_oid')
+        delattr(provider, '_review_notice_path')
+        delattr(provider, '_review_finance_isolated')
+        delattr(provider, '_review_employee_safe')
+        self.assert_replaceable()
+        logger.warning(
+            'Git MAIN installed with independent Recovery review pending; '
+            'no local edits were published or replayed'
+        )
+
     def record_verified_manual_reset(self, *, provider, accepted_main, archive):
         """Seal a NEW MAIN session only after old local evidence was archived.
 

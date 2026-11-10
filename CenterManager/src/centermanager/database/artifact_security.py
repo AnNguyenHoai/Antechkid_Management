@@ -41,12 +41,43 @@ class DatabaseArtifactSecurityError(DatabaseEncryptionError):
     """Raised when a runtime/repository DB artifact violates security policy."""
 
 
+def _assert_standalone_artifact(path: Path) -> None:
+    """Repository/staged artifacts must be self-contained, without WAL state.
+
+    A read of a SQLite WAL database can create -wal/-shm beside a repository
+    artifact. That silently dirties Git and blocks the verified-first-install
+    recovery receipt. More importantly, existing sidecars might contain
+    uncheckpointed transactions: never ignore them by opening immutable.
+    Live runtime connections are explicitly exempt and remain WAL-aware.
+    """
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = path.with_name(path.name + suffix)
+        if sidecar.exists():
+            raise DatabaseArtifactSecurityError(
+                f"Standalone database artifact has SQLite sidecar requiring "
+                f"explicit checkpoint/recovery: {sidecar}"
+            )
+
+
+def _artifact_read_uri(path: Path, *, runtime_guarded: bool) -> str:
+    # immutable=1 is safe only after refusing WAL/SHM/journal. No SQLite
+    # sidecars are created during authentication inside the Git worktree.
+    return path.resolve().as_uri() + (
+        "?mode=ro" if runtime_guarded else "?mode=ro&immutable=1"
+    )
+
+
 def _validate_plain_database(path: Path, *, runtime_guarded: bool = False) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise DatabaseArtifactSecurityError(f"Database artifact is missing or empty: {path}")
 
+    if not runtime_guarded:
+        _assert_standalone_artifact(path)
+
     def open_connection():
-        return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        return sqlite3.connect(
+            _artifact_read_uri(path, runtime_guarded=runtime_guarded), uri=True
+        )
 
     try:
         if runtime_guarded:
@@ -96,10 +127,14 @@ def validate_database_artifact(
             f"Plaintext SQLite artifact is forbidden in production: {path}"
         )
     workspace_key = key if key is not None else DatabaseKeyStore().load()
+    if not runtime_guarded:
+        _assert_standalone_artifact(path)
 
     def open_connection():
         sqlcipher = load_sqlcipher_driver()
-        connection = sqlcipher.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        connection = sqlcipher.connect(
+            _artifact_read_uri(path, runtime_guarded=runtime_guarded), uri=True
+        )
         try:
             apply_sqlcipher_key(connection, workspace_key)
             connection.execute("SELECT count(*) FROM sqlite_master").fetchone()

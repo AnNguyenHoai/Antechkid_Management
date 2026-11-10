@@ -36,26 +36,24 @@ def test_legacy_drift_requires_remote_proof_before_reconciliation(monkeypatch):
     assert "Exact remote Git MAIN cannot be verified" in startup.recovery_error
 
 
-def test_legacy_drift_preserves_before_allowing_replace(monkeypatch, tmp_path):
-    events = []
+def test_legacy_drift_queues_review_without_recursive_capture(monkeypatch, tmp_path):
     class Journal:
         journal = tmp_path / "runtime.write-recovery" / "journal.json"
         root = journal.parent
+        runtime = tmp_path / "runtime"
         def inspect(self):
             return None
     monkeypatch.setattr(
         "centermanager.platform.write_recovery.WriteRecoveryJournal", Journal,
     )
-    from centermanager.platform.sync import manual_review_backup
-    archive = tmp_path / "runtime.write-recovery" / "manual-review" / "test"
+    from centermanager.database import mutation_authority
+    from threading import RLock
     monkeypatch.setattr(
-        manual_review_backup, "preserve_workspace_for_manual_review",
-        lambda journal, *, reason: events.append(("preserve", reason)) or archive,
+        mutation_authority, "gate_for",
+        lambda: SimpleNamespace(lock=RLock(), closed=True),
     )
-    monkeypatch.setattr(
-        manual_review_backup, "verify_manual_review_backup",
-        lambda target: events.append(("verify", target)),
-    )
+    Journal.root.mkdir()
+    Journal.journal.write_text("stale local write journal", encoding="utf-8")
     remote = SimpleNamespace(
         get_fetched_remote_main_commit=lambda: "a" * 40,
         observe_remote_main_commit=lambda: "a" * 40,
@@ -64,14 +62,15 @@ def test_legacy_drift_preserves_before_allowing_replace(monkeypatch, tmp_path):
     startup = StartupSynchronization.__new__(StartupSynchronization)
     startup._provider = remote
     startup._initial_main_receipt_allowed = False
-    assert startup._prepare_authoritative_startup_replacement() is True
-    assert events == [
-        ("preserve", "manual-review-before-authoritative-main"),
-        ("verify", archive),
-    ]
-    assert startup._startup_reconciled_unaccepted_local is True
-    assert startup._initial_main_receipt_allowed is True
-    assert startup._manual_review_backup == archive
+    assert startup._prepare_authoritative_startup_replacement()
+    assert startup._review_only_reset_requested is True
+    assert startup._initial_main_receipt_allowed is False
+    assert startup._review_notice_path is not None
+    assert startup._manual_reset_requested is False
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    queue = RecoveryReviewNotices(Journal())
+    assert queue.validate_notice(startup._review_notice_path)["status"] == "PENDING_REVIEW"
+    assert Journal.journal.read_text() == "stale local write journal"
 
 
 def test_atomic_install_discards_stale_wal_only_after_validated_stage(tmp_path, monkeypatch):
@@ -188,15 +187,12 @@ def test_missing_repository_preclone_preserves_legacy_database(tmp_path, monkeyp
     startup._runtime_db_path = database
     startup._repo_path = runtime / "repository"
     assert startup._preserve_missing_repository_runtime()
-    capture = startup._startup_preclone_capture
-    assert (capture / "database" / "center.db").read_bytes() == database.read_bytes()
-    import json
-    metadata = json.loads((capture / "manifest.json").read_text(encoding="utf-8"))
-    assert "database/center.db" in metadata["files"]
+    assert startup._review_only_clone is True
+    assert database.read_bytes() == b"legacy-opaque-ciphertext"
+    assert not (tmp_path / "runtime.write-recovery" / "preclone").exists()
 
 
-def test_clone_passes_scoped_preclone_evidence():
-    capture = Path("fake-recovery-copy")
+def test_clone_uses_review_only_startup_when_local_recovery_exists():
     seen = {}
     class Provider:
         def clone(self, **kwargs):
@@ -204,10 +200,10 @@ def test_clone_passes_scoped_preclone_evidence():
             return True
     startup = StartupSynchronization.__new__(StartupSynchronization)
     startup._repo_path = Path("fake-repo")
-    startup._startup_preclone_capture = capture
+    startup._review_only_clone = True
     startup._provider = Provider()
     assert startup._clone_repository()
-    assert seen["preclone_capture"] == capture
+    assert seen["review_only_startup"] is True
 
 
 def test_reconciled_local_untracked_files_are_cleaned_only_after_protected_copy():

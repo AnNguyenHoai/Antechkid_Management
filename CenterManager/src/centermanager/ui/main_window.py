@@ -222,32 +222,200 @@ class MainWindow(QMainWindow):
         recovery_menu = self.menuBar().addMenu("Khôi phục")
         recovery_history = recovery_menu.addAction("Danh sách Recovery Case")
         recovery_history.triggered.connect(self._show_recovery_case_history)
+        recovery_log_action = recovery_menu.addAction("Kiểm tra log Recovery")
+        recovery_log_action.triggered.connect(self._show_pending_review_notices)
         self._recovery_pending_action = recovery_menu.addAction("Recovery: đang kiểm tra...")
-        self._recovery_pending_action.triggered.connect(self._show_recovery_case_history)
+        self._recovery_pending_action.triggered.connect(self._open_pending_recovery_review)
         self._recovery_pending_action.setVisible(False)
         QTimer.singleShot(0, self._show_pending_recovery_cases)
 
     def _manual_review_archives(self):
-        """Independent backup-only evidence, never an active database."""
+        """Metadata-only discovery; a legacy archive never blocks login/UI.
+
+        Full checksum verification belongs in a user-selected audit action,
+        not the automatic post-login Recovery reminder.
+        """
         from pathlib import Path
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-        from centermanager.platform.sync.manual_review_backup import (
-            verify_manual_review_backup,
-        )
+
         root = Path(WriteRecoveryJournal().root) / "manual-review"
-        if not root.exists():
+        if not root.is_dir() or root.is_symlink():
             return []
-        archives = []
-        for candidate in sorted(root.iterdir()):
-            if not candidate.is_dir() or candidate.is_symlink():
-                continue
-            try:
-                verify_manual_review_backup(candidate)
-                archives.append(candidate)
-            except Exception:
-                logger.warning("Manual Recovery backup unreadable: retained for investigation")
-                archives.append(candidate)
-        return archives
+        try:
+            return [
+                child for child in sorted(root.iterdir())
+                if child.is_dir() and not child.is_symlink()
+            ]
+        except OSError:
+            logger.warning("Legacy Recovery archive list unavailable; login continues")
+            return []
+
+    def _show_unpersisted_recovery_warning(self) -> None:
+        """Fallback notice when the journal exists but notice persistence failed.
+
+        Never auto-acknowledge unknown evidence or block MAIN startup.
+        """
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        log_root = WriteRecoveryJournal().root
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Recovery — Cần kiểm tra log thủ công")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(
+            "Ứng dụng đang sử dụng Git MAIN. Recovery cũ vẫn cần kiểm tra, "
+            "nhưng chưa tạo được thông báo để đánh dấu Đã kiểm tra."
+        )
+        open_btn = dialog.addButton(
+            "Mở thư mục log", QMessageBox.ButtonRole.ActionRole
+        )
+        dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_root)))
+
+    def _open_pending_recovery_review(self) -> None:
+        """Give the operator an explicit path back to the pending review."""
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        try:
+            if RecoveryReviewNotices(WriteRecoveryJournal()).pending():
+                self._show_pending_review_notices()
+            else:
+                self._show_recovery_case_history()
+        except Exception:
+            logger.exception("Could not open pending Recovery notices")
+            self._show_recovery_case_history()
+
+    def _show_pending_review_notices(self) -> None:
+        """User-only acknowledgement; never changes database or WRITE lease."""
+        from pathlib import Path
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+
+        queue = RecoveryReviewNotices(WriteRecoveryJournal())
+        try:
+            pending = queue.pending()
+        except Exception:
+            logger.exception("Recovery review queue unavailable")
+            self.statusBar().showMessage(
+                "Không thể mở danh sách log Recovery; kiểm tra thư mục recovery", 20000
+            )
+            return
+
+        for item in pending:
+            while True:
+                dialog = QMessageBox(self)
+                dialog.setWindowTitle("Recovery — Cần kiểm tra dữ liệu")
+                dialog.setIcon(QMessageBox.Icon.Warning)
+                dialog.setText(
+                    "Trung tâm đang sử dụng dữ liệu chính thức từ Git MAIN.\n"
+                    "Có ghi nhận thay đổi local cần kiểm tra thủ công."
+                )
+                dialog.setInformativeText(
+                    "Log chỉ là danh mục thao tác, có thể không đủ giá trị "
+                    "để nhập lại. Hãy đối chiếu với số dư, thu chi và công nợ "
+                    "trên Git MAIN trước khi cập nhật.\n"
+                    "Đã kiểm tra: không nhắc lại case này. "
+                    "Để lần sau: sẽ tiếp tục nhắc khi khởi động."
+                )
+                report_button = dialog.addButton("Xuất báo cáo thao tác (.txt)", QMessageBox.ButtonRole.ActionRole)
+                can_compare_finance = self._permission_helper.has_permission("finance.view")
+                compare_button = (
+                    dialog.addButton("Đối chiếu thu/chi với MAIN", QMessageBox.ButtonRole.ActionRole)
+                    if can_compare_finance else None
+                )
+                open_button = dialog.addButton("Mở thư mục log", QMessageBox.ButtonRole.ActionRole)
+                reviewed_button = dialog.addButton("Đã kiểm tra", QMessageBox.ButtonRole.AcceptRole)
+                skip_button = dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
+                dialog.setDefaultButton(skip_button)
+                dialog.exec()
+                choice = dialog.clickedButton()
+                if compare_button is not None and choice is compare_button:
+                    from PySide6.QtWidgets import QFileDialog
+                    from centermanager.platform.recovery_finance_compare import (
+                        compare_verified_notice, render_report_json, write_secure_report,
+                    )
+                    confirm = QMessageBox.question(
+                        self, "Dữ liệu tài chính nhạy cảm",
+                        "Báo cáo chứa số tiền, trạng thái và mã giao dịch. "
+                        "Chỉ lưu ở vị trí riêng tư. NOT_FOUND không chứng minh "
+                        "giao dịch đã mất. Tiếp tục?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if confirm == QMessageBox.StandardButton.Yes:
+                        filename, _ = QFileDialog.getSaveFileName(
+                            self, "Xuất đối chiếu Recovery",
+                            "recovery-finance-compare.json", "JSON (*.json)"
+                        )
+                        if filename:
+                            try:
+                                report = compare_verified_notice(
+                                    queue, item,
+                                    provider=getattr(self._collaboration_manager, "_sync_provider", None),
+                                    can_view_finance=self._permission_helper.has_permission("finance.view"),
+                                )
+                                write_secure_report(Path(filename), render_report_json(report))
+                                QMessageBox.information(
+                                    self, "Recovery", "Đã xuất báo cáo đối chiếu. "
+                                    "Luôn kiểm tra trùng giao dịch trước khi nhập lại."
+                                )
+                            except Exception:
+                                logger.exception("Modern Recovery finance comparison unavailable")
+                                QMessageBox.warning(
+                                    self, "Không thể đối chiếu",
+                                    "Chưa xác minh được DB/WAL cũ, SQLCipher hoặc Git MAIN. "
+                                    "Không xuất báo cáo suy đoán; backup vẫn giữ nguyên."
+                                )
+                    continue
+                if choice is report_button:
+                    from PySide6.QtWidgets import QFileDialog
+                    from centermanager.database.encryption import DatabaseKeyStore
+                    from centermanager.platform.recovery_readable_report import build_notice_report
+                    name, _ = QFileDialog.getSaveFileName(
+                        self, "Xuất Recovery để đối chiếu",
+                        "recovery-review-" + item["id"][:12] + ".txt",
+                        "Văn bản UTF-8 (*.txt)"
+                    )
+                    if name:
+                        try:
+                            # Plaintext is created only on explicit user export.
+                            report = build_notice_report(
+                                queue, item, encryption_key=DatabaseKeyStore().load()
+                            )
+                            Path(name).write_text(report, encoding="utf-8")
+                            QMessageBox.information(
+                                self, "Recovery",
+                                "Đã xuất danh mục thao tác. Báo cáo có thể thiếu và "
+                                "không chứng minh thao tác nào chưa có trên MAIN."
+                            )
+                        except Exception:
+                            logger.exception("Recovery human-readable report export failed")
+                            QMessageBox.warning(
+                                self, "Recovery",
+                                "Không thể giải mã/xác minh sự kiện Recovery. "
+                                "Backup gốc vẫn được giữ nguyên; chưa xuất báo cáo."
+                            )
+                    continue
+                if choice is open_button:
+                    QDesktopServices.openUrl(
+                        QUrl.fromLocalFile(str(Path(queue.journal.root)))
+                    )
+                    continue
+                if choice is reviewed_button:
+                    try:
+                        queue.acknowledge(item["id"])
+                    except Exception:
+                        logger.exception("Recovery review acknowledgment could not be saved")
+                        QMessageBox.warning(
+                            self, "Recovery", "Không ghi được trạng thái Đã kiểm tra. "
+                            "Lần khởi động sau sẽ nhắc lại."
+                        )
+                    break
+                return  # Skip or close never acknowledges any event.
 
     def _show_pending_recovery_cases(self) -> None:
         """Non-modal reminder: never withhold the main window for case review.
@@ -257,16 +425,65 @@ class MainWindow(QMainWindow):
         never acknowledges or erases Recovery evidence.
         """
         from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         try:
-            pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
+            advisory_queue = RecoveryReviewNotices(WriteRecoveryJournal())
+            review_pending = advisory_queue.pending()
+            if review_pending:
+                self._recovery_pending_action.setText(
+                    f"Cần kiểm tra {len(review_pending)} log Recovery"
+                )
+                self._recovery_pending_action.setVisible(True)
+                # Show after the main window is constructed and login complete.
+                QTimer.singleShot(0, self._show_pending_review_notices)
+            from pathlib import Path
+            journal = WriteRecoveryJournal()
+            pending = RecoveryCaseRegistry(journal).pending_cases()
             count = len(pending)
+            # Even if writing the new advisory notice failed (disk full,
+            # invalid old JSON), no pending case may silently disappear from
+            # the UI. The fallback has no Reviewed button because there is
+            # no durable record to acknowledge.
+            raw_unreviewed = False
+            if not review_pending and not pending:
+                try:
+                    old = journal.inspect()
+                    raw_unreviewed = (
+                        old is not None and old.get("status") != "CLEAN"
+                    )
+                except Exception:
+                    source = getattr(journal, "journal", None)
+                    raw_unreviewed = bool(
+                        source is not None and Path(source).exists()
+                    )
+            if raw_unreviewed and isinstance(self, QWidget):
+                QTimer.singleShot(0, self._show_unpersisted_recovery_warning)
+            # Case-specific matching only. A Reviewed notice for session A
+            # must never hide an unrelated pending RV-03 session B.
+            uncovered_legacy = [
+                case for case in pending
+                if not getattr(advisory_queue, "covers_legacy_case",
+                               lambda _case: False)(case)
+            ]
+            if (uncovered_legacy and not review_pending
+                    and isinstance(self, QWidget)):
+                # Legacy signed cases use the existing Reviewed/Skip dialog.
+                # Only after login; close/skip leaves them pending next boot.
+                from centermanager.ui.recovery_cases_dialog import RecoveryCasesDialog
+                registry = RecoveryCaseRegistry(WriteRecoveryJournal())
+                QTimer.singleShot(
+                    0, lambda: RecoveryCasesDialog(
+                        self, pending_only=True, registry=registry
+                    ).exec()
+                )
             archives = len(self._manual_review_archives())
-            if not count and not archives:
+            if not count and not archives and not review_pending and not raw_unreviewed:
                 self._recovery_pending_action.setVisible(False)
                 return
             self._recovery_pending_action.setText(
-                f"Cần kiểm tra {count} Recovery Case, {archives} backup thủ công"
+                f"Cần kiểm tra {len(review_pending)} log, {count} case, "
+                f"{archives} backup Recovery"
             )
             self._recovery_pending_action.setVisible(True)
             self.statusBar().showMessage(
@@ -293,7 +510,11 @@ class MainWindow(QMainWindow):
         try:
             registry = RecoveryCaseRegistry(WriteRecoveryJournal())
             if registry.list_cases():
-                RecoveryCasesDialog(self, registry=registry).exec()
+                RecoveryCasesDialog(
+                    self, registry=registry,
+                    provider=getattr(self._collaboration_manager, "_sync_provider", None),
+                    permission_checker=lambda: self._permission_helper.has_permission("finance.view"),
+                ).exec()
             archives = self._manual_review_archives()
             if archives:
                 # No automatic acknowledgement/deletion; show location only

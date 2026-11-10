@@ -167,10 +167,12 @@ def main() -> int:
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         startup_journal = WriteRecoveryJournal()
         manual_reset_main = getattr(sync_provider, "_verified_manual_main_oid", None)
+        review_reset_main = getattr(sync_provider, "_verified_review_main_oid", None)
         # Legacy Recovery may be malformed: it is already archived as raw
         # evidence. Never parse it as active metadata for this new MAIN session.
         schema_receipt_before = (
-            None if manual_reset_main is not None else startup_journal.inspect()
+            None if (manual_reset_main is not None or review_reset_main is not None)
+            else startup_journal.inspect()
         )
         if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
             startup_journal.assert_replaceable()
@@ -189,7 +191,22 @@ def main() -> int:
         # bootstrap, never an existing legacy runtime, can establish its
         # initial CLEAN receipt after Alembic has verified the schema.
         fresh_main = getattr(sync_provider, "_fresh_install_main_oid", None)
-        if manual_reset_main is not None:
+        if review_reset_main is not None:
+            try:
+                startup_journal.record_verified_review_reset(
+                    provider=sync_provider,
+                    accepted_main=review_reset_main,
+                    notice_path=sync_provider._review_notice_path,
+                )
+            except Exception:
+                # Review metadata cannot veto a valid Git MAIN READ startup.
+                # Without this receipt the normal WRITE gate still refuses
+                # unverified sessions, never grants unsafe editing.
+                logger.exception(
+                    "Could not seal optional Recovery review receipt; "
+                    "continue with authoritative MAIN, WRITE may remain disabled"
+                )
+        elif manual_reset_main is not None:
             startup_journal.record_verified_manual_reset(
                 provider=sync_provider,
                 accepted_main=manual_reset_main,
