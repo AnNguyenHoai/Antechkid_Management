@@ -154,7 +154,9 @@ class RecoveryReviewNotices:
                     encoding="utf-8"
                 ))
                 if (isinstance(document, dict)
-                        and document.get("session_id") == session_id):
+                        and document.get("session_id") == session_id
+                        and document.get("rv03_case_id") is not None
+                        and document.get("rv03_case_id") == case.get("case_id")):
                     return True
             except (OSError, ValueError, KeyError, TypeError):
                 continue
