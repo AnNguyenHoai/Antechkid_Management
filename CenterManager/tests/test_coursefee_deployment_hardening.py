@@ -9,14 +9,20 @@ from centermanager.platform.coursefee_deployment_guard import (
 from centermanager.database.migration import assert_coursefee_database_lineage
 
 
-@pytest.mark.parametrize("branch", ["main", "main_repos", "main_coursefee ", "", None, "lock-main_coursefee"])
-def test_reject_non_coursefee_database_branch(branch):
-    with pytest.raises(CourseFeeDeploymentError, match="main_coursefee"):
+@pytest.mark.parametrize("branch", [
+    "", None, "main_coursefee ", "lock-main_coursefee", "queue-main",
+    "../main", ".hidden", "main..other", "team/.hidden", "main.lock",
+    "main/", "main//other", "foo\\\\bar", "x@{bad",
+])
+def test_reject_malformed_git_database_branch(branch):
+    with pytest.raises(CourseFeeDeploymentError, match="Invalid Git database branch"):
         validate_coursefee_git_branch(branch)
 
 
-def test_explicit_coursefee_branch_is_allowed():
-    validate_coursefee_git_branch("main_coursefee")
+@pytest.mark.parametrize("branch", ["main", "main_repos", "main_coursefee", "db-production", "db/team-1"])
+def test_valid_existing_git_database_branch_names_are_allowed(branch):
+    # Source code branch name is not the name of the Git database branch.
+    validate_coursefee_git_branch(branch)
 
 
 @pytest.mark.parametrize("table", [
@@ -82,3 +88,13 @@ def test_coursefee_migration_tree_is_unambiguous():
     scripts = ScriptDirectory.from_config(get_alembic_config())
     assert scripts.get_current_head() == "cf26a001"
     assert scripts.get_revision("cf26a001").down_revision == "1e10a045"
+
+
+def test_bootstrap_branch_guard_does_not_pin_database_branch_to_source_branch():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1]
+              / "src/centermanager/platform/coursefee_deployment_guard.py").read_text(encoding="utf-8")
+    assert 'COURSEFEE_DATABASE_BRANCH = "main_coursefee"' not in source
+    # Physical monthly tuition detection and revision proof stay mandatory.
+    from centermanager.database import migration
+    assert hasattr(migration, "assert_coursefee_database_lineage")

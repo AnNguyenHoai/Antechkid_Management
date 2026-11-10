@@ -52,3 +52,10 @@ Never merge the PR chain into `main_coursefee` until CI is green and a reviewer 
 - If a previous preview build stamped `1e10a046`, stop: preserve ciphertext and obtain explicitly reviewed offline migration; do not change alembic_version manually on a live database.
 - This product/schema configuration check is separate from Recovery: an old unreviewed notice must not block valid Git MAIN startup.
 - UAT: create/import a fresh independent Git DB branch and verify correct SQLCipher key/identity, then verify 2-PC flows and no cross-version publishing.
+
+## Startup hotfix: separate app source branch from DB repo branch
+
+- The application code branch `main_coursefee` is NOT necessarily the Git branch configured for the database repository. An existing production database branch named `main` is valid.
+- Bootstrap validates that the configured Git branch is a safely formed ref, not that it equals `main_coursefee`. Do not modify a valid existing GitConfig or re-provision DPAPI secrets merely to satisfy the former incorrect guard.
+- Reject incorrect billing model at the **physical SQLCipher schema / Alembic revision boundary**, before stamp/DDL. The ambiguous revision `1e10a046` still requires manual audit; no auto-restamp.
+- Recovery remains advisory/non-blocking. No automatic rollback, restore or republish.
