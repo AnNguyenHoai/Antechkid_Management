@@ -663,10 +663,12 @@ class StartupSynchronization:
             return False
 
     def _prepare_startup_assets(self) -> None:
-        """Stage MAIN assets and retain an immutable, non-runtime rollback copy.
+        """Prepare assets with a fast rename-only path for dirty Recovery.
 
-        This handles ordinary exceptions. A killed process needs a separate
-        durable interrupted-install protocol (S04-01B).
+        Never recursively read/copy the old Employee directory in a recovery
+        review startup. Same-volume rename protects all unpublished content
+        including deep Vietnamese filenames; the Git MAIN asset source stays
+        authoritative. The non-review path retains the existing safety flow.
         """
         import uuid
         token = uuid.uuid4().hex
@@ -675,12 +677,13 @@ class StartupSynchronization:
         manifest = self._runtime_manifest_path
         targets = (employees, manifest, version)
         copies = []
+        review = getattr(self, "_review_only_reset_requested", False)
+        staged_employees = None
         try:
             for dest in targets:
-                # Each backup must be on the same volume as its destination,
-                # and outside WriteRecoveryJournal's workspace fingerprint.
                 runtime_parent = dest.parent
-                while runtime_parent.name not in {"runtime", "Runtime"} and runtime_parent != runtime_parent.parent:
+                while (runtime_parent.name not in {"runtime", "Runtime"}
+                       and runtime_parent != runtime_parent.parent):
                     runtime_parent = runtime_parent.parent
                 if runtime_parent == runtime_parent.parent:
                     runtime_parent = self._runtime_db_path.parent.parent
@@ -688,29 +691,39 @@ class StartupSynchronization:
                     runtime_parent.with_name(runtime_parent.name + ".write-recovery")
                     / "startup-assets" / token / dest.name
                 )
-                exists = dest.exists()
+                exists = dest.exists() or dest.is_symlink()
                 if exists:
+                    if dest.is_symlink():
+                        raise RuntimeError("Unsafe startup asset symlink")
                     rollback.parent.mkdir(parents=True, exist_ok=True)
-                    if dest.is_dir():
+                    if review:
+                        # No WinError 206 from a recursive copy; a directory
+                        # rename is atomic on the existing runtime volume.
+                        os.replace(dest, rollback)
+                    elif dest.is_dir():
                         shutil.copytree(dest, rollback)
                     else:
                         shutil.copy2(dest, rollback)
                 copies.append((dest, rollback, exists))
-            # Ensure source attachments are completely readable before the
-            # already-validated database can be installed.
-            repo_employees = self._repo_path / "Attachments" / "Employees"
-            if repo_employees.exists():
-                staged_employees = (
-                    employees.parent.parent.with_name(employees.parent.parent.name + ".write-recovery")
-                    / "startup-assets" / token / "staged-employees"
-                )
-                staged_employees.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(repo_employees, staged_employees)
-            else:
-                staged_employees = None
+                if review:
+                    # Preserve each completed move for emergency rollback.
+                    self._startup_assets = (list(copies), None)
+
+            if not review:
+                repo_employees = self._repo_path / "Attachments" / "Employees"
+                if repo_employees.exists():
+                    staged_employees = (
+                        employees.parent.parent.with_name(
+                            employees.parent.parent.name + ".write-recovery"
+                        ) / "startup-assets" / token / "staged-employees"
+                    )
+                    staged_employees.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(repo_employees, staged_employees)
             self._startup_assets = (copies, staged_employees)
         except Exception:
-            logger.exception("Unable to stage startup assets; live workspace remains unchanged")
+            logger.exception("Unable to prepare startup assets")
+            if review and copies:
+                self._rollback_startup_assets()
             raise
 
     def _rollback_startup_assets(self) -> None:
@@ -727,7 +740,11 @@ class StartupSynchronization:
                     dest.unlink()
                 if existed:
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    if backup.is_dir():
+                    if getattr(self, "_review_only_reset_requested", False):
+                        # Archive copy remains necessary for manual review,
+                        # so restore the original path with another move.
+                        os.replace(backup, dest)
+                    elif backup.is_dir():
                         shutil.copytree(backup, dest)
                     else:
                         shutil.copy2(backup, dest)
