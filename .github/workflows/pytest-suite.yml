@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main_repos
+      - release/coursefee-stable-rebuild-20261110
   pull_request:
     branches:
       - main_repos
+      - release/coursefee-stable-rebuild-20261110
 
 permissions:
   contents: read
