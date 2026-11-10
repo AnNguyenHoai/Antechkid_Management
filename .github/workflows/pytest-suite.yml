@@ -8,6 +8,7 @@ on:
     branches:
       - main_repos
       - main_coursefee
+      - port/main-coursefee-recovery
 
 permissions:
   contents: read
