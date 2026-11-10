@@ -220,6 +220,8 @@ class MainWindow(QMainWindow):
         # Startup sync has already completed and the user is logged in.
         # This reminder is informational; never changes a WRITE lease.
         recovery_menu = self.menuBar().addMenu("Khôi phục")
+        recovery_status = recovery_menu.addAction("Xem trạng thái Recovery…")
+        recovery_status.triggered.connect(self._show_recovery_status)
         recovery_history = recovery_menu.addAction("Danh sách Recovery Case")
         recovery_history.triggered.connect(self._show_recovery_case_history)
         recovery_log_action = recovery_menu.addAction("Kiểm tra log Recovery")
@@ -274,6 +276,34 @@ class MainWindow(QMainWindow):
         if dialog.clickedButton() is open_btn:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_root)))
 
+    def _show_recovery_status(self) -> None:
+        """Explicit metadata-only status action; never restores or publishes."""
+        from centermanager.platform.recovery_case_registry import RecoveryCaseRegistry
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        try:
+            journal = WriteRecoveryJournal()
+            notices = RecoveryReviewNotices(journal).pending()
+            cases = RecoveryCaseRegistry(journal).list_cases()
+            archives = self._manual_review_archives()
+        except Exception:
+            logger.exception("Recovery status could not be inspected")
+            QMessageBox.warning(
+                self, "Khôi phục",
+                "Không thể đọc trạng thái Recovery. Dữ liệu và backup được giữ nguyên."
+            )
+            return
+        if not notices and not cases and not archives:
+            QMessageBox.information(self, "Khôi phục", "Không có Recovery nào cần kiểm tra.")
+            return
+        QMessageBox.information(
+            self, "Trạng thái Recovery",
+            f"Log cần kiểm tra: {len(notices)}\n"
+            f"Recovery Case: {len(cases)}\n"
+            f"Backup lưu trữ: {len(archives)}\n\n"
+            "Dùng menu Khôi phục để kiểm tra thủ công; không tự restore hoặc publish."
+        )
+
     def _open_pending_recovery_review(self) -> None:
         """Give the operator an explicit path back to the pending review."""
         from centermanager.platform.write_recovery import WriteRecoveryJournal
@@ -303,6 +333,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Không thể mở danh sách log Recovery; kiểm tra thư mục recovery", 20000
             )
+            return
+
+        if not pending:
+            QMessageBox.information(self, "Khôi phục", "Không có log Recovery nào cần kiểm tra.")
             return
 
         for item in pending:
@@ -516,6 +550,11 @@ class MainWindow(QMainWindow):
                     permission_checker=lambda: self._permission_helper.has_permission("finance.view"),
                 ).exec()
             archives = self._manual_review_archives()
+            if not registry.list_cases() and not archives:
+                QMessageBox.information(
+                    self, "Khôi phục",
+                    "Không có Recovery Case nào. Chọn 'Kiểm tra log Recovery' để xem log đang chờ."
+                )
             if archives:
                 # No automatic acknowledgement/deletion; show location only
                 # on explicit operator action, for manual data comparison.
