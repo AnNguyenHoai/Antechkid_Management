@@ -35,7 +35,7 @@ def test_pending_skip_review_and_no_repeat_on_restart(tmp_path):
     assert events.pending() == []
     assert events.validate_notice(notice_path)["status"] == "ACKNOWLEDGED"
     assert (events.root / saved["journal_file"]).read_bytes() == raw
-    events.record(observed_main_oid="a" * 40)
+    events.record(observed_main_oid="b" * 40)  # unrelated MAIN advance
     assert events.pending() == []
 
 
