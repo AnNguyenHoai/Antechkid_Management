@@ -37,6 +37,10 @@ _FIELDS = {
         "origin_adjustment_id", "linked_income_id", "kind", "amount",
         "adjustment_date", "wallet",
     ),
+    "monthly_tuition_outcomes": (
+        "idempotency_key", "enrollment_id", "session_id", "outcome",
+        "replacement_session_id", "revision", "effective_date",
+    ),
 }
 _AMOUNT_FIELDS = {"amount"}
 _MAX_ROWS = 20000
@@ -199,12 +203,12 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     return {
         "case_id": case_id,
         "compared_main_oid": observed,
-        "coverage": "PARTIAL_FINANCE_KEYED_TRANSACTIONS_ONLY",
+        "coverage": "PARTIAL_KEYED_FINANCE_AND_MONTHLY_OUTCOMES_ONLY",
         "publication": case.get("publication", "UNVERIFIED"),
         "warning": (
             "NOT_FOUND không chứng minh giao dịch đã mất. "
             "Phải đối chiếu học sinh, học phí, ví và công nợ trước khi nhập lại. "
-            "Không so sánh trực tiếp số dư hoặc dữ liệu không có idempotency key."
+            "Không so sánh trực tiếp số dư, kế hoạch học phí tháng hoặc dữ liệu không có idempotency key."
         ),
         "findings": findings,
     }
