@@ -18,6 +18,21 @@ class ManualBackupError(RuntimeError):
     pass
 
 
+def _backup_storage_relative(destination: Path, original_relative: Path) -> Path:
+    """Keep ordinary paths human-readable; flatten paths unsafe on Windows.
+
+    Archiving adds the recovery root, UUID and category to the original path.
+    A path valid in the live repo can exceed Windows MAX_PATH after copying.
+    The SHA256 key is based on the *logical* original path (not file contents),
+    so files with the same basename remain distinct and auditable.
+    """
+    candidate = destination / original_relative
+    if len(str(candidate)) < 220:
+        return original_relative
+    identity = hashlib.sha256(original_relative.as_posix().encode("utf-8")).hexdigest()
+    return Path("_longpaths") / identity[:2] / identity
+
+
 def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
     """Copy and verify every existing protected workspace file before replace.
 
@@ -30,6 +45,7 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
     destination = archive_root / uuid.uuid4().hex
     destination.mkdir(mode=0o700)
     records = {}
+    relocated = {}
     try:
         # Include original Recovery log/outbox/cases as well as DB/WAL and
         # attachments. Never traverse manual-review itself (it contains this
@@ -53,8 +69,11 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
                 if not source.is_file():
                     continue
                 rel = Path(category) / source.relative_to(location)
-                target = destination / rel
+                storage_rel = _backup_storage_relative(destination, rel)
+                target = destination / storage_rel
                 target.parent.mkdir(parents=True, exist_ok=True)
+                if storage_rel != rel:
+                    relocated[rel.as_posix()] = storage_rel.as_posix()
                 digest = hashlib.sha256()
                 with source.open("rb") as reader, target.open("xb") as writer:
                     for data in iter(lambda: reader.read(1024 * 1024), b""):
@@ -71,7 +90,8 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
             raise ManualBackupError("No local artifacts found to preserve.")
         manifest = destination / "manifest.json"
         with manifest.open("x", encoding="utf-8") as writer:
-            json.dump({"format": 1, "reason": reason, "files": records}, writer, sort_keys=True)
+            json.dump({"format": 2, "reason": reason, "files": records,
+                       "relocated": relocated}, writer, sort_keys=True)
             writer.flush()
             os.fsync(writer.fileno())
         return destination
@@ -88,12 +108,20 @@ def verify_manual_review_backup(archive: Path) -> None:
     try:
         document = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
         records = document["files"]
-        if document["format"] != 1 or not isinstance(records, dict) or not records:
+        if document["format"] not in (1, 2) or not isinstance(records, dict) or not records:
             raise ValueError("invalid manifest")
+        relocated = document.get("relocated", {}) if document["format"] == 2 else {}
+        if not isinstance(relocated, dict) or not set(relocated).issubset(records):
+            raise ValueError("invalid relocation map")
         for rel, expected in records.items():
-            path = archive / rel
+            stored_rel = relocated.get(rel, rel)
             if (not isinstance(rel, str) or not isinstance(expected, str)
-                    or not path.resolve().is_relative_to(archive.resolve())
+                    or not isinstance(stored_rel, str)
+                    or Path(rel).is_absolute() or Path(stored_rel).is_absolute()
+                    or ".." in Path(rel).parts or ".." in Path(stored_rel).parts):
+                raise ManualBackupError("Manual Recovery backup verification failed.")
+            path = archive / stored_rel
+            if (not path.resolve().is_relative_to(archive.resolve())
                     or path.is_symlink() or not path.is_file()
                     or hashlib.sha256(path.read_bytes()).hexdigest() != expected):
                 raise ManualBackupError("Manual Recovery backup verification failed.")
