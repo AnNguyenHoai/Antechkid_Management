@@ -202,12 +202,15 @@ class StartupSynchronization:
                     self, "_review_only_reset_requested", False):
                 WriteRecoveryJournal().record_synchronized()
         except Exception:
-            logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
-            self._rollback_startup_database_install()
-            self._rollback_startup_assets()
-            self._rollback_startup_git_repository()
-            self._complete_failed_startup_rollback()
-            return False
+            # A stale, malformed, or unwritable advisory receipt is not
+            # permission to discard the already verified Git MAIN database.
+            # No new CLEAN receipt is issued here; the independent WRITE
+            # authority checker continues to fail closed when required.
+            self._provider._startup_recovery_receipt_warning = True
+            logger.exception(
+                "Advisory Recovery receipt could not be recorded; "
+                "Git MAIN startup continues, WRITE must be verified separately"
+            )
         if getattr(self, "_review_only_reset_requested", False):
             # The old encrypted database and WAL are the most detailed
             # possible manual review evidence. Leave the already-atomic
