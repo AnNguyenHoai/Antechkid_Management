@@ -65,5 +65,25 @@ class FinanceAttachmentRepository:
         )
         return {int(entity_id): int(count) for entity_id, count in rows}
 
+    def list_active_for(self, entity_type: str, entity_ids: Iterable[int]) -> Dict[int, List[FinanceAttachment]]:
+        """Fetch active vouchers for all exported entries in bounded SQLite batches."""
+        ids = sorted({int(value) for value in entity_ids})
+        result: Dict[int, List[FinanceAttachment]] = {}
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            rows = (
+                self._session.query(FinanceAttachment)
+                .filter(
+                    FinanceAttachment.entity_type == entity_type,
+                    FinanceAttachment.entity_id.in_(batch),
+                    FinanceAttachment.deleted_at.is_(None),
+                )
+                .order_by(FinanceAttachment.entity_id, FinanceAttachment.uploaded_at, FinanceAttachment.id)
+                .all()
+            )
+            for item in rows:
+                result.setdefault(int(item.entity_id), []).append(item)
+        return result
+
     def soft_delete(self, attachment: FinanceAttachment, when: datetime) -> None:
         attachment.deleted_at = when
