@@ -36,6 +36,10 @@ class _Result:
 
 
 def test_guarded_encrypted_connection_is_registered_until_native_close(monkeypatch, tmp_path):
+    # This test verifies registry ownership of a mocked SQLCipher handle.
+    # A maintenance fence is process-global and is tested separately; do not
+    # let an earlier full-suite test invalidate this fixture's precondition.
+    monkeypatch.setattr(database_engine, "_runtime_db_maintenance", False)
     raw = _RawConnection()
 
     class _Driver:
