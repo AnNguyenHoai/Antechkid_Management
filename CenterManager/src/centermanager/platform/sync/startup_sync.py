@@ -212,6 +212,26 @@ class StartupSynchronization:
                 "Git MAIN startup continues, WRITE must be verified separately"
             )
         if getattr(self, "_review_only_reset_requested", False):
+            # Authenticate the exact rollback generation only when recovery
+            # actually occurs. This is advisory: any hashing/key/disk error
+            # leaves evidence unverified but never blocks Git MAIN startup.
+            try:
+                saved = getattr(self, "_startup_db_install_backup", None)
+                notice = getattr(self, "_review_notice_path", None)
+                if saved is not None and saved[2] and notice is not None:
+                    from centermanager.platform.write_recovery import WriteRecoveryJournal
+                    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+                    from centermanager.platform.recovery_rollback_evidence import bind_startup_rollback
+                    old_journal = WriteRecoveryJournal()
+                    bind_startup_rollback(
+                        RecoveryReviewNotices(old_journal),
+                        Path(notice), Path(saved[1]).parent,
+                    )
+            except Exception:
+                logger.exception(
+                    "Recovery rollback evidence not authenticated; "
+                    "Git MAIN startup continues, comparison stays unavailable"
+                )
             # The old encrypted database and WAL are the most detailed
             # possible manual review evidence. Leave the already-atomic
             # rollback generation in place rather than recopying deep captures.
