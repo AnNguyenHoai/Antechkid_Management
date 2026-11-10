@@ -1596,7 +1596,18 @@ class GitSynchronizationProvider(SynchronizationProvider):
                     raise RuntimeError("Cannot determine old Git worktree integrity.")
 
                 local_oid = self.get_local_main_commit()
-                if status.stdout or local_oid != accepted_oid:
+                # A clean local MAIN that is merely *behind* remote MAIN has
+                # no unpublished work and needs no redundant archive.
+                ancestor = subprocess.run(
+                    [self._git_executable, "merge-base", "--is-ancestor",
+                     local_oid or "HEAD", accepted_oid],
+                    cwd=str(self._repo_path), capture_output=True,
+                    env=self._get_env(), check=False, timeout=60,
+                )
+                if ancestor.returncode not in (0, 1):
+                    raise RuntimeError("Cannot determine whether local Git commits are published.")
+                has_unpublished = bool(status.stdout) or ancestor.returncode == 1
+                if has_unpublished:
                     # Move the complete old repository (including .git object
                     # history and untracked files) before any destructive
                     # Git operation. Avoid WinError 206 from copytree.
