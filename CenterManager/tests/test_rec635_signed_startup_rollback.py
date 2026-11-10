@@ -160,3 +160,21 @@ def test_end_to_end_modern_notice_compares_signed_wal_copy_to_main(tmp_path, mon
     assert report["coverage"].startswith("PARTIAL")
     assert "NOT_FOUND" in report["warning"]
     assert (rollback / "center.db-wal").is_file()
+
+
+def test_oversized_rollback_never_blocks_and_never_gets_signed(tmp_path, monkeypatch):
+    """A multi-GB old DB may exist; startup cannot hash it synchronously."""
+    from centermanager.platform import recovery_rollback_evidence as evidence
+
+    notices, notice, notice_file, rollback = _data(tmp_path)
+    db = rollback / "center.db"
+    sqlite3.connect(db).close()
+    monkeypatch.setattr(evidence, "_MAX_STARTUP_PROOF_BYTES", 1)
+    original = db.read_bytes()
+    with pytest.raises(ValueError, match="bounded startup proof budget"):
+        bind_startup_rollback(notices, notice_file, rollback, encryption_key=b"x" * 32)
+    assert db.read_bytes() == original
+    assert not (notices.root / (notice["id"] + ".rollback-proof.json")).exists()
+    # No proof means unavailable; no false positive legacy comparison.
+    with pytest.raises(ValueError, match="no signed proof"):
+        verify_startup_rollback(notices, notice, encryption_key=b"x" * 32)
