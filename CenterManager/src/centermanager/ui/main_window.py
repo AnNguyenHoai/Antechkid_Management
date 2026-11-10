@@ -250,6 +250,30 @@ class MainWindow(QMainWindow):
             logger.warning("Legacy Recovery archive list unavailable; login continues")
             return []
 
+    def _show_unpersisted_recovery_warning(self) -> None:
+        """Fallback notice when the journal exists but notice persistence failed.
+
+        Never auto-acknowledge unknown evidence or block MAIN startup.
+        """
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        log_root = WriteRecoveryJournal().root
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Recovery — Cần kiểm tra log thủ công")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(
+            "Ứng dụng đang sử dụng Git MAIN. Recovery cũ vẫn cần kiểm tra, "
+            "nhưng chưa tạo được thông báo để đánh dấu Đã kiểm tra."
+        )
+        open_btn = dialog.addButton(
+            "Mở thư mục log", QMessageBox.ButtonRole.ActionRole
+        )
+        dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_root)))
+
     def _open_pending_recovery_review(self) -> None:
         """Give the operator an explicit path back to the pending review."""
         from centermanager.platform.write_recovery import WriteRecoveryJournal
@@ -340,8 +364,24 @@ class MainWindow(QMainWindow):
                 self._recovery_pending_action.setVisible(True)
                 # Show after the main window is constructed and login complete.
                 QTimer.singleShot(0, self._show_pending_review_notices)
-            pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
+            journal = WriteRecoveryJournal()
+            pending = RecoveryCaseRegistry(journal).pending_cases()
             count = len(pending)
+            # Even if writing the new advisory notice failed (disk full,
+            # invalid old JSON), no pending case may silently disappear from
+            # the UI. The fallback has no Reviewed button because there is
+            # no durable record to acknowledge.
+            raw_unreviewed = False
+            if not review_pending and not pending:
+                try:
+                    old = journal.inspect()
+                    raw_unreviewed = (
+                        old is not None and old.get("status") != "CLEAN"
+                    )
+                except Exception:
+                    raw_unreviewed = journal.journal.exists()
+            if raw_unreviewed and isinstance(self, QWidget):
+                QTimer.singleShot(0, self._show_unpersisted_recovery_warning)
             # Case-specific matching only. A Reviewed notice for session A
             # must never hide an unrelated pending RV-03 session B.
             uncovered_legacy = [
@@ -361,7 +401,7 @@ class MainWindow(QMainWindow):
                     ).exec()
                 )
             archives = len(self._manual_review_archives())
-            if not count and not archives and not review_pending:
+            if not count and not archives and not review_pending and not raw_unreviewed:
                 self._recovery_pending_action.setVisible(False)
                 return
             self._recovery_pending_action.setText(
