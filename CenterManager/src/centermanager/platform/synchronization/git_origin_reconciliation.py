@@ -132,7 +132,7 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
             if preclone_capture is not None or review_only_startup:
                 from centermanager.platform.write_recovery import RecoveryRequired
                 raise RecoveryRequired(
-                    "Startup-only clone cannot authorize an existing repository."
+                    "Preclone capture cannot authorize an existing repository."
                 )
             from centermanager.platform.write_recovery import require_replaceable
             require_replaceable()
@@ -145,11 +145,16 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
             return True
         # Delegate capture validation to the original provider. Its narrow
         # preclone exception verifies the captured workspace before clone.
-        return original_clone(
-            self, progress_callback=progress_callback,
-            preclone_capture=preclone_capture,
-            review_only_startup=review_only_startup,
-        )
+        kwargs = {
+            "progress_callback": progress_callback,
+            "preclone_capture": preclone_capture,
+        }
+        # Backward compatibility: older/test provider implementations do not
+        # accept the new keyword. Only pass it for the explicitly requested
+        # narrow startup review path, never silently downgrade that path.
+        if review_only_startup:
+            kwargs["review_only_startup"] = True
+        return original_clone(self, **kwargs)
 
     provider_cls.clone = clone_idempotent
 
