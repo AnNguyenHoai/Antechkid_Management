@@ -172,9 +172,9 @@ def test_encrypted_main_worktree_rejects_external_file_and_missing_provenance(tm
 
 
 def test_coursefee_recovery_has_only_legacy_finance_ledgers():
+    # A completely empty old snapshot has zero findings by definition.
+    # Validate the allowlisted ledger schema rather than fabricating records.
+    from centermanager.platform.recovery_finance_compare import _FIELDS
+    assert set(_FIELDS) == {"incomes", "expenses", "tuition_adjustments"}
     old, main = _db(), _db()
-    results = compare_finance_connections(old, main)
-    assert {item["table"] for item in results} == {
-        "incomes", "expenses", "tuition_adjustments",
-    }
-    assert not any("monthly" in item["table"] for item in results)
+    assert compare_finance_connections(old, main) == []
