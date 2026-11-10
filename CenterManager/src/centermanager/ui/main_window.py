@@ -230,26 +230,25 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._show_pending_recovery_cases)
 
     def _manual_review_archives(self):
-        """Independent backup-only evidence, never an active database."""
+        """Metadata-only discovery; a legacy archive never blocks login/UI.
+
+        Full checksum verification belongs in a user-selected audit action,
+        not the automatic post-login Recovery reminder.
+        """
         from pathlib import Path
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-        from centermanager.platform.sync.manual_review_backup import (
-            verify_manual_review_backup,
-        )
+
         root = Path(WriteRecoveryJournal().root) / "manual-review"
-        if not root.exists():
+        if not root.is_dir() or root.is_symlink():
             return []
-        archives = []
-        for candidate in sorted(root.iterdir()):
-            if not candidate.is_dir() or candidate.is_symlink():
-                continue
-            try:
-                verify_manual_review_backup(candidate)
-                archives.append(candidate)
-            except Exception:
-                logger.warning("Manual Recovery backup unreadable: retained for investigation")
-                archives.append(candidate)
-        return archives
+        try:
+            return [
+                child for child in sorted(root.iterdir())
+                if child.is_dir() and not child.is_symlink()
+            ]
+        except OSError:
+            logger.warning("Legacy Recovery archive list unavailable; login continues")
+            return []
 
     def _show_pending_review_notices(self) -> None:
         """User-only acknowledgement; never changes database or WRITE lease."""
