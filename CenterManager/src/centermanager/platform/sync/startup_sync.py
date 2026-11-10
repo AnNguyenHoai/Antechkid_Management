@@ -65,16 +65,23 @@ class StartupSynchronization:
                 not self._repo_path.is_dir() or any(self._repo_path.iterdir())
             ))
         )
-        # Recovery is advisory; detecting its presence must not recursively
-        # enumerate potentially enormous/deep historical captures. A single
-        # directory entry suffices to classify this as a nonfresh install.
+        # Empty legacy Recovery directories do not disqualify a fresh unzip.
+        # Walk without copying/hashing files; unreadable/too-deep paths are
+        # conservatively nonfresh but never block the Git MAIN startup.
         recovery_root = Path(journal.root)
-        recovery_material = (
-            recovery_root.is_symlink()
-            or (recovery_root.exists() and (
-                not recovery_root.is_dir() or any(recovery_root.iterdir())
-            ))
-        )
+        def recovery_contains_material():
+            if not recovery_root.exists():
+                return False
+            if recovery_root.is_symlink() or not recovery_root.is_dir():
+                return True
+            inaccessible = [False]
+            def walk_error(_exc):
+                inaccessible[0] = True
+            for parent, directories, files in os.walk(recovery_root, onerror=walk_error):
+                if files or any((Path(parent) / name).is_symlink() for name in directories):
+                    return True
+            return inaccessible[0]
+        recovery_material = recovery_contains_material()
         business_material = any(
             has_material(roots[name], allow_placeholders=True)
             for name in ('database', 'attachments', 'legacy-attachments')
