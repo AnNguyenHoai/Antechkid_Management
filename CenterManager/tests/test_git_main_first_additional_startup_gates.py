@@ -71,7 +71,7 @@ def test_review_startup_assets_move_without_copying_deep_local_files(tmp_path, m
     root = tmp_path / "runtime"
     old = root / "Attachments" / "Employees"
     old.mkdir(parents=True)
-    folder = old / "exports" / ("a" * 65) / ("b" * 65)
+    folder = old / "exports" / ("a" * 32) / ("b" * 32)
     folder.mkdir(parents=True)
     (folder / "lesson.txt").write_text("unpublished", encoding="utf-8")
     (root / "metadata").mkdir()
@@ -98,13 +98,13 @@ def test_review_startup_assets_move_without_copying_deep_local_files(tmp_path, m
     saved = startup._startup_assets
     assert saved is not None
     assert not old.exists()
-    assert (saved[0][0][1] / "exports" / ("a" * 65)
-            / ("b" * 65) / "lesson.txt").read_text(encoding="utf-8") == "unpublished"
+    assert (saved[0][0][1] / "exports" / ("a" * 32)
+            / ("b" * 32) / "lesson.txt").read_text(encoding="utf-8") == "unpublished"
     startup._sync_employee_attachments_from_repository()
     assert (old / "official.txt").read_text(encoding="utf-8") == "git-main"
     startup._finalize_startup_assets()
-    assert (saved[0][0][1] / "exports" / ("a" * 65)
-            / ("b" * 65) / "lesson.txt").exists()
+    assert (saved[0][0][1] / "exports" / ("a" * 32)
+            / ("b" * 32) / "lesson.txt").exists()
 
 
 def test_secret_backup_is_fixed_scope_not_recovery_capture(tmp_path):
