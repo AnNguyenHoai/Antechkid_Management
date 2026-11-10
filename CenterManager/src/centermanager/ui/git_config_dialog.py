@@ -157,13 +157,20 @@ class GitConfigDialog(QDialog):
                     "Ask the administrator to create a new workstation provisioning bundle."
                 )
 
+            # Reject cross-product bundles BEFORE touching either the local
+            # encrypted database key or the persisted Git credentials.
+            from centermanager.platform.coursefee_deployment_guard import (
+                validate_coursefee_git_branch,
+            )
+            config = GitConfig.from_dict(git_payload)
+            validate_coursefee_git_branch(config.branch)
+
             # Re-wrap the authenticated shared key for this destination first.
             # The helper refuses to replace a different valid local workspace key,
             # but can repair a copied foreign-DPAPI bundle.
             if workspace_key is not None:
                 provision_workspace_database_key(workspace_key)
 
-            config = GitConfig.from_dict(git_payload)
             # save_config validates the remote before persisting and stores the
             # token only as destination-local DPAPI secret material.
             if not self._git_config_service.save_config(config):
