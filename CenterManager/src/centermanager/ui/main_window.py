@@ -364,6 +364,7 @@ class MainWindow(QMainWindow):
                 self._recovery_pending_action.setVisible(True)
                 # Show after the main window is constructed and login complete.
                 QTimer.singleShot(0, self._show_pending_review_notices)
+            from pathlib import Path
             journal = WriteRecoveryJournal()
             pending = RecoveryCaseRegistry(journal).pending_cases()
             count = len(pending)
@@ -379,7 +380,10 @@ class MainWindow(QMainWindow):
                         old is not None and old.get("status") != "CLEAN"
                     )
                 except Exception:
-                    raw_unreviewed = journal.journal.exists()
+                    source = getattr(journal, "journal", None)
+                    raw_unreviewed = bool(
+                        source is not None and Path(source).exists()
+                    )
             if raw_unreviewed and isinstance(self, QWidget):
                 QTimer.singleShot(0, self._show_unpersisted_recovery_warning)
             # Case-specific matching only. A Reviewed notice for session A
