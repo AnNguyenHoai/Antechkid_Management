@@ -270,17 +270,39 @@ class BootstrapManager:
             # supply a destination-bound bundle for the isolated product.
             logger.error("[BOOTSTRAP] Course-fee database destination rejected: %s", exc)
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(
+            answer = QMessageBox.question(
                 None,
                 "CourseFee repository configuration",
                 "This CourseFee build requires the dedicated 'main_coursefee' "
                 "database branch. The workstation is configured for "
                 f"'{git_config.branch}'.\\n\\n"
-                "No database was changed. Import an administrator-issued "
-                "CourseFee provisioning bundle to select the correct database. "
+                "No database has been changed. Import an administrator-issued "
+                "CourseFee provisioning bundle now?\\n\\n"
                 "Do not rename or stamp the old database's Alembic revision.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            return False
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+            dialog = GitConfigDialog(git_config_service)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                return False
+            git_config = git_config_service.get_config()
+            if git_config is None:
+                logger.error("[BOOTSTRAP] CourseFee re-provisioning did not supply Git configuration")
+                return False
+            try:
+                validate_coursefee_git_branch(git_config.branch)
+            except CourseFeeDeploymentError:
+                logger.error(
+                    "[BOOTSTRAP] CourseFee provisioning bundle still targets an incompatible branch"
+                )
+                QMessageBox.warning(
+                    None, "CourseFee repository configuration",
+                    "The imported configuration is not for 'main_coursefee'. "
+                    "No Git synchronization will be attempted.",
+                )
+                return False
 
         provider = GitSynchronizationProvider(
             repo_path=paths.runtime_root / "repository",
