@@ -160,3 +160,60 @@ def test_end_to_end_modern_notice_compares_signed_wal_copy_to_main(tmp_path, mon
     assert report["coverage"].startswith("PARTIAL")
     assert "NOT_FOUND" in report["warning"]
     assert (rollback / "center.db-wal").is_file()
+
+
+def test_oversized_rollback_never_blocks_and_never_gets_signed(tmp_path, monkeypatch):
+    """A multi-GB old DB may exist; startup cannot hash it synchronously."""
+    from centermanager.platform import recovery_rollback_evidence as evidence
+
+    notices, notice, notice_file, rollback = _data(tmp_path)
+    db = rollback / "center.db"
+    # sqlite3.connect(...).close() alone leaves a zero-byte file. Persist one
+    # page so the fixture actually exceeds the deliberately tiny size budget.
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute("CREATE TABLE recovery_evidence (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO recovery_evidence VALUES ('test')")
+        connection.commit()
+    finally:
+        connection.close()
+    assert db.stat().st_size > 1
+    monkeypatch.setattr(evidence, "_MAX_STARTUP_PROOF_BYTES", 1)
+    original = db.read_bytes()
+    with pytest.raises(ValueError, match="bounded startup proof budget"):
+        bind_startup_rollback(notices, notice_file, rollback, encryption_key=b"x" * 32)
+    assert db.read_bytes() == original
+    assert not (notices.root / (notice["id"] + ".rollback-proof.json")).exists()
+    # No proof means unavailable; no false positive legacy comparison.
+    with pytest.raises(ValueError, match="no signed proof"):
+        verify_startup_rollback(notices, notice, encryption_key=b"x" * 32)
+
+
+from tests.test_e1b1_durable_write_recovery import workspace  # noqa: F401
+
+
+def test_unavailable_recovery_proof_does_not_block_authenticated_git_main_startup(
+    workspace, monkeypatch,
+):
+    """Explicit regression for best-effort startup, even on hash/key failure."""
+    from centermanager.platform import recovery_rollback_evidence as evidence
+    from centermanager.platform.sync.startup_sync import StartupSynchronization
+    from tests.test_e1b1_durable_write_recovery import begin, mutate, values
+
+    begin(workspace)
+    mutate(workspace)
+    assert values(workspace.journal.database) == ["BASE", "LOCAL_UNACCEPTED"]
+
+    def fail_proof(*_args, **_kwargs):
+        raise ValueError("Recovery backup exceeds bounded startup proof budget")
+
+    monkeypatch.setattr(evidence, "bind_startup_rollback", fail_proof)
+    sync = StartupSynchronization(workspace.provider)
+    assert sync.run() is True
+    assert values(workspace.journal.database) == ["BASE"]
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    notices = RecoveryReviewNotices(workspace.journal)
+    pending = notices.pending()
+    assert len(pending) == 1
+    assert not (notices.root / (pending[0]["id"] + ".rollback-proof.json")).exists()
+    assert list((workspace.journal.root / "startup-rollbacks").glob("*/center.db"))

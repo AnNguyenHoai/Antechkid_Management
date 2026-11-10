@@ -43,6 +43,14 @@ _FIELDS = {
     ),
 }
 _AMOUNT_FIELDS = {"amount"}
+# These are integer foreign keys local to each database generation. A numerically
+# equal ID is not proof of the same student, class, enrollment, session or ledger
+# entry after fresh DB import. Never use raw equality to claim business identity.
+_LOCAL_RELATION_FIELDS = {
+    "student_id", "class_id", "enrollment_id", "finance_period_id",
+    "origin_income_id", "origin_adjustment_id", "linked_income_id",
+    "session_id", "replacement_session_id",
+}
 _MAX_ROWS = 20000
 
 
@@ -118,10 +126,28 @@ def compare_finance_connections(recovery_connection, main_connection):
                         field for field in _FIELDS[table]
                         if entry[field] != match[field]
                     ]
-                    status = STATUS_DIFFERENT if changed else STATUS_IDENTICAL
-                    reason = "VALUES_DIFFER" if changed else "VALUES_MATCH"
+                    concrete_changes = [
+                        field for field in changed if field not in _LOCAL_RELATION_FIELDS
+                    ]
+                    relations_present = [
+                        field for field in _FIELDS[table]
+                        if field in _LOCAL_RELATION_FIELDS
+                        and (entry[field] is not None or match[field] is not None)
+                    ]
+                    if concrete_changes:
+                        status, reason = STATUS_DIFFERENT, "VERIFIED_KEY_NON_RELATIONAL_FIELDS_DIFFER"
+                    elif relations_present:
+                        status, reason = STATUS_UNKNOWN, "UNVERIFIED_CROSS_GENERATION_RELATIONSHIPS"
+                    else:
+                        status, reason = STATUS_IDENTICAL, "VALUES_MATCH"
                     if changed:
                         finding["changed_fields"] = changed
+                    if relations_present:
+                        finding["unverified_relationship_fields"] = relations_present
+                        finding["relationship_warning"] = (
+                            "IDs are database-local; equal numbers do not prove "
+                            "the same related business record across generations."
+                        )
             finding["status"] = status
             finding["reason"] = reason
             if match is not None:
@@ -147,6 +173,29 @@ def _immutable_reader(path: Path, key: bytes | None):
         yield connection
     finally:
         connection.close()
+
+
+def _assert_git_main_artifact_clean(provider, main_path: Path, *, encrypted: bool):
+    """Refuse dirty/untracked Git MAIN DB and signed identity in production.
+
+    A matching HEAD/OID alone never proves the working-tree file is the
+    committed MAIN. Read-only Git status checks the exact two artifacts.
+    """
+    if not encrypted:
+        return  # Historical plain SQLite tests are not production deployments.
+    repo = getattr(provider, "_repo_path", None)
+    run = getattr(provider, "_run_git_command", None)
+    if repo is None or not callable(run):
+        raise ValueError("Git provider cannot authenticate MAIN worktree")
+    expected = (Path(repo) / "database" / "center.db").resolve()
+    if Path(main_path).resolve() != expected:
+        raise ValueError("MAIN DB is not from the verified Git checkout")
+    changes = run([
+        "status", "--porcelain", "--untracked-files=normal", "--",
+        "database/center.db", "database/center.db.identity.json",
+    ])
+    if not isinstance(changes, str) or changes.strip():
+        raise ValueError("Git MAIN DB or signed identity is dirty/untracked")
 
 
 def compare_verified_case(registry, case_id: str, *, provider, can_view_finance: bool):
@@ -184,6 +233,7 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
 
     main_path = validate_authoritative_repository_database()
     encrypted = database_encryption_required()
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     old_key = DatabaseKeyStore(source / "database_key.dpapi").load() if encrypted else None
     main_key = DatabaseKeyStore().load() if encrypted else None
     validate_database_artifact(old_path, encryption_required=encrypted, key=old_key)
@@ -207,6 +257,7 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
     if encrypted:
         validate_identity(main_path, main_key)
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
         raise ValueError("Git MAIN changed during comparison: discard result")
     return {
@@ -257,6 +308,7 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
 
     main_path = validate_authoritative_repository_database()
     encrypted = database_encryption_required()
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     main_key = DatabaseKeyStore().load() if encrypted else None
     with reconstructed_readonly_snapshot(notices, notice) as (recovery_path, old_key):
         validate_database_artifact(
@@ -278,6 +330,7 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
     if encrypted:
         validate_identity(main_path, main_key)
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
         raise ValueError("MAIN changed during finance comparison")
     return {
