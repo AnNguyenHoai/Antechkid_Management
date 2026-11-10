@@ -93,7 +93,7 @@ def test_manual_review_backup_shows_notice_without_acknowledgement(monkeypatch):
     fake._manual_review_archives = lambda: [Path("backup-1")]
     MainWindow._show_pending_recovery_cases(fake)
     assert ("visible", True) in actions
-    assert any("1 backup thủ công" in value for kind, value in actions if kind == "text")
+    assert any("1 backup Recovery" in value for kind, value in actions if kind == "text")
     assert notices
 
 
