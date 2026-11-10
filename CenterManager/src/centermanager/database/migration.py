@@ -49,8 +49,14 @@ def _proven_legacy_coursefee_revision(connection) -> bool:
     tables = set(inspector.get_table_names())
     if _COURSEFEE_FORBIDDEN_TABLES.intersection(tables):
         return False
-    if not {"alembic_version", "incomes", "expenses"}.issubset(tables):
+    if not ({"alembic_version", "incomes", "expenses"}
+            | _BASELINE_TABLES
+            | set(_POST_PRJ_REQUIRED_COLUMNS)).issubset(tables):
         return False
+    for table, required_columns in _POST_PRJ_REQUIRED_COLUMNS.items():
+        actual_columns = {column["name"] for column in inspector.get_columns(table)}
+        if not required_columns.issubset(actual_columns):
+            return False
     versions = [row[0] for row in connection.execute(text("SELECT version_num FROM alembic_version"))]
     if versions != [_AMBIGUOUS_REVISION]:
         return False
