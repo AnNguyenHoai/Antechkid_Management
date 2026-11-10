@@ -47,16 +47,20 @@ def test_new_journal_instance_preserves_before_git_main_wins_on_restart(workspac
     sync = StartupSynchronization(workspace.provider)
     assert sync.run()
     assert values(workspace.journal.database) == ["BASE"]
-    from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
-    backup = sync._manual_review_backup
-    verify_manual_review_backup(backup)
-    assert values(backup / "database" / "center.db") == original_values
-    assert (backup / "recovery" / "journal.json").is_file()
-    # A new CLEAN receipt is a separate operation after schema verification;
-    # the original journal remains inside the archive for manual review.
-    restarted_journal.record_verified_manual_reset(
+    # The old SQLCipher generation remains out of runtime for manual review.
+    archived = list((restarted_journal.root / "startup-rollbacks").glob("*/center.db"))
+    assert len(archived) == 1
+    assert values(archived[0]) == original_values
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    notices = RecoveryReviewNotices(restarted_journal)
+    pending = notices.pending()
+    assert len(pending) == 1
+    assert (notices.root / pending[0]["journal_file"]).is_file()
+    # A clean WRITE receipt is separate from the review acknowledgement.
+    restarted_journal.record_verified_review_reset(
         provider=workspace.provider,
         accepted_main=sync._accepted_startup_main_oid,
-        archive=backup,
+        notice_path=workspace.provider._review_notice_path,
     )
     assert restarted_journal.inspect()["status"] == "CLEAN"
+    assert len(notices.pending()) == 1

@@ -102,6 +102,8 @@ def test_app_requires_new_receipt_before_authentication():
     source = (root / "app.py").read_text(encoding="utf-8")
     assert "record_verified_manual_reset(" in source
     assert source.index("record_verified_manual_reset(") < source.index("login_dialog = LoginDialog(")
-    assert "if manual_reset_main is not None:" in source
-    assert "None if manual_reset_main is not None else startup_journal.inspect()" in source
+    assert "elif manual_reset_main is not None:" in source
+    assert "record_verified_review_reset(" in source
+    assert "review_reset_main is not None" in source
+    assert source.index("record_verified_review_reset(") < source.index("login_dialog = LoginDialog(")
     assert "accept_isolated_runtime" not in source

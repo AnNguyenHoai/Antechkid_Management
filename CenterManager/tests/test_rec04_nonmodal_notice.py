@@ -4,6 +4,14 @@ from types import SimpleNamespace
 
 from centermanager.ui.main_window import MainWindow
 
+def _empty_advisory_queue(monkeypatch):
+    from centermanager.platform import recovery_review_notices
+    monkeypatch.setattr(
+        recovery_review_notices, "RecoveryReviewNotices",
+        lambda _journal: SimpleNamespace(pending=lambda: []),
+    )
+
+
 
 def _notice_fake():
     actions = []
@@ -20,6 +28,7 @@ def _notice_fake():
 
 
 def test_non_modal_recovery_pending_shows_count_and_never_acknowledges(monkeypatch):
+    _empty_advisory_queue(monkeypatch)
     from centermanager.platform import recovery_case_registry, write_recovery
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
     monkeypatch.setattr(
@@ -29,11 +38,12 @@ def test_non_modal_recovery_pending_shows_count_and_never_acknowledges(monkeypat
     fake, actions, notices = _notice_fake()
     MainWindow._show_pending_recovery_cases(fake)
     assert ("visible", True) in actions
-    assert any("2 Recovery Case" in text for _, text in actions if _ == "text")
+    assert any("2 case" in text for _, text in actions if _ == "text")
     assert notices and "Git MAIN" in notices[0][0]
 
 
 def test_invalid_recovery_notice_remains_non_modal(monkeypatch):
+    _empty_advisory_queue(monkeypatch)
     from centermanager.platform import recovery_case_registry, write_recovery
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
     def raises(_):
@@ -46,6 +56,7 @@ def test_invalid_recovery_notice_remains_non_modal(monkeypatch):
 
 
 def test_no_recovery_cases_hide_non_modal_notice(monkeypatch):
+    _empty_advisory_queue(monkeypatch)
     from centermanager.platform import recovery_case_registry, write_recovery
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
     monkeypatch.setattr(recovery_case_registry, "RecoveryCaseRegistry", lambda _: SimpleNamespace(pending_cases=lambda: []))
@@ -62,12 +73,16 @@ def test_startup_recovery_reminder_does_not_invoke_modal_exec():
         "def _show_recovery_case_history(", 1
     )[0]
     assert "show_pending_recovery_reminder(" not in method
-    assert ".exec(" not in method
+    assert "QTimer.singleShot(" in method  # Post-login, not startup admission
     assert "mark_reviewed(" not in method
     assert "QMessageBox.warning(" not in method
+    assert "def _show_pending_review_notices(" in source
+    assert 'addButton("Đã kiểm tra"' in source
+    assert 'addButton("Để lần sau"' in source
 
 
 def test_manual_review_backup_shows_notice_without_acknowledgement(monkeypatch):
+    _empty_advisory_queue(monkeypatch)
     from centermanager.platform import recovery_case_registry, write_recovery
     monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: object())
     monkeypatch.setattr(
@@ -78,7 +93,7 @@ def test_manual_review_backup_shows_notice_without_acknowledgement(monkeypatch):
     fake._manual_review_archives = lambda: [Path("backup-1")]
     MainWindow._show_pending_recovery_cases(fake)
     assert ("visible", True) in actions
-    assert any("1 backup thủ công" in value for kind, value in actions if kind == "text")
+    assert any("1 backup Recovery" in value for kind, value in actions if kind == "text")
     assert notices
 
 

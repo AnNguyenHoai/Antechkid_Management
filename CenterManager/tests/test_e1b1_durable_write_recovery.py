@@ -175,11 +175,12 @@ def test_dirty_journal_blocks_destructive_boundary(workspace, path):
         from centermanager.platform.sync.startup_sync import StartupSynchronization
         startup = StartupSynchronization(w.provider)
         assert startup.run()  # New approved startup policy: verified Git MAIN wins.
-        from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
-        archive = startup._manual_review_backup
-        verify_manual_review_backup(archive)
-        assert (archive / "recovery" / "journal.json").is_file()
-        assert values(archive / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        queue = RecoveryReviewNotices(w.journal)
+        assert len(queue.pending()) == 1
+        old_dbs = list((w.journal.root / "startup-rollbacks").glob("*/center.db"))
+        assert old_dbs
+        assert values(old_dbs[-1]) == ["BASE", "LOCAL_UNACCEPTED"]
     elif path == 'runtime':
         from centermanager.platform.sync.write_handoff_runtime_sync_service import RuntimeSyncService
         assert not RuntimeSyncService._apply_runtime_update(SimpleNamespace())
@@ -613,18 +614,22 @@ def test_rv03_remote_a_plus_ten_preserves_unaccepted_sqlcipher_then_boots_main(w
     # Only BASE is installed from authoritative MAIN. The unaccepted work is
     # still recoverable from the signed WAL-consistent protected capture.
     assert values(w.journal.database) == ["BASE"]
-    from centermanager.platform.sync.manual_review_backup import verify_manual_review_backup
-    archived = startup._manual_review_backup
-    verify_manual_review_backup(archived)
-    assert values(archived / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
-    assert (archived / "recovery" / "journal.json").is_file()
+    from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+    queue = RecoveryReviewNotices(w.journal)
+    assert len(queue.pending()) == 1
+    archived = list((w.journal.root / "startup-rollbacks").glob("*/center.db"))
+    assert archived
+    assert values(archived[-1]) == ["BASE", "LOCAL_UNACCEPTED"]
 
-    # app.py seals a NEW receipt only after schema verification, before login.
-    w.journal.record_verified_manual_reset(
-        provider=w.provider, accepted_main=latest_main, archive=archived,
+    # app.py seals a NEW verified-MAIN WRITE receipt after schema validation,
+    # without requiring anyone to mark the independent review as complete.
+    w.journal.record_verified_review_reset(
+        provider=w.provider, accepted_main=latest_main,
+        notice_path=w.provider._review_notice_path,
     )
     assert w.journal.inspect()["status"] == "CLEAN"
     assert StartupSynchronization(w.provider).run()
-    verify_manual_review_backup(archived)
-    assert values(archived / "database" / "center.db") == ["BASE", "LOCAL_UNACCEPTED"]
+    assert archived[-1].is_file()
+    assert values(archived[-1]) == ["BASE", "LOCAL_UNACCEPTED"]
+    assert queue.pending()
     assert values(w.journal.database) == ["BASE"]

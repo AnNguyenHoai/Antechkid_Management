@@ -47,17 +47,21 @@ class StartupSynchronization:
         def has_material(root, *, allow_placeholders=False):
             root = Path(root)
             if not root.exists():
-                return False
+                return root.is_symlink()
             if root.is_symlink() or not root.is_dir():
                 return True
-            return any(
-                item.is_symlink() or (
-                    item.is_file() and not (
-                        allow_placeholders and item.name in {'.gitkeep', '.keep'}
-                    )
-                )
-                for item in root.rglob('*')
-            )
+            unreadable = [False]
+            def on_error(_exc):
+                # Unknown means "not fresh", never a reason to stop startup.
+                unreadable[0] = True
+            for current, directories, files in os.walk(root, onerror=on_error):
+                if any((Path(current) / name).is_symlink()
+                       for name in directories):
+                    return True
+                if any(not (allow_placeholders and name in {'.gitkeep', '.keep'})
+                       for name in files):
+                    return True
+            return unreadable[0]
 
         has_repository = (
             self._repo_path.is_symlink() or
@@ -65,7 +69,23 @@ class StartupSynchronization:
                 not self._repo_path.is_dir() or any(self._repo_path.iterdir())
             ))
         )
-        recovery_material = has_material(journal.root)
+        # Empty legacy Recovery directories do not disqualify a fresh unzip.
+        # Walk without copying/hashing files; unreadable/too-deep paths are
+        # conservatively nonfresh but never block the Git MAIN startup.
+        recovery_root = Path(journal.root)
+        def recovery_contains_material():
+            if not recovery_root.exists():
+                return False
+            if recovery_root.is_symlink() or not recovery_root.is_dir():
+                return True
+            inaccessible = [False]
+            def walk_error(_exc):
+                inaccessible[0] = True
+            for parent, directories, files in os.walk(recovery_root, onerror=walk_error):
+                if files or any((Path(parent) / name).is_symlink() for name in directories):
+                    return True
+            return inaccessible[0]
+        recovery_material = recovery_contains_material()
         business_material = any(
             has_material(roots[name], allow_placeholders=True)
             for name in ('database', 'attachments', 'legacy-attachments')
@@ -142,7 +162,7 @@ class StartupSynchronization:
             return False
 
         # A local WRITE receipt may be absent or unresolved after an EXE upgrade.
-        # Remote MAIN wins only after fresh Git proof and a durable local capture.
+        # Verified remote MAIN wins; Recovery only queues manual review.
         if not self._prepare_authoritative_startup_replacement():
             return False
 
@@ -178,24 +198,50 @@ class StartupSynchronization:
 
         try:
             from centermanager.platform.write_recovery import WriteRecoveryJournal
-            if not getattr(self, "_manual_reset_requested", False):
+            if not getattr(self, "_manual_reset_requested", False) and not getattr(
+                    self, "_review_only_reset_requested", False):
                 WriteRecoveryJournal().record_synchronized()
         except Exception:
-            logger.exception("Startup recovery receipt verification failed; rolling back runtime DB")
-            self._rollback_startup_database_install()
-            self._rollback_startup_assets()
-            self._rollback_startup_git_repository()
-            self._complete_failed_startup_rollback()
-            return False
-        self._finalize_startup_database_install()
+            # A stale, malformed, or unwritable advisory receipt is not
+            # permission to discard the already verified Git MAIN database.
+            # No new CLEAN receipt is issued here; the independent WRITE
+            # authority checker continues to fail closed when required.
+            self._provider._startup_recovery_receipt_warning = True
+            logger.exception(
+                "Advisory Recovery receipt could not be recorded; "
+                "Git MAIN startup continues, WRITE must be verified separately"
+            )
+        if getattr(self, "_review_only_reset_requested", False):
+            # The old encrypted database and WAL are the most detailed
+            # possible manual review evidence. Leave the already-atomic
+            # rollback generation in place rather than recopying deep captures.
+            self._startup_db_install_backup = None
+            logger.warning("Previous local database/WAL retained under startup-rollbacks for review")
+        else:
+            self._finalize_startup_database_install()
         self._finalize_startup_assets()
         self._complete_startup_install()
         self._startup_previous_local_oid = None
+        if getattr(self, "_review_only_reset_requested", False):
+            self._review_only_finance_safe = (
+                self._isolate_unpublished_finance_vouchers_for_review()
+            )
         if getattr(self, "_manual_reset_requested", False):
             # This one-time capability is consumed by app.py only after
             # Alembic and identity checks, before login/WRITE.
             self._provider._verified_manual_main_oid = self._accepted_startup_main_oid
             self._provider._verified_manual_backup_path = str(self._manual_review_backup.resolve())
+        if getattr(self, "_review_only_reset_requested", False):
+            self._provider._verified_review_main_oid = self._accepted_startup_main_oid
+            self._provider._review_notice_path = (
+                str(self._review_notice_path) if self._review_notice_path else None
+            )
+            self._provider._review_finance_isolated = (
+                getattr(self, "_review_only_finance_safe", False)
+            )
+            self._provider._review_employee_safe = (
+                getattr(self, "_review_employee_safe", False)
+            )
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
             # files were copied and verified before Git MAIN replacement.
@@ -252,12 +298,30 @@ class StartupSynchronization:
             )
             return True
         except (InterruptedInstallError, OSError, RuntimeError):
-            self.recovery_error = (
-                "Interrupted startup installation could not be verified or "
-                "recovered. Preserve runtime and .write-recovery; startup blocked."
+            # A corrupt *old* install marker is evidence, not a license to
+            # overwrite MAIN or to block the user forever. Quarantine only
+            # this small marker with an atomic move; keep every original
+            # startup-replay snapshot untouched. The subsequent MAIN install
+            # still has its own new crash marker and SQLCipher gates.
+            logger.exception(
+                "Old startup-install marker unreadable; quarantine for manual "
+                "review and re-install authenticated Git MAIN"
             )
-            logger.exception("%s", self.recovery_error)
-            return False
+            try:
+                import uuid
+                archived = (marker.parent / "startup-install-review"
+                            / (uuid.uuid4().hex + ".json"))
+                archived.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(marker, archived)
+                self._interrupted_install_review_marker = archived
+                from centermanager.database import session as session_module
+                session_module.end_runtime_db_maintenance()
+                return True
+            except Exception:
+                # Moving the marker itself failed; do not overwrite the only
+                # durable interrupted-install barrier.
+                logger.exception("Cannot safely isolate interrupted-install marker")
+                return False
 
     def _begin_startup_install(self) -> None:
         """Persist original DB/WAL/asset bytes before any live replacement."""
@@ -323,6 +387,16 @@ class StartupSynchronization:
         previous = getattr(self, "_startup_previous_local_oid", None)
         if not previous:
             return
+        if getattr(self._provider, "_startup_review_git_archive", None):
+            # The previous commit may exist ONLY inside the quarantined
+            # repository, not the new shallow MAIN clone. Resetting to it
+            # would violate Git MAIN first or fail for a missing object.
+            logger.warning(
+                "Old Git generation retained in Recovery git-worktrees; "
+                "never restore it over authenticated MAIN"
+            )
+            self._startup_previous_local_oid = None
+            return
         try:
             self._provider._run_git_command(["reset", "--hard", previous])
             if self._provider.get_local_main_commit() != previous:
@@ -332,20 +406,19 @@ class StartupSynchronization:
             logger.exception("Startup Git rollback failed: retain recovery artifacts; do not proceed")
 
     def _prepare_authoritative_startup_replacement(self) -> bool:
-        """Git MAIN First: keep ONE active DB and archive unaccepted local bytes.
+        """Authoritative Git MAIN startup; local Recovery is advisory.
 
-        Historical Recovery metadata is evidence for manual review, not a
-        condition for using an independently observed authoritative MAIN.
-        Never overwrite a local DB/WAL/journal until a verified separate copy
-        exists. Nothing from the archive can be published automatically.
+        Review evidence is indexed without copying the historical recovery
+        capture tree. Old runtime SQLCipher/WAL bytes are separately retained
+        in startup-rollbacks by the atomic installer. Failure to log a notice
+        must not prevent login; it only withholds a fresh WRITE receipt.
         """
         from centermanager.platform.write_recovery import WriteRecoveryJournal
-        from centermanager.platform.sync.manual_review_backup import (
-            preserve_workspace_for_manual_review, verify_manual_review_backup,
-        )
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        from centermanager.database.mutation_authority import gate_for
+
         journal = WriteRecoveryJournal()
         try:
-            from centermanager.database.mutation_authority import gate_for
             gate = gate_for()
             with gate.lock:
                 if not gate.closed:
@@ -357,106 +430,75 @@ class StartupSynchronization:
             self._accepted_startup_main_oid = accepted
             self._startup_reconciled_unaccepted_local = False
             self._manual_reset_requested = False
+            self._review_only_reset_requested = False
+            self._review_notice_path = None
 
             try:
                 document = journal.inspect()
             except Exception:
-                # Malformed journals are archived as raw evidence, never
-                # interpreted as CLEAN or silently deleted.
-                logger.warning("Legacy Recovery metadata unreadable; archiving original bytes")
+                logger.warning("Unreadable old Recovery journal; review notification required")
                 document = None
 
-            if document and document.get("status") == "CLEAN":
+            if (document is not None and document.get("status") == "CLEAN"
+                    and not getattr(self, "_interrupted_install_review_marker", None)):
                 try:
                     journal.assert_replaceable()
                     return True
                 except Exception:
-                    logger.warning("CLEAN metadata differs from local files; archive before MAIN reset")
+                    logger.warning("CLEAN receipt differs from runtime; use verified MAIN, notify review")
 
-            if document is None and not journal.journal.exists() and self._initial_main_receipt_allowed:
-                # A genuinely empty first install needs no obsolete backup.
+            if (document is None and not journal.journal.exists()
+                    and self._initial_main_receipt_allowed
+                    and not getattr(self, "_interrupted_install_review_marker", None)):
                 return True
 
-            archive = preserve_workspace_for_manual_review(
-                journal, reason="manual-review-before-authoritative-main",
-            )
-            verify_manual_review_backup(archive)
-            self._manual_review_backup = archive
-            self._startup_reconciled_unaccepted_local = True
-            # A previous journal will be archived after verified MAIN install
-            # and schema migration, before the new CLEAN receipt is committed.
-            self._manual_reset_requested = journal.journal.exists()
-            self._initial_main_receipt_allowed = not self._manual_reset_requested
-            logger.warning(
-                "Unpublished local workspace durably preserved for manual review; "
-                "installing only verified Git MAIN"
-            )
+            self._review_only_reset_requested = True
+            self._initial_main_receipt_allowed = False
+            try:
+                self._review_notice_path = RecoveryReviewNotices(journal).record(
+                    observed_main_oid=accepted,
+                )
+            except Exception:
+                # A failed optional notice is not grounds to deny startup.
+                # The old journal remains untouched; do not stamp WRITE CLEAN.
+                logger.exception(
+                    "Recovery review notice unavailable; will use Git MAIN READ "
+                    "without minting a new WRITE receipt"
+                )
             return True
         except Exception as exc:
             self.recovery_error = str(exc)
-            logger.exception("Git MAIN replacement refused: local evidence not preserved")
+            logger.exception("Cannot authenticate authoritative MAIN startup")
             return False
 
     def _preserve_missing_repository_runtime(self) -> bool:
-        """Safeguard legacy files before first clone without bypassing clone guard.
+        """No destructive operation occurs before clone of a missing repo.
 
-        Never alter production Git permissions or pretend this is an accepted
-        publication receipt.  The independent capture is only a rollback copy.
+        The old runtime DB and Recovery files stay intact until after the new
+        remote MAIN is authenticated. No full recursive capture is necessary
+        merely to clone Git into a different path.
         """
-        import hashlib
-        import uuid
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         journal = WriteRecoveryJournal()
-        try:
-            if journal.inspect() is not None:
-                self.recovery_error = "Existing recovery journal requires a matching repository before clone"
-                return False
-            if self._repo_path.exists() and any(self._repo_path.iterdir()):
-                self.recovery_error = "Incomplete repository contains files; preserve and inspect manually"
-                return False
-            if not self._runtime_db_path.exists():
-                return True
-            root = journal.root / "preclone" / uuid.uuid4().hex
-            root.mkdir(parents=True, exist_ok=False)
-            files = {}
-            for name, source_root in journal._workspace_roots().items():
-                if name == "repository":
-                    continue
-                source_root = Path(source_root)
-                if not source_root.exists():
-                    continue
-                if source_root.is_symlink():
-                    raise RuntimeError("Symlinked workspace cannot be preserved")
-                for source in sorted(source_root.rglob("*")):
-                    if source.is_symlink():
-                        raise RuntimeError("Symlinked workspace file cannot be preserved")
-                    if not source.is_file():
-                        continue
-                    rel = (Path(name) / source.relative_to(source_root)).as_posix()
-                    dest = root / rel
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, dest)
-                    digest = hashlib.sha256(dest.read_bytes()).hexdigest()
-                    if digest != hashlib.sha256(source.read_bytes()).hexdigest():
-                        raise RuntimeError("Preclone workspace capture checksum mismatch")
-                    files[rel] = digest
-            manifest = root / "manifest.json"
-            with manifest.open("x", encoding="utf-8") as handle:
-                json.dump({"files": files}, handle, sort_keys=True)
-                handle.flush()
-                os.fsync(handle.fileno())
-            self._startup_preclone_capture = root
-            logger.warning("Preserved missing-repository legacy workspace at %s", root)
-            return True
-        except Exception as exc:
-            self.recovery_error = str(exc)
-            logger.exception("Cannot preserve missing-repository runtime before clone")
+        self._review_only_clone = (
+            Path(getattr(journal, "journal", Path(journal.root) / "journal.json")).exists()
+            or self._runtime_db_path.exists()
+            or Path(journal.root).exists()
+        )
+        if self._repo_path.exists() and any(self._repo_path.iterdir()):
+            self.recovery_error = "Nonempty incomplete Git repository needs repair before clone"
             return False
+        return True
 
     def _clone_repository(self) -> bool:
         try:
             self._repo_path.parent.mkdir(parents=True, exist_ok=True)
-            result = self._provider.clone(progress_callback=None, preclone_capture=getattr(self, '_startup_preclone_capture', None))
+            if getattr(self, "_review_only_clone", False):
+                result = self._provider.clone(
+                    progress_callback=None, review_only_startup=True
+                )
+            else:
+                result = self._provider.clone(progress_callback=None)
             if result:
                 logger.info(f"Repository cloned successfully to {self._repo_path}")
             return result
@@ -480,7 +522,9 @@ class StartupSynchronization:
                 return False
             # Do not let provider.reset_to_remote() fetch a different generation
             # after a recovery capture has already pinned the accepted commit.
-            if getattr(self, "_manual_review_backup", None) is not None:
+            if getattr(self, "_review_only_reset_requested", False):
+                self._provider.reset_verified_main_for_review(accepted)
+            elif getattr(self, "_manual_review_backup", None) is not None:
                 # The generic Git mutation gate correctly refuses to reset
                 # a dirty journal. The narrowly scoped provider command can
                 # operate only on the exact verified MAIN after the ORIGINAL
@@ -630,11 +674,41 @@ class StartupSynchronization:
             backup.unlink(missing_ok=True)
         self._startup_db_install_backup = None
 
-    def _prepare_startup_assets(self) -> None:
-        """Stage MAIN assets and retain an immutable, non-runtime rollback copy.
+    def _isolate_unpublished_finance_vouchers_for_review(self) -> bool:
+        """Prevent unaccepted runtime voucher blobs from leaking into later pushes.
 
-        This handles ordinary exceptions. A killed process needs a separate
-        durable interrupted-install protocol (S04-01B).
+        FinanceAttachmentService resolves published content from the Git
+        repository if the runtime copy is absent. A stale pre-MAIN runtime
+        directory must never be staged by a subsequent Finish Editing.
+        """
+        import uuid
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+
+        current = self._paths.attachment_dir / "Finance"
+        if not current.exists() and not current.is_symlink():
+            return True
+        if current.is_symlink() or not current.is_dir():
+            logger.error("Unsafe legacy Finance attachment directory; keep WRITE disabled")
+            return False
+        target = WriteRecoveryJournal().root / "startup-finance" / uuid.uuid4().hex
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Same-volume atomic directory move; avoids recursive copy/WinError
+            # 206 and preserves all old voucher bytes for manual review.
+            os.replace(current, target)
+            logger.warning("Old local Finance vouchers isolated from Git MAIN runtime")
+            return True
+        except OSError:
+            logger.exception("Unable to quarantine old local Finance vouchers; WRITE remains gated")
+            return False
+
+    def _prepare_startup_assets(self) -> None:
+        """Prepare assets with a fast rename-only path for dirty Recovery.
+
+        Never recursively read/copy the old Employee directory in a recovery
+        review startup. Same-volume rename protects all unpublished content
+        including deep Vietnamese filenames; the Git MAIN asset source stays
+        authoritative. The non-review path retains the existing safety flow.
         """
         import uuid
         token = uuid.uuid4().hex
@@ -643,12 +717,13 @@ class StartupSynchronization:
         manifest = self._runtime_manifest_path
         targets = (employees, manifest, version)
         copies = []
+        review = getattr(self, "_review_only_reset_requested", False)
+        staged_employees = None
         try:
             for dest in targets:
-                # Each backup must be on the same volume as its destination,
-                # and outside WriteRecoveryJournal's workspace fingerprint.
                 runtime_parent = dest.parent
-                while runtime_parent.name not in {"runtime", "Runtime"} and runtime_parent != runtime_parent.parent:
+                while (runtime_parent.name not in {"runtime", "Runtime"}
+                       and runtime_parent != runtime_parent.parent):
                     runtime_parent = runtime_parent.parent
                 if runtime_parent == runtime_parent.parent:
                     runtime_parent = self._runtime_db_path.parent.parent
@@ -656,29 +731,39 @@ class StartupSynchronization:
                     runtime_parent.with_name(runtime_parent.name + ".write-recovery")
                     / "startup-assets" / token / dest.name
                 )
-                exists = dest.exists()
+                exists = dest.exists() or dest.is_symlink()
                 if exists:
+                    if dest.is_symlink():
+                        raise RuntimeError("Unsafe startup asset symlink")
                     rollback.parent.mkdir(parents=True, exist_ok=True)
-                    if dest.is_dir():
+                    if review:
+                        # No WinError 206 from a recursive copy; a directory
+                        # rename is atomic on the existing runtime volume.
+                        os.replace(dest, rollback)
+                    elif dest.is_dir():
                         shutil.copytree(dest, rollback)
                     else:
                         shutil.copy2(dest, rollback)
                 copies.append((dest, rollback, exists))
-            # Ensure source attachments are completely readable before the
-            # already-validated database can be installed.
-            repo_employees = self._repo_path / "Attachments" / "Employees"
-            if repo_employees.exists():
-                staged_employees = (
-                    employees.parent.parent.with_name(employees.parent.parent.name + ".write-recovery")
-                    / "startup-assets" / token / "staged-employees"
-                )
-                staged_employees.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(repo_employees, staged_employees)
-            else:
-                staged_employees = None
+                if review:
+                    # Preserve each completed move for emergency rollback.
+                    self._startup_assets = (list(copies), None)
+
+            if not review:
+                repo_employees = self._repo_path / "Attachments" / "Employees"
+                if repo_employees.exists():
+                    staged_employees = (
+                        employees.parent.parent.with_name(
+                            employees.parent.parent.name + ".write-recovery"
+                        ) / "startup-assets" / token / "staged-employees"
+                    )
+                    staged_employees.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(repo_employees, staged_employees)
             self._startup_assets = (copies, staged_employees)
         except Exception:
-            logger.exception("Unable to stage startup assets; live workspace remains unchanged")
+            logger.exception("Unable to prepare startup assets")
+            if review and copies:
+                self._rollback_startup_assets()
             raise
 
     def _rollback_startup_assets(self) -> None:
@@ -695,7 +780,11 @@ class StartupSynchronization:
                     dest.unlink()
                 if existed:
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    if backup.is_dir():
+                    if getattr(self, "_review_only_reset_requested", False):
+                        # Archive copy remains necessary for manual review,
+                        # so restore the original path with another move.
+                        os.replace(backup, dest)
+                    elif backup.is_dir():
                         shutil.copytree(backup, dest)
                     else:
                         shutil.copy2(backup, dest)
@@ -711,6 +800,16 @@ class StartupSynchronization:
         if saved is None:
             return
         copies, staged = saved
+        if getattr(self, "_review_only_reset_requested", False):
+            # Historical Employee attachments/metadata can contain manual
+            # evidence not captured in the Recovery operation index.
+            # Preserve the already-staged old asset generations for review.
+            # Never load them as runtime or publish them to MAIN.
+            if staged is not None and staged.exists():
+                shutil.rmtree(staged)
+            self._startup_assets = None
+            logger.warning("Prior local assets retained under startup-assets for manual review")
+            return
         for _, backup, _ in copies:
             if backup.is_dir():
                 shutil.rmtree(backup)
@@ -724,7 +823,20 @@ class StartupSynchronization:
         """Copy repository database and manifest to runtime, update metadata."""
         from centermanager.platform.write_recovery import require_replaceable
         manual_archive = getattr(self, "_manual_review_backup", None)
-        if manual_archive is None:
+        if getattr(self, "_review_only_reset_requested", False):
+            # Startup-scoped exception only. Remote MAIN must still be
+            # freshly observed, writer closed, and source commit pinned.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active writer prevents MAIN install")
+            accepted = self._accepted_startup_main_oid
+            if (self._provider.get_fetched_remote_main_commit() != accepted
+                    or self._provider.observe_remote_main_commit() != accepted
+                    or self._provider.get_local_main_commit() != accepted):
+                raise RuntimeError("Authoritative MAIN changed before install")
+        elif manual_archive is None:
             require_replaceable()
         else:
             # A verified manual archive replaces ONLY the old startup
@@ -824,6 +936,7 @@ class StartupSynchronization:
         """
         repo_root = self._repo_path / "Attachments" / "Employees"
         runtime_root = self._paths.attachment_dir / "Employees"
+        self._review_employee_safe = True
         try:
             staged = getattr(self, "_startup_assets", None)
             staged_source = staged[1] if staged is not None else None
@@ -843,7 +956,18 @@ class StartupSynchronization:
                 logger.info("No Employee attachments found in repository; runtime mirror cleared.")
         except Exception:
             logger.exception("Failed to synchronize Employee attachments from repository")
-            raise
+            if not getattr(self, "_review_only_reset_requested", False):
+                raise
+            # Remote MAIN and SQLCipher remain usable for READ. Do not let a
+            # corrupt/deep optional Employee attachment veto login merely
+            # because local Recovery was dirty. WRITE is separately disabled
+            # until a complete clean mirror can be verified.
+            self._review_employee_safe = False
+            try:
+                if runtime_root.is_dir():
+                    shutil.rmtree(runtime_root)
+            except OSError:
+                logger.exception("Incomplete Employee mirror remains; WRITE disabled")
 
     def _refresh_database_sessions(self) -> bool:
         try:

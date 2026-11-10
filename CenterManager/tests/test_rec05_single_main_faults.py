@@ -97,8 +97,11 @@ def test_invalid_copy_refuses_startup_without_changing_pending_local(legacy, mon
         ),
         _initial_main_receipt_allowed=False,
     )
-    assert not StartupSynchronization._prepare_authoritative_startup_replacement(fake)
-    assert "simulated copy/hash failure" in fake.recovery_error
+    # Failure of the obsolete recursive archive must not veto authenticated MAIN.
+    assert StartupSynchronization._prepare_authoritative_startup_replacement(fake)
+    assert fake._review_only_reset_requested is True
+    assert fake._review_notice_path is not None
+    assert not (legacy.root / "manual-review").exists()
     _unmodified(legacy)
 
 
@@ -136,5 +139,6 @@ def test_recovery_never_requires_an_alternate_active_runtime():
     assert "accept_isolated_runtime" not in app
     assert "prepare_isolated_runtime" not in app
     assert "read_selected_workspace" not in app
-    assert "preserve_workspace_for_manual_review" in startup
+    assert "RecoveryReviewNotices" in startup
+    assert "reset_verified_main_for_review" in startup
     assert "self._runtime_db_path" in startup
