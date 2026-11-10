@@ -65,11 +65,24 @@ class StudentImportService:
                     continue
                 if not str(row[1] or "").strip():
                     errors.append(f"Row {index}: Full name is required")
-                code = str(row[0]).strip() if row[0] else ""
+                code = str(row[0]).strip().upper() if row[0] else ""
                 if code:
+                    import re
+                    if not re.fullmatch(r"HS[0-9]+", code):
+                        errors.append(f"Row {index}: Invalid Student code (expected HS followed by digits)")
                     if code in seen:
                         errors.append(f"Row {index}: duplicate Student code within file: {code}")
                     seen.add(code)
+                status = str(row[5]).strip().upper() if row[5] else "ACTIVE"
+                if status not in ("ACTIVE", "ARCHIVED"):
+                    errors.append(f"Row {index}: Invalid status {status}")
+                if row[3]:
+                    from datetime import date
+                    if not isinstance(row[3], (datetime, date)):
+                        try:
+                            datetime.strptime(str(row[3]), "%Y-%m-%d")
+                        except ValueError:
+                            errors.append(f"Row {index}: Invalid date format (use YYYY-MM-DD)")
             return rows, errors
         finally:
             wb.close()
@@ -89,7 +102,7 @@ class StudentImportService:
                 continue
 
             try:
-                code = row[0] if row[0] else None
+                code = str(row[0]).strip().upper() if row[0] else None
                 full_name = row[1]
                 if not full_name:
                     errors.append(f"Row {row_idx}: Full name is required")
@@ -120,7 +133,7 @@ class StudentImportService:
                     preferred_name=str(row[2]).strip() if row[2] else None,
                     date_of_birth=dob,
                     gender=str(row[4]).strip() if row[4] else None,
-                    status=str(row[5]).strip() if row[5] else "ACTIVE",
+                    status=str(row[5]).strip().upper() if row[5] else "ACTIVE",
                     current_level=str(row[6]).strip() if row[6] else None,
                     notes=str(row[7]).strip() if row[7] else None,
                 )
