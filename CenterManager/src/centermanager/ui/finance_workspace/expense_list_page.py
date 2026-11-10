@@ -73,7 +73,10 @@ class ExpenseListPage(QWidget):
         top_row.addWidget(self.refresh_btn)
         self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.clicked.connect(self._export_csv)
+        self.zip_export_btn = SecondaryButton("Xuất ZIP + chứng từ")
+        self.zip_export_btn.clicked.connect(self._export_zip)
         top_row.addWidget(self.export_btn)
+        top_row.addWidget(self.zip_export_btn)
         self.reimburse_btn = SecondaryButton("Hoàn trả khoản đã chọn")
         self.reimburse_btn.clicked.connect(self._reimburse_selected)
         top_row.addWidget(self.reimburse_btn)
@@ -357,6 +360,26 @@ class ExpenseListPage(QWidget):
             return
         self._sort_by, self._sort_ascending, self._current_page = key, ascending, 1
         self._load_page()
+
+    def _export_zip(self) -> None:
+        if self._period_configured is False:
+            self._notify("Finance period is not configured.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Xuất chi phí kèm chứng từ", "expenses_vouchers.zip", "ZIP Files (*.zip)")
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            count = self._service.export_expenses_zip(
+                path, **self._filter_kwargs(), finance_period_start=self._period_start,
+                sort_by=self._sort_by, ascending=self._sort_ascending,
+            )
+            self._notify(f"Đã xuất {count} khoản chi và chứng từ.", "success")
+        except Exception as exc:
+            logger.exception("Expense voucher ZIP export failed")
+            QMessageBox.critical(self, "Lỗi xuất chứng từ", str(exc))
 
     def _export_csv(self) -> None:
         if self._period_configured is False:
