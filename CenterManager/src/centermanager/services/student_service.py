@@ -106,6 +106,7 @@ class StudentService:
         current_level: Optional[str] = None,
         enrollment_date: Optional[date] = None,
         notes: Optional[str] = None,
+        student_code: Optional[str] = None,
     ) -> Student:
         normalized_full_name = self._validate_full_name(full_name)
         normalized_preferred = self._normalize_text(preferred_name)
@@ -117,9 +118,18 @@ class StudentService:
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
             try:
-                student_code = self._generate_student_code(repo)
+                if student_code is not None:
+                    import re
+                    supplied = str(student_code).strip().upper()
+                    if not re.fullmatch(r"HS[0-9]+", supplied):
+                        raise StudentValidationError("Student code must use HS followed by digits.")
+                    if repo.get_by_code_including_deleted(supplied) is not None:
+                        raise StudentValidationError(f"Student code {supplied} already exists.")
+                    assigned_code = supplied
+                else:
+                    assigned_code = self._generate_student_code(repo)
                 student = Student(
-                    student_code=student_code,
+                    student_code=assigned_code,
                     full_name=normalized_full_name,
                     preferred_name=normalized_preferred,
                     date_of_birth=date_of_birth,
