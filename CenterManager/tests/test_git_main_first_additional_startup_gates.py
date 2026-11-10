@@ -159,3 +159,16 @@ def test_modern_notice_only_covers_exact_old_session(tmp_path):
     assert notices.covers_legacy_case({"write_session_id": "session-a"})
     assert not notices.covers_legacy_case({"write_session_id": "session-b"})
     assert not notices.covers_legacy_case({"write_session_id": None})
+
+
+def test_failure_does_not_restore_old_unpublished_commit_over_main(tmp_path):
+    startup = StartupSynchronization.__new__(StartupSynchronization)
+    def forbid_reset(_args):
+        raise AssertionError("old unpublished commit must not overwrite MAIN")
+    startup._provider = SimpleNamespace(
+        _startup_review_git_archive=str(tmp_path / "git-worktrees" / "old"),
+        _run_git_command=forbid_reset,
+    )
+    startup._startup_previous_local_oid = "a" * 40
+    startup._rollback_startup_git_repository()
+    assert startup._startup_previous_local_oid is None
