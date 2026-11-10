@@ -67,3 +67,35 @@ def test_tampered_notice_rejected_before_decryption(tmp_path):
     notice["observed_main_oid"] = "b" * 40
     with pytest.raises(ValueError):
         build_notice_report(notices, notice, encryption_key=bytes(range(32)))
+
+
+def test_finance_checklist_requires_main_verification():
+    from centermanager.platform.recovery_readable_report import _review_instruction
+    assert "Không tạo lại" in _review_instruction(
+        {"module": "finance", "entity_type": "Income", "action": "create"}
+    )
+    assert "Không ghi chi hai lần" in _review_instruction(
+        {"module": "finance", "entity_type": "Expense", "action": "create"}
+    )
+    assert "công nợ" in _review_instruction(
+        {"module": "tuition", "entity_type": "Enrollment", "action": "update"}
+    )
+
+
+def test_wrong_key_never_exposes_unverified_event(tmp_path):
+    notices, notice = _notice(tmp_path)
+    key = bytes(range(32))
+    event = {
+        "write_session_id": "write-123",
+        "event_id": "a3b3c3d3-1111-4111-8111-111111111111",
+        "module": "finance", "action": "create",
+        "entity_type": "Income", "entity_id": "1",
+    }
+    mirror_committed_payload(
+        json.dumps(event).encode(), recovery_root=notices.journal.root,
+        encryption_key=key,
+    )
+    report = build_notice_report(notices, notice, encryption_key=b"x" * 32)
+    assert "CÁC THAO TÁC GHI NHẬN TRONG MIRROR: 0" in report
+    assert "không đọc/xác minh được: 1" in report
+    assert "UNKNOWN" in report
