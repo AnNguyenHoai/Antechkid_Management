@@ -236,6 +236,9 @@ class StartupSynchronization:
             self._provider._review_finance_isolated = (
                 getattr(self, "_review_only_finance_safe", False)
             )
+            self._provider._review_employee_safe = (
+                getattr(self, "_review_employee_safe", False)
+            )
         if self._initial_main_receipt_allowed:
             # No previous active journal was silently promoted. Any legacy
             # files were copied and verified before Git MAIN replacement.
@@ -900,6 +903,7 @@ class StartupSynchronization:
         """
         repo_root = self._repo_path / "Attachments" / "Employees"
         runtime_root = self._paths.attachment_dir / "Employees"
+        self._review_employee_safe = True
         try:
             staged = getattr(self, "_startup_assets", None)
             staged_source = staged[1] if staged is not None else None
@@ -919,7 +923,18 @@ class StartupSynchronization:
                 logger.info("No Employee attachments found in repository; runtime mirror cleared.")
         except Exception:
             logger.exception("Failed to synchronize Employee attachments from repository")
-            raise
+            if not getattr(self, "_review_only_reset_requested", False):
+                raise
+            # Remote MAIN and SQLCipher remain usable for READ. Do not let a
+            # corrupt/deep optional Employee attachment veto login merely
+            # because local Recovery was dirty. WRITE is separately disabled
+            # until a complete clean mirror can be verified.
+            self._review_employee_safe = False
+            try:
+                if runtime_root.is_dir():
+                    shutil.rmtree(runtime_root)
+            except OSError:
+                logger.exception("Incomplete Employee mirror remains; WRITE disabled")
 
     def _refresh_database_sessions(self) -> bool:
         try:
