@@ -59,6 +59,8 @@ class IncomeFormDialog(QDialog):
         self._identity_unresolved = False
         self._initial_edit_values = None
         self._credit_only_command_key = f"tuition-credit-only:{uuid4()}"
+        self._submission_key = f"income:{uuid4()}"
+        self._saved_income_id = None  # primary posting may precede voucher retry
 
         self.setWindowTitle("Sửa khoản thu" if self._is_edit else "Thêm khoản thu")
         self.setMinimumWidth(620)
@@ -595,6 +597,12 @@ class IncomeFormDialog(QDialog):
         )
 
     def _save(self) -> None:
+        # FIN-04: if cash was committed, retry only failed vouchers. Never
+        # re-quote an already covered month or create a second ledger entry.
+        if not self._is_edit and self._saved_income_id is not None:
+            if self._commit_vouchers(self._saved_income_id):
+                self.accept()
+            return
         if self._is_edit and (
             self._identity_unresolved or not self.save_btn.isEnabled()
             or not self._check_identity_display()
@@ -694,6 +702,7 @@ class IncomeFormDialog(QDialog):
                         payment_period=payment_period or None,
                         received_by=received_by or None,
                         note=create_note,
+                        idempotency_key=self._submission_key,
                     )
                 else:
                     created = self._income_service.create_income(
@@ -707,10 +716,13 @@ class IncomeFormDialog(QDialog):
                         payment_period=payment_period or None,
                         received_by=received_by or None,
                         note=create_note,
+                        idempotency_key=self._submission_key,
                     )
                 if isinstance(created, tuple):
                     created = created[0]
-                self._commit_vouchers(getattr(created, "id", None))
+                self._saved_income_id = getattr(created, "id", None)
+                if not self._commit_vouchers(self._saved_income_id):
+                    return  # keep original Save key and failed files for retry
             self.accept()
         except (IncomeValidationError, TuitionAdjustmentValidationError) as exc:
             QMessageBox.warning(self, "Lỗi xác thực", str(exc))
@@ -720,7 +732,7 @@ class IncomeFormDialog(QDialog):
 
     def _commit_vouchers(self, income_id) -> None:
         if self.voucher_widget is None or income_id is None:
-            return
+            return True
         errors = self.voucher_widget.commit_pending(income_id)
         if errors:
             QMessageBox.warning(
@@ -728,3 +740,5 @@ class IncomeFormDialog(QDialog):
                 "Chứng từ",
                 "Khoản thu đã được lưu nhưng một số chứng từ chưa đính kèm được:\n" + "\n".join(errors),
             )
+            return False
+        return True

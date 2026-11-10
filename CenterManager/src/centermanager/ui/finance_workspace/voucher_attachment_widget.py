@@ -167,12 +167,20 @@ class VoucherAttachmentWidget(QGroupBox):
         """Upload pending files after the record was saved."""
         self._entity_id = entity_id
         errors = []
+        failed = []
         for path, name in list(self._pending):
             try:
-                self._service.add_attachment(self._entity_type, entity_id, path, original_filename=name)
+                self._service.add_attachment(
+                    self._entity_type, entity_id, path, original_filename=name
+                )
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
-        self._pending = []
+                failed.append((path, name))
+        # FIN-04: never silently discard failed vouchers. A retry resumes
+        # the original Income/Expense command using its stable submission key
+        # and attempts only the remaining files.
+        self._pending = failed
+        self.reload()
         return errors
 
     def _selected(self):

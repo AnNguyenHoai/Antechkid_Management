@@ -31,6 +31,13 @@ class Income(Base, TimestampMixin):
     STATUS_VOIDED = "VOIDED"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # FIN-03: client command identity survives retries and Git publication.
+    # Nullable to preserve all historical entries; unique non-null keys
+    # prevent duplicate financial postings from repeated Save commands.
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(120), nullable=True, unique=True
+    )
+
 
     student_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("students.id"), nullable=True

@@ -165,6 +165,12 @@ class IncomeRepository(BaseRepository[Income]):
             joinedload(Income.enrollment),
         )
 
+    def get_by_idempotency_key(self, key: str) -> Optional[Income]:
+        """Fetch a durable Save command from the authoritative ledger."""
+        return self._session.query(Income).filter(
+            Income.idempotency_key == key
+        ).first()
+
     def get_by_id(self, income_id: int) -> Optional[Income]:
         return self._session.query(Income).options(*self._load_options()).filter(
             Income.id == income_id, Income.deleted_at.is_(None)

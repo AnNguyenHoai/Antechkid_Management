@@ -21,6 +21,13 @@ class Expense(Base, TimestampMixin):
     PERSONAL_PAYMENT_METHOD = "PERSONAL"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # FIN-03: client command identity survives retries and Git publication.
+    # Nullable to preserve all historical entries; unique non-null keys
+    # prevent duplicate financial postings from repeated Save commands.
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(120), nullable=True, unique=True
+    )
+
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
