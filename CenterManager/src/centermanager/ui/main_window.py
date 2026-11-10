@@ -322,12 +322,55 @@ class MainWindow(QMainWindow):
                     "Để lần sau: sẽ tiếp tục nhắc khi khởi động."
                 )
                 report_button = dialog.addButton("Xuất báo cáo thao tác (.txt)", QMessageBox.ButtonRole.ActionRole)
+                can_compare_finance = self._permission_helper.has_permission("finance.view")
+                compare_button = (
+                    dialog.addButton("Đối chiếu thu/chi với MAIN", QMessageBox.ButtonRole.ActionRole)
+                    if can_compare_finance else None
+                )
                 open_button = dialog.addButton("Mở thư mục log", QMessageBox.ButtonRole.ActionRole)
                 reviewed_button = dialog.addButton("Đã kiểm tra", QMessageBox.ButtonRole.AcceptRole)
                 skip_button = dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
                 dialog.setDefaultButton(skip_button)
                 dialog.exec()
                 choice = dialog.clickedButton()
+                if compare_button is not None and choice is compare_button:
+                    from PySide6.QtWidgets import QFileDialog
+                    from centermanager.platform.recovery_finance_compare import (
+                        compare_verified_notice, render_report_json, write_secure_report,
+                    )
+                    confirm = QMessageBox.question(
+                        self, "Dữ liệu tài chính nhạy cảm",
+                        "Báo cáo chứa số tiền, trạng thái và mã giao dịch. "
+                        "Chỉ lưu ở vị trí riêng tư. NOT_FOUND không chứng minh "
+                        "giao dịch đã mất. Tiếp tục?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if confirm == QMessageBox.StandardButton.Yes:
+                        filename, _ = QFileDialog.getSaveFileName(
+                            self, "Xuất đối chiếu Recovery",
+                            "recovery-finance-compare.json", "JSON (*.json)"
+                        )
+                        if filename:
+                            try:
+                                report = compare_verified_notice(
+                                    queue, item,
+                                    provider=getattr(self._collaboration_manager, "_sync_provider", None),
+                                    can_view_finance=self._permission_helper.has_permission("finance.view"),
+                                )
+                                write_secure_report(Path(filename), render_report_json(report))
+                                QMessageBox.information(
+                                    self, "Recovery", "Đã xuất báo cáo đối chiếu. "
+                                    "Luôn kiểm tra trùng giao dịch trước khi nhập lại."
+                                )
+                            except Exception:
+                                logger.exception("Modern Recovery finance comparison unavailable")
+                                QMessageBox.warning(
+                                    self, "Không thể đối chiếu",
+                                    "Chưa xác minh được DB/WAL cũ, SQLCipher hoặc Git MAIN. "
+                                    "Không xuất báo cáo suy đoán; backup vẫn giữ nguyên."
+                                )
+                    continue
                 if choice is report_button:
                     from PySide6.QtWidgets import QFileDialog
                     from centermanager.database.encryption import DatabaseKeyStore
