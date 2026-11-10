@@ -43,3 +43,38 @@ def test_recovery_menu_gives_explicit_empty_state_without_restore():
     assert "Không có Recovery Case nào." in source
     action = source.split("def _show_recovery_status(self)", 1)[1].split("def _open_pending_recovery_review", 1)[0]
     assert ".restore(" not in action and ".publish(" not in action
+
+
+def test_voucher_batch_lookup_excludes_deleted_and_other_types():
+    from datetime import datetime
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from centermanager.models.finance_attachment import FinanceAttachment
+    from centermanager.repositories.finance_attachment_repository import FinanceAttachmentRepository
+
+    engine = create_engine("sqlite:///:memory:")
+    FinanceAttachment.__table__.create(bind=engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    def row(kind, entity_id, name, deleted=False):
+        return FinanceAttachment(
+            entity_type=kind, entity_id=entity_id, original_filename=name,
+            stored_path="Finance/2026/11/" + "f" * 64 + ".pdf",
+            mime_type="application/pdf", size_bytes=12,
+            sha256="f" * 64, uploaded_at=datetime(2026, 11, 10),
+            deleted_at=datetime(2026, 11, 11) if deleted else None,
+        )
+    with factory.begin() as session:
+        session.add_all([
+            row("INCOME", 11, "invoice.pdf"),
+            row("INCOME", 11, "hidden.pdf", deleted=True),
+            row("EXPENSE", 11, "wrong-kind.pdf"),
+            row("INCOME", 12, "second.pdf"),
+        ])
+    with factory() as session:
+        repo = FinanceAttachmentRepository(session)
+        matches = repo.list_active_for("INCOME", [11, 12, 999])
+        assert sorted(matches) == [11, 12]
+        assert [item.original_filename for item in matches[11]] == ["invoice.pdf"]
+        assert [item.original_filename for item in matches[12]] == ["second.pdf"]
+        assert repo.list_active_for("INCOME", []) == {}
+    engine.dispose()
