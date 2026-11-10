@@ -69,9 +69,15 @@ _POST_PRJ_REQUIRED_COLUMNS = {
         "withdrawn_from_session",
     },
     "class_fee_history": {"changed_by"},
-    "expenses": {"funding_source", "incurred_date", "idempotency_key"},
-    "incomes": {"idempotency_key"},
+    "expenses": {"funding_source", "incurred_date"},
     "finance_attachments": {"entity_type", "entity_id", "stored_path", "sha256", "deleted_at"},
+}
+
+# The dedicated course-fee revision requires submission identities on both
+# ledgers. Keep the earlier PR-J invariant unchanged for old regression tests.
+_COURSEFEE_REQUIRED_COLUMNS = {
+    "incomes": {"idempotency_key"},
+    "expenses": {"idempotency_key"},
 }
 
 
@@ -88,7 +94,10 @@ def _validate_post_upgrade_schema(connection, config: Config) -> None:
 
     db_inspector = inspect(connection)
     missing = []
-    for table_name, required_columns in _POST_PRJ_REQUIRED_COLUMNS.items():
+    for table_name, required_columns in (
+        list(_POST_PRJ_REQUIRED_COLUMNS.items())
+        + list(_COURSEFEE_REQUIRED_COLUMNS.items())
+    ):
         actual = {
             column["name"]
             for column in db_inspector.get_columns(table_name)

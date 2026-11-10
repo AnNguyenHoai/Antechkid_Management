@@ -15,7 +15,7 @@ COURSEFEE_DATABASE_BRANCH = "main_coursefee"
 
 
 def validate_coursefee_git_branch(branch: str) -> None:
-    if not isinstance(branch, str) or branch.strip() != COURSEFEE_DATABASE_BRANCH:
+    if not isinstance(branch, str) or branch != COURSEFEE_DATABASE_BRANCH:
         raise CourseFeeDeploymentError(
             "Course-fee edition requires an isolated Git DB branch named "
             "'main_coursefee'. Existing main/main_repos configs must not be "
