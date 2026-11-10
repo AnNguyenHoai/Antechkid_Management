@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from centermanager.database.migration import (
+    _BASELINE_TABLES,
+    _POST_PRJ_REQUIRED_COLUMNS,
     _proven_legacy_coursefee_revision,
     assert_coursefee_database_lineage,
 )
@@ -12,8 +14,22 @@ from centermanager.database.migration import (
 def _fixture(connection, *, income_index=True, expense_index=True, monthly=False):
     connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
     connection.execute(text("INSERT INTO alembic_version VALUES ('1e10a046')"))
+    # Recreate the pre-CourseFee physical baseline without modifying a real DB.
+    for table in sorted(_BASELINE_TABLES | set(_POST_PRJ_REQUIRED_COLUMNS)):
+        if table in ("incomes", "expenses"):
+            continue
+        columns = _POST_PRJ_REQUIRED_COLUMNS.get(table, set())
+        columns_sql = "".join(f", {column} TEXT" for column in sorted(columns))
+        connection.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY{columns_sql})"))
     for table, with_index in (("incomes", income_index), ("expenses", expense_index)):
-        connection.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, idempotency_key TEXT)"))
+        extra = "".join(
+            f", {column} TEXT" for column in sorted(
+                _POST_PRJ_REQUIRED_COLUMNS.get(table, set())
+            )
+        )
+        connection.execute(text(
+            f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, idempotency_key TEXT{extra})"
+        ))
         if with_index:
             connection.execute(text(
                 f"CREATE UNIQUE INDEX ux_{table}_idempotency_key ON {table}(idempotency_key)"
