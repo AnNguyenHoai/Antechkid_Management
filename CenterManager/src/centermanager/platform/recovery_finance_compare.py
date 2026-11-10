@@ -175,6 +175,29 @@ def _immutable_reader(path: Path, key: bytes | None):
         connection.close()
 
 
+def _assert_git_main_artifact_clean(provider, main_path: Path, *, encrypted: bool):
+    """Refuse dirty/untracked Git MAIN DB and signed identity in production.
+
+    A matching HEAD/OID alone never proves the working-tree file is the
+    committed MAIN. Read-only Git status checks the exact two artifacts.
+    """
+    if not encrypted:
+        return  # Historical plain SQLite tests are not production deployments.
+    repo = getattr(provider, "_repo_path", None)
+    run = getattr(provider, "_run_git_command", None)
+    if repo is None or not callable(run):
+        raise ValueError("Git provider cannot authenticate MAIN worktree")
+    expected = (Path(repo) / "database" / "center.db").resolve()
+    if Path(main_path).resolve() != expected:
+        raise ValueError("MAIN DB is not from the verified Git checkout")
+    changes = run([
+        "status", "--porcelain", "--untracked-files=normal", "--",
+        "database/center.db", "database/center.db.identity.json",
+    ])
+    if not isinstance(changes, str) or changes.strip():
+        raise ValueError("Git MAIN DB or signed identity is dirty/untracked")
+
+
 def compare_verified_case(registry, case_id: str, *, provider, can_view_finance: bool):
     """Production boundary: authenticated case + snapshot + remote MAIN + role.
 
@@ -210,6 +233,7 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
 
     main_path = validate_authoritative_repository_database()
     encrypted = database_encryption_required()
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     old_key = DatabaseKeyStore(source / "database_key.dpapi").load() if encrypted else None
     main_key = DatabaseKeyStore().load() if encrypted else None
     validate_database_artifact(old_path, encryption_required=encrypted, key=old_key)
@@ -233,6 +257,7 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
     if encrypted:
         validate_identity(main_path, main_key)
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
         raise ValueError("Git MAIN changed during comparison: discard result")
     return {
@@ -283,6 +308,7 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
 
     main_path = validate_authoritative_repository_database()
     encrypted = database_encryption_required()
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     main_key = DatabaseKeyStore().load() if encrypted else None
     with reconstructed_readonly_snapshot(notices, notice) as (recovery_path, old_key):
         validate_database_artifact(
@@ -304,6 +330,7 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
     if encrypted:
         validate_identity(main_path, main_key)
+    _assert_git_main_artifact_clean(provider, main_path, encrypted=encrypted)
     if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
         raise ValueError("MAIN changed during finance comparison")
     return {
