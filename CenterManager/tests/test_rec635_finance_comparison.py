@@ -163,3 +163,33 @@ def test_changed_amount_remains_visible_even_when_foreign_identity_unknown():
     assert result[0]["status"] == "PRESENT_DIFFERENT"
     assert result[0]["changed_fields"] == ["amount"]
     assert result[0]["unverified_relationship_fields"] == ["student_id"]
+
+
+def test_encrypted_main_worktree_requires_clean_git_database_and_identity(tmp_path):
+    from centermanager.platform.recovery_finance_compare import _assert_git_main_artifact_clean
+    root = tmp_path / "repo"
+    path = root / "database" / "center.db"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"synthetic")
+    calls = []
+    class Provider:
+        _repo_path = root
+        def _run_git_command(self, args):
+            calls.append(args)
+            return ""
+    provider = Provider()
+    _assert_git_main_artifact_clean(provider, path, encrypted=True)
+    assert calls and "database/center.db.identity.json" in calls[0]
+    provider._run_git_command = lambda args: " M database/center.db"
+    with pytest.raises(ValueError, match="dirty/untracked"):
+        _assert_git_main_artifact_clean(provider, path, encrypted=True)
+
+
+def test_encrypted_main_worktree_rejects_external_file_and_missing_provenance(tmp_path):
+    from centermanager.platform.recovery_finance_compare import _assert_git_main_artifact_clean
+    root = tmp_path / "repo"
+    with pytest.raises(ValueError, match="cannot authenticate"):
+        _assert_git_main_artifact_clean(object(), tmp_path / "main.db", encrypted=True)
+    provider = SimpleNamespace(_repo_path=root, _run_git_command=lambda _: "")
+    with pytest.raises(ValueError, match="not from the verified Git checkout"):
+        _assert_git_main_artifact_clean(provider, tmp_path / "main.db", encrypted=True)
