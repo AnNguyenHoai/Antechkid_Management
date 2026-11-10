@@ -40,15 +40,22 @@ Strict read boundary:
 
 ### Unresolved operational gaps (Issue #635 remains open)
 
-**Critical:** The newer Git MAIN-first review-notice path introduced by PR
-#633 retains the old database/WAL under `startup-rollbacks`, whereas this
-increment supports only legacy **verified RV-03 captured Recovery Cases**.
-A startup rollback copy has not been proven to be a WAL-complete authenticated,
-standalone SQLCipher snapshot, and the review notice does not cryptographically
-pin its folder. Therefore this increment deliberately does **not** read that
-copy, guess the correct folder or auto-create an apparent verified capture.
-A separate, crash-safe capture provenance design and Windows migration tests
-are required before supporting modern review notices.
+**Modern Git MAIN-first review notices (PR #633):** This PR additionally
+binds the old `startup-rollbacks` DB/WAL/SHM to the exact review notice with an
+HMAC-authenticated per-file SHA-256 inventory on the *recovery-only* startup
+path. This binding is best-effort; failure never blocks startup. Without its
+proof, old bytes are deliberately not compared. On explicit operator request,
+the old signed bytes are copied into an isolated temporary folder, SQLCipher
+replays/checkpoints the detached WAL **only on the copy**, integrity is checked,
+then the immutable copy is compared to independently verified remote MAIN.
+The signed old bytes are re-checked after comparison; the report is discarded
+if any authenticity or source-stability check fails.
+
+**Remaining gate for modern path:** packaged Windows EXE tests (including crash
+between old DB move and signed proof, DPAPI same/different user, WAL crash,
+multi-GB startup performance, two-machine races). A malformed, missing or
+corrupt proof is an UNKNOWN/UNAVAILABLE report, never an excuse to overwrite
+or discard the old rollback.
 
 Still missing: month plan default/activation/allocations, enrollment mapping
 across DB generations, wallets and computed outstanding, current student
