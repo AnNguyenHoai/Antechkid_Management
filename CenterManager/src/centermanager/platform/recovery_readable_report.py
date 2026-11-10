@@ -13,7 +13,7 @@ from pathlib import Path
 from centermanager.platform.recovery_change_mirror import decrypt_mirrored_event
 
 _SESSION = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
-_EVENT_FILE = re.compile(r"^[0-9a-fA-F-]{36}\\.enc$")
+_EVENT_FILE = re.compile(r"^[0-9a-fA-F-]{36}\.enc$")
 _MAX_EVENTS = 10000
 _MAX_BYTES = 2 * 1024 * 1024
 
