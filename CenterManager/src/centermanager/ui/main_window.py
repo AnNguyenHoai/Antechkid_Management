@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
         recovery_log_action = recovery_menu.addAction("Kiểm tra log Recovery")
         recovery_log_action.triggered.connect(self._show_pending_review_notices)
         self._recovery_pending_action = recovery_menu.addAction("Recovery: đang kiểm tra...")
-        self._recovery_pending_action.triggered.connect(self._show_recovery_case_history)
+        self._recovery_pending_action.triggered.connect(self._open_pending_recovery_review)
         self._recovery_pending_action.setVisible(False)
         QTimer.singleShot(0, self._show_pending_recovery_cases)
 
@@ -249,6 +249,19 @@ class MainWindow(QMainWindow):
         except OSError:
             logger.warning("Legacy Recovery archive list unavailable; login continues")
             return []
+
+    def _open_pending_recovery_review(self) -> None:
+        """Give the operator an explicit path back to the pending review."""
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
+        try:
+            if RecoveryReviewNotices(WriteRecoveryJournal()).pending():
+                self._show_pending_review_notices()
+            else:
+                self._show_recovery_case_history()
+        except Exception:
+            logger.exception("Could not open pending Recovery notices")
+            self._show_recovery_case_history()
 
     def _show_pending_review_notices(self) -> None:
         """User-only acknowledgement; never changes database or WRITE lease."""
