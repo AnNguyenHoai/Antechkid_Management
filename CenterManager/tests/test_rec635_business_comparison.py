@@ -17,6 +17,8 @@ def _new():
         CREATE TABLE monthly_tuition_plans (id INTEGER PRIMARY KEY,class_id INTEGER,
                               month TEXT,version INTEGER,monthly_fee_vnd INTEGER,
                               schedule_version TEXT,status TEXT);
+        CREATE TABLE monthly_tuition_allocations (id INTEGER PRIMARY KEY,plan_id INTEGER,
+                  original_date TEXT,amount_vnd INTEGER);
         CREATE TABLE incomes (id INTEGER PRIMARY KEY,amount REAL,payment_method TEXT,
                               status TEXT,deleted_at TEXT);
         CREATE TABLE expenses (id INTEGER PRIMARY KEY,amount REAL,payment_method TEXT,
@@ -33,11 +35,17 @@ def test_unique_cross_generation_class_name_and_student_code():
     main.execute("INSERT INTO classes VALUES (80,'K3 Python','Python','ACTIVE',1000000,8,NULL)")
     old.execute("INSERT INTO monthly_tuition_plans VALUES (3,2,'2026-11-01',1,1200000,'s1','ACTIVE')")
     main.execute("INSERT INTO monthly_tuition_plans VALUES (99,80,'2026-11-01',1,1200000,'s1','ACTIVE')")
+    old.execute("INSERT INTO monthly_tuition_allocations VALUES (1,3,'2026-11-01',600000)")
+    old.execute("INSERT INTO monthly_tuition_allocations VALUES (2,3,'2026-11-02',600000)")
+    main.execute("INSERT INTO monthly_tuition_allocations VALUES (50,99,'2026-11-01',600000)")
+    main.execute("INSERT INTO monthly_tuition_allocations VALUES (51,99,'2026-11-02',600000)")
     rows = compare_identity_and_monthly_plans(old, main)["findings"]
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert all(x["status"] == "PRESENT_IDENTICAL" for x in rows)
     assert rows[0]["main_row_id"] == 900
     assert rows[2]["main_row_id"] == 99
+    assert rows[3]["status"] == "PRESENT_IDENTICAL"
+    assert rows[3]["coverage"] == "PER_ORIGINAL_DATE_COUNT_AND_AMOUNT_ONLY"
 
 
 def test_duplicated_class_identity_stays_unknown():
@@ -76,3 +84,21 @@ def test_schema_drift_never_creates_fake_monthly_plan_match():
     main = _new()
     findings = compare_identity_and_monthly_plans(old, main)["findings"]
     assert all(x["status"] == "UNKNOWN" for x in findings)
+
+
+def test_monthly_allocation_mismatch_and_corrupt_sum():
+    old, main = _new(), _new()
+    old.execute("INSERT INTO classes VALUES (1,'Python','Python','ACTIVE',1000000,8,NULL)")
+    main.execute("INSERT INTO classes VALUES (2,'Python','Python','ACTIVE',1000000,8,NULL)")
+    old.execute("INSERT INTO monthly_tuition_plans VALUES (10,1,'2026-11-01',1,1000000,'s1','ACTIVE')")
+    main.execute("INSERT INTO monthly_tuition_plans VALUES (20,2,'2026-11-01',1,1000000,'s1','ACTIVE')")
+    old.execute("INSERT INTO monthly_tuition_allocations VALUES (1,10,'2026-11-01',1000000)")
+    main.execute("INSERT INTO monthly_tuition_allocations VALUES (2,20,'2026-11-02',1000000)")
+    findings = compare_identity_and_monthly_plans(old, main)["findings"]
+    allocation = next(x for x in findings if x["entity"] == "monthly_tuition_allocations")
+    assert allocation["status"] == "PRESENT_DIFFERENT"
+    main.execute("UPDATE monthly_tuition_allocations SET amount_vnd=500000")
+    findings = compare_identity_and_monthly_plans(old, main)["findings"]
+    allocation = next(x for x in findings if x["entity"] == "monthly_tuition_allocations")
+    assert allocation["status"] == "UNKNOWN"
+    assert allocation["reason"] == "ALLOCATION_SUM_INCONSISTENT"
