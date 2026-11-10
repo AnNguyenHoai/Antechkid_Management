@@ -352,16 +352,21 @@ class ExpenseService:
             total = repo.count_active(**kwargs)
             rows = repo.list_active(offset=0, limit=max(total, 1), sort_by=sort_by,
                                     ascending=ascending, **kwargs) if total else []
+            vouchers_by_id = self._repository_provider.finance_attachments(
+                session
+            ).list_active_for("EXPENSE", (row.id for row in rows))
+        from centermanager.services.finance_csv_vouchers import voucher_csv_fields
         directory = os.path.dirname(os.path.abspath(destination))
         fd, temp_path = tempfile.mkstemp(prefix=".expense_export_", suffix=".csv", dir=directory)
         try:
             with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
-                writer.writerow(["Date", "Category", "Description", "Amount", "Payment Method", "Paid By", "Status", "Note"])
+                writer.writerow(["Date", "Category", "Description", "Amount", "Payment Method", "Paid By", "Status", "Note", "Voucher Count", "Voucher Filenames", "Voucher SHA256"])
                 for expense in rows:
                     writer.writerow([expense.payment_date.isoformat(), expense.category, expense.description or "",
                                      f"{expense.amount:.2f}", expense.payment_method, expense.paid_by or "",
-                                     expense.status, expense.note or ""])
+                                     expense.status, expense.note or "",
+                                     *voucher_csv_fields(vouchers_by_id.get(expense.id, []))])
             os.replace(temp_path, destination)
         except Exception:
             try: os.unlink(temp_path)
