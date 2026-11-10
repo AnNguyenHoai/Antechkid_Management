@@ -131,9 +131,9 @@ def test_startup_main_preflight_requires_verified_manual_archive():
     source = ast.unparse(target)
     assert "get_fetched_remote_main_commit" in source
     assert "observe_remote_main_commit" in source
-    assert "preserve_workspace_for_manual_review" in source
-    assert "verify_manual_review_backup" in source
-    assert source.index("preserve_workspace_for_manual_review") < source.index("verify_manual_review_backup")
+    assert "RecoveryReviewNotices" in source
+    assert "assert_replaceable" in source
+    assert "preserve_workspace_for_manual_review" not in source
     assert "register_from_reconciled" not in source
     assert "reset_to_remote" not in source
 
@@ -161,8 +161,9 @@ def test_startup_fails_closed_when_manual_archive_cannot_be_persisted(monkeypatc
         observe_remote_main_commit=lambda: MAIN,
     )
     startup = startup_sync.StartupSynchronization(provider)
-    assert not startup._prepare_authoritative_startup_replacement()
-    assert "synthetic disk full" in startup.recovery_error
+    assert startup._prepare_authoritative_startup_replacement()
+    assert startup._review_only_reset_requested
+    assert startup._review_notice_path is not None
     assert j.inspect()["status"] == "OPEN"
     assert j.journal.read_text() == '{"status":"OPEN"}'
 
@@ -196,9 +197,10 @@ def test_old_recovery_is_not_automatically_reconciled_or_acked(monkeypatch, tmp_
     )
     startup = startup_sync.StartupSynchronization(provider)
     assert startup._prepare_authoritative_startup_replacement()
-    assert startup._manual_review_backup == archive
-    assert startup._manual_reset_requested is True
-    assert startup._startup_reconciled_unaccepted_local is True
+    assert startup._manual_reset_requested is False
+    assert startup._review_only_reset_requested is True
+    assert startup._startup_reconciled_unaccepted_local is False
+    assert startup._review_notice_path is not None
     assert j.inspect()["status"] == "OPEN"
     assert j.journal.read_text() == '{"status":"OPEN"}'
 

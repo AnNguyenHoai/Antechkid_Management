@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main_repos
+      - main_coursefee
   pull_request:
     branches:
       - main_repos
+      - main_coursefee
 
 permissions:
   contents: read
