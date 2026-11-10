@@ -136,7 +136,8 @@ class StudentListPage(WorkspaceBase):
         self.search_bar.clear_btn.clicked.connect(self._clear_toolbar_filters)
         self.refresh_btn = toolbar.add_action("Refresh", self.refresh, variant=ButtonVariant.SECONDARY)
         self.import_btn = toolbar.add_action("Import", self.show_import_dialog, variant=ButtonVariant.SECONDARY)
-        self.export_btn = toolbar.add_action("Export", self.export_students, variant=ButtonVariant.SECONDARY)
+        self.export_btn = toolbar.add_action("Export filtered", self.export_students, variant=ButtonVariant.SECONDARY)
+        self.export_all_btn = toolbar.add_action("Export all Active", self.export_all_active_students, variant=ButtonVariant.SECONDARY)
         self.add_btn = toolbar.add_action("Add student", self.show_add_dialog, variant=ButtonVariant.PRIMARY)
 
         # Keep selection feedback/actions inside the existing toolbar. Toggling
@@ -203,6 +204,7 @@ class StudentListPage(WorkspaceBase):
         self.import_btn.setEnabled(can_write)
         self.bulk_delete_btn.setEnabled(can_write)
         self.export_btn.setEnabled(can_export)
+        self.export_all_btn.setEnabled(can_export)
         self.bulk_export_btn.setEnabled(can_export)
         self.export_btn.setToolTip(
             "Export student records"
@@ -391,6 +393,8 @@ class StudentListPage(WorkspaceBase):
             self.search_bar.search_input.clear()
             for combo in self.search_bar.filter_controls.values():
                 combo.setCurrentIndex(0)
+            # Clear returns to the operational default; All is an explicit selection.
+            self.search_bar.set_filter_value("status", "Active")
         finally:
             for widget, blocked in zip(widgets, previous):
                 widget.blockSignals(blocked)
@@ -634,18 +638,76 @@ class StudentListPage(WorkspaceBase):
             self.refresh()
             self._feedback.success("Student import completed", key="student-import")
 
+    def _students_matching_export_filters(self) -> List[Student]:
+        """Export the full visible query, not only the current paginated page."""
+        if self._advanced_filter_active and self._advanced_filter_criteria is not None:
+            # The advanced filter's local projection already holds ALL matches.
+            return list(self._filtered)
+
+        criteria = self._toolbar_filter_values()
+        search = self.search_bar.text().strip()
+        batch_size = 250
+        page = 1
+        results: List[Student] = []
+        expected_total = None
+        while True:
+            batch, total = self._student_service.search_students_page(
+                search_text=search,
+                status=criteria.status,
+                enrollment_status=criteria.enrollment_status,
+                assessment_status=criteria.assessment_status,
+                page=page,
+                per_page=batch_size,
+                sort_by=self._sort_key or "student_code",
+                ascending=self._sort_asc,
+            )
+            if expected_total is None:
+                expected_total = total
+            elif total != expected_total:
+                raise RuntimeError("Student list changed during export. Please retry.")
+            results.extend(batch)
+            if len(results) >= total or not batch:
+                break
+            page += 1
+        if len(results) != expected_total:
+            raise RuntimeError("Student list changed during export. Please retry.")
+        return results
+
     def export_students(self) -> None:
-        operation_id = "student-export-all"
-        if not self._feedback.begin_operation(operation_id, "Exporting students…"):
+        """Export every Student matching the active query, across all pages."""
+        operation_id = "student-export-filtered"
+        if not self._feedback.begin_operation(operation_id, "Exporting filtered students…"):
+            return
+        try:
+            students = self._students_matching_export_filters()
+            file_path = self._export_service.export_excel(students)
+            self._feedback.finish_operation(operation_id)
+            self._feedback.success(
+                f"Exported {len(students)} filtered students to {file_path}",
+                key="student-export",
+            )
+        except Exception as exc:
+            self._feedback.finish_operation(operation_id)
+            logger.exception("Filtered Student export failed")
+            self._feedback.system_error(
+                exc, message="Filtered students could not be exported.", key="student-export"
+            )
+
+    def export_all_active_students(self) -> None:
+        """Separate deliberate action, unaffected by the current toolbar filters."""
+        operation_id = "student-export-active"
+        if not self._feedback.begin_operation(operation_id, "Exporting all active students…"):
             return
         try:
             file_path = self._export_service.export_all_active()
             self._feedback.finish_operation(operation_id)
-            self._feedback.success(f"Students exported to {file_path}", key="student-export")
+            self._feedback.success(f"Active students exported to {file_path}", key="student-export")
         except Exception as exc:
             self._feedback.finish_operation(operation_id)
-            logger.exception("Export failed")
-            self._feedback.system_error(exc, message="Students could not be exported.", key="student-export")
+            logger.exception("All-active Student export failed")
+            self._feedback.system_error(
+                exc, message="Active students could not be exported.", key="student-export"
+            )
 
     def show_filter_dialog(self) -> None:
         dialog = StudentFilterDialog(parent=self)
