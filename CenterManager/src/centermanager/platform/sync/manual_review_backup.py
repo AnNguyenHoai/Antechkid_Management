@@ -18,6 +18,23 @@ class ManualBackupError(RuntimeError):
     pass
 
 
+def _native_path(path: Path) -> Path:
+    """Use Windows extended-length paths for copy/verification only.
+
+    The on-disk archive stays in its original location. No global Windows
+    long-path setting or administrator rights are required.
+    """
+    path = Path(path)
+    if os.name != "nt":
+        return path
+    absolute = str(path.resolve())
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
+
+
 def _backup_storage_relative(destination: Path, original_relative: Path) -> Path:
     """Keep ordinary paths human-readable; flatten paths unsafe on Windows.
 
@@ -71,18 +88,18 @@ def preserve_workspace_for_manual_review(journal, *, reason: str) -> Path:
                 rel = Path(category) / source.relative_to(location)
                 storage_rel = _backup_storage_relative(destination, rel)
                 target = destination / storage_rel
-                target.parent.mkdir(parents=True, exist_ok=True)
+                _native_path(target.parent).mkdir(parents=True, exist_ok=True)
                 if storage_rel != rel:
                     relocated[rel.as_posix()] = storage_rel.as_posix()
                 digest = hashlib.sha256()
-                with source.open("rb") as reader, target.open("xb") as writer:
+                with _native_path(source).open("rb") as reader, _native_path(target).open("xb") as writer:
                     for data in iter(lambda: reader.read(1024 * 1024), b""):
                         writer.write(data)
                         digest.update(data)
                     writer.flush()
                     os.fsync(writer.fileno())
-                copied = hashlib.sha256(target.read_bytes()).hexdigest()
-                original = hashlib.sha256(source.read_bytes()).hexdigest()
+                copied = hashlib.sha256(_native_path(target).read_bytes()).hexdigest()
+                original = hashlib.sha256(_native_path(source).read_bytes()).hexdigest()
                 if copied != digest.hexdigest() or copied != original:
                     raise ManualBackupError("Manual Recovery backup checksum mismatch.")
                 records[rel.as_posix()] = copied
@@ -122,8 +139,9 @@ def verify_manual_review_backup(archive: Path) -> None:
                 raise ManualBackupError("Manual Recovery backup verification failed.")
             path = archive / stored_rel
             if (not path.resolve().is_relative_to(archive.resolve())
-                    or path.is_symlink() or not path.is_file()
-                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected):
+                    or _native_path(path).is_symlink()
+                    or not _native_path(path).is_file()
+                    or hashlib.sha256(_native_path(path).read_bytes()).hexdigest() != expected):
                 raise ManualBackupError("Manual Recovery backup verification failed.")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ManualBackupError("Manual Recovery backup metadata is incomplete.") from exc
