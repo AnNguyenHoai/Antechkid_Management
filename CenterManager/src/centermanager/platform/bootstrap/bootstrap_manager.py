@@ -256,53 +256,25 @@ class BootstrapManager:
                     )
                     return False
 
-        # This build is the course/session tuition product. A restored
-        # workstation config must never silently bind it to another Git
-        # database branch (especially main_repos/monthly tuition).
+        # The application source branch and the DB repository branch are
+        # independent. Validate only the Git reference syntax here. Database
+        # lineage/schema is checked separately and must never be inferred from
+        # a branch name (e.g. 'main' is a legitimate DB branch).
         from centermanager.platform.coursefee_deployment_guard import (
             validate_coursefee_git_branch, CourseFeeDeploymentError,
         )
         try:
             validate_coursefee_git_branch(git_config.branch)
         except CourseFeeDeploymentError as exc:
-            # This is a destination identity error, not a Recovery failure.
-            # Never fetch or install the old branch's DB. Let the operator
-            # supply a destination-bound bundle for the isolated product.
-            logger.error("[BOOTSTRAP] Course-fee database destination rejected: %s", exc)
+            logger.error("[BOOTSTRAP] Invalid Git database branch: %s", exc)
             from PySide6.QtWidgets import QMessageBox
-            answer = QMessageBox.question(
-                None,
-                "CourseFee repository configuration",
-                "This CourseFee build requires the dedicated 'main_coursefee' "
-                "database branch. The workstation is configured for "
-                f"'{git_config.branch}'.\n\n"
-                "No database has been changed. Import an administrator-issued "
-                "CourseFee provisioning bundle now?\n\n"
-                "Do not rename or stamp the old database's Alembic revision.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            QMessageBox.warning(
+                None, "Invalid database branch",
+                "The configured Git database branch name is invalid. "
+                "Reconfigure the workstation with a valid DB repository branch. "
+                "No database synchronization has been attempted.",
             )
-            if answer != QMessageBox.StandardButton.Yes:
-                return False
-            dialog = GitConfigDialog(git_config_service)
-            if dialog.exec() != dialog.DialogCode.Accepted:
-                return False
-            git_config = git_config_service.get_config()
-            if git_config is None:
-                logger.error("[BOOTSTRAP] CourseFee re-provisioning did not supply Git configuration")
-                return False
-            try:
-                validate_coursefee_git_branch(git_config.branch)
-            except CourseFeeDeploymentError:
-                logger.error(
-                    "[BOOTSTRAP] CourseFee provisioning bundle still targets an incompatible branch"
-                )
-                QMessageBox.warning(
-                    None, "CourseFee repository configuration",
-                    "The imported configuration is not for 'main_coursefee'. "
-                    "No Git synchronization will be attempted.",
-                )
-                return False
+            return False
 
         provider = GitSynchronizationProvider(
             repo_path=paths.runtime_root / "repository",
