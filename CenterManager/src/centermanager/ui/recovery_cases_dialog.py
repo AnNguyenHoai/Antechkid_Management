@@ -40,10 +40,12 @@ def _summary(case):
 
 
 class RecoveryCasesDialog(QDialog):
-    def __init__(self, parent=None, *, pending_only=False, registry=None):
+    def __init__(self, parent=None, *, pending_only=False, registry=None, provider=None, permission_checker=None):
         super().__init__(parent)
         self._registry = registry or RecoveryCaseRegistry(WriteRecoveryJournal())
         self._pending_only = pending_only
+        self._provider = provider
+        self._permission_checker = permission_checker
         self.setWindowTitle("Recovery Case — Kiểm tra dữ liệu")
         self.setMinimumSize(650, 410)
         layout = QVBoxLayout(self)
@@ -69,6 +71,14 @@ class RecoveryCasesDialog(QDialog):
         export = QPushButton("Xuất tóm tắt", self)
         export.clicked.connect(self._export)
         actions.addWidget(export)
+        compare_button = QPushButton("Đối chiếu thu/chi với MAIN", self)
+        compare_button.setEnabled(
+            self._provider is not None
+            and callable(self._permission_checker)
+            and bool(self._permission_checker())
+        )
+        compare_button.clicked.connect(self._compare_finance)
+        actions.addWidget(compare_button)
         skip = QPushButton("Skip / Để lần sau", self)
         skip.clicked.connect(self.reject)
         actions.addWidget(skip)
@@ -139,6 +149,55 @@ class RecoveryCasesDialog(QDialog):
                 self, "Không thể xác nhận",
                 "Không xác minh/ghi được Recovery Case. Không đánh dấu đã kiểm tra. "
                 "Hãy giữ nguyên dữ liệu recovery và liên hệ hỗ trợ kỹ thuật."
+            )
+
+    def _compare_finance(self):
+        """On-demand privileged comparison, never part of startup or login."""
+        case = self._selected()
+        if not case or not callable(self._permission_checker) or not self._permission_checker():
+            QMessageBox.warning(self, "Từ chối truy cập", "Cần quyền finance.view để đối chiếu dữ liệu.")
+            return
+        if self._provider is None:
+            QMessageBox.warning(self, "Recovery", "Không có kết nối Git MAIN để kiểm chứng.")
+            return
+        confirmed = QMessageBox.question(
+            self, "Xuất dữ liệu tài chính",
+            "Báo cáo có số tiền và dữ liệu giao dịch nhạy cảm. "
+            "Chỉ lưu ở vị trí an toàn, không gửi công khai. "
+            "Báo cáo KHÔNG tự xác nhận khoản tiền nào đã mất. Tiếp tục?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmed != QMessageBox.StandardButton.Yes:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Xuất đối chiếu thu/chi", "recovery-finance-compare.json",
+            "JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            from centermanager.platform.recovery_finance_compare import (
+                compare_verified_case, render_report_json, write_secure_report,
+            )
+            report = compare_verified_case(
+                self._registry, case["case_id"],
+                provider=self._provider,
+                can_view_finance=bool(self._permission_checker()),
+            )
+            write_secure_report(Path(path), render_report_json(report))
+            QMessageBox.information(
+                self, "Recovery",
+                "Đã xuất kết quả đối chiếu. NOT_FOUND không có nghĩa là giao dịch bị mất; "
+                "cần kiểm tra công nợ/ví trước khi nhập lại."
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Verified finance comparison unavailable")
+            QMessageBox.warning(
+                self, "Đối chiếu chưa khả dụng",
+                "Không xác minh được backup, khóa SQLCipher hoặc MAIN hiện tại. "
+                "Không xuất dữ liệu suy đoán; các bản backup được giữ nguyên."
             )
 
     def _export(self):
