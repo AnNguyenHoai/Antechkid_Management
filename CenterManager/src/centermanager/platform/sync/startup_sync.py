@@ -434,8 +434,9 @@ class StartupSynchronization:
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         journal = WriteRecoveryJournal()
         self._review_only_clone = (
-            journal.journal.exists() or self._runtime_db_path.exists()
-            or journal.root.exists()
+            Path(getattr(journal, "journal", Path(journal.root) / "journal.json")).exists()
+            or self._runtime_db_path.exists()
+            or Path(journal.root).exists()
         )
         if self._repo_path.exists() and any(self._repo_path.iterdir()):
             self.recovery_error = "Nonempty incomplete Git repository needs repair before clone"
