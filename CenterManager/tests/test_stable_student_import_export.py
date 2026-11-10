@@ -60,3 +60,21 @@ def test_active_export_filters_archived():
     source = (Path(__file__).resolve().parents[1] /
               "src/centermanager/services/student_export_service.py").read_text(encoding="utf-8")
     assert 'student.status == "ACTIVE"' in source
+
+
+def test_import_service_preserves_excel_student_codes_and_rejects_invalid_rows(tmp_path):
+    svc = object.__new__(StudentImportService)
+    path = _file(tmp_path / "bad_codes.xlsx", [
+        ["BAD-01", "Student", "", "", "", "ACTIVE", "", ""],
+        ["HS100", "Student", "", "", "", "UNKNOWN", "", ""],
+    ])
+    rows, errors = svc.preview_from_excel(path)
+    assert rows == 2
+    assert any("Invalid Student code" in error for error in errors)
+    assert any("Invalid status" in error for error in errors)
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src/centermanager"
+    service = (root / "services/student_service.py").read_text(encoding="utf-8")
+    importer = (root / "services/student_import_service.py").read_text(encoding="utf-8")
+    assert "student_code: Optional[str] = None" in service
+    assert "student_code=str(code).strip() if code else None" in importer
