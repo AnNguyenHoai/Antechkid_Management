@@ -33,7 +33,10 @@ class StudentExportService:
         """Export all active students to Excel."""
         with self._session_factory() as session:
             repo = self._repository_provider.students(session)
-            students = repo.list_active()
+            # list_active() means non-deleted in the legacy repository and may
+            # contain archived records; this API promises ACTIVE only.
+            students = [student for student in repo.list_active()
+                        if student.status == "ACTIVE" and student.deleted_at is None]
         return self.export_excel(students, file_path)
 
     @require_permission("student.export")
