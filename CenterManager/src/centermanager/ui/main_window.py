@@ -321,11 +321,6 @@ class MainWindow(QMainWindow):
         try:
             advisory_queue = RecoveryReviewNotices(WriteRecoveryJournal())
             review_pending = advisory_queue.pending()
-            # Previously reviewed advisory logs must not cause the same old
-            # RV-03 case to pop up again on a later application launch.
-            advisory_history = getattr(
-                advisory_queue, "has_recorded_notices", lambda: False
-            )()
             if review_pending:
                 self._recovery_pending_action.setText(
                     f"Cần kiểm tra {len(review_pending)} log Recovery"
@@ -335,7 +330,14 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._show_pending_review_notices)
             pending = RecoveryCaseRegistry(WriteRecoveryJournal()).pending_cases()
             count = len(pending)
-            if (pending and not review_pending and not advisory_history
+            # Case-specific matching only. A Reviewed notice for session A
+            # must never hide an unrelated pending RV-03 session B.
+            uncovered_legacy = [
+                case for case in pending
+                if not getattr(advisory_queue, "covers_legacy_case",
+                               lambda _case: False)(case)
+            ]
+            if (uncovered_legacy and not review_pending
                     and isinstance(self, QWidget)):
                 # Legacy signed cases use the existing Reviewed/Skip dialog.
                 # Only after login; close/skip leaves them pending next boot.
