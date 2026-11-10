@@ -47,8 +47,9 @@ class RecoveryReviewNotices:
         # if unrelated writers advance Git MAIN. The remote revision is context
         # for the notice, not part of the incident identity.
         identity = hashlib.sha256(
-            str(self.journal.runtime).encode("utf-8") + b"\\0"
-            + journal_bytes
+            str(getattr(self.journal, "runtime",
+                        Path(self.journal.root).with_name("runtime"))).encode("utf-8")
+            + b"\\0" + journal_bytes
         ).hexdigest()
         self.root.mkdir(parents=True, exist_ok=True)
         archived = self.root / (identity + ".journal.json")
