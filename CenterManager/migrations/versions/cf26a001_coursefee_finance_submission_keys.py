@@ -1,16 +1,17 @@
 """Durable opt-in duplicate-submission fences for Income and Expense.
 
-Revision ID: 1e10a046
+Revision ID: cf26a001
 Revises: 1e10a045
 
-Course-fee branch: no monthly tuition migration dependency.\nHistorical Income/Expense rows retain NULL keys; new keyed submissions are
+Course-fee branch: no monthly tuition migration dependency.
+Historical Income/Expense rows retain NULL keys; new keyed submissions are
 unique per ledger, preventing repeated Save after uncertain UI/transport results.
 """
 from alembic import op
 from sqlalchemy import inspect
 import sqlalchemy as sa
 
-revision = "1e10a046"
+revision = "cf26a001"
 down_revision = "1e10a045"
 branch_labels = None
 depends_on = None

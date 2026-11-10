@@ -27,6 +27,36 @@ _BASELINE_TABLES = {
     "timeline_events", "student_products", "progress", "attachments",
 }
 
+_COURSEFEE_FORBIDDEN_TABLES = frozenset({
+    "monthly_tuition_plans", "monthly_tuition_allocations",
+    "enrollment_monthly_tuition_terms", "monthly_tuition_outcomes",
+    "monthly_class_defaults",
+})
+# Prior versions of *different* products used the same Alembic identifier.
+# Never try to guess which database owns that legacy revision.
+_AMBIGUOUS_REVISION = "1e10a046"
+
+
+def assert_coursefee_database_lineage(connection) -> None:
+    """Reject a monthly-tuition or ambiguous revision before ANY migration writes."""
+    from sqlalchemy import text
+    tables = set(inspect(connection).get_table_names())
+    forbidden = sorted(tables.intersection(_COURSEFEE_FORBIDDEN_TABLES))
+    if forbidden:
+        raise RuntimeError(
+            "Incompatible monthly-tuition database; course-fee migration is denied: "
+            + ", ".join(forbidden)
+        )
+    if "alembic_version" in tables:
+        versions = [row[0] for row in connection.execute(text("SELECT version_num FROM alembic_version"))]
+        if _AMBIGUOUS_REVISION in versions:
+            raise RuntimeError(
+                "Ambiguous Alembic revision 1e10a046: this database may belong to "
+                "a different tuition product. Preserve the original encrypted DB; "
+                "an explicitly audited offline transition is required."
+            )
+
+
 _POST_PRJ_REQUIRED_COLUMNS = {
     "enrollments": {
         "reconciled_into_enrollment_id",
@@ -43,9 +73,17 @@ _POST_PRJ_REQUIRED_COLUMNS = {
     "finance_attachments": {"entity_type", "entity_id", "stored_path", "sha256", "deleted_at"},
 }
 
+# The dedicated course-fee revision requires submission identities on both
+# ledgers. Keep the earlier PR-J invariant unchanged for old regression tests.
+_COURSEFEE_REQUIRED_COLUMNS = {
+    "incomes": {"idempotency_key"},
+    "expenses": {"idempotency_key"},
+}
+
 
 def _validate_post_upgrade_schema(connection, config: Config) -> None:
-    """Prove revision metadata and the critical post-PR-J physical schema agree."""
+    """Prove revision metadata and the course-fee physical schema agree."""
+    assert_coursefee_database_lineage(connection)
     migration_context = MigrationContext.configure(connection)
     current = migration_context.get_current_revision()
     head = ScriptDirectory.from_config(config).get_current_head()
@@ -56,7 +94,10 @@ def _validate_post_upgrade_schema(connection, config: Config) -> None:
 
     db_inspector = inspect(connection)
     missing = []
-    for table_name, required_columns in _POST_PRJ_REQUIRED_COLUMNS.items():
+    for table_name, required_columns in (
+        list(_POST_PRJ_REQUIRED_COLUMNS.items())
+        + list(_COURSEFEE_REQUIRED_COLUMNS.items())
+    ):
         actual = {
             column["name"]
             for column in db_inspector.get_columns(table_name)
@@ -178,6 +219,8 @@ def _upgrade_database_with_engine(database_path: Path, engine) -> None:
     permit = system_mutation_permit("migration") if is_runtime_path(database_path) else nullcontext()
     with permit:
         with engine.begin() as connection:
+            # Reject wrong-product DB and colliding history BEFORE stamp/DDL.
+            assert_coursefee_database_lineage(connection)
             inspector = inspect(connection)
             tables = set(inspector.get_table_names())
 
