@@ -43,6 +43,14 @@ _FIELDS = {
     ),
 }
 _AMOUNT_FIELDS = {"amount"}
+# These are integer foreign keys local to each database generation. A numerically
+# equal ID is not proof of the same student, class, enrollment, session or ledger
+# entry after fresh DB import. Never use raw equality to claim business identity.
+_LOCAL_RELATION_FIELDS = {
+    "student_id", "class_id", "enrollment_id", "finance_period_id",
+    "origin_income_id", "origin_adjustment_id", "linked_income_id",
+    "session_id", "replacement_session_id",
+}
 _MAX_ROWS = 20000
 
 
@@ -118,10 +126,28 @@ def compare_finance_connections(recovery_connection, main_connection):
                         field for field in _FIELDS[table]
                         if entry[field] != match[field]
                     ]
-                    status = STATUS_DIFFERENT if changed else STATUS_IDENTICAL
-                    reason = "VALUES_DIFFER" if changed else "VALUES_MATCH"
+                    concrete_changes = [
+                        field for field in changed if field not in _LOCAL_RELATION_FIELDS
+                    ]
+                    relations_present = [
+                        field for field in _FIELDS[table]
+                        if field in _LOCAL_RELATION_FIELDS
+                        and (entry[field] is not None or match[field] is not None)
+                    ]
+                    if concrete_changes:
+                        status, reason = STATUS_DIFFERENT, "VERIFIED_KEY_NON_RELATIONAL_FIELDS_DIFFER"
+                    elif relations_present:
+                        status, reason = STATUS_UNKNOWN, "UNVERIFIED_CROSS_GENERATION_RELATIONSHIPS"
+                    else:
+                        status, reason = STATUS_IDENTICAL, "VALUES_MATCH"
                     if changed:
                         finding["changed_fields"] = changed
+                    if relations_present:
+                        finding["unverified_relationship_fields"] = relations_present
+                        finding["relationship_warning"] = (
+                            "IDs are database-local; equal numbers do not prove "
+                            "the same related business record across generations."
+                        )
             finding["status"] = status
             finding["reason"] = reason
             if match is not None:
