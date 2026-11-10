@@ -18,6 +18,39 @@ _MAX_EVENTS = 10000
 _MAX_BYTES = 2 * 1024 * 1024
 
 
+def _review_instruction(event: dict) -> str:
+    """Finance-first checklist; never assert missing MAIN data from an event."""
+    module = str(event.get("module", "")).lower()
+    entity = str(event.get("entity_type", "")).lower()
+    action = str(event.get("action", "")).lower()
+    if "income" in entity or "income" in module:
+        return (
+            "Đối chiếu khoản thu trên MAIN theo mã giao dịch, học sinh, "
+            "số tiền, ngày thu và phương thức. Không tạo lại khi chưa loại trừ trùng."
+        )
+    if "expense" in entity or "expense" in module:
+        return (
+            "Đối chiếu khoản chi trên MAIN theo mã giao dịch, số tiền, "
+            "ngày chi, người chi và trạng thái hoàn ứng. Không ghi chi hai lần."
+        )
+    if any(word in entity or word in module for word in
+           ("tuition", "enrollment", "financeperiod", "finance_period")):
+        return (
+            "Kiểm tra hợp đồng học phí, kỳ thu, ví và công nợ trên MAIN; "
+            "không tự cộng/trừ tiền dựa trên sự kiện Recovery."
+        )
+    if "student" in entity or "student" in module:
+        return "Đối chiếu hồ sơ học sinh theo ID và mã học sinh trước khi chỉnh sửa."
+    if "attendance" in entity or "session" in entity:
+        return (
+            "Đối chiếu buổi học và điểm danh trên MAIN; kiểm tra ảnh hưởng "
+            "đến công nợ/học phí trước khi cập nhật."
+        )
+    if "delete" in action or "void" in action:
+        return "Kiểm tra trạng thái hủy/xóa trên MAIN trước khi thao tác."
+    return "Đối chiếu bản ghi theo ID và loại thao tác trên MAIN trước khi sửa thủ công."
+
+
 def build_notice_report(notices, notice: dict, *, encryption_key: bytes) -> str:
     """Produce a human-readable, conservative report from an authenticated notice.
 
@@ -95,6 +128,7 @@ def build_notice_report(notices, notice: dict, *, encryption_key: bytes) -> str:
             "   Đối tượng: " + str(event.get("entity_type", "?")) + " #" + str(event.get("entity_id", "?")),
             "   Người thực hiện (ID): " + str(event.get("actor_id", "?")),
             "   Mã thao tác: " + str(event.get("operation_id", "?")),
+            "   Cần kiểm tra: " + _review_instruction(event),
         ])
         args = event.get("summary_args_json")
         if isinstance(args, str):
@@ -111,6 +145,7 @@ def build_notice_report(notices, notice: dict, *, encryption_key: bytes) -> str:
         "TÌNH TRẠNG BẰNG CHỨNG",
         "Số phân đoạn không đọc/xác minh được: " + str(problems),
         "Mức độ đầy đủ: UNKNOWN — không được kết luận hoàn chỉnh.",
+        "Trạng thái đối chiếu: CHƯA XÁC MINH TỪ MAIN.",
         "Báo cáo này chỉ gồm mã thao tác và ID; không có tên, số tiền hoặc",
         "giá trị cũ/mới nếu các thông tin đó không được ghi trong sự kiện.",
         "Cần dùng backup SQLCipher đã xác minh và đối chiếu MAIN để",
