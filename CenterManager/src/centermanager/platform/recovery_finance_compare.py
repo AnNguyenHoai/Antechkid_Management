@@ -214,6 +214,66 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     }
 
 
+def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance: bool):
+    """Modern Git MAIN-first review notice: signed old DB/WAL, never raw rollback."""
+    if not can_view_finance:
+        raise PermissionError("finance.view permission required")
+    from centermanager.platform.recovery_rollback_evidence import (
+        verify_startup_rollback, reconstructed_readonly_snapshot,
+    )
+    from centermanager.database.artifact_security import (
+        validate_authoritative_repository_database, validate_database_artifact,
+    )
+    from centermanager.database.artifact_identity import validate_identity
+    from centermanager.database.encryption import (
+        DatabaseKeyStore, database_encryption_required,
+    )
+
+    verified_notice = notices.validate_notice(
+        notices.root / (notice["id"] + ".json")
+    )
+    if verified_notice != notice:
+        raise ValueError("Recovery review notice changed")
+    # Never silently read an unbound startup-rollback generation.
+    verify_startup_rollback(notices, notice)
+
+    fetched = provider.get_fetched_remote_main_commit()
+    local = provider.get_local_main_commit()
+    observed = provider.observe_remote_main_commit()
+    if not fetched or fetched != local or fetched != observed:
+        raise ValueError("Git MAIN cannot be independently verified")
+
+    main_path = validate_authoritative_repository_database()
+    encrypted = database_encryption_required()
+    main_key = DatabaseKeyStore().load() if encrypted else None
+    with reconstructed_readonly_snapshot(notices, notice) as (recovery_path, old_key):
+        validate_database_artifact(
+            recovery_path, encryption_required=encrypted, key=old_key
+        )
+        with _immutable_reader(recovery_path, old_key) as recovery_db:
+            with _immutable_reader(main_path, main_key) as main_db:
+                findings = compare_finance_connections(recovery_db, main_db)
+    # The snapshot context has reverified the original signed bytes.
+    validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
+    if encrypted:
+        validate_identity(main_path, main_key)
+    if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
+        raise ValueError("MAIN changed during finance comparison")
+    return {
+        "notice_id": notice["id"],
+        "compared_main_oid": observed,
+        "coverage": "PARTIAL_KEYED_FINANCE_AND_MONTHLY_OUTCOMES_ONLY",
+        "publication": "UNVERIFIED",
+        "warning": (
+            "Đây là so sánh DB local trước startup với MAIN hiện tại, không phải "
+            "danh sách các khoản chắc chắn bị mất. NOT_FOUND chỉ là thiếu khóa "
+            "idempotency trong snapshot MAIN vừa xác thực. "
+            "Không nhập lại khoản thu/chi nếu chưa kiểm tra trùng, ví và công nợ."
+        ),
+        "findings": findings,
+    }
+
+
 def render_report_json(report: dict) -> str:
     """Explicitly exported sensitive finance data; caller enforces permission."""
     return json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
