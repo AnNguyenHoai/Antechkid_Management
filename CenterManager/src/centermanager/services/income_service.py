@@ -1222,7 +1222,11 @@ class IncomeService:
                 sort_by=sort_by,
                 ascending=ascending,
             )
+            vouchers_by_id = self._repository_provider.finance_attachments(
+                session
+            ).list_active_for("INCOME", (row.id for row in records))
 
+        from centermanager.services.finance_csv_vouchers import voucher_csv_fields
         output = io.StringIO(newline="")
         writer = csv.writer(output)
         writer.writerow([
@@ -1230,6 +1234,7 @@ class IncomeService:
             "Tuition Attribution", "Income Type", "Amount", "Payment Method",
             "Payment Period", "Finance Period Start", "Received By", "Note",
             "Status", "Voided At", "Voided By", "Void Reason",
+            "Voucher Count", "Voucher Filenames", "Voucher SHA256",
         ])
         for income in records:
             linked = income.student_id is not None
@@ -1251,5 +1256,6 @@ class IncomeService:
                 income.voided_at.isoformat() if income.voided_at else "",
                 income.voided_by or "",
                 income.void_reason or "",
+                *voucher_csv_fields(vouchers_by_id.get(income.id, [])),
             ])
         return output.getvalue()
