@@ -467,7 +467,11 @@ class MainWindow(QMainWindow):
         try:
             registry = RecoveryCaseRegistry(WriteRecoveryJournal())
             if registry.list_cases():
-                RecoveryCasesDialog(self, registry=registry).exec()
+                RecoveryCasesDialog(
+                    self, registry=registry,
+                    provider=getattr(self._collaboration_manager, "_sync_provider", None),
+                    permission_checker=lambda: self._permission_helper.has_permission("finance.view"),
+                ).exec()
             archives = self._manual_review_archives()
             if archives:
                 # No automatic acknowledgement/deletion; show location only
