@@ -61,8 +61,11 @@ def test_actual_dpapi_sqlcipher_rollback_wal_roundtrip(tmp_path, monkeypatch):
     with evidence.reconstructed_readonly_snapshot(notices, notice) as (snapshot, recovered_key):
         assert recovered_key == key
         assert not encryption.is_plaintext_sqlite_file(snapshot)
-        with sqlcipher.connect(snapshot.resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as reader:
+        reader = sqlcipher.connect(snapshot.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
+        try:
             encryption.apply_sqlcipher_key(reader, recovered_key)
             reader.execute("PRAGMA query_only=ON")
             assert reader.execute("SELECT amount FROM incomes").fetchone() == (1200000,)
+        finally:
+            reader.close()
     assert baseline == {p.name: evidence._hash(p) for p in rollback.iterdir()}
