@@ -26,6 +26,7 @@ class StudentOverviewPage(QWidget):
         self.status.addItem("Tất cả trạng thái", None)
         self.status.addItem("Đang hoạt động", "ACTIVE")
         self.status.addItem("Archived", "ARCHIVED")
+        self.status.setCurrentIndex(1)  # Operational default; historical records remain selectable.
         self.search = QLineEdit()
         self.search.setPlaceholderText("Tìm mã hoặc tên học sinh")
         for label, control in (("Năm", self.year), ("Tháng", self.month), ("Trạng thái", self.status)):
