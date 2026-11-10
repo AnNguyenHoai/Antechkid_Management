@@ -102,3 +102,61 @@ def test_repeated_bind_keeps_original_evidence(tmp_path):
     before = first.read_bytes()
     assert bind_startup_rollback(notices, notice_file, rollback, encryption_key=key) == first
     assert first.read_bytes() == before
+
+
+def test_end_to_end_modern_notice_compares_signed_wal_copy_to_main(tmp_path, monkeypatch):
+    from centermanager.platform import recovery_rollback_evidence as evidence
+    from centermanager.platform.recovery_finance_compare import compare_verified_notice
+    from centermanager.database import artifact_security
+
+    notices, notice, notice_file, rollback = _data(tmp_path)
+    key = b"a" * 32
+    monkeypatch.setattr(evidence, "_key", lambda provided: key if provided is None else provided)
+
+    schema = (
+        "CREATE TABLE incomes (id INTEGER PRIMARY KEY, idempotency_key TEXT, "
+        "student_id INTEGER, class_id INTEGER, enrollment_id INTEGER, "
+        "amount REAL, income_type TEXT, payment_method TEXT, payment_date TEXT, "
+        "payment_period TEXT, finance_period_id INTEGER, status TEXT, deleted_at TEXT)"
+    )
+    source = tmp_path / "old-wal.db"
+    conn = sqlite3.connect(str(source))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(schema)
+    conn.commit()
+    conn.execute(
+        "INSERT INTO incomes (id,idempotency_key,student_id,amount,"
+        "income_type,payment_method,payment_date,status) "
+        "VALUES (1,'txn-123',42,1200000,'Tuition','CASH','2026-11-09','ACTIVE')"
+    )
+    conn.commit()
+    shutil.copyfile(source, rollback / "center.db")
+    shutil.copyfile(str(source) + "-wal", rollback / "center.db-wal")
+    if Path(str(source) + "-shm").is_file():
+        shutil.copyfile(str(source) + "-shm", rollback / "center.db-shm")
+    conn.close()
+
+    main = tmp_path / "main.db"
+    current = sqlite3.connect(str(main))
+    current.execute(schema)
+    current.commit()
+    current.close()
+    monkeypatch.setattr(
+        artifact_security, "validate_authoritative_repository_database",
+        lambda: main,
+    )
+    bind_startup_rollback(notices, notice_file, rollback, encryption_key=key)
+    provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: "a" * 40,
+        get_local_main_commit=lambda: "a" * 40,
+        observe_remote_main_commit=lambda: "a" * 40,
+    )
+    report = compare_verified_notice(
+        notices, notice, provider=provider, can_view_finance=True
+    )
+    income = next(item for item in report["findings"] if item["table"] == "incomes")
+    assert income["status"] == "NOT_FOUND"
+    assert income["recovery"]["amount"] == "1200000.0000"
+    assert report["coverage"].startswith("PARTIAL")
+    assert "NOT_FOUND" in report["warning"]
+    assert (rollback / "center.db-wal").is_file()
