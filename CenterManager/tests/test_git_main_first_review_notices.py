@@ -33,6 +33,7 @@ def test_pending_skip_review_and_no_repeat_on_restart(tmp_path):
     # Only explicit acknowledgement suppresses future prompts for this ID.
     events.acknowledge(saved["id"])
     assert events.pending() == []
+    assert events.has_recorded_notices()  # Legacy RV-03 popup must not reappear.
     assert events.validate_notice(notice_path)["status"] == "ACKNOWLEDGED"
     assert (events.root / saved["journal_file"]).read_bytes() == raw
     events.record(observed_main_oid="b" * 40)  # unrelated MAIN advance
