@@ -37,6 +37,39 @@ _COURSEFEE_FORBIDDEN_TABLES = frozenset({
 _AMBIGUOUS_REVISION = "1e10a046"
 
 
+def _proven_legacy_coursefee_revision(connection) -> bool:
+    """Identify the retired CourseFee 1e10a046 by its exact physical fence.
+
+    The same revision ID was also issued by Monthly Tuition. Never resolve it
+    from revision text alone. The prior CourseFee migration added two unique
+    idempotency indexes; both must exist with the expected column and uniqueness.
+    """
+    from sqlalchemy import text
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+    if _COURSEFEE_FORBIDDEN_TABLES.intersection(tables):
+        return False
+    if not {"alembic_version", "incomes", "expenses"}.issubset(tables):
+        return False
+    versions = [row[0] for row in connection.execute(text("SELECT version_num FROM alembic_version"))]
+    if versions != [_AMBIGUOUS_REVISION]:
+        return False
+    for table in ("incomes", "expenses"):
+        columns = {col["name"] for col in inspector.get_columns(table)}
+        if "idempotency_key" not in columns:
+            return False
+        expected_index = f"ux_{table}_idempotency_key"
+        indexes = inspector.get_indexes(table)
+        if not any(
+            index["name"] == expected_index
+            and bool(index.get("unique"))
+            and index.get("column_names") == ["idempotency_key"]
+            for index in indexes
+        ):
+            return False
+    return True
+
+
 def assert_coursefee_database_lineage(connection) -> None:
     """Reject a monthly-tuition or ambiguous revision before ANY migration writes."""
     from sqlalchemy import text
@@ -50,10 +83,16 @@ def assert_coursefee_database_lineage(connection) -> None:
     if "alembic_version" in tables:
         versions = [row[0] for row in connection.execute(text("SELECT version_num FROM alembic_version"))]
         if _AMBIGUOUS_REVISION in versions:
+            if _proven_legacy_coursefee_revision(connection):
+                logger.warning(
+                    "Legacy CourseFee Alembic revision is physically verified; "
+                    "a scoped schema transition is required before WRITE"
+                )
+                return
             raise RuntimeError(
-                "Ambiguous Alembic revision 1e10a046: this database may belong to "
-                "a different tuition product. Preserve the original encrypted DB; "
-                "an explicitly audited offline transition is required."
+                "Ambiguous Alembic revision 1e10a046: database does not prove "
+                "legacy CourseFee identity (or contains Monthly Tuition tables). "
+                "Preserve the encrypted database for an audited transition."
             )
 
 
@@ -226,6 +265,26 @@ def _upgrade_database_with_engine(database_path: Path, engine) -> None:
 
             config = get_alembic_config(database_path)
             config.attributes["connection"] = connection
+
+            # Retired CourseFee and Monthly Tuition both shipped 1e10a046.
+            # Only the *physically proven* CourseFee shape may be relabeled.
+            # This is a metadata-only bridge in the authenticated, fenced
+            # migration transaction; it does not drop or reinterpret data.
+            if _proven_legacy_coursefee_revision(connection):
+                from sqlalchemy import text
+                if ScriptDirectory.from_config(config).get_revision("cf26a001") is None:
+                    raise RuntimeError("CourseFee migration revision cf26a001 is not bundled")
+                result = connection.execute(
+                    text("UPDATE alembic_version SET version_num = :next "
+                         "WHERE version_num = :previous"),
+                    {"next": "cf26a001", "previous": _AMBIGUOUS_REVISION},
+                )
+                if result.rowcount != 1:
+                    raise RuntimeError("Legacy CourseFee revision transition affected unexpected rows")
+                logger.warning(
+                    "Authenticated legacy CourseFee schema transitioned from %s to cf26a001",
+                    _AMBIGUOUS_REVISION,
+                )
 
             if "alembic_version" not in tables and _BASELINE_TABLES.intersection(tables):
                 logger.info(
