@@ -43,9 +43,12 @@ class RecoveryReviewNotices:
         """
         journal_path = Path(self.journal.journal)
         journal_bytes = journal_path.read_bytes() if journal_path.is_file() else b""
+        # The same unpublished-local incident must keep its review state even
+        # if unrelated writers advance Git MAIN. The remote revision is context
+        # for the notice, not part of the incident identity.
         identity = hashlib.sha256(
-            (str(self.journal.runtime) + "\\0" + str(observed_main_oid)).encode("utf-8")
-            + b"\\0" + journal_bytes
+            str(self.journal.runtime).encode("utf-8") + b"\\0"
+            + journal_bytes
         ).hexdigest()
         self.root.mkdir(parents=True, exist_ok=True)
         archived = self.root / (identity + ".journal.json")
