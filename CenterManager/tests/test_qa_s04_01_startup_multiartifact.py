@@ -201,13 +201,14 @@ def test_successful_install_commit_clears_interruption_marker(snapshot):
     assert sync._check_interrupted_startup_install()
 
 
-def test_truncated_interruption_marker_still_blocks_startup(snapshot):
+def test_truncated_interruption_marker_is_retained_for_review_without_blocking_main(snapshot):
     sync, root = snapshot
     marker = sync._startup_install_marker_path()
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text('{"format":', encoding="utf-8")
-    assert not sync._check_interrupted_startup_install()
-    assert marker.read_text(encoding="utf-8") == '{"format":'
+    assert sync._check_interrupted_startup_install()
+    assert not marker.exists()
+    assert sync._interrupted_install_review_marker.read_text(encoding="utf-8") == '{"format":'
 
 
 def test_complete_failed_rollback_releases_marker_only_when_all_phases_clean(snapshot):
@@ -231,7 +232,7 @@ def test_failed_rollback_retains_marker_if_db_generation_still_pending(snapshot)
     assert sync._startup_install_marker_path().exists()
 
 
-def test_interrupted_replay_corrupted_backup_blocks_without_changing_local(snapshot):
+def test_interrupted_replay_corrupted_backup_isolated_without_changing_local(snapshot):
     sync, root = snapshot
     sync._begin_startup_install()
     marker = sync._startup_install_marker_path()
@@ -240,8 +241,10 @@ def test_interrupted_replay_corrupted_backup_blocks_without_changing_local(snaps
     saved_db = marker.parent / "startup-replay" / token / "0" / "__file__"
     saved_db.write_bytes(b"CORRUPTED-BACKUP")
     (root / "Database" / "center.db").write_bytes(b"HALF-INSTALLED")
-    assert not sync._check_interrupted_startup_install()
-    assert marker.exists()
+    assert sync._check_interrupted_startup_install()
+    assert not marker.exists()
+    assert sync._interrupted_install_review_marker.exists()
+    assert saved_db.read_bytes() == b"CORRUPTED-BACKUP"
     assert (root / "Database" / "center.db").read_bytes() == b"HALF-INSTALLED"
 
 
@@ -253,8 +256,9 @@ def test_interrupted_replay_refuses_incompatible_runtime_target(snapshot):
     other._paths = SimpleNamespace(attachment_dir=root / "other-attachments")
     other._runtime_manifest_path = sync._runtime_manifest_path
     other._metadata_dir = sync._metadata_dir
-    assert not other._check_interrupted_startup_install()
-    assert sync._startup_install_marker_path().exists()
+    assert other._check_interrupted_startup_install()
+    assert not sync._startup_install_marker_path().exists()
+    assert other._interrupted_install_review_marker.is_file()
 
 
 def test_replay_is_not_authoritative_without_subsequent_git_fetch(snapshot):
@@ -357,8 +361,8 @@ def test_verified_crash_replay_releases_maintenance_fence_for_git_preflight(snap
     assert events == ["fence", "unfence"]
 
 
-def test_corrupted_replay_does_not_release_maintenance_fence(snapshot, monkeypatch):
-    """A failed replay must remain fail-closed rather than allow DB use."""
+def test_corrupted_replay_quarantines_marker_and_releases_fence_for_main(snapshot, monkeypatch):
+    """No local DB is trusted; new Git MAIN validation must run unfenced."""
     sync, root = snapshot
     sync._begin_startup_install()
     import json
@@ -369,9 +373,10 @@ def test_corrupted_replay_does_not_release_maintenance_fence(snapshot, monkeypat
     events = []
     monkeypatch.setattr(session_module, "quiesce_runtime_db", lambda: events.append("fence"))
     monkeypatch.setattr(session_module, "end_runtime_db_maintenance", lambda: events.append("unfence"))
-    assert not sync._check_interrupted_startup_install()
-    assert events == ["fence"]
-    assert marker.exists()
+    assert sync._check_interrupted_startup_install()
+    assert events == ["fence", "unfence"]
+    assert not marker.exists()
+    assert sync._interrupted_install_review_marker.exists()
 
 
 def test_real_sqlcipher_wal_snapshot_recovers_after_partial_file_swap(workspace):
