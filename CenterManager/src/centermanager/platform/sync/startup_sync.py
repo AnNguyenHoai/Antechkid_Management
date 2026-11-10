@@ -47,17 +47,21 @@ class StartupSynchronization:
         def has_material(root, *, allow_placeholders=False):
             root = Path(root)
             if not root.exists():
-                return False
+                return root.is_symlink()
             if root.is_symlink() or not root.is_dir():
                 return True
-            return any(
-                item.is_symlink() or (
-                    item.is_file() and not (
-                        allow_placeholders and item.name in {'.gitkeep', '.keep'}
-                    )
-                )
-                for item in root.rglob('*')
-            )
+            unreadable = [False]
+            def on_error(_exc):
+                # Unknown means "not fresh", never a reason to stop startup.
+                unreadable[0] = True
+            for current, directories, files in os.walk(root, onerror=on_error):
+                if any((Path(current) / name).is_symlink()
+                       for name in directories):
+                    return True
+                if any(not (allow_placeholders and name in {'.gitkeep', '.keep'})
+                       for name in files):
+                    return True
+            return unreadable[0]
 
         has_repository = (
             self._repo_path.is_symlink() or
