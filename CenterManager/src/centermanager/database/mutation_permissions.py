@@ -16,6 +16,10 @@ def mutation_permissions(table, action, column=None):
         'finance_periods': ('finance.period.manage',),
         'financial_settlements': ('finance.settlement.create', 'finance.settlement.update', 'finance.settlement.confirm', 'finance.settlement.reopen'),
         'tuition_adjustments': ('finance.income.create', 'finance.income.update', 'finance.income.delete'),
+        # Voucher changes are permitted only for Income/Expense editors.
+        # finance.view alone must not authorize INSERT/UPDATE/DELETE.
+        'finance_attachments': ('finance.income.create', 'finance.income.update',
+                                'finance.expense.create', 'finance.expense.update'),
         'users': ('user.' + verb, 'user.manage', 'user.reset_password'),
         'roles': ('role.manage',), 'role_permissions': ('role.manage',),
         'permissions': ('role.manage',),

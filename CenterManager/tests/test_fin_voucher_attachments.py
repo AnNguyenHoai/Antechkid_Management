@@ -104,9 +104,12 @@ def test_limits_type_signature_size_and_duplicates(env, monkeypatch):
             service.add_attachment("EXPENSE", 1, _file(tmp_path, "big.pdf", PDF))
         monkeypatch.setattr(FinanceAttachmentService, "MAX_FILE_BYTES", 5 * 1024 * 1024)
 
-        service.add_attachment("EXPENSE", 1, _file(tmp_path, "a.pdf", PDF))
-        with pytest.raises(FinanceAttachmentValidationError):
-            service.add_attachment("EXPENSE", 1, _file(tmp_path, "a-copy.pdf", PDF))
+        first = service.add_attachment("EXPENSE", 1, _file(tmp_path, "a.pdf", PDF))
+        # FIN-04: a repeated upload with the same digest is an idempotent
+        # retry, not a second metadata row or a user-visible failure.
+        replay = service.add_attachment("EXPENSE", 1, _file(tmp_path, "a-copy.pdf", PDF))
+        assert first.id == replay.id
+        assert service.count_for("EXPENSE", [1]) == {1: 1}
         for index in range(4):
             service.add_attachment("EXPENSE", 1, _file(tmp_path, f"p{index}.png", PNG + bytes([index])))
         with pytest.raises(FinanceAttachmentValidationError):
