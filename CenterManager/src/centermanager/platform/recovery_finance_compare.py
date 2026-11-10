@@ -193,6 +193,15 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     with _immutable_reader(old_path, old_key) as recovery_db:
         with _immutable_reader(main_path, main_key) as main_db:
             findings = compare_finance_connections(recovery_db, main_db)
+            from centermanager.platform.recovery_business_compare import (
+                compare_identity_and_monthly_plans, wallet_movements, outstanding_coverage,
+            )
+            business = compare_identity_and_monthly_plans(recovery_db, main_db)
+            wallets = {
+                "recovery": wallet_movements(recovery_db),
+                "main": wallet_movements(main_db),
+            }
+            debt = outstanding_coverage()
     # Reverify file identities after reading, not just branch OIDs.
     registry.journal.verify_capture(source)
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
@@ -211,6 +220,9 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
             "Không so sánh trực tiếp số dư, kế hoạch học phí tháng hoặc dữ liệu không có idempotency key."
         ),
         "findings": findings,
+        "business_identity_and_plans": business,
+        "wallet_movements": wallets,
+        "outstanding_coverage": debt,
     }
 
 
@@ -253,6 +265,15 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
         with _immutable_reader(recovery_path, old_key) as recovery_db:
             with _immutable_reader(main_path, main_key) as main_db:
                 findings = compare_finance_connections(recovery_db, main_db)
+            from centermanager.platform.recovery_business_compare import (
+                compare_identity_and_monthly_plans, wallet_movements, outstanding_coverage,
+            )
+            business = compare_identity_and_monthly_plans(recovery_db, main_db)
+            wallets = {
+                "recovery": wallet_movements(recovery_db),
+                "main": wallet_movements(main_db),
+            }
+            debt = outstanding_coverage()
     # The snapshot context has reverified the original signed bytes.
     validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
     if encrypted:
@@ -271,6 +292,9 @@ def compare_verified_notice(notices, notice: dict, *, provider, can_view_finance
             "Không nhập lại khoản thu/chi nếu chưa kiểm tra trùng, ví và công nợ."
         ),
         "findings": findings,
+        "business_identity_and_plans": business,
+        "wallet_movements": wallets,
+        "outstanding_coverage": debt,
     }
 
 
