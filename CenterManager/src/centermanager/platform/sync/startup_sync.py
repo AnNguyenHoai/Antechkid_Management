@@ -387,6 +387,16 @@ class StartupSynchronization:
         previous = getattr(self, "_startup_previous_local_oid", None)
         if not previous:
             return
+        if getattr(self._provider, "_startup_review_git_archive", None):
+            # The previous commit may exist ONLY inside the quarantined
+            # repository, not the new shallow MAIN clone. Resetting to it
+            # would violate Git MAIN first or fail for a missing object.
+            logger.warning(
+                "Old Git generation retained in Recovery git-worktrees; "
+                "never restore it over authenticated MAIN"
+            )
+            self._startup_previous_local_oid = None
+            return
         try:
             self._provider._run_git_command(["reset", "--hard", previous])
             if self._provider.get_local_main_commit() != previous:
