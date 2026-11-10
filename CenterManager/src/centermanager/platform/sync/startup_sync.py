@@ -295,12 +295,30 @@ class StartupSynchronization:
             )
             return True
         except (InterruptedInstallError, OSError, RuntimeError):
-            self.recovery_error = (
-                "Interrupted startup installation could not be verified or "
-                "recovered. Preserve runtime and .write-recovery; startup blocked."
+            # A corrupt *old* install marker is evidence, not a license to
+            # overwrite MAIN or to block the user forever. Quarantine only
+            # this small marker with an atomic move; keep every original
+            # startup-replay snapshot untouched. The subsequent MAIN install
+            # still has its own new crash marker and SQLCipher gates.
+            logger.exception(
+                "Old startup-install marker unreadable; quarantine for manual "
+                "review and re-install authenticated Git MAIN"
             )
-            logger.exception("%s", self.recovery_error)
-            return False
+            try:
+                import uuid
+                archived = (marker.parent / "startup-install-review"
+                            / (uuid.uuid4().hex + ".json"))
+                archived.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(marker, archived)
+                self._interrupted_install_review_marker = archived
+                from centermanager.database import session as session_module
+                session_module.end_runtime_db_maintenance()
+                return True
+            except Exception:
+                # Moving the marker itself failed; do not overwrite the only
+                # durable interrupted-install barrier.
+                logger.exception("Cannot safely isolate interrupted-install marker")
+                return False
 
     def _begin_startup_install(self) -> None:
         """Persist original DB/WAL/asset bytes before any live replacement."""
@@ -408,7 +426,8 @@ class StartupSynchronization:
                 logger.warning("Unreadable old Recovery journal; review notification required")
                 document = None
 
-            if document is not None and document.get("status") == "CLEAN":
+            if (document is not None and document.get("status") == "CLEAN"
+                    and not getattr(self, "_interrupted_install_review_marker", None)):
                 try:
                     journal.assert_replaceable()
                     return True
@@ -416,7 +435,8 @@ class StartupSynchronization:
                     logger.warning("CLEAN receipt differs from runtime; use verified MAIN, notify review")
 
             if (document is None and not journal.journal.exists()
-                    and self._initial_main_receipt_allowed):
+                    and self._initial_main_receipt_allowed
+                    and not getattr(self, "_interrupted_install_review_marker", None)):
                 return True
 
             self._review_only_reset_requested = True
