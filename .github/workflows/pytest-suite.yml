@@ -10,6 +10,7 @@ on:
       - main_repos
       - main_coursefee
       - port/main-coursefee-recovery
+      - port/main-coursefee-finance
 
 permissions:
   contents: read
