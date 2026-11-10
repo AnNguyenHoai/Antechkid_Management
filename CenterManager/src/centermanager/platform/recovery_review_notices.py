@@ -131,6 +131,35 @@ class RecoveryReviewNotices:
             return True
         return False
 
+    def covers_legacy_case(self, case: dict) -> bool:
+        """Match a signed RV-03 case to its *own* journal session only.
+
+        Never use 'any reviewed notice' as evidence to hide a different
+        pending case. Malformed or unlinked notices cannot suppress reminders.
+        """
+        session_id = case.get("write_session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return False
+        if not self.root.is_dir():
+            return False
+        for path in self.root.glob("*.json"):
+            if path.name.endswith(".journal.json"):
+                continue
+            try:
+                notice = self.validate_notice(path)
+                source = notice.get("journal_file")
+                if not source:
+                    continue
+                document = json.loads((self.root / source).read_text(
+                    encoding="utf-8"
+                ))
+                if (isinstance(document, dict)
+                        and document.get("session_id") == session_id):
+                    return True
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return False
+
     def acknowledge(self, case_id: str) -> None:
         if not isinstance(case_id, str) or len(case_id) != 64 or any(c not in "0123456789abcdef" for c in case_id):
             raise ValueError("Invalid review ID")
