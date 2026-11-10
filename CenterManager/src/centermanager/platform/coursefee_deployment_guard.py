@@ -1,23 +1,40 @@
-"""Strict deployment identity for the course/session tuition build.
+"""Validate the configured Git database branch, not the application source branch.
 
-Git configuration is machine-portable and may have been copied from another
-CenterManager installation. Check it before clone/fetch/SQLCipher replacement.
-An invalid target is a configuration failure, NEVER a Recovery admission gate.
+The EXE's source lives on `main_coursefee`, but workstations may legitimately
+use an independently provisioned database repository with a branch named
+`main` (or a different valid Git branch). Branch names do not prove the
+database's billing model; Alembic/schema checks enforce that separately.
 """
 from __future__ import annotations
+import re
 
 
 class CourseFeeDeploymentError(ValueError):
-    """Selected Git database branch does not belong to this course-fee build."""
+    """The Git database branch configuration is malformed or unsafe."""
 
 
-COURSEFEE_DATABASE_BRANCH = "main_coursefee"
+# Conservative subset of valid Git ref component names. No URL/path/space
+# injection, shell-looking fragments, or internal collaboration ref prefixes.
+_SAFE_GIT_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 
 
 def validate_coursefee_git_branch(branch: str) -> None:
-    if not isinstance(branch, str) or branch != COURSEFEE_DATABASE_BRANCH:
+    """Reject malformed Git refs, not valid database branch names."""
+    if (
+        not isinstance(branch, str)
+        or len(branch) > 200
+        or not _SAFE_GIT_BRANCH.fullmatch(branch)
+        or branch.startswith(("lock-", "queue-"))
+        or branch.startswith("-")
+        or branch.endswith((".", "/", ".lock"))
+        or branch.startswith(".")
+        or any(segment in ("", ".", "..") or segment.startswith(".")
+               or segment.endswith(".lock") for segment in branch.split("/"))
+        or ".." in branch
+        or "@{" in branch
+    ):
         raise CourseFeeDeploymentError(
-            "Course-fee edition requires an isolated Git DB branch named "
-            "'main_coursefee'. Existing main/main_repos configs must not be "
-            "reused; provision a dedicated branch with a compatible encrypted DB."
+            "Invalid Git database branch in workstation configuration. "
+            "Provide a valid existing branch with the correct encrypted database. "
+            "Database schema and tuition lineage will be validated separately."
         )
