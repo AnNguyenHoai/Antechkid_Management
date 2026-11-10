@@ -170,12 +170,33 @@ def main() -> int:
         review_reset_main = getattr(sync_provider, "_verified_review_main_oid", None)
         # Legacy Recovery may be malformed: it is already archived as raw
         # evidence. Never parse it as active metadata for this new MAIN session.
-        schema_receipt_before = (
-            None if (manual_reset_main is not None or review_reset_main is not None)
-            else startup_journal.inspect()
-        )
+        # The old journal is evidence, never an admission gate for a new
+        # verified MAIN READ. Bootstrap has already preserved unreadable bytes.
+        try:
+            schema_receipt_before = (
+                None if (manual_reset_main is not None or review_reset_main is not None)
+                else startup_journal.inspect()
+            )
+        except Exception:
+            logger.warning(
+                "[STARTUP] Prior Recovery journal unreadable; continue with "
+                "authenticated Git MAIN and retain saved review evidence"
+            )
+            schema_receipt_before = None
+        # A Recovery receipt may differ only because of exports, old attachment
+        # isolation, or other review evidence. Never let this advisory drift
+        # veto READ of the freshly authenticated authoritative Git MAIN.
+        # Only a separately verified CLEAN receipt is eligible for refreshing.
+        schema_receipt_verified = False
         if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
-            startup_journal.assert_replaceable()
+            try:
+                startup_journal.assert_replaceable()
+                schema_receipt_verified = True
+            except Exception:
+                logger.warning(
+                    "[STARTUP] Prior CLEAN receipt differs from installed MAIN; "
+                    "retain Recovery evidence, do not treat it as WRITE authority"
+                )
 
         if bootstrap._offline_read:
             # A cached READ must never implicitly stamp/migrate accepted data.
@@ -183,7 +204,25 @@ def main() -> int:
             verify_runtime_schema_readonly()
             logger.info("[STARTUP] Offline READ schema verified without mutation")
         else:
-            ensure_schema()
+            from centermanager.database.migration import verify_runtime_schema_readonly
+            try:
+                # A Git MAIN DB already at the bundled head needs NO migration
+                # and must never enter a Recovery-gated DML/DDL permit.
+                verify_runtime_schema_readonly()
+                logger.info("[STARTUP] Git MAIN schema already at head (read-only)")
+            except RuntimeError as exc:
+                if not str(exc).startswith("Database migration revision mismatch after upgrade:"):
+                    # Wrong tuition product, ambiguous Alembic revision or a
+                    # broken physical schema must NOT be auto-stamped/repaired.
+                    raise
+                from centermanager.database.mutation_authority import (
+                    verified_authoritative_startup_migration,
+                )
+                # Scoped, authenticated MAIN migration. Pending Recovery logs
+                # are not a source of database authority.
+                with verified_authoritative_startup_migration(sync_provider):
+                    ensure_schema()
+                logger.info("[STARTUP] Verified Git MAIN schema migrated")
             logger.info("[STARTUP] Schema ensured")
 
         # A first-time installation can legitimately migrate the freshly
@@ -216,10 +255,18 @@ def main() -> int:
             startup_journal.record_verified_fresh_install(
                 provider=sync_provider, accepted_main=fresh_main
             )
-        elif schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
-            startup_journal.refresh_verified_bootstrap_migration(
-                provider=sync_provider, before=schema_receipt_before
-            )
+        elif schema_receipt_verified:
+            try:
+                startup_journal.refresh_verified_bootstrap_migration(
+                    provider=sync_provider, before=schema_receipt_before
+                )
+            except Exception:
+                # A receipt refresh is an optional WRITE gate, not an
+                # admission requirement for authoritative Git MAIN READ.
+                logger.exception(
+                    "[STARTUP] Optional CLEAN receipt refresh unavailable; "
+                    "continue READ, leave WRITE gated by existing authority"
+                )
 
         permission_service = PermissionService(session_factory)
 

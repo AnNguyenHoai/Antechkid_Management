@@ -73,6 +73,50 @@ def runtime_install_permit():
             _local.install_path = previous
 
 
+@contextmanager
+def verified_authoritative_startup_migration(provider):
+    """Narrow permit for bundled Alembic on an authenticated, installed Git MAIN.
+
+    Requires exact bytes from clean Git HEAD, matching fetched and LIVE
+    remote commit, and no WAL or active editor. Never authorizes publication,
+    restoration, general SQL or a different local database. The exception for
+    stale Recovery metadata exists ONLY inside this call's migration scope.
+    """
+    from centermanager.platform.write_recovery import WriteRecoveryJournal
+    journal = WriteRecoveryJournal()
+    gate = gate_for()
+    db = runtime_path()
+    repo_db = journal.repository / "database" / "center.db"
+    with gate.lock:
+        if not gate.closed or gate.transaction is not None:
+            raise MutationAuthorityError("Startup migration cannot race an editor")
+        if getattr(_local, "startup_main_migration_path", None) is not None:
+            raise MutationAuthorityError("Nested startup migration is forbidden")
+        if not db.is_file() or not repo_db.is_file() or journal._wal_pending():
+            raise MutationAuthorityError("Verified MAIN database/WAL not ready for migration")
+        def digest(path):
+            result = hashlib.sha256()
+            with path.open("rb") as source:
+                for block in iter(lambda: source.read(1048576), b""):
+                    result.update(block)
+            return result.digest()
+        if digest(db) != digest(repo_db):
+            raise MutationAuthorityError("Installed runtime differs from authoritative MAIN DB")
+        if provider is None or Path(provider._repo_path).resolve() != journal.repository.resolve():
+            raise MutationAuthorityError("Authenticated Git provider repository mismatch")
+        local = provider.get_local_main_commit()
+        fetched = provider.get_fetched_remote_main_commit()
+        observed = provider.observe_remote_main_commit()
+        if (not local or len(local) != 40 or local != fetched or local != observed
+                or provider._run_git_command(["status", "--porcelain", "--untracked-files=all"]).strip()):
+            raise MutationAuthorityError("Authoritative Git MAIN identity is not verified")
+        _local.startup_main_migration_path = db
+        try:
+            yield
+        finally:
+            _local.startup_main_migration_path = None
+
+
 def runtime_path() -> Path:
     from centermanager.database.engine import get_database_path
     return get_database_path().resolve()
@@ -334,7 +378,11 @@ def system_mutation_permit(kind, *, path=None):
                          and runtime_db_maintenance_active())
             if gate.transaction is not None and not installed:
                 raise MutationAuthorityError("Startup maintenance cannot run after collaboration is bound")
-            if is_runtime_path(path) and not installed:
+            trusted_main = (
+                kind == 'migration'
+                and getattr(_local, 'startup_main_migration_path', None) == path
+            )
+            if is_runtime_path(path) and not installed and not trusted_main:
                 WriteRecoveryJournal().assert_replaceable()
         previous = getattr(_local, 'maintenance', None)
         _local.maintenance = (path, uuid.uuid4().hex, kinds[kind], kind)
