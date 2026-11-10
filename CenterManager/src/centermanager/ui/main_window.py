@@ -321,12 +321,42 @@ class MainWindow(QMainWindow):
                     "Đã kiểm tra: không nhắc lại case này. "
                     "Để lần sau: sẽ tiếp tục nhắc khi khởi động."
                 )
+                report_button = dialog.addButton("Xuất báo cáo thao tác (.txt)", QMessageBox.ButtonRole.ActionRole)
                 open_button = dialog.addButton("Mở thư mục log", QMessageBox.ButtonRole.ActionRole)
                 reviewed_button = dialog.addButton("Đã kiểm tra", QMessageBox.ButtonRole.AcceptRole)
                 skip_button = dialog.addButton("Để lần sau", QMessageBox.ButtonRole.RejectRole)
                 dialog.setDefaultButton(skip_button)
                 dialog.exec()
                 choice = dialog.clickedButton()
+                if choice is report_button:
+                    from PySide6.QtWidgets import QFileDialog
+                    from centermanager.database.encryption import DatabaseKeyStore
+                    from centermanager.platform.recovery_readable_report import build_notice_report
+                    name, _ = QFileDialog.getSaveFileName(
+                        self, "Xuất Recovery để đối chiếu",
+                        "recovery-review-" + item["id"][:12] + ".txt",
+                        "Văn bản UTF-8 (*.txt)"
+                    )
+                    if name:
+                        try:
+                            # Plaintext is created only on explicit user export.
+                            report = build_notice_report(
+                                queue, item, encryption_key=DatabaseKeyStore().load()
+                            )
+                            Path(name).write_text(report, encoding="utf-8")
+                            QMessageBox.information(
+                                self, "Recovery",
+                                "Đã xuất danh mục thao tác. Báo cáo có thể thiếu và "
+                                "không chứng minh thao tác nào chưa có trên MAIN."
+                            )
+                        except Exception:
+                            logger.exception("Recovery human-readable report export failed")
+                            QMessageBox.warning(
+                                self, "Recovery",
+                                "Không thể giải mã/xác minh sự kiện Recovery. "
+                                "Backup gốc vẫn được giữ nguyên; chưa xuất báo cáo."
+                            )
+                    continue
                 if choice is open_button:
                     QDesktopServices.openUrl(
                         QUrl.fromLocalFile(str(Path(queue.journal.root)))
