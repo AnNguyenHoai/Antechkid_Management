@@ -256,6 +256,18 @@ class BootstrapManager:
                     )
                     return False
 
+        # This build is the course/session tuition product. A restored
+        # workstation config must never silently bind it to another Git
+        # database branch (especially main_repos/monthly tuition).
+        from centermanager.platform.coursefee_deployment_guard import (
+            validate_coursefee_git_branch, CourseFeeDeploymentError,
+        )
+        try:
+            validate_coursefee_git_branch(git_config.branch)
+        except CourseFeeDeploymentError as exc:
+            logger.error("[BOOTSTRAP] Course-fee database destination rejected: %s", exc)
+            return False
+
         provider = GitSynchronizationProvider(
             repo_path=paths.runtime_root / "repository",
             repository_url=git_config.repository_url,

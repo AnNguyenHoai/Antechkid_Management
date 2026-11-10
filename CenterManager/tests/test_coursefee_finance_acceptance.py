@@ -123,7 +123,8 @@ def test_fin04_failed_pending_upload_is_retained_for_retry(qtbot, tmp_path):
 
 def test_coursefee_fin03_migration_and_ui_command_keys_exist():
     root = Path(__file__).resolve().parents[1]
-    migration = (root / "migrations/versions/1e10a046_coursefee_finance_submission_keys.py").read_text(encoding="utf-8")
+    migration = (root / "migrations/versions/cf26a001_coursefee_finance_submission_keys.py").read_text(encoding="utf-8")
+    assert 'revision = "cf26a001"' in migration
     assert 'down_revision = "1e10a045"' in migration
     assert '"idempotency_key"' in migration
     assert "unique=True" in migration
