@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main_repos
+      - main_coursefee
 
 permissions:
   contents: read
