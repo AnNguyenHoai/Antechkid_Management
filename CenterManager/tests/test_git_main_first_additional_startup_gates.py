@@ -41,6 +41,32 @@ def test_dirty_git_worktree_moved_whole_before_main_reset(workspace):
     assert archive.is_dir()
 
 
+def test_clean_git_fast_forward_does_not_archive_redundant_worktree(workspace, tmp_path):
+    w = workspace
+    import subprocess
+    import shutil
+    repo = w.journal.repository
+    other = tmp_path / "independent-git-writer"
+    subprocess.run(
+        ["git", "clone", "-b", "main", str(w.remote), str(other)],
+        check=True, capture_output=True,
+    )
+    git(other, "config", "user.name", "Independent Writer")
+    git(other, "config", "user.email", "synthetic@example.invalid")
+    (other / "remote-only.txt").write_text("accepted", encoding="utf-8")
+    git(other, "add", "remote-only.txt")
+    git(other, "commit", "-m", "external remote MAIN change")
+    git(other, "push", "origin", "main")
+    assert w.provider.fetch()
+    accepted = w.provider.get_fetched_remote_main_commit()
+    assert accepted != w.base
+
+    assert w.provider.reset_verified_main_for_review(accepted)
+    assert git(repo, "rev-parse", "HEAD") == accepted
+    assert (repo / "remote-only.txt").read_text(encoding="utf-8") == "accepted"
+    assert not hasattr(w.provider, "_startup_review_git_archive")
+
+
 def test_review_startup_assets_move_without_copying_deep_local_files(tmp_path, monkeypatch):
     root = tmp_path / "runtime"
     old = root / "Attachments" / "Employees"
