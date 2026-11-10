@@ -8,6 +8,8 @@ point independently checks the remote and local Git MAIN commit before reads.
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from collections import Counter
 from contextlib import contextmanager
 from decimal import Decimal
@@ -187,6 +189,11 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
     with _immutable_reader(old_path, old_key) as recovery_db:
         with _immutable_reader(main_path, main_key) as main_db:
             findings = compare_finance_connections(recovery_db, main_db)
+    # Reverify file identities after reading, not just branch OIDs.
+    registry.journal.verify_capture(source)
+    validate_database_artifact(main_path, encryption_required=encrypted, key=main_key)
+    if encrypted:
+        validate_identity(main_path, main_key)
     if provider.get_local_main_commit() != local or provider.observe_remote_main_commit() != observed:
         raise ValueError("Git MAIN changed during comparison: discard result")
     return {
@@ -206,3 +213,22 @@ def compare_verified_case(registry, case_id: str, *, provider, can_view_finance:
 def render_report_json(report: dict) -> str:
     """Explicitly exported sensitive finance data; caller enforces permission."""
     return json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def write_secure_report(destination: Path, content: str) -> None:
+    """User-triggered atomic export; no implicit temporary plaintext at startup.
+
+    File system ACLs are platform-dependent: caller must show the privacy warning.
+    """
+    target = Path(destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name("." + target.name + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        fd = os.open(str(temp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, target)
+    finally:
+        temp.unlink(missing_ok=True)
