@@ -170,10 +170,19 @@ def main() -> int:
         review_reset_main = getattr(sync_provider, "_verified_review_main_oid", None)
         # Legacy Recovery may be malformed: it is already archived as raw
         # evidence. Never parse it as active metadata for this new MAIN session.
-        schema_receipt_before = (
-            None if (manual_reset_main is not None or review_reset_main is not None)
-            else startup_journal.inspect()
-        )
+        # The old journal is evidence, never an admission gate for a new
+        # verified MAIN READ. Bootstrap has already preserved unreadable bytes.
+        try:
+            schema_receipt_before = (
+                None if (manual_reset_main is not None or review_reset_main is not None)
+                else startup_journal.inspect()
+            )
+        except Exception:
+            logger.warning(
+                "[STARTUP] Prior Recovery journal unreadable; continue with "
+                "authenticated Git MAIN and retain saved review evidence"
+            )
+            schema_receipt_before = None
         # A Recovery receipt may differ only because of exports, old attachment
         # isolation, or other review evidence. Never let this advisory drift
         # veto READ of the freshly authenticated authoritative Git MAIN.
