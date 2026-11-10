@@ -32,6 +32,12 @@ def _db():
         "origin_adjustment_id INTEGER, linked_income_id INTEGER, kind TEXT, "
         "amount REAL, adjustment_date TEXT, wallet TEXT)"
     )
+    connection.execute(
+        "CREATE TABLE monthly_tuition_outcomes (id INTEGER PRIMARY KEY, "
+        "idempotency_key TEXT, enrollment_id INTEGER, session_id INTEGER, "
+        "outcome TEXT, replacement_session_id INTEGER, revision INTEGER, "
+        "effective_date TEXT)"
+    )
     return connection
 
 
@@ -83,7 +89,7 @@ def test_missing_and_duplicate_idempotency_are_unknown():
 def test_missing_schema_is_unknown_never_not_found():
     old, main = _db(), sqlite3.connect(":memory:")
     result = compare_finance_connections(old, main)
-    assert len(result) == 3
+    assert len(result) == 4
     assert all(item["status"] == "UNKNOWN" for item in result)
 
 
@@ -99,10 +105,27 @@ def test_explicit_file_export_and_no_automatic_plaintext(tmp_path):
     output = tmp_path / "finance-compare.json"
     assert not output.exists()
     write_secure_report(output, render_report_json({
-        "coverage": "PARTIAL_FINANCE_KEYED_TRANSACTIONS_ONLY",
+        "coverage": "PARTIAL_KEYED_FINANCE_AND_MONTHLY_OUTCOMES_ONLY",
         "findings": [{"status": "UNKNOWN"}],
     }))
     data = json.loads(output.read_text(encoding="utf-8"))
     assert data["findings"][0]["status"] == "UNKNOWN"
     assert data["coverage"].startswith("PARTIAL")
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_monthly_tuition_outcome_identical_by_idempotency():
+    old, main = _db(), _db()
+    old.execute(
+        "INSERT INTO monthly_tuition_outcomes "
+        "(id,idempotency_key,enrollment_id,session_id,outcome,revision,effective_date) "
+        "VALUES (1,'outcome-abc',9,77,'BILLABLE',1,'2026-11-09')"
+    )
+    main.execute(
+        "INSERT INTO monthly_tuition_outcomes "
+        "(id,idempotency_key,enrollment_id,session_id,outcome,revision,effective_date) "
+        "VALUES (99,'outcome-abc',9,77,'BILLABLE',1,'2026-11-09')"
+    )
+    result = [x for x in compare_finance_connections(old, main)
+              if x["table"] == "monthly_tuition_outcomes"]
+    assert result[0]["status"] == "PRESENT_IDENTICAL"
