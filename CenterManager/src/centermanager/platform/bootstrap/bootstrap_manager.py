@@ -275,9 +275,9 @@ class BootstrapManager:
                 "CourseFee repository configuration",
                 "This CourseFee build requires the dedicated 'main_coursefee' "
                 "database branch. The workstation is configured for "
-                f"'{git_config.branch}'.\\n\\n"
+                f"'{git_config.branch}'.\n\n"
                 "No database has been changed. Import an administrator-issued "
-                "CourseFee provisioning bundle now?\\n\\n"
+                "CourseFee provisioning bundle now?\n\n"
                 "Do not rename or stamp the old database's Alembic revision.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
