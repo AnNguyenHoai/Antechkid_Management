@@ -168,7 +168,16 @@ def test_oversized_rollback_never_blocks_and_never_gets_signed(tmp_path, monkeyp
 
     notices, notice, notice_file, rollback = _data(tmp_path)
     db = rollback / "center.db"
-    sqlite3.connect(db).close()
+    # sqlite3.connect(...).close() alone leaves a zero-byte file. Persist one
+    # page so the fixture actually exceeds the deliberately tiny size budget.
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute("CREATE TABLE recovery_evidence (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO recovery_evidence VALUES ('test')")
+        connection.commit()
+    finally:
+        connection.close()
+    assert db.stat().st_size > 1
     monkeypatch.setattr(evidence, "_MAX_STARTUP_PROOF_BYTES", 1)
     original = db.read_bytes()
     with pytest.raises(ValueError, match="bounded startup proof budget"):
