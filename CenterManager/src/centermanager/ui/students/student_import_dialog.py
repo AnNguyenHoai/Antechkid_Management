@@ -71,7 +71,7 @@ class StudentImportDialog(QDialog):
             self,
             "Select Excel File",
             "",
-            "Excel Files (*.xlsx *.xls)"
+            "Excel Files (*.xlsx)"
         )
         if file_path:
             self._file_path = Path(file_path)
@@ -83,6 +83,26 @@ class StudentImportDialog(QDialog):
     def _import(self) -> None:
         if not self._file_path or not self._file_path.exists():
             QMessageBox.warning(self, "Error", "File does not exist.")
+            return
+
+        try:
+            total, validation_errors = self._service.preview_from_excel(self._file_path)
+            if validation_errors:
+                QMessageBox.warning(self, "Invalid import file",
+                    "\\n".join(validation_errors[:15]))
+                return
+            answer = QMessageBox.question(
+                self, "Confirm Student import",
+                f"{total} students will be imported. Existing Student codes will be skipped; "
+                "no Enrollment or tuition data will be created. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        except Exception as exc:
+            logger.exception("Student import preview failed")
+            QMessageBox.critical(self, "Invalid import file", str(exc))
             return
 
         self.import_btn.setEnabled(False)
