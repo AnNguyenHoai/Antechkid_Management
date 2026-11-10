@@ -112,6 +112,25 @@ class RecoveryReviewNotices:
                 result.append(notice)
         return result
 
+    def has_recorded_notices(self) -> bool:
+        """A validated modern notice supersedes an old duplicate popup.
+
+        Retain legacy case history in the Recovery menu; never auto-ack or
+        delete a signed legacy case merely because the user reviewed the
+        corresponding log in the newer UI.
+        """
+        if not self.root.is_dir():
+            return False
+        for path in self.root.glob("*.json"):
+            if path.name.endswith(".journal.json"):
+                continue
+            try:
+                self.validate_notice(path)
+            except Exception:
+                continue
+            return True
+        return False
+
     def acknowledge(self, case_id: str) -> None:
         if not isinstance(case_id, str) or len(case_id) != 64 or any(c not in "0123456789abcdef" for c in case_id):
             raise ValueError("Invalid review ID")
