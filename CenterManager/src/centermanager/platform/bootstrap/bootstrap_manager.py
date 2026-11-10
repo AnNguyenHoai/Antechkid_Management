@@ -265,7 +265,21 @@ class BootstrapManager:
         try:
             validate_coursefee_git_branch(git_config.branch)
         except CourseFeeDeploymentError as exc:
+            # This is a destination identity error, not a Recovery failure.
+            # Never fetch or install the old branch's DB. Let the operator
+            # supply a destination-bound bundle for the isolated product.
             logger.error("[BOOTSTRAP] Course-fee database destination rejected: %s", exc)
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                None,
+                "CourseFee repository configuration",
+                "This CourseFee build requires the dedicated 'main_coursefee' "
+                "database branch. The workstation is configured for "
+                f"'{git_config.branch}'.\\n\\n"
+                "No database was changed. Import an administrator-issued "
+                "CourseFee provisioning bundle to select the correct database. "
+                "Do not rename or stamp the old database's Alembic revision.",
+            )
             return False
 
         provider = GitSynchronizationProvider(
