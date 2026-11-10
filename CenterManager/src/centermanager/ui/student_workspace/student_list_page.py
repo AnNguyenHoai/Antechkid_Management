@@ -634,12 +634,59 @@ class StudentListPage(WorkspaceBase):
             self.refresh()
             self._feedback.success("Student import completed", key="student-import")
 
+    def _students_matching_export_filters(self):
+        """Export the whole filtered result, not just the visible server page."""
+        if self._advanced_filter_active and self._advanced_filter_criteria is not None:
+            return list(self._filtered)
+        criteria = self._toolbar_filter_values()
+        common = dict(
+            search_text=self.search_bar.text().strip(),
+            status=criteria.status,
+            enrollment_status=criteria.enrollment_status,
+            assessment_status=criteria.assessment_status,
+            per_page=250,
+            sort_by=self._sort_key or "student_code",
+            ascending=self._sort_asc,
+        )
+        students = []
+        total_expected = None
+        page = 1
+        while True:
+            rows, total = self._student_service.search_students_page(page=page, **common)
+            if total_expected is None:
+                total_expected = total
+            elif total != total_expected:
+                raise RuntimeError("Student result set changed during export; retry.")
+            students.extend(rows)
+            if len(students) >= total_expected:
+                break
+            if not rows:
+                raise RuntimeError("Student result set changed during export; retry.")
+            page += 1
+        if len(students) != total_expected or len({s.id for s in students}) != len(students):
+            raise RuntimeError("Student result set changed during export; retry.")
+        return students
+
     def export_students(self) -> None:
-        operation_id = "student-export-all"
+        from PySide6.QtWidgets import QInputDialog
+        modes = ("Export filtered (Excel)", "Export all ACTIVE (Excel)", "Export selected (CSV)")
+        mode, accepted = QInputDialog.getItem(self, "Export students", "Export scope:", modes, 0, False)
+        if not accepted:
+            return
+        operation_id = "student-export"
         if not self._feedback.begin_operation(operation_id, "Exporting students…"):
             return
         try:
-            file_path = self._export_service.export_all_active()
+            if mode == modes[0]:
+                file_path = self._export_service.export_excel(self._students_matching_export_filters())
+            elif mode == modes[1]:
+                file_path = self._export_service.export_all_active()
+            else:
+                if not self._selected_ids:
+                    raise ValueError("Select at least one student before exporting selected rows.")
+                file_path = self._export_service.export_csv(
+                    [self._student_service.get_student(i) for i in self._selected_ids]
+                )
             self._feedback.finish_operation(operation_id)
             self._feedback.success(f"Students exported to {file_path}", key="student-export")
         except Exception as exc:
