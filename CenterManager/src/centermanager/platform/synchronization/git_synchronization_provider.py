@@ -1561,15 +1561,18 @@ class GitSynchronizationProvider(SynchronizationProvider):
         return bool(self._repository_url)
 
     def reset_verified_main_for_review(self, accepted_oid: str) -> bool:
-        """Startup-only Git MAIN reset when Recovery requires manual review.
+        """Adopt authenticated Git MAIN without discarding unpublished Git work.
 
-        Requires a fresh exact remote observation and a closed local writer.
-        No local changes are ever pushed or merged. The old runtime DB/WAL are
-        moved to startup-rollbacks by StartupSynchronization, not published.
+        An unaccepted worktree (staged, unstaged, untracked, or local-only
+        commits) is atomically renamed to a separate same-volume archive,
+        then a pristine worktree is cloned from MAIN. This is a rename, not a
+        recursive copy of arbitrarily deep paths. Never push old work.
         """
         import re
         import subprocess
+        import uuid
         from centermanager.database.mutation_authority import gate_for
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
 
         if not re.fullmatch(r"[0-9a-f]{40}", accepted_oid or ""):
             raise RuntimeError("Invalid authoritative MAIN revision.")
@@ -1583,14 +1586,48 @@ class GitSynchronizationProvider(SynchronizationProvider):
             if not self._git_executable:
                 raise RuntimeError("Git is unavailable for startup reset.")
             with self._git_command_lock:
-                for args in (["reset", "--hard", accepted_oid], ["clean", "-fd"]):
+                status = subprocess.run(
+                    [self._git_executable, "status", "--porcelain", "-z",
+                     "--untracked-files=all"],
+                    cwd=str(self._repo_path), capture_output=True,
+                    env=self._get_env(), check=False, timeout=60,
+                )
+                if status.returncode != 0:
+                    raise RuntimeError("Cannot determine old Git worktree integrity.")
+
+                local_oid = self.get_local_main_commit()
+                if status.stdout or local_oid != accepted_oid:
+                    # Move the complete old repository (including .git object
+                    # history and untracked files) before any destructive
+                    # Git operation. Avoid WinError 206 from copytree.
+                    old = self._repo_path
+                    if old.is_symlink() or not old.is_dir():
+                        raise RuntimeError("Cannot archive unsafe old Git repository.")
+                    target = (WriteRecoveryJournal().root / "git-worktrees"
+                              / uuid.uuid4().hex)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(old, target)
+                    self._startup_review_git_archive = str(target)
+                    try:
+                        if not self.clone(
+                                progress_callback=None, review_only_startup=True):
+                            raise RuntimeError("Cannot clone verified MAIN into new worktree.")
+                        if (self.get_local_main_commit() != accepted_oid
+                                or self.observe_remote_main_commit() != accepted_oid):
+                            raise RuntimeError("Git MAIN changed during clean clone.")
+                    except Exception:
+                        # The old repository is never deleted and is NOT
+                        # silently promoted over a failed new Git clone.
+                        logger.exception("Git MAIN clone failed; original worktree preserved")
+                        raise
+                else:
                     result = subprocess.run(
-                        [self._git_executable, *args],
+                        [self._git_executable, "reset", "--hard", accepted_oid],
                         cwd=str(self._repo_path), capture_output=True,
                         env=self._get_env(), check=False, timeout=60,
                     )
                     if result.returncode != 0:
-                        raise RuntimeError("Could not reset to authenticated Git MAIN.")
+                        raise RuntimeError("Could not reset clean worktree to MAIN.")
         if (self.get_local_main_commit() != accepted_oid
                 or self.observe_remote_main_commit() != accepted_oid):
             raise RuntimeError("Remote MAIN changed during startup reset.")
