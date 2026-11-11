@@ -64,8 +64,13 @@ def install_git_output_safety(provider_cls: Any) -> None:
         if args and args[0] in {"reset", "merge", "pull", "checkout", "clean", "rebase"}:
             from pathlib import Path
             if Path(cwd).resolve() == self._repo_path.resolve():
-                from centermanager.platform.write_recovery import require_replaceable
-                require_replaceable()
+                from centermanager.database.mutation_authority import gate_for
+                gate = gate_for()
+                with gate.lock:
+                    if not gate.closed:
+                        raise RuntimeError(
+                            "Active WRITE editor prevents Git worktree replacement"
+                        )
         if env is None:
             env = self._get_env()
 
