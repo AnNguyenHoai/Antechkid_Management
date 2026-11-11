@@ -474,13 +474,36 @@ class SessionDetailDialog(QDialog):
             or (current.actual_date or current.scheduled_date) > get_clock().today()
         ):
             return
+        # Attendance and Session completion remain independent. Explicitly
+        # warn if the roster still contains unmarked students: the existing
+        # enrollment billing policy may bill missing Attendance on completion.
+        try:
+            overview = self._attendance_service.get_session_attendance_overview(
+                self._session_id
+            )
+        except Exception as exc:
+            logger.exception("Cannot verify attendance coverage before completion")
+            QMessageBox.warning(
+                self, "Chưa xác minh điểm danh",
+                "Không thể kiểm tra danh sách học sinh chưa điểm danh. "
+                "Chưa chuyển Session sang Completed.\\n" + str(exc),
+            )
+            return
+        unmarked = int(overview.get("Unmarked", 0))
+        warning = (
+            f"\\n\\n⚠ Có {unmarked} học sinh chưa điểm danh. "
+            "Theo chính sách hiện tại, thiếu điểm danh vẫn có thể bị tính phí. "
+            "Vui lòng kiểm tra Attendance trước khi xác nhận."
+            if unmarked else ""
+        )
         answer = QMessageBox.question(
             self,
             "Xác nhận hoàn thành buổi học",
             f"Xác nhận buổi #{current.session_number} đã được tổ chức "
             "và kết thúc thực tế?\\n\\n"
             "Sau khi Completed, hệ thống sẽ tính học phí theo "
-            "chính sách của từng Enrollment. Không tự thay đổi điểm danh.",
+            "chính sách của từng Enrollment. Không tự thay đổi điểm danh."
+            + warning,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
