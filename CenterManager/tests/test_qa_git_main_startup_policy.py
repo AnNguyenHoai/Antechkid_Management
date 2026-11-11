@@ -262,6 +262,14 @@ def test_startup_copy_failure_after_db_install_does_not_complete(tmp_path, monke
     startup._runtime_manifest_path = root / "manifest.json"
     startup._metadata_dir = root / "metadata"
     startup._paths = SimpleNamespace(attachment_dir=root / "Attachments")
+    # This fixture isolates the attachment fault after MAIN has been
+    # independently authenticated; synthesize the exact accepted OID.
+    startup._accepted_startup_main_oid = "a" * 40
+    startup._provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: "a" * 40,
+        observe_remote_main_commit=lambda: "a" * 40,
+        get_local_main_commit=lambda: "a" * 40,
+    )
     startup._install_authoritative_database_atomically = lambda source: old_db.write_bytes(source.read_bytes()) or True
     startup._sync_employee_attachments_from_repository = lambda: (_ for _ in ()).throw(OSError("synthetic attachment copy failure"))
     assert startup._apply_runtime_database() is False
