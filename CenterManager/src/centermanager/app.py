@@ -254,6 +254,21 @@ def main() -> int:
                 "for READ and independently authorized WRITE"
             )
 
+        if not bootstrap._offline_read:
+            # Independent cached-READ provenance: never a Recovery receipt,
+            # WRITE grant or user-review state. A failed optional cache write
+            # cannot interrupt authenticated online work.
+            try:
+                from centermanager.platform.sync.offline_main_receipt import (
+                    record_authenticated_main,
+                )
+                record_authenticated_main(sync_provider, paths)
+            except Exception:
+                logger.exception(
+                    "Independent offline MAIN cache could not be recorded; "
+                    "online MAIN/WRITE admission remains independent"
+                )
+
         permission_service = PermissionService(session_factory)
 
         # Credential verification happens before collaboration identity exists,
