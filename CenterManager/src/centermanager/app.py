@@ -99,10 +99,12 @@ def _degrade_startup_to_verified_read(bootstrap, sync_provider, reason: str) -> 
     Caller MUST first complete authenticated Git MAIN/SQLCipher installation.
     This does not bypass schema verification, Git integrity or credential gates.
     """
-    from centermanager.platform.sync.offline_read_state import set_offline_read
+    from centermanager.platform.sync.offline_read_state import (
+        protect_read_only_for_process,
+    )
 
     bootstrap._offline_read = True
-    set_offline_read(True)
+    protect_read_only_for_process()
     sync_provider._startup_recovery_receipt_warning = True
     logger.warning(
         "[STARTUP] Recovery receipt unavailable; protected READ-only mode: %s",
