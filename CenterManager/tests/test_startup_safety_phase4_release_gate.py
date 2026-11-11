@@ -68,3 +68,14 @@ def test_build_script_verifies_package_before_archive():
     assert '"migration_sha256": migration_digest(PROJECT_ROOT)' in source
     assert "--add-data" in source
     assert '"migrations"' in source
+
+
+def test_build_rejects_dirty_source_before_pyinstaller_runs():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "build_release.py").read_text(encoding="utf-8")
+    main = source.split("def main() -> None:", 1)[1]
+    assert "assert_clean_source_checkout(source_commit)" in main
+    assert main.index("assert_clean_source_checkout(source_commit)") < main.index(
+        "executable = build_executable()"
+    )
+    assert '["git", "status", "--porcelain", "--untracked-files=all"]' in source
