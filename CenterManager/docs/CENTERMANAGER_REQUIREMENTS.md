@@ -1,7 +1,7 @@
 # CENTERMANAGER — PRODUCT & SYSTEM REQUIREMENTS (CANONICAL INDEX)
 
-**Document ID:** CM-REQ | **Version:** 1.0 | **Updated:** 2026-11-11
-**Source baseline:** `main_coursefee` @ `cd61814c03c4224e54b51cf7fa8a57fd6db3b43e` (includes PR #651, #652, #653).
+**Document ID:** CM-REQ | **Version:** 1.1 | **Updated:** 2026-11-11
+**Verified pre-hardening baseline:** `main_coursefee` @ `1ea1f8a1be902d524825a24ea9fa9193c362830d` (includes PR #651–#656). **Hardening phase changes:** follow linked PRs; verify actual HEAD and EXE manifest before deployment.
 **Product:** AnTechKids CenterManager — Windows portable desktop; **current product: course-based tuition**.
 **Paired document:** [CENTERMANAGER_BUSINESS_WORKFLOWS.md](CENTERMANAGER_BUSINESS_WORKFLOWS.md).
 
@@ -171,6 +171,21 @@
 7. For high-impact domains run real EXE UAT on isolated copy of SQLCipher DB; verify login, READ, Start Editing, Finish Editing and subsequent restart.
 8. Update these **two files in the same PR** if the accepted requirement/workflow actually changes. Include IDs and state `confirmed`, `code-observed`, `verify` or `proposed`; do not silently rewrite older approved decisions.
 9. A PR is complete only after required CI, review, manual acceptance and human authorization. No merging speculative behavior to overcome a failed startup.
+
+## 9A. Startup reliability acceptance contract (2026-11-11, approved hardening scope)
+
+| ID | Requirement | Rejection vs advisory outcome |
+| --- | --- | --- |
+| START-001 | Exact remote DB Git MAIN OID, SQLCipher key, signed identity/generation and real Alembic physical schema remain mandatory before usable READ. Source `main_coursefee` remains independent from database branch `main`. | **Fail closed** when proof is missing; never trust local unaccepted database. |
+| START-002 | Old unsent DB, WAL/SHM/journal, assets or Recovery evidence must survive rejected/uncertain installs and interruption. Backup capture/verification failures before install must not be bypassed. | Abort unsafe replacement, keep originals and pending recovery marker. |
+| START-003 | After accepted MAIN DB is installed and sessions refreshed, failure removing **obsolete rollback copies** may be logged and deferred; it does not invalidate the accepted data. Never delete unverified evidence or claim WRITE authorization from cleanup. | Continue verified READ; preserve locked stale backup for later manual cleanup. |
+| START-004 | Recovery review/receipt failures are **not automatic publication rights**. On a failed pre-schema Recovery check after authenticated Git MAIN, enforce readonly schema validation and deny WRITE; if schema incompatible, refuse login. On post-schema receipt failure, degrade to verified READ and deny WRITE. The Recovery failure sets a **process-lifetime monotonic READ-only latch**: background Git reconnection or `set_offline_read(False)` must never clear it; only a fresh fully verified startup may allow WRITE again. | READ permitted only when independent DB/schema proofs succeed; `offline_read_active` fences Start Editing. |
+| START-005 | Frozen EXE migration assets are bundled, release manifest records full source SHA and deterministic migration tree SHA256; a packaging gate rejects mismatched assets, missing Git/EXE or embedded runtime secrets. | Fail packaging before ZIP; this **does not replace** runtime SQLCipher and EXE UAT. |
+| START-006 | Release acceptance requires 3 Windows CI shards PASS; clean and existing installation on copied encrypted DB; wrong key/identity, interrupted startup, locked backup, long Vietnamese path, invalid receipt, offline READ; Start/Finish Editing and restart. | **Task stays OPEN** until evidence for each criterion is attached. CI green alone is insufficient. |
+
+**Preservation rule:** the hardening PRs must not modify `migrations/`, database schema/contents, `database/artifact_identity.py`, DB source-of-truth branch, Git CAS/write locking, tuition formulas or archived financial history. Corrections beyond this scope need a separate user-approved architecture decision.
+
+**Cross-reference:** `CENTERMANAGER_BUSINESS_WORKFLOWS.md` WF-01/WF-04/WF-05/WF-28 and its Startup Acceptance Matrix.
 
 ## 10. Detailed source references / disputed or non-current rules
 
