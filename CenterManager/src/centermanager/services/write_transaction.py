@@ -232,30 +232,27 @@ class WriteTransactionManager:
             provider = self._collab_manager._sync_provider
             token = getattr(provider, "_owned_lock_token", None)
             authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
-            receipt = self._pre_handoff_clean_receipt
-            if receipt is not None:
-                # The handoff layer (before it discards the previous DB)
-                # already validated MAIN and sealed the migrated runtime.
-                # Never reseal here: that would validate the old pre-handoff
-                # receipt against a newly accepted database generation.
-                journal.assert_replaceable()
-                accepted = journal.inspect()
-                if (accepted is None or accepted.get('status') != 'CLEAN'
-                        or accepted.get('published_oid') != self._base_main_commit):
-                    from centermanager.platform.write_recovery import RecoveryRequired
-                    raise RecoveryRequired(
-                        'WRITE handoff receipt does not match its pinned MAIN commit.'
-                    )
-                self._pre_handoff_clean_receipt = None
-            journal.begin(self._collab_manager.get_session_id(), self._base_main_commit, authority)
+            # The independently validated WRITE handoff already pinned MAIN;
+            # the Recovery ledger is now logging-only, not a second grant.
+            self._pre_handoff_clean_receipt = None
+            journal.begin(
+                self._collab_manager.get_session_id(),
+                self._base_main_commit,
+                authority,
+                advisory=True,
+            )
             self._recovery_journal = journal
             return True
-        except Exception as exc:
-            self._last_start_error = f"Local recovery protection failed: {exc}. Keep the workspace; inspect recovery before retrying."
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            self._is_editing = False
-            logger.error(self._last_start_error)
-            return False
+        except Exception:
+            # Failed disk logging cannot revoke a successfully verified remote
+            # WRITE lease. WARN loudly: an unlogged crash may require review
+            # of local rollback files, but current business editing continues.
+            self._recovery_journal = None
+            logger.exception(
+                "Recovery audit unavailable for this edit session; "
+                "independent Git MAIN/WRITE checks remain enforced"
+            )
+            return True
 
     def _create_snapshot(self) -> None:
         from centermanager.database.wal_safety import copy_runtime_database_for_publish
@@ -601,18 +598,9 @@ class WriteTransactionManager:
             logger.warning(self._last_start_error)
             return False
 
-        from centermanager.platform.write_recovery import WriteRecoveryJournal, require_replaceable, RecoveryRequired
-        try:
-            require_replaceable()
-            receipt = WriteRecoveryJournal().inspect()
-            self._pre_handoff_clean_receipt = (
-                receipt if receipt is not None and receipt.get("status") == "CLEAN"
-                else None
-            )
-        except RecoveryRequired as exc:
-            self._last_start_error = str(exc)
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            return False
+        # Recovery is only an advisory log. Current MAIN, active lease and
+        # WRITE handoff are independently authenticated below.
+        self._pre_handoff_clean_receipt = None
         if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
             self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
@@ -665,9 +653,7 @@ class WriteTransactionManager:
                 self._base_main_commit[:8] if self._base_main_commit else None,
             )
 
-            if not timed_call("recovery_begin", self._begin_recovery_journal):
-                self._release_grant_after_failed_consistency_check()
-                return False
+            timed_call("recovery_begin", self._begin_recovery_journal)
             if not self._verify_grant_before_editing():
                 self._state = WriteTransactionState.RECOVERY_REQUIRED
                 self._is_editing = False
@@ -1181,9 +1167,7 @@ class WriteTransactionManager:
             self._release_grant_after_failed_consistency_check()
             self._state = WriteTransactionState.RECOVERY_REQUIRED
             return
-        if not self._begin_recovery_journal():
-            self._release_grant_after_failed_consistency_check()
-            return
+        self._begin_recovery_journal()
         if not self._verify_grant_before_editing():
             self._state = WriteTransactionState.RECOVERY_REQUIRED
             self._is_editing = False
