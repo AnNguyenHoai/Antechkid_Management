@@ -689,9 +689,17 @@ class StartupSynchronization:
         if saved is None:
             return
         _, previous, _, moved_sidecars = saved
-        previous.unlink(missing_ok=True)
-        for _, backup in moved_sidecars:
-            backup.unlink(missing_ok=True)
+        # All runtime validation/refresh gates have passed before finalization.
+        # A locked historical backup is now cleanup debt, not invalid MAIN.
+        # Never delete the active runtime database on cleanup failure.
+        for obsolete in (previous, *(backup for _, backup in moved_sidecars)):
+            try:
+                obsolete.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Obsolete startup DB rollback backup retained for later "
+                    "manual cleanup: %s", obsolete, exc_info=True,
+                )
         self._startup_db_install_backup = None
 
     def _isolate_unpublished_finance_vouchers_for_review(self) -> bool:
@@ -820,24 +828,30 @@ class StartupSynchronization:
         if saved is None:
             return
         copies, staged = saved
-        if getattr(self, "_review_only_reset_requested", False):
-            # Historical Employee attachments/metadata can contain manual
-            # evidence not captured in the Recovery operation index.
-            # Preserve the already-staged old asset generations for review.
-            # Never load them as runtime or publish them to MAIN.
-            if staged is not None and staged.exists():
-                shutil.rmtree(staged)
-            self._startup_assets = None
-            logger.warning("Prior local assets retained under startup-assets for manual review")
-            return
-        for _, backup, _ in copies:
-            if backup.is_dir():
-                shutil.rmtree(backup)
-            else:
-                backup.unlink(missing_ok=True)
-        if staged is not None and staged.exists():
-            shutil.rmtree(staged)
+        review = getattr(self, "_review_only_reset_requested", False)
+        # After the authoritative install succeeds, stale rollback copies are
+        # disposable; in review mode they remain protected evidence. Windows
+        # can hold these files open, so cleanup must never veto an already
+        # verified Git MAIN READ startup or delete the protected originals.
+        obsolete = [] if review else [backup for _, backup, _ in copies]
+        if staged is not None:
+            obsolete.append(staged)
+        for path in obsolete:
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Startup backup cleanup deferred; artifact retained for "
+                    "manual inspection: %s", path, exc_info=True,
+                )
         self._startup_assets = None
+        if review:
+            logger.warning(
+                "Prior local assets retained under startup-assets for manual review"
+            )
 
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
