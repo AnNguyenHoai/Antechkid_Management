@@ -35,6 +35,21 @@ When a material requirement is ambiguous and cannot be resolved from the Issue, 
 
 ---
 
+## 1A. Mandatory CenterManager read-first documents
+
+Before **every** CenterManager implementation, bug fix, refactor, test or release
+change, read **both** current product-contract indexes:
+
+1. `CenterManager/docs/CENTERMANAGER_REQUIREMENTS.md`
+2. `CenterManager/docs/CENTERMANAGER_BUSINESS_WORKFLOWS.md`
+
+Identify affected requirement IDs, workflow IDs, detailed approved domain
+specifications, invariants and regression cases **before editing**. Include
+this impact mapping in the Issue/PR. For an accepted behavior change, update
+the two documents in the same PR; otherwise explicitly state that the
+contract is unchanged. These indexes do not override explicit new human
+direction or newer approved domain amendments: surface conflicts for review.
+
 ## 2. Sources of Truth
 
 Use the following precedence when implementing a task:
