@@ -23,7 +23,7 @@ def migration_digest(root: Path) -> str:
     names.extend(
         Path("migrations") / p.relative_to(root / "migrations")
         for p in sorted((root / "migrations").rglob("*"))
-        if p.is_file() and p.suffix == ".py" and "__pycache__" not in p.parts
+        if p.is_file() and p.suffix != ".pyc" and "__pycache__" not in p.parts
     )
     digest = hashlib.sha256()
     for rel in sorted(names, key=lambda p: p.as_posix()):
