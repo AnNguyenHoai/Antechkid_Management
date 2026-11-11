@@ -279,8 +279,9 @@ def test_explicit_reconciliation_keeps_unaccepted_git_commit_and_db(workspace):
     capture = Path(w.journal.inspect()['last_capture'])
     assert git(capture / 'repository', 'rev-parse', 'HEAD') == unaccepted
     assert values(capture / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED']
-    assert w.provider.reset_to_remote()
-    w.journal.assert_replaceable()
+    # A generic reset is never permitted to destroy a diverged local commit.
+    # The authenticated startup path has its own archival/OID checks.
+    assert not w.provider.reset_to_remote()
     from centermanager.platform.sync.startup_sync import StartupSynchronization
     assert StartupSynchronization(w.provider).run()
     assert values(w.journal.database) == ['BASE']
