@@ -93,6 +93,25 @@ def ensure_schema():
     logger.info("Database schema is at Alembic head.")
 
 
+def _degrade_startup_to_verified_read(bootstrap, sync_provider, reason: str) -> None:
+    """Recovery receipt failures never grant WRITE or veto verified MAIN READ.
+
+    Caller MUST first complete authenticated Git MAIN/SQLCipher installation.
+    This does not bypass schema verification, Git integrity or credential gates.
+    """
+    from centermanager.platform.sync.offline_read_state import (
+        protect_read_only_for_process,
+    )
+
+    bootstrap._offline_read = True
+    protect_read_only_for_process()
+    sync_provider._startup_recovery_receipt_warning = True
+    logger.warning(
+        "[STARTUP] Recovery receipt unavailable; protected READ-only mode: %s",
+        reason,
+    )
+
+
 def main() -> int:
     try:
         logger.info("[STARTUP] Application starting")
@@ -170,12 +189,23 @@ def main() -> int:
         review_reset_main = getattr(sync_provider, "_verified_review_main_oid", None)
         # Legacy Recovery may be malformed: it is already archived as raw
         # evidence. Never parse it as active metadata for this new MAIN session.
-        schema_receipt_before = (
-            None if (manual_reset_main is not None or review_reset_main is not None)
-            else startup_journal.inspect()
-        )
-        if schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
-            startup_journal.assert_replaceable()
+        schema_receipt_before = None
+        if manual_reset_main is None and review_reset_main is None:
+            try:
+                schema_receipt_before = startup_journal.inspect()
+                if (schema_receipt_before is not None
+                        and schema_receipt_before.get("status") == "CLEAN"):
+                    startup_journal.assert_replaceable()
+            except Exception:
+                # Git MAIN was independently verified and materialized by
+                # bootstrap, but an unverifiable recovery receipt cannot
+                # authorize mutation. Continue ONLY with readonly schema
+                # verification and deny all WRITE/editing until repaired.
+                logger.exception("Recovery receipt pre-schema check failed")
+                schema_receipt_before = None
+                _degrade_startup_to_verified_read(
+                    bootstrap, sync_provider, "pre-schema recovery check",
+                )
 
         if bootstrap._offline_read:
             # A cached READ must never implicitly stamp/migrate accepted data.
@@ -191,34 +221,37 @@ def main() -> int:
         # bootstrap, never an existing legacy runtime, can establish its
         # initial CLEAN receipt after Alembic has verified the schema.
         fresh_main = getattr(sync_provider, "_fresh_install_main_oid", None)
-        if review_reset_main is not None:
-            try:
+        try:
+            if review_reset_main is not None:
                 startup_journal.record_verified_review_reset(
                     provider=sync_provider,
                     accepted_main=review_reset_main,
                     notice_path=sync_provider._review_notice_path,
                 )
-            except Exception:
-                # Review metadata cannot veto a valid Git MAIN READ startup.
-                # Without this receipt the normal WRITE gate still refuses
-                # unverified sessions, never grants unsafe editing.
-                logger.exception(
-                    "Could not seal optional Recovery review receipt; "
-                    "continue with authoritative MAIN, WRITE may remain disabled"
+            elif manual_reset_main is not None:
+                startup_journal.record_verified_manual_reset(
+                    provider=sync_provider,
+                    accepted_main=manual_reset_main,
+                    archive=sync_provider._verified_manual_backup_path,
                 )
-        elif manual_reset_main is not None:
-            startup_journal.record_verified_manual_reset(
-                provider=sync_provider,
-                accepted_main=manual_reset_main,
-                archive=sync_provider._verified_manual_backup_path,
-            )
-        elif fresh_main is not None:
-            startup_journal.record_verified_fresh_install(
-                provider=sync_provider, accepted_main=fresh_main
-            )
-        elif schema_receipt_before is not None and schema_receipt_before.get("status") == "CLEAN":
-            startup_journal.refresh_verified_bootstrap_migration(
-                provider=sync_provider, before=schema_receipt_before
+            elif fresh_main is not None:
+                startup_journal.record_verified_fresh_install(
+                    provider=sync_provider, accepted_main=fresh_main
+                )
+            elif (schema_receipt_before is not None
+                    and schema_receipt_before.get("status") == "CLEAN"
+                    and not bootstrap._offline_read):
+                startup_journal.refresh_verified_bootstrap_migration(
+                    provider=sync_provider, before=schema_receipt_before
+                )
+        except Exception:
+            # Optional WRITE authorization could not be sealed after the
+            # independently verified MAIN/schema gates. This is NOT a reason
+            # to reopen an older local DB or to grant editing rights. Preserve
+            # evidence and expose only the now-verified runtime in READ.
+            logger.exception("Recovery WRITE receipt seal failed after schema verification")
+            _degrade_startup_to_verified_read(
+                bootstrap, sync_provider, "post-schema recovery receipt",
             )
 
         permission_service = PermissionService(session_factory)

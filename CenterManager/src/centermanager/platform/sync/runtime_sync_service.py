@@ -246,7 +246,15 @@ class RuntimeSyncService:
     def _sync_loop(self) -> None:
         while self._running:
             try:
-                from centermanager.platform.sync.offline_read_state import offline_read_active
+                from centermanager.platform.sync.offline_read_state import (
+                    offline_read_active, receipt_read_only_active,
+                )
+                if receipt_read_only_active():
+                    # This is NOT a network outage. A failed Recovery WRITE
+                    # receipt requires a fresh validated bootstrap; a remote
+                    # health check may not reopen the editor or mutate runtime.
+                    time.sleep(self._poll_interval)
+                    continue
                 if offline_read_active():
                     # Git OID can advance without a manifest/runtime_version
                     # increment. Reconnect must not depend on version diff.
