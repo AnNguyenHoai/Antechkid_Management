@@ -210,6 +210,7 @@ class ClassScheduleWidget(QWidget):
         self.table.setVisible(True)
 
     def _show_empty(self) -> None:
+        self.warning_label.hide()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No sessions scheduled"))
         self.table.setItem(0, 1, QTableWidgetItem(""))
