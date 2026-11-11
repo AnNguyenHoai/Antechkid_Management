@@ -103,7 +103,10 @@ class IncomeListPage(QWidget):
 
         self.export_btn = SecondaryButton("Xuất CSV")
         self.export_btn.clicked.connect(self._export_csv)
+        self.zip_export_btn = SecondaryButton("Xuất ZIP + chứng từ")
+        self.zip_export_btn.clicked.connect(self._export_zip)
         top_row.addWidget(self.export_btn)
+        top_row.addWidget(self.zip_export_btn)
 
         self.add_btn = PrimaryButton("Thêm thu nhập")
         self.add_btn.clicked.connect(self._show_add_dialog)
@@ -536,6 +539,30 @@ class IncomeListPage(QWidget):
         except Exception as exc:
             logger.exception("Delete income failed")
             QMessageBox.critical(self, "Lỗi", str(exc))
+
+    def _export_zip(self) -> None:
+        if self._period_configured is False:
+            self._notify("Finance period is not configured.")
+            return
+        kwargs = self._filter_kwargs()
+        if kwargs["date_from"] > kwargs["date_to"]:
+            self._notify("Khoảng ngày lọc không hợp lệ.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Xuất Income kèm chứng từ", "income_vouchers.zip", "ZIP Files (*.zip)")
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            self._income_service.export_incomes_zip(
+                path, **kwargs, finance_period_start=self._period_start,
+                sort_by=self._sort_by, ascending=self._sort_ascending,
+            )
+            self._notify("Xuất ZIP kèm chứng từ thành công.", "info")
+        except Exception as exc:
+            logger.exception("Income voucher ZIP export failed")
+            QMessageBox.critical(self, "Lỗi xuất chứng từ", str(exc))
 
     def _export_csv(self) -> None:
         if self._period_configured is False:
