@@ -235,13 +235,34 @@ def resolve_source_commit() -> str:
     raise RuntimeError("Could not resolve the source Git commit for release provenance.")
 
 
+def assert_clean_source_checkout(source_commit: str) -> None:
+    """Refuse to label uncommitted code with the last committed source SHA."""
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    state = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=False,
+    )
+    if (head.returncode != 0 or state.returncode != 0
+            or head.stdout.strip().lower() != source_commit.lower()
+            or state.stdout.strip()):
+        raise RuntimeError(
+            "Release build requires an exact clean Git checkout matching "
+            "RELEASE_MANIFEST source_commit. Commit or discard working tree changes."
+        )
+
+
 def release_channel() -> str:
     return "release-candidate" if "-rc" in VERSION else "production"
 
 
 def write_release_manifest(source_commit: str) -> Path:
+    from scripts.verify_startup_release import migration_digest
     manifest_path = PACKAGE_ROOT / "RELEASE_MANIFEST.json"
     manifest = {
+        "migration_sha256": migration_digest(PROJECT_ROOT),
         "application": APP_NAME, "version": VERSION, "release_channel": release_channel(),
         "source_commit": source_commit, "platform": "windows-x64",
         "portable_git_version": PORTABLE_GIT_VERSION, "admin_provisioning_tool": f"AdminTools/{ADMIN_TOOL_NAME}.exe",
@@ -291,7 +312,17 @@ def write_uat_checklist() -> None:
         "- [ ] Restarting the executable preserves expected runtime data.\n- [ ] No source checkout or Python installation is required to launch either executable.\n"
         "- [ ] Git synchronization works without a system Git installation.\n- [ ] With Git configured, startup uses the repository database rather than a stale local database.\n"
         "- [ ] If the authoritative repository database is unavailable, startup refuses to continue with a stale local database.\n"
-        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n",
+        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n"
+        "- [ ] Three Windows pytest shards PASS on the EXACT release source SHA.\n"
+        "- [ ] Verify RELEASE_MANIFEST.json migration_sha256 with scripts/verify_startup_release.py.\n"
+        "- [ ] On a COPY of the production-format SQLCipher database, verify clean and existing installation startup and READ login.\n"
+        "- [ ] Simulate locked obsolete backup: accepted MAIN READ is not blocked; original evidence retained.\n"
+        "- [ ] Simulate interrupted install with WAL, deep Vietnamese Employee paths and disk full during REQUIRED capture; never delete unprotected originals.\n"
+        "- [ ] Corrupt/unwrite Recovery notice or receipt: verified READ allowed but NO WRITE until valid proof.\n"
+        "- [ ] Wrong key, signed identity or Alembic revision rejects unsafe startup; no stamp or data rewrite.\n"
+        "- [ ] Git offline READ only with verified cached CLEAN receipt; never grant WRITE.\n"
+        "- [ ] Two machines: single WRITE owner, Start Editing, Finish Editing CAS, second-client restart sees MAIN.\n"
+        "- [ ] Record EXE SHA, encrypted test DB provenance, logs and maintainer approval BEFORE release.\n",
         encoding="utf-8",
     )
 
@@ -358,14 +389,19 @@ def create_release_package(executable: Path, admin_executable: Path, source_comm
     write_release_manifest(source_commit)
     write_release_readme(source_commit)
     write_uat_checklist()
+    # Refuse release before zipping if the copied migration tree differs from
+    # this exact source tree or the package contains runtime secrets.
+    from scripts.verify_startup_release import verify_package
+    verify_package(PACKAGE_ROOT, source_commit)
     archive = Path(shutil.make_archive(str(RELEASE_ROOT / RELEASE_NAME), "zip", root_dir=RELEASE_ROOT, base_dir=RELEASE_NAME))
     checksum = write_archive_checksum(archive)
     return archive, checksum
 
 
 def main() -> None:
-    clean_outputs()
     source_commit = resolve_source_commit()
+    assert_clean_source_checkout(source_commit)
+    clean_outputs()
     print(f"Building {APP_NAME} {VERSION} from {source_commit}...")
     executable = build_executable()
     admin_executable = build_admin_provisioning_executable()
