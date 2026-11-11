@@ -850,6 +850,15 @@ class WriteTransactionManager:
 
         if self._mutation_gate is not None:
             self._mutation_gate.close()
+        # Forced cancellation must restore a dirty local DB snapshot BEFORE
+        # deleting it and releasing the independently verified WRITE lease,
+        # regardless of whether the advisory Recovery ledger is available.
+        if force and self._has_changes:
+            if not self._restore_snapshot():
+                logger.error("Forced cancel cannot restore local snapshot; data retained")
+                self._state = WriteTransactionState.FAILED
+                self._is_editing = False
+                return False
         if self._recovery_journal is not None:
             try:
                 self._recovery_journal.preserve("cancel-editing")
@@ -879,12 +888,6 @@ class WriteTransactionManager:
             self._delete_snapshot()
             self._reset_to_idle()
             return True
-
-        if force and self._has_changes:
-            if not self._restore_snapshot():
-                logger.error("Snapshot restore failed, lock retained")
-                self._state = WriteTransactionState.FAILED
-                return False
 
         if self._collab_manager.is_writing():
             if not self._collab_manager.release_write():
