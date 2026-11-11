@@ -221,14 +221,14 @@ class WriteTransactionManager:
     def _begin_recovery_journal(self) -> bool:
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         from centermanager.database.encryption import database_encryption_required
-        journal = WriteRecoveryJournal()
         # Non-deployed, DB-less custom providers have no persistent workspace.
         # Encrypted production always requires durable metadata.
-        if not database_encryption_required() and not (
-            journal.database.exists() and (journal.repository / ".git").exists()
-        ):
-            return True
         try:
+            journal = WriteRecoveryJournal()
+            if not database_encryption_required() and not (
+                journal.database.exists() and (journal.repository / ".git").exists()
+            ):
+                return True
             provider = self._collab_manager._sync_provider
             token = getattr(provider, "_owned_lock_token", None)
             authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
@@ -945,33 +945,40 @@ class WriteTransactionManager:
 
         try:
             if self._recovery_journal is not None:
-                # Local Save and mutation gate are already quiesced here.
-                # Drain ONLY the mirror worker (which never opens SQLCipher).
-                # No Git/network operation is introduced by this barrier.
-                # A failed/expired mirror is NOT a data-loss event: the
-                # WAL-complete SQLCipher capture below still retains outbox.
-                from centermanager.platform.recovery_mirror_worker import drain_before_capture
-                active_recovery = self._recovery_journal.inspect() or {}
-                mirror_drained = timed_call(
-                    "rv02_mirror_drain", drain_before_capture, 5.0,
-                    recovery_root=self._recovery_journal.root,
-                    session_id=active_recovery.get("session_id"),
-                )
-                self._recovery_journal.update(
-                    rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
-                )
-                if not mirror_drained:
-                    logger.warning(
-                        "RV-02 background mirror incomplete before publication; "
-                        "preserving original SQLCipher outbox in protected capture"
+                try:
+                    # Audit is best-effort: a failed Recovery log cannot stop
+                    # the independent CAS-based Git MAIN publication.
+                    from centermanager.platform.recovery_mirror_worker import drain_before_capture
+                    active_recovery = self._recovery_journal.inspect() or {}
+                    mirror_drained = timed_call(
+                        "rv02_mirror_drain", drain_before_capture, 5.0,
+                        recovery_root=self._recovery_journal.root,
+                        session_id=active_recovery.get("session_id"),
                     )
-                timed_call("capture_before_publish", self._recovery_journal.preserve, "before-publish")
-                self._recovery_journal.update(status="PUBLISHING")
+                    self._recovery_journal.update(
+                        rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
+                    )
+                    if not mirror_drained:
+                        logger.warning("Recovery mirror incomplete; retaining any available evidence")
+                    timed_call(
+                        "capture_before_publish", self._recovery_journal.preserve,
+                        "before-publish",
+                    )
+                    self._recovery_journal.update(status="PUBLISHING")
+                except Exception:
+                    logger.exception("Recovery pre-publish logging failed; Git publish proceeds")
+                    self._recovery_journal = None
             success = timed_call("git_publish", self._do_publish)
             if success:
                 if self._recovery_journal is not None:
-                    with trace_phase("recovery_published"):
-                        self._recovery_journal.published(self._collab_manager._sync_provider)
+                    try:
+                        with trace_phase("recovery_published"):
+                            self._recovery_journal.published(self._collab_manager._sync_provider)
+                    except Exception:
+                        logger.exception(
+                            "Git MAIN publish verified, but Recovery receipt could not be recorded"
+                        )
+                        self._recovery_journal = None
                 if self._version_manager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
@@ -988,8 +995,19 @@ class WriteTransactionManager:
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
                     self._on_publish_success()
-                post_publish_pending = bool(self._recovery_journal is not None and
-                    timed_call("post_publish_validation", self._recovery_journal.preserve_post_publish_changes))
+                try:
+                    post_publish_pending = bool(
+                        self._recovery_journal is not None and
+                        timed_call(
+                            "post_publish_validation",
+                            self._recovery_journal.preserve_post_publish_changes,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "Post-publish Recovery audit failed; accepted Git MAIN remains authoritative"
+                    )
+                    post_publish_pending = False
                 self._collab_manager._lock.clear_finishing_data()
                 self._finishing_deadline = None
                 self._finishing_started_at = None
@@ -1003,10 +1021,10 @@ class WriteTransactionManager:
                     return True
 
                 if post_publish_pending:
-                    self._state = WriteTransactionState.RECOVERY_REQUIRED
-                    self._is_editing = False
-                    self._last_start_error = "MAIN was published, but a post-publish callback saved additional local data. Recovery copies are retained; inspect and explicitly reconcile before further editing or synchronization."
-                    return True
+                    logger.warning(
+                        "Git MAIN published; additional post-publish local changes "
+                        "need human Recovery review, not an editing veto"
+                    )
                 self._delete_snapshot()
                 self._reset_to_idle()
                 return True
@@ -1063,7 +1081,10 @@ class WriteTransactionManager:
             logger.warning("Remote WRITE lock release is not yet confirmed")
             return False
         if self._recovery_journal is not None:
-            self._recovery_journal.released()
+            try:
+                self._recovery_journal.released()
+            except Exception:
+                logger.exception("Remote WRITE released; Recovery release logging unavailable")
         self._state = WriteTransactionState.COMPLETED
         logger.info("Transaction: COMPLETED (lock released)")
         return True
