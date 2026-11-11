@@ -863,6 +863,11 @@ class WriteTransactionManager:
             # whether cancellation of the active editor can finish.
             if self._collab_manager.is_writing():
                 if not self._collab_manager.release_write():
+                    # Cancellation cannot declare IDLE or permit further
+                    # mutation while remote WRITE-release acknowledgement is
+                    # uncertain. This is the lease safety rule, NOT Recovery.
+                    self._state = WriteTransactionState.FINISHING_STALE
+                    self._is_editing = False
                     self._last_start_error = (
                         "Remote WRITE release is not verified; wait for lease resolution."
                     )
