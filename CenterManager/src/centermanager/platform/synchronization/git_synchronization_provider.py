@@ -1704,6 +1704,26 @@ class GitSynchronizationProvider(SynchronizationProvider):
         if branch is None:
             branch = self._branch
         try:
+            # Generic reset is not the verified startup backup pathway. It
+            # must not destroy unaccepted Git files/commits merely because
+            # Recovery metadata is no longer an authorization gate.
+            if self._run_git_command(
+                ["status", "--porcelain", "--untracked-files=all"]
+            ):
+                logger.warning(
+                    "Refusing generic reset: unpublished local Git files must "
+                    "be preserved by the explicit verified startup path"
+                )
+                return False
+            local = self._run_git_command(["rev-parse", "HEAD"])
+            remote = self._run_git_command(["rev-parse", f"origin/{branch}"])
+            ancestor = self._run_git_command(["merge-base", local, remote])
+            if ancestor != local:
+                logger.warning(
+                    "Refusing generic reset: diverged local commits need "
+                    "the verified startup archive pathway"
+                )
+                return False
             try:
                 self._run_git_command(["rebase", "--abort"])
             except Exception:
