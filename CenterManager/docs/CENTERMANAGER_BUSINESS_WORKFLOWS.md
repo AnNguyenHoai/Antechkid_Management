@@ -1,7 +1,7 @@
 # CENTERMANAGER — END-TO-END BUSINESS WORKFLOWS (READ FIRST)
 
-**Document ID:** CM-WF | **Version:** 1.1 | **Updated:** 2026-11-11
-**Verified pre-hardening baseline:** `main_coursefee` @ `1ea1f8a1be902d524825a24ea9fa9193c362830d`. Hardening changes tracked in phase PRs; always resolve current HEAD and packaged SHA at release.
+**Document ID:** CM-WF | **Version:** 1.2 | **Updated:** 2026-11-11
+**Verified base for Recovery policy change:** `main_coursefee` @ `dcb5f33f77524c46d5c2002d975436d7fbbfbffd` (merged hardening phases). Read this approved contract against the final tested EXE SHA; implementation remains subject to Windows SQLCipher acceptance.
 **Paired authoritative index:** [CENTERMANAGER_REQUIREMENTS.md](CENTERMANAGER_REQUIREMENTS.md).
 
 > **MANDATORY:** Before changing a feature, read **both documents**, locate its `WF-xx` flow and `CM-REQ` requirement IDs, follow the implementation links and tests, then record how normal, historical, permission and failure paths will behave. This describes the **course-based** CenterManager tool. The monthly-tuition product exists separately and is NOT this release.
@@ -29,7 +29,7 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 3. Verify accepted remote OID, repository identity, database artifacts, SQLCipher/metadata and migration/schema compatibility for this build.
 4. Handle any old runtime DB/WAL/attachments and Recovery notice according to the verified-protection policy; install accepted MAIN into the single active runtime, without merging old unaccepted data.
 5. Open domain session and present user login; check credentials and enforce permitted navigation. Initial application mode is READ.
-6. Show outstanding Recovery review notice where relevant, without turning old Recovery metadata into an editing/publishing authority.
+6. After independently authenticating Git MAIN and SQLCipher/schema, allow login even if a prior force-close left an OPEN/UNVERIFIED journal or a Recovery log fails. On a review-startup, use **read-only Alembic schema verification** to avoid migrating a historical OPEN journal. Neither Reviewed nor Skip is required for Start Editing. Notify the user after login without giving historical records any WRITE authority.
 
 **Success:** opened authorized READ using authenticated MAIN, no unaccepted writes promoted. **Exceptions:** offline network may permit explicitly verified cached READ, never WRITE; invalid key/schema/remote identity blocks unsafe acceptance; unverified old files must not be deleted; long paths/locks/WAL need verified protection. **Never** force database branch to the name `main_coursefee`. **Code:** `app.py`, `platform/bootstrap/`, `platform/sync/startup_sync.py`, `database/`, `ui/login_dialog.py` (verify exact path).
 
@@ -38,7 +38,7 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 **Actors:** logged-in user with mutation capability. **Requirements:** COL-005/006/010, SYS-004.
 
 1. User opens a workspace in READ and may search, view history and export if authorized.
-2. User invokes Start Editing; platform verifies accepted remote OID and current local admission/Recovery safety, asks for distributed WRITE lease.
+2. User invokes Start Editing; platform verifies the exact accepted Git MAIN OID, signed runtime integrity, current domain permissions and independent local/remote WRITE state, then requests the distributed WRITE lease. **Do not read Recovery journal status as an admission gate.**
 3. If another owner holds WRITE, queue/wait using remote lock/heartbeat/arbitration; show status; no domain business write yet.
 4. After grant and revalidation, start durable edit session/recovery journal; UI projects WRITE state and relevant controls.
 5. For each save, service validates user's capability and domain-state rule; repository writes transactionally; durable audit/change evidence is recorded.
@@ -396,16 +396,16 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 | A6 | Interrupted install between snapshot, DB replacement and asset refresh | Original DB/WAL evidence retained, marker replay verified; no unsafe overwrite | PENDING — Windows EXE |
 | A7 | Long Vietnamese/nested Employee attachment, locked obsolete rollback copy | Original content intact; accepted MAIN READ not failed merely by obsolete cleanup | PENDING — Windows EXE |
 | A8 | Disk full/permission denial **during required backup capture** | Fail-safe preservation and no silent deletion of local unaccepted bytes | PENDING — Windows EXE |
-| A9 | Malformed/unwritable Recovery notice and WRITE receipt | If DB/schema separately verified, READ only; no WRITE until valid receipt | PENDING — Windows EXE |
+| A9 | Malformed/unwritable Recovery notice and audit receipt | If Git MAIN/schema/remote WRITE proofs pass, startup and Start Editing work; log error is diagnostic only; never mint false capture success | PENDING — Windows EXE |
 | A10 | Wrong SQLCipher key, identity, branch or incompatible Alembic revision | Refuse unsafe bootstrap; no stamp/forced migration/branch rewrite | PENDING — Windows EXE |
-| A11 | Git unavailable but verified accepted CLEAN cached data | Offline READ only; without CLEAN proof fail closed | PENDING — Windows EXE |
+| A11 | Git unavailable but independently signed accepted-MAIN cached data | Offline READ only; untrusted cache/key mismatch fails closed. Recovery OPEN/Skip/Reviewed is irrelevant | PENDING — Windows EXE |
 | A12 | Build portable EXE; verify full SHA, bundled Alembic, manifest digest and no secrets | Release gate PASS; EXE can open tested copied DB; signer/maintainer records source SHA | PENDING |
 | A13 | Read-first docs updated and scope diff reviewed | SYS/COL/START invariants and WF-01..05/28 checked; no unauthorized files | PENDING |
 
 **Phase chain:**
 1. Phase 1: baseline tests characterize Windows cleanup failure, crash snapshot and advisory Recovery (test-only).
 2. Phase 2: after successful install, stale backup *deletion* faults become deferred cleanup with original evidence retained. Required preinstall capture/rollback failures still stop unsafe replacement.
-3. Phase 3: explicit READ-only degradation for unverifiable Recovery receipt, including a process-lifetime READ-only latch which background reconnect cannot clear; recovery requires fresh validated restart, never bypass schema/identity.
+3. Phase 3 prior receipt READ-only latch was superseded by the PO's Recovery observability-only decision: an audit failure no longer blocks WRITE or requires restart. Only failed Git MAIN/SQLCipher/remote lease proofs block. Offline READ uses a signed cache separate from Recovery.
 4. Phase 4: `scripts/verify_startup_release.py` and `build_release.py` check release SHA, migration asset digest, packaged Git/EXE and secret exclusions before producing a release ZIP.
 5. Phase 5: these documents and the Windows acceptance matrix, kept in sync with actual approved behavior.
 
