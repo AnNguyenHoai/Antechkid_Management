@@ -183,8 +183,13 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             self._failed_count = 0
 
             from centermanager.platform.sync.offline_read_state import (
-                offline_read_active, set_offline_read,
+                offline_read_active, recovery_read_only_active, set_offline_read,
             )
+            if recovery_read_only_active():
+                logger.warning(
+                    "Recovery proof READ-only latch requires fresh validated startup"
+                )
+                return False
             if offline_read_active():
                 # Pull-only sync and atomic runtime install must be complete
                 # before any READ->WRITE availability transition. A successful
