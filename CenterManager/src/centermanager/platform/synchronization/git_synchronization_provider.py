@@ -1275,10 +1275,30 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def publish(self, message: str, user: str) -> bool:
         self._ensure_repo()
         try:
-            # Pull latest before publishing. A publish must never continue
-            # against a stale repository working tree because Git is authoritative.
-            if not self.pull():
-                raise RemoteUnavailableError("Unable to synchronize repository before publish")
+            # Legacy publish() receives business changes already staged in
+            # the local worktree. A generic pull refuses dirty work by design,
+            # so first fetch and verify that its base matches remote MAIN.
+            # Only clean worktrees may fast-forward. Dirty worktrees may
+            # publish ONLY if the remote OID still equals their local HEAD.
+            # Never reset/rebase/discard pending business changes.
+            self._run_git_command(["fetch", "origin", self._branch])
+            local_base = self._run_git_command(["rev-parse", "HEAD"]).strip()
+            remote_base = self._run_git_command([
+                "rev-parse", f"origin/{self._branch}",
+            ]).strip()
+            dirty = bool(self._run_git_command([
+                "status", "--porcelain", "--untracked-files=all",
+            ]))
+            if dirty:
+                if local_base != remote_base:
+                    raise RepositoryConflictError(
+                        "Remote MAIN changed while unpublished local business "
+                        "files are pending; preserve local work for manual review"
+                    )
+            elif not self.pull():
+                raise RemoteUnavailableError(
+                    "Unable to synchronize clean repository before publish"
+                )
 
             # Materialize runtime Employee documents into the Git repository
             # before staging. The runtime copy is local UI state; the repository
