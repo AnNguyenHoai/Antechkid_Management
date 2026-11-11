@@ -1,4 +1,4 @@
-"""Handoff must use the receipt already committed by the install barrier."""
+"""Recovery receipt cannot veto a previously verified WRITE handoff."""
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,47 +16,38 @@ class Journal:
         self.fail = fail
         self.calls = []
 
-    def assert_replaceable(self):
-        self.calls.append(("verify",))
+    def begin(self, session_id, base_oid, authority, *, advisory=False):
+        self.calls.append(("begin", session_id, base_oid, authority, advisory))
         if self.fail:
-            raise RuntimeError("receipt checksum mismatch")
-
-    def inspect(self):
-        return {"status": "CLEAN", "published_oid": "accepted-main"}
-
-    def begin(self, session_id, base_oid, authority):
-        self.calls.append(("begin", session_id, base_oid, authority))
+            raise OSError("advisory journal directory unwritable")
 
 
-@pytest.mark.parametrize("has_clean_receipt,fail", [
-    (True, False), (False, False), (True, True),
+@pytest.mark.parametrize("old_receipt,log_fails", [
+    (True, False), (False, False), (True, True), (False, True),
 ])
-def test_handoff_does_not_begin_before_verified_receipt(
-    monkeypatch, has_clean_receipt, fail
+def test_verified_handoff_can_begin_even_if_recovery_log_fails(
+    monkeypatch, old_receipt, log_fails,
 ):
-    from centermanager.platform import write_recovery as recovery
+    from centermanager.platform import write_recovery
     from centermanager.database import encryption
 
-    journal = Journal(fail=fail)
-    monkeypatch.setattr(recovery, "WriteRecoveryJournal", lambda: journal)
+    journal = Journal(fail=log_fails)
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda: journal)
     monkeypatch.setattr(encryption, "database_encryption_required", lambda: True)
     provider = SimpleNamespace(_owned_lock_token={
-        "session_id": "session", "oid": "lock-oid", "lease_revision": 2
+        "session_id": "session", "oid": "lock-oid", "lease_revision": 2,
     })
     manager = WriteTransactionManager(SimpleNamespace(
-        _sync_provider=provider, get_session_id=lambda: "session"
+        _sync_provider=provider, get_session_id=lambda: "session",
     ))
     manager._base_main_commit = "accepted-main"
-    if has_clean_receipt:
+    if old_receipt:
         manager._pre_handoff_clean_receipt = {"status": "CLEAN"}
 
-    assert manager._begin_recovery_journal() is (not (fail and has_clean_receipt))
-    names = [call[0] for call in journal.calls]
-    if fail and has_clean_receipt:
-        assert names == ["verify"]
-        assert manager.state is WriteTransactionState.RECOVERY_REQUIRED
-    elif has_clean_receipt:
-        assert names == ["verify", "begin"]
-        assert manager._pre_handoff_clean_receipt is None
-    else:
-        assert names == ["begin"]
+    assert manager._begin_recovery_journal() is True
+    assert len(journal.calls) == 1
+    assert journal.calls[0][0] == "begin"
+    assert journal.calls[0][-1] is True
+    assert manager._pre_handoff_clean_receipt is None
+    assert manager._recovery_journal is (None if log_fails else journal)
+    assert manager.state is not WriteTransactionState.RECOVERY_REQUIRED
