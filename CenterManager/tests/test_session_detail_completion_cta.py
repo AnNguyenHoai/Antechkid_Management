@@ -3,10 +3,7 @@
 This PR depends on SessionService.complete_scheduled_session from #655.
 No migrations, finance formulas, Git or Recovery changes.
 """
-from datetime import date
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "src/centermanager"
 DETAIL = ROOT / "ui/session/session_detail_dialog.py"
@@ -85,3 +82,13 @@ def test_only_session_ui_code_and_contract_docs_may_change():
     assert "update_session(" not in source.split("def _on_complete_session_clicked(", 1)[1].split(
         "def _update_attendance_summary(", 1
     )[0]
+
+
+def test_requirement_and_workflow_docs_track_the_new_action():
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    req = _text(docs / "CENTERMANAGER_REQUIREMENTS.md")
+    wf = _text(docs / "CENTERMANAGER_BUSINESS_WORKFLOWS.md")
+    assert "SES-005" in req
+    assert "Hoàn thành buổi học" in req
+    assert "Hoàn thành buổi học" in wf
+    assert "WF-11" in wf
