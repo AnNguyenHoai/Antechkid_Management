@@ -399,9 +399,9 @@ def create_release_package(executable: Path, admin_executable: Path, source_comm
 
 
 def main() -> None:
-    clean_outputs()
     source_commit = resolve_source_commit()
     assert_clean_source_checkout(source_commit)
+    clean_outputs()
     print(f"Building {APP_NAME} {VERSION} from {source_commit}...")
     executable = build_executable()
     admin_executable = build_admin_provisioning_executable()
