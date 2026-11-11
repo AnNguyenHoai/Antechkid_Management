@@ -183,8 +183,13 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             self._failed_count = 0
 
             from centermanager.platform.sync.offline_read_state import (
-                offline_read_active, set_offline_read,
+                offline_read_active, receipt_read_only_active, set_offline_read,
             )
+            if receipt_read_only_active():
+                # Reconnecting the Git transport does not repair an invalid
+                # Recovery WRITE receipt. No READY transition in this process.
+                logger.warning("Recovery receipt READ-only latch requires new validated startup")
+                return False
             if offline_read_active():
                 # Pull-only sync and atomic runtime install must be complete
                 # before any READ->WRITE availability transition. A successful
