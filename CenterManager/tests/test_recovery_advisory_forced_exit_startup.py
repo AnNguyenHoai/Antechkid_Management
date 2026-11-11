@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from centermanager.app import _requires_readonly_schema_for_recovery
+from centermanager.app import (\n    _requires_readonly_schema_for_recovery, _validate_accepted_runtime_schema,\n)
 from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
 from centermanager.platform.sync import offline_read_state
 
@@ -56,8 +56,8 @@ def test_startup_schema_check_protects_against_recovery_migration_crash():
               "src/centermanager/app.py").read_text(encoding="utf-8")
     main = source.split("def main() -> int:", 1)[1]
     assert "use_readonly_schema = _requires_readonly_schema_for_recovery(" in main
-    assert main.index("if use_readonly_schema:") < main.index("ensure_schema()")
-    assert "verify_runtime_schema_readonly()" in main
+    assert "_validate_accepted_runtime_schema(readonly=use_readonly_schema)" in main
+    assert "def _validate_accepted_runtime_schema(*, readonly: bool)" in source
     assert "record_verified_review_reset(" in main
     assert "receipt_seal_failed = True" in main
     assert "protect_read_only_for_process()" in main
@@ -121,3 +121,33 @@ def test_background_reconnect_never_clears_failed_recovery_authority():
     promote = (root / "platform/sync/authoritative_runtime_sync_service.py").read_text(encoding="utf-8")
     assert "if recovery_read_only_active():" in loop
     assert "if recovery_read_only_active():" in promote
+
+
+def test_forced_recovery_schema_admission_calls_readonly_verifier_not_alembic(monkeypatch):
+    import centermanager.app as app
+    from centermanager.database import migration
+
+    calls = []
+    monkeypatch.setattr(
+        migration, "verify_runtime_schema_readonly",
+        lambda: calls.append("readonly-verify"),
+    )
+    monkeypatch.setattr(
+        app, "ensure_schema",
+        lambda: (_ for _ in ()).throw(AssertionError(
+            "historical OPEN journal must not enter migration"
+        )),
+    )
+    _validate_accepted_runtime_schema(readonly=True)
+    assert calls == ["readonly-verify"]
+
+
+def test_corrupt_schema_still_fails_closed_even_with_recovery(monkeypatch):
+    from centermanager.database import migration
+
+    def invalid_schema():
+        raise ValueError("Alembic revision incompatible with packaged EXE")
+
+    monkeypatch.setattr(migration, "verify_runtime_schema_readonly", invalid_schema)
+    with pytest.raises(ValueError, match="Alembic revision incompatible"):
+        _validate_accepted_runtime_schema(readonly=True)
