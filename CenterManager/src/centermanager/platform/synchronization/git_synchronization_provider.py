@@ -1108,15 +1108,15 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 remote_commit = self._run_git_command(["rev-parse", f"origin/{self._branch}"])
             except Exception:
                 return True
-            if local_commit == remote_commit:
-                logger.info("Already up to date")
-                return True
             if self._run_git_command(["status", "--porcelain", "--untracked-files=all"]):
                 logger.warning(
                     "Local Git worktree has unpublished changes; normal pull refuses "
-                    "destructive replacement without the verified startup backup path"
+                    "replacement without the verified startup backup path"
                 )
                 return False
+            if local_commit == remote_commit:
+                logger.info("Already up to date")
+                return True
             try:
                 self._run_git_command(["merge", "--ff-only", f"origin/{self._branch}"])
                 logger.info(f"Fast-forwarded to {remote_commit[:8]}")
