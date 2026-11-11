@@ -217,7 +217,7 @@ class SessionService:
                 description="status: 'Scheduled' -> 'Completed'",
                 metadata={"session_id": session_obj.id},
             )
-            self._publish_class_session_changed(session_obj, "UPDATED")
+            self._publish_class_session_changed(session_obj, action="updated")
             return session_obj
 
     @require_permission("lesson.update")
