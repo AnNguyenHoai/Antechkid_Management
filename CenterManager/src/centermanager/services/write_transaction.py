@@ -994,7 +994,13 @@ class WriteTransactionManager:
                         logger.exception("Published core data; derived report delivery failed")
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
-                    self._on_publish_success()
+                    try:
+                        self._on_publish_success()
+                    except Exception:
+                        logger.exception(
+                            "Git MAIN was already published; post-publish UI callback "
+                            "failed and must not reclassify the accepted publication"
+                        )
                 try:
                     post_publish_pending = bool(
                         self._recovery_journal is not None and
@@ -1095,11 +1101,8 @@ class WriteTransactionManager:
             return False
         if not self._release_lock():
             return False
-        if self._recovery_journal is not None and self._recovery_journal.inspect()['status'] == 'POST_PUBLISH_PENDING':
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            self._is_editing = False
-            self._last_start_error = "Published MAIN and released WRITE; additional local data is preserved for explicit recovery reconciliation."
-            return True
+        # A post-publish Recovery case is notification-only. Remote MAIN was
+        # already verified and the exclusive WRITE lease has been released.
         self._delete_snapshot()
         self._reset_to_idle()
         return True
