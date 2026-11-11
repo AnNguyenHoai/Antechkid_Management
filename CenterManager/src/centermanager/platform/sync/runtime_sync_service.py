@@ -246,15 +246,7 @@ class RuntimeSyncService:
     def _sync_loop(self) -> None:
         while self._running:
             try:
-                from centermanager.platform.sync.offline_read_state import (
-                    offline_read_active, receipt_read_only_active,
-                )
-                if receipt_read_only_active():
-                    # This is NOT a network outage. A failed Recovery WRITE
-                    # receipt requires a fresh validated bootstrap; a remote
-                    # health check may not reopen the editor or mutate runtime.
-                    time.sleep(self._poll_interval)
-                    continue
+                from centermanager.platform.sync.offline_read_state import offline_read_active
                 if offline_read_active():
                     # Git OID can advance without a manifest/runtime_version
                     # increment. Reconnect must not depend on version diff.
@@ -444,8 +436,17 @@ class RuntimeSyncService:
 
     def _apply_runtime_update(self) -> bool:
         try:
-            from centermanager.platform.write_recovery import require_replaceable
-            require_replaceable()
+            from centermanager.database.mutation_authority import gate_for
+            from centermanager.database.artifact_security import (
+                validate_authoritative_repository_database,
+            )
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active WRITE editor prevents runtime replacement")
+            # Validate authenticated Git MAIN itself. The historical
+            # Recovery journal is neither a trusted dataset nor a write gate.
+            validate_authoritative_repository_database()
             paths = get_paths()
             repo_db = paths.runtime_root / "repository" / "database" / "center.db"
             runtime_db = paths.database_dir / "center.db"

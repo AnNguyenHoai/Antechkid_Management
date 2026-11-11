@@ -59,12 +59,12 @@ def verified_employee_identity_repair(user_id):
 @contextmanager
 def runtime_install_permit():
     """Preserve the pre-swap recovery proof for the bundled schema barrier."""
-    from centermanager.platform.write_recovery import require_replaceable
     gate = gate_for()
     with gate.lock:
         if not gate.closed:
             raise MutationAuthorityError('Runtime replacement cannot race an active local editor')
-        require_replaceable()
+        # Historical Recovery journals are observation only; the caller must
+        # validate the signed Git MAIN artifact/OID before installation.
         previous = getattr(_local, 'install_path', None)
         _local.install_path = runtime_path()
         try:
@@ -114,28 +114,47 @@ class MutationAuthorityGate:
             transaction._mutation_gate = self
             transaction._collab_manager._mutation_gate = self
 
+    def _repository_path(self):
+        from centermanager.core.paths import get_paths
+        provider = getattr(self.transaction._collab_manager, "_sync_provider", None)
+        source = getattr(provider, "_repo_path", None)
+        return Path(source).resolve() if source is not None else (
+            get_paths().runtime_root / "repository"
+        ).resolve()
+
     def _config_hash(self):
-        # Local file read only; do not execute Git under a DB lock.
-        config = self.transaction._recovery_journal.repository / ".git" / "config"
+        # Identity is independent of Recovery logging and checked at every
+        # mutation boundary. Reading local .git/config does not perform Git IO.
+        config = self._repository_path() / ".git" / "config"
         return hashlib.sha256(config.read_bytes()).hexdigest()
 
     def open(self):
-        """Explicit entry only, after journal preparation and remote validation."""
+        """Enter using Git MAIN/remote lease, never Recovery metadata.
+
+        Perform potentially slow remote OID observations OUTSIDE the DB
+        mutation mutex; the independent lease must also be rechecked below.
+        """
+        tx = self.transaction
+        if tx is None:
+            raise MutationAuthorityError("WRITE transaction has not been bound")
+        provider = getattr(tx._collab_manager, "_sync_provider", None)
+        if provider is not None:
+            pinned = tx._base_main_commit
+            if (not pinned
+                    or provider.get_local_main_commit() != pinned
+                    or provider.observe_remote_main_commit() != pinned):
+                raise MutationAuthorityError(
+                    "Authoritative Git MAIN changed before mutation admission"
+                )
         with self.lock:
-            tx = self.transaction
-            journal = tx._recovery_journal
-            if journal is None:
-                raise MutationAuthorityError("Durable WRITE recovery is required")
-            document = journal.inspect()
-            if not document or document['status'] != 'OPEN' or document.get('mutation_authority_lost'):
-                raise MutationAuthorityError("Recovery is pending; editing cannot resume")
+            # An old or unwritable Recovery journal cannot grant or deny an
+            # authenticated lease, provided the same runtime is still active.
             self.session_id = tx._collab_manager.get_session_id()
-            if document['session_id'] != self.session_id:
-                raise MutationAuthorityError("Recovery session mismatch")
-            self.repository_id = document['repository_id']
-            if self.repository_id != journal._repository_id():
-                raise MutationAuthorityError("Repository identity mismatch")
             self.repository_config_hash = self._config_hash()
+            self.repository_id = hashlib.sha256(
+                str(self._repository_path()).encode("utf-8")
+                + self.repository_config_hash.encode("ascii")
+            ).hexdigest()
             self.incarnation = uuid.uuid4().hex
             self._pending_observation = None
             self._pending_failure = None
@@ -219,12 +238,17 @@ class MutationAuthorityGate:
             tx._collab_manager._lease_renewal_suspended = True
             try:
                 if tx._recovery_journal is not None:
-                    tx._recovery_journal.update(mutation_authority_lost=True, mutation_failure=reason)
-            finally:
-                # Existing UI mode projection, queued after the DB hook unwinds.
-                # This neither changes nor releases the remote lock.
-                from centermanager.platform.collaboration.events import ModeChanged
-                tx._collab_manager._event_bus.publish_deferred(ModeChanged(mode='READ'))
+                    tx._recovery_journal.update(
+                        mutation_authority_lost=True, mutation_failure=reason
+                    )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Recovery audit could not record lost remote WRITE authority"
+                )
+            # READ projection is mandatory, regardless of advisory log health.
+            from centermanager.platform.collaboration.events import ModeChanged
+            tx._collab_manager._event_bus.publish_deferred(ModeChanged(mode='READ'))
 
     def close(self):
         with self.lock:
@@ -268,17 +292,14 @@ class MutationAuthorityGate:
             self.invalidate("Verified WRITE observation has expired")
             raise MutationAuthorityError("Verified WRITE observation has expired")
         try:
-            document = tx._recovery_journal.inspect()
-            valid = (document['status'] == 'OPEN' and not document.get('mutation_authority_lost')
-                     and document['session_id'] == self.session_id
-                     and document['repository_id'] == self.repository_id
-                     and Path(document['database']).resolve() == self.database
-                     and self._config_hash() == self.repository_config_hash)
+            repository_intact = self._config_hash() == self.repository_config_hash
         except Exception:
-            valid = False
-        if not valid:
-            self.invalidate("Recovery journal or repository identity changed")
-            raise MutationAuthorityError("Recovery journal or repository identity changed")
+            repository_intact = False
+        if not repository_intact:
+            self.invalidate("Git repository identity changed during WRITE")
+            raise MutationAuthorityError("Git repository identity changed during WRITE")
+        # The existing remote lease observation and its deadline continue to
+        # guard every mutation. Do not inspect Recovery journal for admission.
         if category != 'business':
             raise MutationAuthorityError("System operation requires an explicit maintenance permit")
         from centermanager.core.current_user import get_current_user
@@ -318,7 +339,6 @@ def system_mutation_permit(kind, *, path=None):
     """
     path = Path(path).resolve() if path is not None else runtime_path()
     gate = gate_for(path)
-    from centermanager.platform.write_recovery import WriteRecoveryJournal
     from centermanager.database.engine import runtime_db_maintenance_active
     kinds = {'checkpoint': {'checkpoint'}, 'initialize': {'pragma'},
              'migration': {'schema', 'business', 'pragma'},
@@ -334,8 +354,8 @@ def system_mutation_permit(kind, *, path=None):
                          and runtime_db_maintenance_active())
             if gate.transaction is not None and not installed:
                 raise MutationAuthorityError("Startup maintenance cannot run after collaboration is bound")
-            if is_runtime_path(path) and not installed:
-                WriteRecoveryJournal().assert_replaceable()
+            # No Recovery journal check: runtime DB integrity, migration assets
+            # and active-editor fencing are separate authorization layers.
         previous = getattr(_local, 'maintenance', None)
         _local.maintenance = (path, uuid.uuid4().hex, kinds[kind], kind)
         try:

@@ -108,8 +108,13 @@ class GitSynchronizationProvider(SynchronizationProvider):
         if cwd is None:
             cwd = self._repo_path
         if args and args[0] in {"reset", "merge", "pull", "checkout", "clean"} and Path(cwd).resolve() == self._repo_path.resolve():
-            from centermanager.platform.write_recovery import require_replaceable
-            require_replaceable()
+            # Recovery logs never authorize Git operations. An active SQLCipher
+            # editor *does* forbid replacing its Git base while editing.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active WRITE editor prevents Git worktree replacement")
         if env is None:
             env = self._get_env()
 
@@ -1089,12 +1094,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return False
 
     def pull(self) -> bool:
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
-        try:
-            require_replaceable()
-        except RecoveryRequired as exc:
-            logger.error("Pull blocked: %s", exc)
-            return False
+        # Recovery state is advisory. A normal pull can fast-forward a clean
+        # Git working tree; dirty/diverged work must use the separately
+        # verified backup/reset startup path, never be discarded here.
         self._ensure_repo()
         if not self._has_remote_origin():
             logger.debug("No remote origin, pull skipped")
@@ -1106,6 +1108,12 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 remote_commit = self._run_git_command(["rev-parse", f"origin/{self._branch}"])
             except Exception:
                 return True
+            if self._run_git_command(["status", "--porcelain", "--untracked-files=all"]):
+                logger.warning(
+                    "Local Git worktree has unpublished changes; normal pull refuses "
+                    "replacement without the verified startup backup path"
+                )
+                return False
             if local_commit == remote_commit:
                 logger.info("Already up to date")
                 return True
@@ -1114,10 +1122,11 @@ class GitSynchronizationProvider(SynchronizationProvider):
                 logger.info(f"Fast-forwarded to {remote_commit[:8]}")
                 return True
             except RepositoryConflictError:
-                logger.warning("Diverged: resetting to remote")
-                self._run_git_command(["reset", "--hard", f"origin/{self._branch}"])
-                logger.info(f"Reset to remote {remote_commit[:8]}")
-                return True
+                logger.warning(
+                    "Local Git history diverged; manual verified reset required "
+                    "to preserve unpublished work"
+                )
+                return False
         except Exception as e:
             logger.error(f"Pull failed: {e}")
             return False
@@ -1266,10 +1275,34 @@ class GitSynchronizationProvider(SynchronizationProvider):
     def publish(self, message: str, user: str) -> bool:
         self._ensure_repo()
         try:
-            # Pull latest before publishing. A publish must never continue
-            # against a stale repository working tree because Git is authoritative.
-            if not self.pull():
-                raise RemoteUnavailableError("Unable to synchronize repository before publish")
+            # Legacy publish() receives business changes already staged in
+            # the local worktree. A generic pull refuses dirty work by design,
+            # so first fetch and verify that its base matches remote MAIN.
+            # Only clean worktrees may fast-forward. Dirty worktrees may
+            # publish ONLY if the remote OID still equals their local HEAD.
+            # Never reset/rebase/discard pending business changes.
+            if self._has_remote_origin():
+                # Legacy tests/local-only repositories have no origin.
+                # Production repositories do: failures fetching that origin
+                # must reject a publish BEFORE staging any local business data.
+                self._run_git_command(["fetch", "origin", self._branch])
+                local_base = self._run_git_command(["rev-parse", "HEAD"]).strip()
+                remote_base = self._run_git_command([
+                    "rev-parse", f"origin/{self._branch}",
+                ]).strip()
+                dirty = bool(self._run_git_command([
+                    "status", "--porcelain", "--untracked-files=all",
+                ]))
+                if dirty:
+                    if local_base != remote_base:
+                        raise RepositoryConflictError(
+                            "Remote MAIN changed while unpublished local business "
+                            "files are pending; preserve local work for manual review"
+                        )
+                elif not self.pull():
+                    raise RemoteUnavailableError(
+                        "Unable to synchronize clean repository before publish"
+                    )
 
             # Materialize runtime Employee documents into the Git repository
             # before staging. The runtime copy is local UI state; the repository
@@ -1695,6 +1728,26 @@ class GitSynchronizationProvider(SynchronizationProvider):
         if branch is None:
             branch = self._branch
         try:
+            # Generic reset is not the verified startup backup pathway. It
+            # must not destroy unaccepted Git files/commits merely because
+            # Recovery metadata is no longer an authorization gate.
+            if self._run_git_command(
+                ["status", "--porcelain", "--untracked-files=all"]
+            ):
+                logger.warning(
+                    "Refusing generic reset: unpublished local Git files must "
+                    "be preserved by the explicit verified startup path"
+                )
+                return False
+            local = self._run_git_command(["rev-parse", "HEAD"])
+            remote = self._run_git_command(["rev-parse", f"origin/{branch}"])
+            ancestor = self._run_git_command(["merge-base", local, remote])
+            if ancestor != local:
+                logger.warning(
+                    "Refusing generic reset: diverged local commits need "
+                    "the verified startup archive pathway"
+                )
+                return False
             try:
                 self._run_git_command(["rebase", "--abort"])
             except Exception:

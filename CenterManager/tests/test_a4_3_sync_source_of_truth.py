@@ -48,9 +48,21 @@ def test_publish_does_not_continue_after_failed_repository_pull():
     start = source.index("    def publish(self, message: str, user: str) -> bool:")
     end = source.index("    def publish_only(", start)
     block = source[start:end]
-    assert "if not self.pull()" in block
-    assert "Unable to synchronize repository before publish" in block
-    assert block.index("if not self.pull()") < block.index("self._sync_employee_attachments_to_repository()")
+    # A clean repository still uses pull; a dirty, prepared business tree
+    # must not be reset or merged. Both paths authenticate remote MAIN
+    # before staging/publishing. No origin is local-only test mode.
+    assert "if self._has_remote_origin():" in block
+    assert 'self._run_git_command(["fetch", "origin", self._branch])' in block
+    assert "if local_base != remote_base:" in block
+    assert "Remote MAIN changed while unpublished local business" in block
+    assert "elif not self.pull():" in block
+    assert "Unable to synchronize clean repository before publish" in block
+    assert block.index('self._run_git_command(["fetch", "origin", self._branch])') < block.index(
+        "self._sync_employee_attachments_to_repository()"
+    )
+    assert block.index("if local_base != remote_base:") < block.index(
+        "self._sync_employee_attachments_to_repository()"
+    )
 
 
 def test_publish_only_always_establishes_remote_commit_fence():

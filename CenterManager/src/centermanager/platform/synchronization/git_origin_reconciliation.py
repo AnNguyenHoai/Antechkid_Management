@@ -134,8 +134,8 @@ def install_origin_reconciliation(provider_cls: Any) -> None:
                 raise RecoveryRequired(
                     "Preclone capture cannot authorize an existing repository."
                 )
-            from centermanager.platform.write_recovery import require_replaceable
-            require_replaceable()
+            # Origin identity is checked by _reconcile_origin. A historical
+            # Recovery log is not an authorization source for idempotent clone.
             if not _reconcile_origin(self):
                 logger.error("Existing repository origin could not be reconciled")
                 return False

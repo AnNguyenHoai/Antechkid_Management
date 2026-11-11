@@ -194,6 +194,42 @@ class TestGitIntegration:
         
         assert provider.publish("Update to version 3", "test_user") is True
     
+    def test_dirty_legacy_publish_denies_stale_main_without_losing_local_files(
+        self, temp_git_repo, tmp_path,
+    ):
+        """Local business changes are never reset or pushed over newer MAIN."""
+        from centermanager.platform.synchronization.exceptions import PushFailedError
+
+        repo_path, remote_path, repo, branch_name = temp_git_repo
+        provider = GitSynchronizationProvider(
+            repo_path=repo_path, repository_url=str(remote_path),
+            token="test", branch=branch_name,
+        )
+        provider.connect()
+
+        local_pending = repo_path / "student_unpublished.txt"
+        local_pending.write_text("locally saved but not published", encoding="utf-8")
+
+        second = git.Repo.clone_from(str(remote_path), tmp_path / "second_writer")
+        changed = tmp_path / "second_writer" / "manifest.json"
+        manifest = json.loads(changed.read_text(encoding="utf-8"))
+        manifest["runtime_version"] = 10
+        changed.write_text(json.dumps(manifest), encoding="utf-8")
+        second.index.add(["manifest.json"])
+        second.index.commit("Another writer publishes first")
+        second.remotes.origin.push(refspec=f"{branch_name}:{branch_name}")
+        newer_main = second.head.commit.hexsha
+        local_head = repo.head.commit.hexsha
+
+        with pytest.raises(PushFailedError, match="Remote MAIN changed"):
+            provider.publish("Attempt stale publish", "test_user")
+
+        assert local_pending.read_text(encoding="utf-8") == (
+            "locally saved but not published"
+        )
+        assert repo.head.commit.hexsha == local_head
+        assert git.Repo(remote_path).commit(branch_name).hexsha == newer_main
+
     def test_health(self, temp_git_repo):
         """Test health check."""
         repo_path, remote_path, repo, branch_name = temp_git_repo

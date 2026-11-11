@@ -221,41 +221,38 @@ class WriteTransactionManager:
     def _begin_recovery_journal(self) -> bool:
         from centermanager.platform.write_recovery import WriteRecoveryJournal
         from centermanager.database.encryption import database_encryption_required
-        journal = WriteRecoveryJournal()
         # Non-deployed, DB-less custom providers have no persistent workspace.
         # Encrypted production always requires durable metadata.
-        if not database_encryption_required() and not (
-            journal.database.exists() and (journal.repository / ".git").exists()
-        ):
-            return True
         try:
+            journal = WriteRecoveryJournal()
+            if not database_encryption_required() and not (
+                journal.database.exists() and (journal.repository / ".git").exists()
+            ):
+                return True
             provider = self._collab_manager._sync_provider
             token = getattr(provider, "_owned_lock_token", None)
             authority = {name: token.get(name) for name in ("session_id", "oid", "lease_revision")} if isinstance(token, dict) else {}
-            receipt = self._pre_handoff_clean_receipt
-            if receipt is not None:
-                # The handoff layer (before it discards the previous DB)
-                # already validated MAIN and sealed the migrated runtime.
-                # Never reseal here: that would validate the old pre-handoff
-                # receipt against a newly accepted database generation.
-                journal.assert_replaceable()
-                accepted = journal.inspect()
-                if (accepted is None or accepted.get('status') != 'CLEAN'
-                        or accepted.get('published_oid') != self._base_main_commit):
-                    from centermanager.platform.write_recovery import RecoveryRequired
-                    raise RecoveryRequired(
-                        'WRITE handoff receipt does not match its pinned MAIN commit.'
-                    )
-                self._pre_handoff_clean_receipt = None
-            journal.begin(self._collab_manager.get_session_id(), self._base_main_commit, authority)
+            # The independently validated WRITE handoff already pinned MAIN;
+            # the Recovery ledger is now logging-only, not a second grant.
+            self._pre_handoff_clean_receipt = None
+            journal.begin(
+                self._collab_manager.get_session_id(),
+                self._base_main_commit,
+                authority,
+                advisory=True,
+            )
             self._recovery_journal = journal
             return True
-        except Exception as exc:
-            self._last_start_error = f"Local recovery protection failed: {exc}. Keep the workspace; inspect recovery before retrying."
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            self._is_editing = False
-            logger.error(self._last_start_error)
-            return False
+        except Exception:
+            # Failed disk logging cannot revoke a successfully verified remote
+            # WRITE lease. WARN loudly: an unlogged crash may require review
+            # of local rollback files, but current business editing continues.
+            self._recovery_journal = None
+            logger.exception(
+                "Recovery audit unavailable for this edit session; "
+                "independent Git MAIN/WRITE checks remain enforced"
+            )
+            return True
 
     def _create_snapshot(self) -> None:
         from centermanager.database.wal_safety import copy_runtime_database_for_publish
@@ -285,8 +282,20 @@ class WriteTransactionManager:
             logger.exception("Failed to delete snapshot: %s", snapshot_path)
 
     def _restore_snapshot(self) -> bool:
-        from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+        # Recovery journal status cannot veto an explicit local cancel. The
+        # remote writer/MAIN base must remain independently authenticated.
+        if not self._collab_manager.is_writing():
+            logger.warning("Cannot restore snapshot without current WRITE lease")
+            return False
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if provider is not None:
+            try:
+                if (not self._base_main_commit
+                        or provider.observe_remote_main_commit() != self._base_main_commit):
+                    return False
+            except Exception:
+                logger.exception("Snapshot restore MAIN OID check failed")
+                return False
         if self._snapshot_path and self._snapshot_path.exists():
             try:
                 paths = get_paths()
@@ -601,18 +610,9 @@ class WriteTransactionManager:
             logger.warning(self._last_start_error)
             return False
 
-        from centermanager.platform.write_recovery import WriteRecoveryJournal, require_replaceable, RecoveryRequired
-        try:
-            require_replaceable()
-            receipt = WriteRecoveryJournal().inspect()
-            self._pre_handoff_clean_receipt = (
-                receipt if receipt is not None and receipt.get("status") == "CLEAN"
-                else None
-            )
-        except RecoveryRequired as exc:
-            self._last_start_error = str(exc)
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            return False
+        # Recovery is only an advisory log. Current MAIN, active lease and
+        # WRITE handoff are independently authenticated below.
+        self._pre_handoff_clean_receipt = None
         if not self._transition_to(WriteTransactionState.ACQUIRING, "request write"):
             self._last_start_error = "Unable to enter write-lock acquisition state."
             return False
@@ -665,9 +665,7 @@ class WriteTransactionManager:
                 self._base_main_commit[:8] if self._base_main_commit else None,
             )
 
-            if not timed_call("recovery_begin", self._begin_recovery_journal):
-                self._release_grant_after_failed_consistency_check()
-                return False
+            timed_call("recovery_begin", self._begin_recovery_journal)
             if not self._verify_grant_before_editing():
                 self._state = WriteTransactionState.RECOVERY_REQUIRED
                 self._is_editing = False
@@ -852,32 +850,44 @@ class WriteTransactionManager:
 
         if self._mutation_gate is not None:
             self._mutation_gate.close()
+        # Forced cancellation must restore a dirty local DB snapshot BEFORE
+        # deleting it and releasing the independently verified WRITE lease,
+        # regardless of whether the advisory Recovery ledger is available.
+        if force and self._has_changes:
+            if not self._restore_snapshot():
+                logger.error("Forced cancel cannot restore local snapshot; data retained")
+                self._state = WriteTransactionState.FAILED
+                self._is_editing = False
+                return False
         if self._recovery_journal is not None:
             try:
                 self._recovery_journal.preserve("cancel-editing")
                 self._recovery_journal.update(status="CANCELLED")
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                if self._collab_manager.is_writing():
-                    if not self._collab_manager.release_write():
-                        self._last_start_error = "Cancelled data is preserved, but WRITE release is unverified. Keep recovery data and close CenterManager before reconciliation."
-                        return False
+            except Exception:
+                logger.exception(
+                    "Recovery could not record cancelled local edits; "
+                    "the operation remains advisory"
+                )
+            # Remote lease release, not Recovery log availability, decides
+            # whether cancellation of the active editor can finish.
+            if self._collab_manager.is_writing():
+                if not self._collab_manager.release_write():
+                    # Cancellation cannot declare IDLE or permit further
+                    # mutation while remote WRITE-release acknowledgement is
+                    # uncertain. This is the lease safety rule, NOT Recovery.
+                    self._state = WriteTransactionState.FINISHING_STALE
+                    self._is_editing = False
+                    self._last_start_error = (
+                        "Remote WRITE release is not verified; wait for lease resolution."
+                    )
+                    return False
+                try:
                     self._recovery_journal.released()
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                self._last_start_error = "Cancelled data is preserved. Inspect recovery and explicitly reconcile before synchronizing."
-                return True
-            except Exception as exc:
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                self._last_start_error = f"Recovery preservation failed: {exc}. Free disk space and retry; keep the workspace."
-                return False
-
-        if force and self._has_changes:
-            if not self._restore_snapshot():
-                logger.error("Snapshot restore failed, lock retained")
-                self._state = WriteTransactionState.FAILED
-                return False
+                except Exception:
+                    logger.exception("Cancelled WRITE released; Recovery log unavailable")
+            self._delete_snapshot()
+            self._reset_to_idle()
+            return True
 
         if self._collab_manager.is_writing():
             if not self._collab_manager.release_write():
@@ -959,33 +969,40 @@ class WriteTransactionManager:
 
         try:
             if self._recovery_journal is not None:
-                # Local Save and mutation gate are already quiesced here.
-                # Drain ONLY the mirror worker (which never opens SQLCipher).
-                # No Git/network operation is introduced by this barrier.
-                # A failed/expired mirror is NOT a data-loss event: the
-                # WAL-complete SQLCipher capture below still retains outbox.
-                from centermanager.platform.recovery_mirror_worker import drain_before_capture
-                active_recovery = self._recovery_journal.inspect() or {}
-                mirror_drained = timed_call(
-                    "rv02_mirror_drain", drain_before_capture, 5.0,
-                    recovery_root=self._recovery_journal.root,
-                    session_id=active_recovery.get("session_id"),
-                )
-                self._recovery_journal.update(
-                    rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
-                )
-                if not mirror_drained:
-                    logger.warning(
-                        "RV-02 background mirror incomplete before publication; "
-                        "preserving original SQLCipher outbox in protected capture"
+                try:
+                    # Audit is best-effort: a failed Recovery log cannot stop
+                    # the independent CAS-based Git MAIN publication.
+                    from centermanager.platform.recovery_mirror_worker import drain_before_capture
+                    active_recovery = self._recovery_journal.inspect() or {}
+                    mirror_drained = timed_call(
+                        "rv02_mirror_drain", drain_before_capture, 5.0,
+                        recovery_root=self._recovery_journal.root,
+                        session_id=active_recovery.get("session_id"),
                     )
-                timed_call("capture_before_publish", self._recovery_journal.preserve, "before-publish")
-                self._recovery_journal.update(status="PUBLISHING")
+                    self._recovery_journal.update(
+                        rv02_mirror_state="QUEUE_DRAINED" if mirror_drained else "INCOMPLETE"
+                    )
+                    if not mirror_drained:
+                        logger.warning("Recovery mirror incomplete; retaining any available evidence")
+                    timed_call(
+                        "capture_before_publish", self._recovery_journal.preserve,
+                        "before-publish",
+                    )
+                    self._recovery_journal.update(status="PUBLISHING")
+                except Exception:
+                    logger.exception("Recovery pre-publish logging failed; Git publish proceeds")
+                    self._recovery_journal = None
             success = timed_call("git_publish", self._do_publish)
             if success:
                 if self._recovery_journal is not None:
-                    with trace_phase("recovery_published"):
-                        self._recovery_journal.published(self._collab_manager._sync_provider)
+                    try:
+                        with trace_phase("recovery_published"):
+                            self._recovery_journal.published(self._collab_manager._sync_provider)
+                    except Exception:
+                        logger.exception(
+                            "Git MAIN publish verified, but Recovery receipt could not be recorded"
+                        )
+                        self._recovery_journal = None
                 if self._version_manager:
                     self._version_manager.publish_pending_version()
                     self._pending_version = None
@@ -1001,9 +1018,26 @@ class WriteTransactionManager:
                         logger.exception("Published core data; derived report delivery failed")
                 logger.info("Transaction: PUBLISHED")
                 if self._on_publish_success:
-                    self._on_publish_success()
-                post_publish_pending = bool(self._recovery_journal is not None and
-                    timed_call("post_publish_validation", self._recovery_journal.preserve_post_publish_changes))
+                    try:
+                        self._on_publish_success()
+                    except Exception:
+                        logger.exception(
+                            "Git MAIN was already published; post-publish UI callback "
+                            "failed and must not reclassify the accepted publication"
+                        )
+                try:
+                    post_publish_pending = bool(
+                        self._recovery_journal is not None and
+                        timed_call(
+                            "post_publish_validation",
+                            self._recovery_journal.preserve_post_publish_changes,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "Post-publish Recovery audit failed; accepted Git MAIN remains authoritative"
+                    )
+                    post_publish_pending = False
                 self._collab_manager._lock.clear_finishing_data()
                 self._finishing_deadline = None
                 self._finishing_started_at = None
@@ -1017,10 +1051,10 @@ class WriteTransactionManager:
                     return True
 
                 if post_publish_pending:
-                    self._state = WriteTransactionState.RECOVERY_REQUIRED
-                    self._is_editing = False
-                    self._last_start_error = "MAIN was published, but a post-publish callback saved additional local data. Recovery copies are retained; inspect and explicitly reconcile before further editing or synchronization."
-                    return True
+                    logger.warning(
+                        "Git MAIN published; additional post-publish local changes "
+                        "need human Recovery review, not an editing veto"
+                    )
                 self._delete_snapshot()
                 self._reset_to_idle()
                 return True
@@ -1077,7 +1111,10 @@ class WriteTransactionManager:
             logger.warning("Remote WRITE lock release is not yet confirmed")
             return False
         if self._recovery_journal is not None:
-            self._recovery_journal.released()
+            try:
+                self._recovery_journal.released()
+            except Exception:
+                logger.exception("Remote WRITE released; Recovery release logging unavailable")
         self._state = WriteTransactionState.COMPLETED
         logger.info("Transaction: COMPLETED (lock released)")
         return True
@@ -1088,11 +1125,8 @@ class WriteTransactionManager:
             return False
         if not self._release_lock():
             return False
-        if self._recovery_journal is not None and self._recovery_journal.inspect()['status'] == 'POST_PUBLISH_PENDING':
-            self._state = WriteTransactionState.RECOVERY_REQUIRED
-            self._is_editing = False
-            self._last_start_error = "Published MAIN and released WRITE; additional local data is preserved for explicit recovery reconciliation."
-            return True
+        # A post-publish Recovery case is notification-only. Remote MAIN was
+        # already verified and the exclusive WRITE lease has been released.
         self._delete_snapshot()
         self._reset_to_idle()
         return True
@@ -1181,9 +1215,7 @@ class WriteTransactionManager:
             self._release_grant_after_failed_consistency_check()
             self._state = WriteTransactionState.RECOVERY_REQUIRED
             return
-        if not self._begin_recovery_journal():
-            self._release_grant_after_failed_consistency_check()
-            return
+        self._begin_recovery_journal()
         if not self._verify_grant_before_editing():
             self._state = WriteTransactionState.RECOVERY_REQUIRED
             self._is_editing = False

@@ -64,9 +64,9 @@ def test_offline_reconnect_never_creates_production_income_or_git_push_paths():
     assert 'begin_sync("Auto sync"' not in reconnect_body
     assert "self._apply_runtime_update()" in reconnect_body
     assert "provider.observe_remote_main_commit()" in reconnect_body
-    assert "WriteRecoveryJournal().assert_replaceable()" in reconnect_body
+    assert "WriteRecoveryJournal().assert_replaceable()" not in reconnect_body
     assert "set_offline_read(False)" in reconnect_body
-    assert reconnect_body.index("WriteRecoveryJournal().assert_replaceable()") < reconnect_body.index("set_offline_read(False)")
+    assert reconnect_body.index("provider.observe_remote_main_commit()") < reconnect_body.index("set_offline_read(False)")
 
 
 def test_phase1_probe_never_uses_remote_git_fetch_or_migration():
@@ -78,4 +78,5 @@ def test_phase1_probe_never_uses_remote_git_fetch_or_migration():
     assert "record_synchronized(" not in gate
     assert "reconcile(" not in gate
     assert "validate_identity(" in gate
-    assert "journal.assert_replaceable()" in gate
+    assert "journal.assert_replaceable()" not in gate
+    assert "verify_authenticated_cache(paths)" in gate

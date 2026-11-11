@@ -192,11 +192,14 @@ def test_dirty_journal_blocks_destructive_boundary(workspace, path):
         assert not result.success and 'protected' in result.error
     elif path == 'cancel-rollback':
         from centermanager.services.write_transaction import WriteTransactionManager
-        with pytest.raises(RecoveryRequired):
-            WriteTransactionManager(SimpleNamespace())._restore_snapshot()
+        # A missing verified remote lease, not dirty Recovery, rejects rollback.
+        assert not WriteTransactionManager(
+            SimpleNamespace(is_writing=lambda: False)
+        )._restore_snapshot()
     elif path == 'clone':
-        with pytest.raises(RecoveryRequired):
-            w.provider.clone()
+        # Existing clean Git-origin reconciliation is idempotent even while
+        # old local Recovery remains OPEN. It must not erase user artifacts.
+        assert w.provider.clone()
     else:
         assert not getattr(w.provider, 'reset_to_remote' if path == 'reset' else 'pull')()
     if path != 'startup':
@@ -215,7 +218,7 @@ def test_cancel_retains_data_even_without_dirty_flag(workspace):
     transaction._recovery_journal = workspace.journal
     assert not transaction.has_changes
     assert transaction.cancel_editing(force=True)
-    assert transaction.state == WriteTransactionState.RECOVERY_REQUIRED
+    assert transaction.state == WriteTransactionState.IDLE
     document = workspace.journal.inspect()
     assert document['status'] == 'CANCELLED' and document['release'] == 'VERIFIED'
     assert values(Path(document['last_capture']) / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED']
@@ -276,8 +279,9 @@ def test_explicit_reconciliation_keeps_unaccepted_git_commit_and_db(workspace):
     capture = Path(w.journal.inspect()['last_capture'])
     assert git(capture / 'repository', 'rev-parse', 'HEAD') == unaccepted
     assert values(capture / 'center.db') == ['BASE', 'LOCAL_UNACCEPTED']
-    assert w.provider.reset_to_remote()
-    w.journal.assert_replaceable()
+    # A generic reset is never permitted to destroy a diverged local commit.
+    # The authenticated startup path has its own archival/OID checks.
+    assert not w.provider.reset_to_remote()
     from centermanager.platform.sync.startup_sync import StartupSynchronization
     assert StartupSynchronization(w.provider).run()
     assert values(w.journal.database) == ['BASE']
@@ -410,12 +414,13 @@ def test_transaction_prepares_journal_before_editing_and_blocks_on_failure(works
         tx._state = WriteTransactionState.GRANTING
         tx.on_write_granted()
     else:
-        assert not tx.start_editing()
+        assert tx.start_editing()
     assert observed == [False]
-    assert not tx.is_editing
-    assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
-    assert 'recovery protection failed' in tx.last_start_error
-    collab.release_write.assert_called_once()
+    # A journaling fault must not revoke a separately verified writer.
+    assert tx.is_editing
+    assert tx.state == WriteTransactionState.EDITING
+    assert tx._recovery_journal is None
+    collab.release_write.assert_not_called()
 
 
 def test_manifest_tampering_cannot_authorize_reconciliation(workspace):
@@ -442,9 +447,9 @@ def test_failed_cancel_preservation_retains_original_and_blocks(workspace, monke
     def fail(*a):
         raise OSError('disk full')
     monkeypatch.setattr(workspace.journal, 'preserve', fail)
-    assert not tx.cancel_editing(force=True)
-    assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
-    collab.release_write.assert_not_called()
+    assert tx.cancel_editing(force=True)
+    assert tx.state == WriteTransactionState.IDLE
+    collab.release_write.assert_called_once()
     assert values(workspace.journal.database) == ['BASE', 'LOCAL_UNACCEPTED']
 
 
@@ -483,7 +488,9 @@ def test_real_transaction_sqlcipher_publish_release_and_second_session(workspace
         tx.mark_dirty()
         assert tx.finish_editing(on_publish_success=(lambda: mutate(workspace)) if callback_mutates else None)
         if callback_mutates:
-            assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+            # MAIN is accepted; post-publish local evidence stays in Recovery
+            # without poisoning the next independently verified edit session.
+            assert tx.state == WriteTransactionState.IDLE
             document = workspace.journal.inspect()
             assert document['status'] == 'POST_PUBLISH_PENDING'
             assert document['release'] == 'VERIFIED'
@@ -509,7 +516,7 @@ def test_cancel_release_failure_remains_blocked(workspace):
     tx._recovery_journal = workspace.journal
     assert not tx.cancel_editing(force=True)
     assert not tx.is_editing
-    assert tx.state == WriteTransactionState.RECOVERY_REQUIRED
+    assert tx.state == WriteTransactionState.FINISHING_STALE
     assert workspace.journal.inspect()['release'] == 'UNVERIFIED'
 
 

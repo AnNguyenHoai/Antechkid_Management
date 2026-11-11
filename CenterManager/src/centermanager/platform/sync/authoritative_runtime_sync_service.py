@@ -183,18 +183,12 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
             self._failed_count = 0
 
             from centermanager.platform.sync.offline_read_state import (
-                offline_read_active, receipt_read_only_active, set_offline_read,
+                offline_read_active, set_offline_read,
             )
-            if receipt_read_only_active():
-                # Reconnecting the Git transport does not repair an invalid
-                # Recovery WRITE receipt. No READY transition in this process.
-                logger.warning("Recovery receipt READ-only latch requires new validated startup")
-                return False
             if offline_read_active():
                 # Pull-only sync and atomic runtime install must be complete
                 # before any READ->WRITE availability transition. A successful
                 # HTTP probe alone never releases the offline fence.
-                from centermanager.platform.write_recovery import WriteRecoveryJournal
                 from centermanager.platform.runtime.context.runtime_state import RuntimeState
                 from centermanager.platform.collaboration.events import ModeChanged
                 from centermanager.platform.sync.events import SynchronizationCompleted
@@ -205,8 +199,10 @@ class RuntimeSyncService(_HardenedRuntimeSyncService):
                 if not accepted or observed != accepted:
                     logger.warning("Reconnect: Git MAIN OID changed; retaining Offline READ")
                     return False
-                WriteRecoveryJournal().assert_replaceable()
-                # Switch on only after a verified runtime/receipt+remote OID.
+                # The just-completed atomic materialization has already
+                # validated the signed Git MAIN artifact and physical schema.
+                # A historical Recovery receipt is never a reconnect gate.
+                # Switch on only after the verified runtime and exact remote OID.
                 runtime_context = self._context_manager.get_context()
                 runtime_context.state.transition_to(RuntimeState.READY)
                 set_offline_read(False)

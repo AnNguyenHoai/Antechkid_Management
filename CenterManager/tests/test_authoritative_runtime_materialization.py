@@ -236,8 +236,8 @@ def test_refresh_failure_rolls_back_and_rejects_handoff(tmp_path, monkeypatch):
     assert _read_values(runtime_db) == ["OLD_B"]
 
 
-def test_receipt_failure_rolls_back_db_before_discarding_backup(tmp_path, monkeypatch):
-    """Even after migration+refresh, failed journal attestation must roll back."""
+def test_advisory_receipt_failure_does_not_veto_verified_main(tmp_path, monkeypatch):
+    """A Recovery log error cannot roll back separately verified Git MAIN."""
     paths = _paths(tmp_path)
     repo_db = paths.runtime_root / "repository" / "database" / "center.db"
     _make_plain_db(repo_db, ["NEW_MAIN"])
@@ -259,15 +259,15 @@ def test_receipt_failure_rolls_back_db_before_discarding_backup(tmp_path, monkey
 
     monkeypatch.setattr(recovery, "WriteRecoveryJournal", RejectReceipt)
 
-    assert service._apply_runtime_update() is False
+    assert service._apply_runtime_update() is True
     assert "receipt-rejected" in order
     assert order.index("migrate") < order.index("receipt-rejected")
-    assert order.count("refresh") == 2  # new sessions + rollback sessions
+    assert order.count("refresh") == 1  # no rollback on advisory log failure
     assert fence["active"] is False
-    assert _read_values(runtime_db) == ["PREVIOUS_ACCEPTED"]
+    assert _read_values(runtime_db) == ["NEW_MAIN"]
 
 
-def test_unverified_receipt_stops_before_database_mutation(tmp_path, monkeypatch):
+def test_unverified_receipt_preserves_old_generation_but_installs_main(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     repo_db = paths.runtime_root / "repository" / "database" / "center.db"
     _make_plain_db(repo_db, ["NEW_MAIN"])
@@ -284,10 +284,17 @@ def test_unverified_receipt_stops_before_database_mutation(tmp_path, monkeypatch
             return {"status": "OPEN", "publication": "UNKNOWN"}
 
     monkeypatch.setattr(recovery, "WriteRecoveryJournal", UnacceptedJournal)
-    assert service._apply_runtime_update() is False
-    assert order == []
+    assert service._apply_runtime_update() is True
+    assert "migrate" in order and "refresh" in order
     assert fence["active"] is False
-    assert _read_values(runtime_db) == ["PREVIOUS_ACCEPTED"]
+    assert _read_values(runtime_db) == ["NEW_MAIN"]
+    preserved = list(
+        (UnacceptedJournal.root / "handoff-rollback").glob(
+            "*/.center.db.previous-*"
+        )
+    )
+    assert len(preserved) == 1
+    assert _read_values(preserved[0]) == ["PREVIOUS_ACCEPTED"]
 
 
 def test_clean_receipt_fingerprint_excludes_deleted_handoff_backup(tmp_path, monkeypatch):
@@ -300,8 +307,8 @@ def test_clean_receipt_fingerprint_excludes_deleted_handoff_backup(tmp_path, mon
     service, fence, order = _service(monkeypatch, paths)
 
     assert service._apply_runtime_update() is True
-    assert order.index("receipt") < order.index("receipt-verified")
-    assert "receipt-verified" in order
+    assert "receipt" in order  # optional receipt seal for a clean prior log
+    assert "migrate" in order and "refresh" in order
     assert not list(paths.database_dir.glob(".*.previous-*"))
     assert not list(
         (paths.runtime_root.with_name(paths.runtime_root.name + ".write-recovery") /
@@ -310,8 +317,8 @@ def test_clean_receipt_fingerprint_excludes_deleted_handoff_backup(tmp_path, mon
     assert _read_values(runtime_db) == ["FROM_MAIN"]
 
 
-def test_rejected_receipt_retains_old_db_until_rollback(tmp_path, monkeypatch):
-    """Unaccepted handoff preserves and restores the previous DB from recovery area."""
+def test_rejected_advisory_receipt_retains_main_success(tmp_path, monkeypatch):
+    """A failed log still sees the old generation before MAIN is accepted."""
     paths = _paths(tmp_path)
     repo_db = paths.runtime_root / "repository" / "database" / "center.db"
     _make_plain_db(repo_db, ["NEW"])
@@ -334,6 +341,6 @@ def test_rejected_receipt_retains_old_db_until_rollback(tmp_path, monkeypatch):
             raise recovery.RecoveryRequired("simulated MAIN advancement")
 
     monkeypatch.setattr(recovery, "WriteRecoveryJournal", RejectOnSeal)
-    assert service._apply_runtime_update() is False
-    assert _read_values(runtime_db) == ["OLD"]
+    assert service._apply_runtime_update() is True
+    assert _read_values(runtime_db) == ["NEW"]
     assert fence["active"] is False

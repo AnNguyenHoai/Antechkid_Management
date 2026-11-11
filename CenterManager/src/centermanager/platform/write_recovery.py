@@ -335,10 +335,27 @@ class WriteRecoveryJournal:
         self.update(accepted_local_files=current)
         self.assert_replaceable()
 
-    def begin(self, session_id, base_oid, authority):
+    def begin(self, session_id, base_oid, authority, *, advisory=False):
         if not isinstance(session_id, str) or not session_id or not isinstance(base_oid, str) or not base_oid:
             raise RecoveryRequired('A verified session and accepted MAIN base are required before local editing.')
-        self.assert_replaceable(legacy=True)
+        if not advisory:
+            # Legacy strict mode retained for explicit diagnostic callers.
+            self.assert_replaceable(legacy=True)
+        else:
+            # The independent collaboration WRITE lease and Git MAIN handoff
+            # have already been verified by WriteTransactionManager. Archive
+            # the raw previous receipt (including corrupt/OPEN journals)
+            # before logging the new session; never use it as authorization.
+            if self.journal.is_file():
+                old_bytes = self.journal.read_bytes()
+                archive = self.root / 'history' / (
+                    'advisory-' + uuid.uuid4().hex + '.json'
+                )
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open('xb') as output:
+                    output.write(old_bytes)
+                    output.flush()
+                    os.fsync(output.fileno())
         if self._git('rev-parse', 'HEAD') != base_oid:
             raise RecoveryRequired('WRITE base does not match the materialized repository commit.')
         document = dict(format=1, session_id=session_id, base_main_oid=base_oid,
@@ -348,7 +365,7 @@ class WriteRecoveryJournal:
                         authority=authority, ownership_epoch=None,
                         publication='UNVERIFIED', release='UNVERIFIED')
         # History is never garbage-collected here; no only-copy deletion.
-        if self.journal.exists():
+        if self.journal.exists() and not advisory:
             _json(self.root / 'history' / (uuid.uuid4().hex + '.json'), self.inspect())
         _json(self.journal, document)
         self.preserve('base')

@@ -16,7 +16,9 @@ def _fake_reconnect(monkeypatch, *, observed):
     verified = []
     monkeypatch.setattr(
         recovery, "WriteRecoveryJournal",
-        lambda: SimpleNamespace(assert_replaceable=lambda: verified.append("clean")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("reconnect may not consult Recovery")
+        ),
     )
     events = []
     runtime_state = SimpleNamespace(current=RuntimeState.OFFLINE)
@@ -63,13 +65,13 @@ def test_reconnect_rejects_remote_main_oid_race(monkeypatch):
         set_offline_read(False)
 
 
-def test_only_verified_remote_main_and_clean_receipt_unlock_write(monkeypatch):
+def test_only_verified_remote_main_and_runtime_install_unlock_write(monkeypatch):
     from centermanager.platform.collaboration.events import ModeChanged
     try:
         set_offline_read(True)
         fake, state, events, verified = _fake_reconnect(monkeypatch, observed="a" * 40)
         assert RuntimeSyncService._perform_sync(fake) is True
-        assert verified == ["clean"]
+        assert not verified
         assert not offline_read_active()
         assert state.current is RuntimeState.READY
         assert any(isinstance(e, ModeChanged) and e.mode == "READ" for e in events)
@@ -101,11 +103,14 @@ def test_background_reconnect_does_not_require_version_increment():
     assert body.index("offline_read_active()") < body.index("self._perform_check()")
 
 
-def test_reconnect_keeps_write_fence_until_verified_clean_runtime():
+def test_reconnect_keeps_write_fence_until_verified_main_runtime():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "src" / "centermanager"
     service = (root / "platform" / "sync" / "authoritative_runtime_sync_service.py").read_text(encoding="utf-8")
     reconnect = service.split("def _perform_sync(", 1)[1]
     assert reconnect.index("self._apply_runtime_update()") < reconnect.index("provider.observe_remote_main_commit()")
-    assert reconnect.index("WriteRecoveryJournal().assert_replaceable()") < reconnect.index("set_offline_read(False)")
+    assert "WriteRecoveryJournal().assert_replaceable()" not in reconnect
+    assert reconnect.index("provider.observe_remote_main_commit()") < reconnect.index(
+        "set_offline_read(False)"
+    )
     assert 'ModeChanged(mode="READ")' in reconnect

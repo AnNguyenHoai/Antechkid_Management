@@ -397,7 +397,10 @@ def test_true_post_publish_sql_mutation_still_preserves_recovery(reporting):
         finally:
             raw.close()
     assert w.tx.finish_editing(on_publish_success=unexpected_authoritative_side_effect)
-    assert w.tx.state == WriteTransactionState.RECOVERY_REQUIRED
+    # The accepted remote MAIN is authoritative and remote WRITE was released.
+    # A subsequent local SQL callback is still preserved as a distinct
+    # advisory Recovery case; it cannot keep the transaction in WRITE/ERROR.
+    assert w.tx.state == WriteTransactionState.IDLE
     assert w.journal.inspect()['status'] == 'POST_PUBLISH_PENDING'
     capture = Path(w.journal.inspect()['last_capture'])
     w.journal.verify_capture(capture)

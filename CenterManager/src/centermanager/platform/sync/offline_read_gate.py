@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """STARTUP-FIX-01 Phase 1: non-mutating eligibility check for cached READ.
 
-This probe does not fetch Git, reconcile recovery, accept a new database,
-migrate schema, or grant WRITE authority. An existing CLEAN receipt is the
-minimum provenance proof; simply finding center.db is not enough.
+This probe does not fetch Git, inspect historical Recovery, migrate schema
+or grant WRITE authority. A separate machine-key-signed accepted-MAIN cache
+is minimum proof; simply finding center.db is not enough.
 """
 from __future__ import annotations
 
@@ -30,27 +30,26 @@ def assess_offline_read(paths=None) -> OfflineReadEligibility:
     from centermanager.database.encryption import DatabaseKeyStore, database_encryption_required
     from centermanager.database.artifact_security import validate_database_artifact
     from centermanager.database.artifact_identity import validate_identity
-    from centermanager.platform.write_recovery import WriteRecoveryJournal
+    from centermanager.platform.sync.offline_main_receipt import (
+        verify_authenticated_cache,
+    )
 
     paths = paths or get_paths()
     db = Path(paths.database_dir) / "center.db"
     repo_db = Path(paths.runtime_root) / "repository" / "database" / "center.db"
     try:
-        journal = WriteRecoveryJournal(paths)
-        receipt = journal.inspect()
-        if not receipt or receipt.get("status") != "CLEAN" or receipt.get("publication") != "VERIFIED":
-            return OfflineReadEligibility(False, "No verified CLEAN recovery receipt.")
+        if not verify_authenticated_cache(paths):
+            return OfflineReadEligibility(
+                False, "Independent signed Git MAIN offline cache is unavailable."
+            )
         if not db.is_file() or not repo_db.is_file() or db.stat().st_size == 0:
             return OfflineReadEligibility(False, "Accepted runtime/repository database is missing.")
         if db.is_symlink() or repo_db.is_symlink():
             return OfflineReadEligibility(False, "Database symlink cannot be trusted.")
         if any(db.with_name(db.name + suffix).exists() for suffix in ("-wal", "-journal")):
             return OfflineReadEligibility(False, "Uncheckpointed database state requires recovery.")
-        # This performs only local Git/status/fingerprint checks and never
-        # reclassifies a pending WRITE journal as CLEAN.
-        journal.assert_replaceable()
-        if hashlib.sha256(db.read_bytes()).hexdigest() != receipt.get("published_runtime_sha256"):
-            return OfflineReadEligibility(False, "Runtime differs from accepted CLEAN receipt.")
+        # Cache authentication already bound both hashes to the secret
+        # protected database key, independent from Recovery review state.
 
         encrypted = database_encryption_required()
         key = DatabaseKeyStore().load() if encrypted else None
@@ -64,6 +63,6 @@ def assess_offline_read(paths=None) -> OfflineReadEligibility:
             return OfflineReadEligibility(False, "Local database integrity check failed.")
         return OfflineReadEligibility(True, "Verified accepted local database is safe for offline READ.")
     except Exception:
-        # Recovery/identity/key failures are intentionally indistinguishable
+        # Cached identity/key failures are intentionally indistinguishable
         # in the UX; detailed exception must remain in local diagnostic logs.
         return OfflineReadEligibility(False, "Local database provenance or integrity is unverified.")

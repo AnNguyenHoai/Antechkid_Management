@@ -125,22 +125,10 @@ class _WriteHandoffUiRefreshBarrier(QObject):
                     if callable(current_refresh):
                         current_refresh()
 
-            # Refreshing a view must not silently invalidate the CLEAN
-            # recovery boundary. Catch it here, not later in journal.begin()
-            # after the distributed lock was granted.
-            from centermanager.platform.write_recovery import (
-                RecoveryRequired, WriteRecoveryJournal,
-            )
-            journal = WriteRecoveryJournal()
-            try:
-                journal.assert_replaceable()
-            except RecoveryRequired:
-                journal.log_clean_mismatch('post-write-handoff-ui-refresh')
-                logger.error(
-                    'WRITE handoff UI refresh modified the accepted runtime; '
-                    'EDITING is denied until the producer is identified.'
-                )
-                return False
+            # The UI must reflect the accepted MAIN; Recovery metadata cannot
+            # veto a handoff. The independently checked remote OID, signed
+            # SQLCipher artifact, runtime-session refresh and current lease
+            # remain the WRITE authority.
             logger.info("WRITE handoff UI projection refreshed from authoritative runtime")
             return True
         except Exception:
@@ -190,18 +178,21 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         """
         from centermanager.database import session as session_module
 
-        from centermanager.platform.write_recovery import (
-            WriteRecoveryJournal, require_replaceable, RecoveryRequired,
-        )
+        from centermanager.platform.write_recovery import WriteRecoveryJournal
+        # Recovery is an audit stream only, not a precondition for refreshing
+        # the verified authoritative MAIN. We preserve unaccepted prior files
+        # when the historical ledger is uncertain, without using it as a gate.
+        receipt_before = None
+        preserve_prior_for_review = False
         try:
-            require_replaceable()
             receipt_before = WriteRecoveryJournal().inspect()
-            if (receipt_before is None or receipt_before.get("status") != "CLEAN"
-                    or receipt_before.get("publication") != "VERIFIED"):
-                raise RecoveryRequired("WRITE handoff requires a verified CLEAN pre-install receipt.")
-        except RecoveryRequired as exc:
-            logger.error("Runtime replacement blocked: %s", exc)
-            return False
+            preserve_prior_for_review = (
+                receipt_before is None
+                or receipt_before.get("status") not in ("CLEAN", "PUBLISHED")
+            )
+        except Exception:
+            logger.exception("Old Recovery receipt unreadable during handoff; retaining old generation")
+            preserve_prior_for_review = True
         paths = get_paths()
         repo_db = paths.runtime_root / "repository" / "database" / "center.db"
         runtime_db = paths.database_dir / "center.db"
@@ -382,15 +373,21 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
             if provider is None:
                 raise RuntimeError("WRITE handoff provider unavailable for receipt verification")
             accepted_main = provider.get_local_main_commit()
-            journal = WriteRecoveryJournal()
-            journal.record_verified_handoff_install(
-                before=receipt_before,
-                accepted_main=accepted_main,
-                observe_main=provider.observe_remote_main_commit,
-            )
-            logger.info(
-                "WRITE handoff receipt sealed without temporary DB rollback artifacts"
-            )
+            if (not accepted_main
+                    or provider.observe_remote_main_commit() != accepted_main):
+                raise RuntimeError("Remote MAIN changed during handoff")
+            try:
+                if receipt_before is not None and receipt_before.get("status") == "CLEAN":
+                    WriteRecoveryJournal().record_verified_handoff_install(
+                        before=receipt_before,
+                        accepted_main=accepted_main,
+                        observe_main=provider.observe_remote_main_commit,
+                    )
+            except Exception:
+                logger.exception(
+                    "Advisory Recovery handoff receipt not recorded; "
+                    "authoritative MAIN validation remains independent"
+                )
 
         except Exception:
             logger.exception("Atomic authoritative runtime materialization failed")
@@ -446,23 +443,25 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
             staged_manifest.unlink(missing_ok=True)
 
         # Installation succeeded and the new runtime session factory is live.
-        # Old DB/WAL artifacts can now be destroyed; they must never be reused.
-        previous_db.unlink(missing_ok=True)
-        previous_manifest.unlink(missing_ok=True)
-        for _, backup in preserved_sidecars:
-            backup.unlink(missing_ok=True)
-        try:
-            rollback_dir.rmdir()
-        except OSError:
+        # An uncertain previous local generation is manual-review evidence;
+        # never erase its DB/WAL/manifest merely because MAIN was accepted.
+        if preserve_prior_for_review:
             logger.warning(
-                "WRITE handoff rollback directory retained after success; "
-                "inspect remaining artifacts"
+                "Old unaccepted handoff DB/WAL retained for manual Recovery review: %s",
+                rollback_dir,
             )
-        # Prove that the accepted receipt survives rollback-backup cleanup.
-        # This is not a bypass: all normal business files, DB SHA, WAL and
-        # Git invariants are still checked by the ordinary CLEAN guard.
-        WriteRecoveryJournal().assert_replaceable()
-        logger.info("WRITE handoff CLEAN receipt remains valid after backup cleanup")
+        else:
+            for old in (previous_db, previous_manifest, *(b for _, b in preserved_sidecars)):
+                try:
+                    old.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Obsolete handoff backup cleanup deferred: %s", old)
+            try:
+                rollback_dir.rmdir()
+            except OSError:
+                logger.debug("Handoff rollback directory retained: %s", rollback_dir)
+        # Never let Recovery receipt content decide whether independently
+        # verified Git MAIN and remote WRITE authority may proceed.
         return True
 
     def execute_write_handoff_sync(self) -> bool:
