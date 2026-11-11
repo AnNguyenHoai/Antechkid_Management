@@ -405,7 +405,7 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 **Phase chain:**
 1. Phase 1: baseline tests characterize Windows cleanup failure, crash snapshot and advisory Recovery (test-only).
 2. Phase 2: after successful install, stale backup *deletion* faults become deferred cleanup with original evidence retained. Required preinstall capture/rollback failures still stop unsafe replacement.
-3. Phase 3: explicit READ-only degradation for unverifiable Recovery receipt; never grant WRITE or bypass schema/identity.
+3. Phase 3: explicit READ-only degradation for unverifiable Recovery receipt, including a process-lifetime READ-only latch which background reconnect cannot clear; recovery requires fresh validated restart, never bypass schema/identity.
 4. Phase 4: `scripts/verify_startup_release.py` and `build_release.py` check release SHA, migration asset digest, packaged Git/EXE and secret exclusions before producing a release ZIP.
 5. Phase 5: these documents and the Windows acceptance matrix, kept in sync with actual approved behavior.
 
