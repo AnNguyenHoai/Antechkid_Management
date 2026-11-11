@@ -65,3 +65,10 @@ def test_background_reconnect_cannot_clear_recovery_receipt_latch():
     offline = (root / "platform/sync/offline_read_state.py").read_text(encoding="utf-8")
     assert "def protect_read_only_for_process()" in offline
     assert "_offline_read = bool(value) or _receipt_read_only" in offline
+    authoritative = (
+        root / "platform/sync/authoritative_runtime_sync_service.py"
+    ).read_text(encoding="utf-8")
+    assert "if receipt_read_only_active():" in authoritative
+    assert authoritative.index("if receipt_read_only_active():") < authoritative.index(
+        "set_offline_read(False)", authoritative.index("if receipt_read_only_active():")
+    )
