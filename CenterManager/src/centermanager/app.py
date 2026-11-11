@@ -108,6 +108,15 @@ def _requires_readonly_schema_for_recovery(
     )
 
 
+def _validate_accepted_runtime_schema(*, readonly: bool) -> None:
+    """Require full schema verification, never migrating an old Recovery journal."""
+    if readonly:
+        from centermanager.database.migration import verify_runtime_schema_readonly
+        verify_runtime_schema_readonly()
+    else:
+        ensure_schema()
+
+
 def main() -> int:
     try:
         logger.info("[STARTUP] Application starting")
@@ -222,19 +231,14 @@ def main() -> int:
             manual_main=manual_reset_main,
             unverified_receipt=recovery_receipt_unverified,
         )
-        if use_readonly_schema:
-            from centermanager.database.migration import verify_runtime_schema_readonly
-            # This is still a strict SQLCipher/Alembic/physical-schema gate:
-            # incompatible accepted MAIN fails safely; only Recovery metadata
-            # must be advisory.
-            verify_runtime_schema_readonly()
-            logger.info(
-                "[STARTUP] Authoritative MAIN schema verified read-only; "
-                "Recovery evidence is independent of runtime admission"
-            )
-        else:
-            ensure_schema()
-            logger.info("[STARTUP] Schema ensured")
+        # This remains a strict SQLCipher/Alembic/physical-schema check.
+        # It never migrates an installed MAIN while the previous WRITE
+        # journal is OPEN/uncertain, which caused the reported fatal error.
+        _validate_accepted_runtime_schema(readonly=use_readonly_schema)
+        logger.info(
+            "[STARTUP] Authoritative MAIN schema verified (%s)",
+            "read-only" if use_readonly_schema else "normal",
+        )
 
         # A first-time installation can legitimately migrate the freshly
         # downloaded MAIN database before login. Only this same-process
