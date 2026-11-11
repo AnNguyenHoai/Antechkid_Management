@@ -45,7 +45,11 @@ def test_bootstrap_only_falls_back_after_remote_fetch_failure():
 def test_offline_does_not_migrate_shared_database_or_trigger_daily_side_effects():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
     migration = (ROOT / "database" / "migration.py").read_text(encoding="utf-8")
-    assert "if bootstrap._offline_read:" in source
+    # Offline READ and Recovery advisory startup both must select the
+    # read-only schema verifier, not writable Alembic migration. Test the
+    # actual helper contract rather than the old inline if-statement.
+    assert "offline_read=bootstrap._offline_read" in source
+    assert "_validate_accepted_runtime_schema(readonly=use_readonly_schema)" in source
     assert "verify_runtime_schema_readonly()" in source
     assert "if not bootstrap._offline_read:" in source
     assert "def verify_runtime_schema_readonly()" in migration
