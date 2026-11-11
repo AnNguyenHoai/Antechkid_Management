@@ -9,7 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from centermanager.app import (\n    _requires_readonly_schema_for_recovery, _validate_accepted_runtime_schema,\n)
+from centermanager.app import (
+    _requires_readonly_schema_for_recovery,
+    _validate_accepted_runtime_schema,
+)
 from centermanager.platform.recovery_review_notices import RecoveryReviewNotices
 from centermanager.platform.sync import offline_read_state
 
