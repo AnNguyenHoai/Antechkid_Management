@@ -108,8 +108,13 @@ class GitSynchronizationProvider(SynchronizationProvider):
         if cwd is None:
             cwd = self._repo_path
         if args and args[0] in {"reset", "merge", "pull", "checkout", "clean"} and Path(cwd).resolve() == self._repo_path.resolve():
-            from centermanager.platform.write_recovery import require_replaceable
-            require_replaceable()
+            # Recovery logs never authorize Git operations. An active SQLCipher
+            # editor *does* forbid replacing its Git base while editing.
+            from centermanager.database.mutation_authority import gate_for
+            gate = gate_for()
+            with gate.lock:
+                if not gate.closed:
+                    raise RuntimeError("Active WRITE editor prevents Git worktree replacement")
         if env is None:
             env = self._get_env()
 
@@ -1089,12 +1094,9 @@ class GitSynchronizationProvider(SynchronizationProvider):
             return False
 
     def pull(self) -> bool:
-        from centermanager.platform.write_recovery import require_replaceable, RecoveryRequired
-        try:
-            require_replaceable()
-        except RecoveryRequired as exc:
-            logger.error("Pull blocked: %s", exc)
-            return False
+        # Recovery state is advisory. A normal pull can fast-forward a clean
+        # Git working tree; dirty/diverged work must use the separately
+        # verified backup/reset startup path, never be discarded here.
         self._ensure_repo()
         if not self._has_remote_origin():
             logger.debug("No remote origin, pull skipped")
@@ -1109,15 +1111,22 @@ class GitSynchronizationProvider(SynchronizationProvider):
             if local_commit == remote_commit:
                 logger.info("Already up to date")
                 return True
+            if self._run_git_command(["status", "--porcelain", "--untracked-files=all"]):
+                logger.warning(
+                    "Local Git worktree has unpublished changes; normal pull refuses "
+                    "destructive replacement without the verified startup backup path"
+                )
+                return False
             try:
                 self._run_git_command(["merge", "--ff-only", f"origin/{self._branch}"])
                 logger.info(f"Fast-forwarded to {remote_commit[:8]}")
                 return True
             except RepositoryConflictError:
-                logger.warning("Diverged: resetting to remote")
-                self._run_git_command(["reset", "--hard", f"origin/{self._branch}"])
-                logger.info(f"Reset to remote {remote_commit[:8]}")
-                return True
+                logger.warning(
+                    "Local Git history diverged; manual verified reset required "
+                    "to preserve unpublished work"
+                )
+                return False
         except Exception as e:
             logger.error(f"Pull failed: {e}")
             return False
