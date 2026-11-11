@@ -1,5 +1,4 @@
-"""STARTUP-FIX-01 P1: accepted local READ is validated without network/mutation."""
-import hashlib
+"""Offline READ derives authority from signed accepted-MAIN cache, never Recovery."""
 from types import SimpleNamespace
 
 import pytest
@@ -11,73 +10,79 @@ from centermanager.database.lifecycle import DatabaseLifecycleState
 @pytest.fixture
 def gate_fixture(monkeypatch, tmp_path):
     from centermanager.database import engine, artifact_security, encryption
-    from centermanager.platform import write_recovery
+    from centermanager.platform.sync import offline_main_receipt
 
-    data = tmp_path / "database"
+    data = tmp_path / "Database"
     repo_db = tmp_path / "repository" / "database"
     data.mkdir()
     repo_db.mkdir(parents=True)
     runtime = data / "center.db"
-    runtime.write_bytes(b"accepted-runtime")
-    (repo_db / "center.db").write_bytes(b"accepted-main")
-    receipt = {
-        "status": "CLEAN", "publication": "VERIFIED",
-        "published_runtime_sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
-    }
-    journal = SimpleNamespace(
-        inspect=lambda: receipt,
-        assert_replaceable=lambda: None,
+    runtime.write_bytes(b"verified-runtime-db")
+    (repo_db / "center.db").write_bytes(b"verified-Git-MAIN-db")
+
+    cache = {"verified": True}
+    monkeypatch.setattr(
+        offline_main_receipt, "verify_authenticated_cache",
+        lambda paths: cache["verified"],
     )
-    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", lambda _: journal)
-    monkeypatch.setattr(engine, "inspect_runtime_database", lambda: DatabaseLifecycleState.AVAILABLE)
-    monkeypatch.setattr(artifact_security, "validate_database_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        engine, "inspect_runtime_database",
+        lambda: DatabaseLifecycleState.AVAILABLE,
+    )
+    monkeypatch.setattr(
+        artifact_security, "validate_database_artifact",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(encryption, "database_encryption_required", lambda: False)
     return SimpleNamespace(
         paths=SimpleNamespace(database_dir=data, runtime_root=tmp_path),
-        journal=journal, receipt=receipt, runtime=runtime,
+        cache=cache, runtime=runtime,
     )
 
 
-def test_verified_clean_cached_runtime_can_be_read_without_remote_fetch(gate_fixture):
+def test_verified_signed_cache_allows_offline_read_without_remote_fetch(gate_fixture):
     assert assess_offline_read(gate_fixture.paths).allowed
 
 
-@pytest.mark.parametrize("status,publication", [
-    ("OPEN", "VERIFIED"),
-    ("RECOVERY_REQUIRED", "VERIFIED"),
-    ("RECONCILED", "VERIFIED"),
-    ("CLEAN", "UNKNOWN"),
+@pytest.mark.parametrize("historical_status", [
+    "OPEN", "RECOVERY_REQUIRED", "CANCELLED", "RECONCILED", "CORRUPT",
 ])
-def test_pending_or_unaccepted_recovery_is_not_eligible(gate_fixture, status, publication):
-    gate_fixture.receipt.update(status=status, publication=publication)
+def test_old_recovery_status_is_not_offline_read_gate(
+    gate_fixture, monkeypatch, historical_status,
+):
+    # If Recovery inspection is attempted, fail the test. Git-main cache
+    # authentication, not the user's pending review status, is the authority.
+    from centermanager.platform import write_recovery
+
+    monkeypatch.setattr(
+        write_recovery, "WriteRecoveryJournal",
+        lambda *_: (_ for _ in ()).throw(AssertionError(historical_status)),
+    )
+    assert assess_offline_read(gate_fixture.paths).allowed
+
+
+def test_missing_signed_cache_cannot_be_treated_as_trusted_main(gate_fixture):
+    gate_fixture.cache["verified"] = False
     assert not assess_offline_read(gate_fixture.paths).allowed
 
 
-def test_runtime_change_after_clean_receipt_is_blocked(gate_fixture):
-    gate_fixture.runtime.write_bytes(b"unaccepted-local-edit")
-    assert not assess_offline_read(gate_fixture.paths).allowed
-
-
-def test_unclean_wal_is_not_accepted(gate_fixture):
+def test_uncheckpointed_wal_still_rejected(gate_fixture):
     gate_fixture.runtime.with_name("center.db-wal").write_bytes(b"pending")
     assert not assess_offline_read(gate_fixture.paths).allowed
 
 
-def test_missing_cached_database_is_not_offline_first_install(gate_fixture):
+def test_missing_cached_database_not_offline_first_install(gate_fixture):
     gate_fixture.runtime.unlink()
     assert not assess_offline_read(gate_fixture.paths).allowed
 
 
-def test_failed_replaceability_proof_cannot_be_bypassed(gate_fixture):
-    gate_fixture.journal.assert_replaceable = lambda: (_ for _ in ()).throw(
-        RuntimeError("missing authoritative base")
-    )
-    assert not assess_offline_read(gate_fixture.paths).allowed
-
-
-def test_corrupt_cached_database_rejected_by_integrity_verifier(gate_fixture, monkeypatch):
+def test_corrupt_database_rejected_by_independent_integrity_verifier(
+    gate_fixture, monkeypatch,
+):
     from centermanager.database import artifact_security
+
     def corrupt(*args, **kwargs):
-        raise RuntimeError("invalid SQLCipher")
+        raise RuntimeError("SQLCipher identity mismatch")
+
     monkeypatch.setattr(artifact_security, "validate_database_artifact", corrupt)
     assert not assess_offline_read(gate_fixture.paths).allowed
