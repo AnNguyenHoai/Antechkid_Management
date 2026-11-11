@@ -842,22 +842,26 @@ class WriteTransactionManager:
             try:
                 self._recovery_journal.preserve("cancel-editing")
                 self._recovery_journal.update(status="CANCELLED")
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                if self._collab_manager.is_writing():
-                    if not self._collab_manager.release_write():
-                        self._last_start_error = "Cancelled data is preserved, but WRITE release is unverified. Keep recovery data and close CenterManager before reconciliation."
-                        return False
+            except Exception:
+                logger.exception(
+                    "Recovery could not record cancelled local edits; "
+                    "the operation remains advisory"
+                )
+            # Remote lease release, not Recovery log availability, decides
+            # whether cancellation of the active editor can finish.
+            if self._collab_manager.is_writing():
+                if not self._collab_manager.release_write():
+                    self._last_start_error = (
+                        "Remote WRITE release is not verified; wait for lease resolution."
+                    )
+                    return False
+                try:
                     self._recovery_journal.released()
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                self._last_start_error = "Cancelled data is preserved. Inspect recovery and explicitly reconcile before synchronizing."
-                return True
-            except Exception as exc:
-                self._state = WriteTransactionState.RECOVERY_REQUIRED
-                self._is_editing = False
-                self._last_start_error = f"Recovery preservation failed: {exc}. Free disk space and retry; keep the workspace."
-                return False
+                except Exception:
+                    logger.exception("Cancelled WRITE released; Recovery log unavailable")
+            self._delete_snapshot()
+            self._reset_to_idle()
+            return True
 
         if force and self._has_changes:
             if not self._restore_snapshot():
