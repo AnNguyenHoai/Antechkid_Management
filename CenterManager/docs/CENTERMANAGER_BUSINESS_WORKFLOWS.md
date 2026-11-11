@@ -50,12 +50,12 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 **Actors:** writer. **Requirements:** COL-007/010/011, SYS-007.
 
 1. User selects Finish Editing; reject double-completion or invalid local state.
-2. Quiesce necessary writers, finalize pending primary domain transactions/audit and durable recovery capture.
+2. Quiesce necessary writers and finalize primary domain transactions. Attempt durable Recovery capture as **best-effort observability**: capture/log failure is reported but must not veto an independently authorized publication; never report an incomplete capture as successful.
 3. Verify current remote WRITE owner, lease and accepted base MAIN OID; publish through established Git CAS, not direct arbitrary push.
-4. Observe/verify new authoritative remote commit; only then treat publication as accepted, complete journal and release WRITE.
+4. Observe/verify new authoritative remote commit; only then treat publication as accepted and release remote WRITE. Recording the advisory Recovery publication/release receipt must not reclassify a Git-verified success as failed.
 5. Other clients refresh authenticated Git MAIN into runtime in a safe READ transition; derived reports may update separately.
 
-**Failure:** network/remote OID drift/lease expiration, interrupted capture or uncertain publish → preserve original evidence, inform user, do not automatically replay/double-publish. Never mark success solely because local SQLite commit succeeded. **Code:** `services/write_transaction.py`, `platform/synchronization/git_synchronization_provider.py`, CollaborationManager.
+**Failure:** network/remote OID drift/lease expiration or uncertain Git CAS → preserve original evidence, inform user, do not automatically replay/double-publish. Recovery log/capture failure alone is only an evidence-completeness warning; where logging fails, the system cannot guarantee reconstruction of an uncommitted operation. Never mark success solely because local SQLite commit succeeded. **Code:** `services/write_transaction.py`, `platform/synchronization/git_synchronization_provider.py`, CollaborationManager.
 
 ### WF-04 — Recovery review, skip and manual reconciliation
 
