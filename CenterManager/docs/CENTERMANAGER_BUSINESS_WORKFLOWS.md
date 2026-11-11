@@ -1,7 +1,7 @@
 # CENTERMANAGER — END-TO-END BUSINESS WORKFLOWS (READ FIRST)
 
-**Document ID:** CM-WF | **Version:** 1.0 | **Updated:** 2026-11-11
-**Source baseline:** `main_coursefee` @ `cd61814c03c4224e54b51cf7fa8a57fd6db3b43e`.
+**Document ID:** CM-WF | **Version:** 1.1 | **Updated:** 2026-11-11
+**Verified pre-hardening baseline:** `main_coursefee` @ `1ea1f8a1be902d524825a24ea9fa9193c362830d`. Hardening changes tracked in phase PRs; always resolve current HEAD and packaged SHA at release.
 **Paired authoritative index:** [CENTERMANAGER_REQUIREMENTS.md](CENTERMANAGER_REQUIREMENTS.md).
 
 > **MANDATORY:** Before changing a feature, read **both documents**, locate its `WF-xx` flow and `CM-REQ` requirement IDs, follow the implementation links and tests, then record how normal, historical, permission and failure paths will behave. This describes the **course-based** CenterManager tool. The monthly-tuition product exists separately and is NOT this release.
@@ -381,6 +381,35 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 7. Record test evidence and PO acceptance before merging/releasing critical change.
 
 **Exceptions:** mismatched source/data branch, earlier broken-source regression, wrong Alembic chain, Windows path-length error, missing attachment, disk full, interrupted publish, old EXE with Git credentials. No silent reset of database to “fix” app startup. **Code:** `build_release.py`, `.github/workflows/`, `platform/sync/`, `platform/write_recovery.py`.
+
+## Startup acceptance matrix — Phase 1 to Phase 5
+
+> This matrix is the required **release acceptance record**, not a claim of test success. Enter PASS/FAIL, Windows EXE source commit, test artifact/log and operator for **every** row before marking the five-phase task complete. Run only on disposable/copied SQLCipher data; never manipulate authoritative Git MAIN or a real production key in fault injection.
+
+| Gate | Exercise | Expected behavior | Evidence status |
+| --- | --- | --- | --- |
+| A1 | Windows pytest all 3 shards on final release SHA | PASS; all startup fault-injection tests included | PENDING |
+| A2 | Cold install, approved provisioning + encrypted copied SQLCipher DB | Login in READ with verified Git DB MAIN identity, not source branch | PENDING — Windows EXE |
+| A3 | Existing installation restart after normal Finish Editing | Fetch accepted MAIN, SQLCipher/schema validated, no data loss | PENDING — Windows EXE |
+| A4 | Different writer holds remote lease | Start Editing denied/queued; only one verified writer | PENDING — multi-machine |
+| A5 | Normal Start Editing → permitted edit → Finish Editing → restart | CAS publication acknowledged, subsequent READ reflects same MAIN OID | PENDING — multi-machine |
+| A6 | Interrupted install between snapshot, DB replacement and asset refresh | Original DB/WAL evidence retained, marker replay verified; no unsafe overwrite | PENDING — Windows EXE |
+| A7 | Long Vietnamese/nested Employee attachment, locked obsolete rollback copy | Original content intact; accepted MAIN READ not failed merely by obsolete cleanup | PENDING — Windows EXE |
+| A8 | Disk full/permission denial **during required backup capture** | Fail-safe preservation and no silent deletion of local unaccepted bytes | PENDING — Windows EXE |
+| A9 | Malformed/unwritable Recovery notice and WRITE receipt | If DB/schema separately verified, READ only; no WRITE until valid receipt | PENDING — Windows EXE |
+| A10 | Wrong SQLCipher key, identity, branch or incompatible Alembic revision | Refuse unsafe bootstrap; no stamp/forced migration/branch rewrite | PENDING — Windows EXE |
+| A11 | Git unavailable but verified accepted CLEAN cached data | Offline READ only; without CLEAN proof fail closed | PENDING — Windows EXE |
+| A12 | Build portable EXE; verify full SHA, bundled Alembic, manifest digest and no secrets | Release gate PASS; EXE can open tested copied DB; signer/maintainer records source SHA | PENDING |
+| A13 | Read-first docs updated and scope diff reviewed | SYS/COL/START invariants and WF-01..05/28 checked; no unauthorized files | PENDING |
+
+**Phase chain:**
+1. Phase 1: baseline tests characterize Windows cleanup failure, crash snapshot and advisory Recovery (test-only).
+2. Phase 2: after successful install, stale backup *deletion* faults become deferred cleanup with original evidence retained. Required preinstall capture/rollback failures still stop unsafe replacement.
+3. Phase 3: explicit READ-only degradation for unverifiable Recovery receipt; never grant WRITE or bypass schema/identity.
+4. Phase 4: `scripts/verify_startup_release.py` and `build_release.py` check release SHA, migration asset digest, packaged Git/EXE and secret exclusions before producing a release ZIP.
+5. Phase 5: these documents and the Windows acceptance matrix, kept in sync with actual approved behavior.
+
+**Important limitation:** the CI runner and static release gate cannot prove machine-bound DPAPI provisioning, Windows long-path behavior on the operator's machine, a live Git ownership lease or real SQLCipher data compatibility. Do not mark the project complete without Windows test logs and the user's operational acceptance.
 
 ## Cross-workflow invariant map — anti-regression guard
 
