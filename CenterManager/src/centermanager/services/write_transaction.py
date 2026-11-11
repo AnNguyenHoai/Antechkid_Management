@@ -282,8 +282,20 @@ class WriteTransactionManager:
             logger.exception("Failed to delete snapshot: %s", snapshot_path)
 
     def _restore_snapshot(self) -> bool:
-        from centermanager.platform.write_recovery import require_replaceable
-        require_replaceable()
+        # Recovery journal status cannot veto an explicit local cancel. The
+        # remote writer/MAIN base must remain independently authenticated.
+        if not self._collab_manager.is_writing():
+            logger.warning("Cannot restore snapshot without current WRITE lease")
+            return False
+        provider = getattr(self._collab_manager, "_sync_provider", None)
+        if provider is not None:
+            try:
+                if (not self._base_main_commit
+                        or provider.observe_remote_main_commit() != self._base_main_commit):
+                    return False
+            except Exception:
+                logger.exception("Snapshot restore MAIN OID check failed")
+                return False
         if self._snapshot_path and self._snapshot_path.exists():
             try:
                 paths = get_paths()
