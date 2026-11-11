@@ -44,6 +44,15 @@ def snapshot(tmp_path, monkeypatch):
     sync._runtime_manifest_path = root / "manifest.json"
     sync._metadata_dir = root / "metadata"
     sync._paths = SimpleNamespace(attachment_dir=root / "Attachments")
+    # Production now requires a pinned, observed Git MAIN OID even for the
+    # atomic materialization helper. Supply that independent proof explicitly
+    # in synthetic snapshot tests instead of weakening the production guard.
+    sync._accepted_startup_main_oid = "1" * 40
+    sync._provider = SimpleNamespace(
+        get_fetched_remote_main_commit=lambda: "1" * 40,
+        observe_remote_main_commit=lambda: "1" * 40,
+        get_local_main_commit=lambda: "1" * 40,
+    )
 
     # Isolate the multi-artifact boundary from the independently tested
     # SQLCipher atomic installer; do not weaken its production checks.
@@ -141,6 +150,10 @@ def test_failed_session_refresh_rolls_back_all_artifacts(snapshot):
     old = (root / "Database" / "center.db").read_bytes()
     class Provider:
         def get_local_main_commit(self):
+            return "1" * 40
+        def get_fetched_remote_main_commit(self):
+            return "1" * 40
+        def observe_remote_main_commit(self):
             return "1" * 40
         def _run_git_command(self, args):
             assert args == ["reset", "--hard", "1" * 40]
