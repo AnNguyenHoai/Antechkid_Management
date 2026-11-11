@@ -246,7 +246,14 @@ class RuntimeSyncService:
     def _sync_loop(self) -> None:
         while self._running:
             try:
-                from centermanager.platform.sync.offline_read_state import offline_read_active
+                from centermanager.platform.sync.offline_read_state import (
+                    offline_read_active, recovery_read_only_active,
+                )
+                if recovery_read_only_active():
+                    # Human review cannot be converted into WRITE by the
+                    # background reconnect path; restart after valid proof.
+                    time.sleep(self._poll_interval)
+                    continue
                 if offline_read_active():
                     # Git OID can advance without a manifest/runtime_version
                     # increment. Reconnect must not depend on version diff.
