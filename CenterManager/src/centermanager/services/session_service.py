@@ -174,6 +174,53 @@ class SessionService:
             return repo.get_by_class_ordered_desc(class_id)
 
     @require_permission("lesson.update")
+    def complete_scheduled_session(self, session_id: int) -> Session:
+        """Explicit completion after Attendance save; never auto-complete on Save.
+
+        Recheck the persisted lifecycle inside the same WRITE transaction so a
+        stale dialog cannot complete a cancelled, postponed or edited session.
+        The existing mutation journal, permission guard and event publication
+        contracts remain owned by SessionService.
+        """
+        from centermanager.core.clock import get_clock
+
+        with self._session_factory() as db_session:
+            repo = self._repository_provider.sessions(db_session)
+            session_obj = repo.get_by_id(session_id)
+            if session_obj is None:
+                raise SessionNotFoundError(f"Session {session_id} not found.")
+            self._require_active_class(db_session, session_obj.class_id)
+            if session_obj.status != SessionStatus.SCHEDULED.value:
+                raise SessionValidationError(
+                    "The session is no longer Scheduled. Refresh before completing."
+                )
+            if (session_obj.actual_date or session_obj.scheduled_date) > get_clock().today():
+                raise SessionValidationError(
+                    "A future teaching session cannot be marked Completed."
+                )
+            session_obj.status = SessionStatus.COMPLETED.value
+            record_for_active_write(
+                db_session, module="session", action="UPDATE",
+                entity_type="TeachingSession", entity_id=session_obj.id,
+                entity_object=session_obj,
+                summary_args={"session_id": session_obj.id, "class_id": session_obj.class_id},
+            )
+            db_session.commit()
+            mirror_after_successful_commit(db_session)
+            repo.refresh(session_obj)
+
+            timeline_service = ClassTimelineService(self._session_factory)
+            timeline_service.log_event(
+                class_id=session_obj.class_id,
+                event_type="SessionUpdated",
+                title=f"Session {session_obj.session_number} Updated",
+                description="status: 'Scheduled' -> 'Completed'",
+                metadata={"session_id": session_obj.id},
+            )
+            self._publish_class_session_changed(session_obj, action="updated")
+            return session_obj
+
+    @require_permission("lesson.update")
     def update_session(
         self,
         session_id: int,

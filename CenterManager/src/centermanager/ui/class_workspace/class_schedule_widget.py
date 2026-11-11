@@ -3,6 +3,7 @@
 ClassScheduleWidget - display weekly schedule with assessment view.
 """
 import logging
+from datetime import date
 from typing import Optional, List
 
 from PySide6.QtCore import Qt, Signal, QUrl
@@ -71,14 +72,24 @@ class ClassScheduleWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Table: Session, Date, Time, Topic, Assessment, Actions
+        # Lifecycle status must not be confused with teaching assessment.
+        self.warning_label = QLabel()
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setStyleSheet(
+            "color: #854d0e; background: #fef3c7; padding: 8px; "
+            "border-radius: 4px;"
+        )
+        layout.addWidget(self.warning_label)
+        self.warning_label.hide()
+
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "Session", "Date", "Time", "Topic", "Assessment", "Actions"
+            "Session", "Date", "Time", "Topic", "Assessment",
+            "Session Status", "Actions"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -111,7 +122,36 @@ class ClassScheduleWidget(QWidget):
         self._historical_read_only = not enabled
 
     
+    @staticmethod
+    def incomplete_past_sessions(sessions, today=None):
+        """Pure read-only alert projection. Postponed/Cancelled are intentional."""
+        today = today or date.today()
+        return sorted(
+            (
+                session for session in sessions
+                if session.status == "Scheduled"
+                and session.scheduled_date < today
+            ),
+            key=lambda session: (session.scheduled_date, session.session_number),
+        )
+
     def _update_table(self) -> None:
+        overdue = self.incomplete_past_sessions(self._sessions)
+        if overdue:
+            details = ", ".join(
+                f"#{session.session_number} ({session.scheduled_date:%d/%m/%Y})"
+                for session in overdue[:12]
+            )
+            if len(overdue) > 12:
+                details += f" và {len(overdue) - 12} buổi khác"
+            self.warning_label.setText(
+                f"⚠ {len(overdue)} buổi đã qua vẫn Scheduled: {details}. "
+                "Mở View để kiểm tra và xác nhận Completed khi đã dạy xong. "
+                "Các buổi này chưa phát sinh học phí."
+            )
+            self.warning_label.show()
+        else:
+            self.warning_label.hide()
         self.table.setRowCount(len(self._sessions))
         if not self._sessions:
             self._show_empty()
@@ -141,6 +181,13 @@ class ClassScheduleWidget(QWidget):
             elif has_highlights:
                 status_text = "⭐ Highlights only"
             self.table.setItem(row, 4, QTableWidgetItem(status_text))
+            lifecycle = QTableWidgetItem(sess.status)
+            if sess in overdue:
+                lifecycle.setText("⚠ Scheduled (quá hạn)")
+                lifecycle.setToolTip(
+                    "Buổi học chưa Completed nên chưa được tính học phí."
+                )
+            self.table.setItem(row, 5, lifecycle)
 
             # Actions: View + manual parent-group PDF export.
             action_widget = QWidget()
@@ -158,18 +205,20 @@ class ClassScheduleWidget(QWidget):
             export_btn.clicked.connect(lambda checked=False, sid=sess.id: self._export_session_pdf(sid))
             action_layout.addWidget(export_btn)
 
-            self.table.setCellWidget(row, 5, action_widget)
+            self.table.setCellWidget(row, 6, action_widget)
 
         self.table.setVisible(True)
 
     def _show_empty(self) -> None:
+        self.warning_label.hide()
         self.table.setRowCount(1)
         self.table.setItem(0, 0, QTableWidgetItem("No sessions scheduled"))
         self.table.setItem(0, 1, QTableWidgetItem(""))
         self.table.setItem(0, 2, QTableWidgetItem(""))
         self.table.setItem(0, 3, QTableWidgetItem(""))
         self.table.setItem(0, 4, QTableWidgetItem(""))
-        self.table.setCellWidget(0, 5, None)
+        self.table.setItem(0, 5, QTableWidgetItem(""))
+        self.table.setCellWidget(0, 6, None)
         self.table.setVisible(True)
 
     def _export_session_pdf(self, session_id: int) -> None:

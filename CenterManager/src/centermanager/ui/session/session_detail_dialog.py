@@ -407,6 +407,52 @@ class SessionDetailDialog(QDialog):
     def _on_attendance_changed(self) -> None:
         self._update_attendance_summary()
         self.session_updated.emit()
+        # Attendance is persisted independently: a save does not make a
+        # Scheduled session billable. Ask separately, only under live WRITE.
+        if not self.attendance_widget.isEnabled() or not self.attendance_widget._can_write():
+            return
+        try:
+            current = self._session_service.get_session(self._session_id)
+        except Exception:
+            logger.exception("Cannot check session status after attendance save")
+            return
+        if current.status != SessionStatus.SCHEDULED.value:
+            self._session = current
+            self._update_header()
+            return
+        from centermanager.core.clock import get_clock
+        if (current.actual_date or current.scheduled_date) > get_clock().today():
+            return
+        answer = QMessageBox.question(
+            self,
+            "Xác nhận hoàn tất buổi học",
+            "Điểm danh đã lưu thành công nhưng Session vẫn là Scheduled.\\n\\n"
+            "Buổi học này đã kết thúc thực tế chưa?\\n"
+            "Chọn Yes để chuyển sang Completed và cho phép hệ thống tính "
+            "học phí theo chính sách Enrollment. Chọn No để giữ Scheduled "
+            "và xử lý sau.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self.attendance_widget.isEnabled() or not self.attendance_widget._can_write():
+            QMessageBox.warning(self, "READ mode", "WRITE authority is no longer available.")
+            return
+        try:
+            self._session = self._session_service.complete_scheduled_session(self._session_id)
+        except Exception as exc:
+            logger.exception("Explicit session completion failed")
+            QMessageBox.warning(
+                self, "Chưa hoàn tất buổi học",
+                "Điểm danh đã được lưu. Session chưa được xác nhận Completed.\\n"
+                f"Chi tiết: {exc}",
+            )
+            return
+        self._update_header()
+        self._update_summary()
+        self.attendance_widget.refresh()
+        self.session_updated.emit()
 
     def _on_edit_session(self) -> None:
         from centermanager.ui.session.session_dialog import SessionDialog
