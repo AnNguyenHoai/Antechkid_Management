@@ -59,12 +59,12 @@ def verified_employee_identity_repair(user_id):
 @contextmanager
 def runtime_install_permit():
     """Preserve the pre-swap recovery proof for the bundled schema barrier."""
-    from centermanager.platform.write_recovery import require_replaceable
     gate = gate_for()
     with gate.lock:
         if not gate.closed:
             raise MutationAuthorityError('Runtime replacement cannot race an active local editor')
-        require_replaceable()
+        # Historical Recovery journals are observation only; the caller must
+        # validate the signed Git MAIN artifact/OID before installation.
         previous = getattr(_local, 'install_path', None)
         _local.install_path = runtime_path()
         try:
@@ -334,7 +334,6 @@ def system_mutation_permit(kind, *, path=None):
     """
     path = Path(path).resolve() if path is not None else runtime_path()
     gate = gate_for(path)
-    from centermanager.platform.write_recovery import WriteRecoveryJournal
     from centermanager.database.engine import runtime_db_maintenance_active
     kinds = {'checkpoint': {'checkpoint'}, 'initialize': {'pragma'},
              'migration': {'schema', 'business', 'pragma'},
@@ -350,8 +349,8 @@ def system_mutation_permit(kind, *, path=None):
                          and runtime_db_maintenance_active())
             if gate.transaction is not None and not installed:
                 raise MutationAuthorityError("Startup maintenance cannot run after collaboration is bound")
-            if is_runtime_path(path) and not installed:
-                WriteRecoveryJournal().assert_replaceable()
+            # No Recovery journal check: runtime DB integrity, migration assets
+            # and active-editor fencing are separate authorization layers.
         previous = getattr(_local, 'maintenance', None)
         _local.maintenance = (path, uuid.uuid4().hex, kinds[kind], kind)
         try:
