@@ -187,8 +187,8 @@ class RuntimeSyncService(_BaseRuntimeSyncService):
         try:
             receipt_before = WriteRecoveryJournal().inspect()
             preserve_prior_for_review = (
-                receipt_before is not None
-                and receipt_before.get("status") not in ("CLEAN", "PUBLISHED")
+                receipt_before is None
+                or receipt_before.get("status") not in ("CLEAN", "PUBLISHED")
             )
         except Exception:
             logger.exception("Old Recovery receipt unreadable during handoff; retaining old generation")
