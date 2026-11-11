@@ -93,6 +93,21 @@ def ensure_schema():
     logger.info("Database schema is at Alembic head.")
 
 
+def _requires_readonly_schema_for_recovery(
+    *, offline_read: bool, review_main: str | None,
+    manual_main: str | None, unverified_receipt: bool,
+) -> bool:
+    """Never enter Alembic's WRITE guard with an unresolved old journal.
+
+    The Git-main install/bootstrap must already have passed its independent
+    identity/security checks. This function never grants database authority.
+    """
+    return bool(
+        offline_read or review_main is not None
+        or manual_main is not None or unverified_receipt
+    )
+
+
 def main() -> int:
     try:
         logger.info("[STARTUP] Application starting")
@@ -201,11 +216,12 @@ def main() -> int:
                 schema_receipt_before = None
                 recovery_receipt_unverified = True
 
-        recovery_review_startup = (manual_reset_main is not None
-                                   or review_reset_main is not None)
-        use_readonly_schema = (bootstrap._offline_read
-                               or recovery_review_startup
-                               or recovery_receipt_unverified)
+        use_readonly_schema = _requires_readonly_schema_for_recovery(
+            offline_read=bootstrap._offline_read,
+            review_main=review_reset_main,
+            manual_main=manual_reset_main,
+            unverified_receipt=recovery_receipt_unverified,
+        )
         if use_readonly_schema:
             from centermanager.database.migration import verify_runtime_schema_readonly
             # This is still a strict SQLCipher/Alembic/physical-schema gate:
