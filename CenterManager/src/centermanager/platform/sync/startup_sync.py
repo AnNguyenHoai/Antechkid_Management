@@ -855,39 +855,26 @@ class StartupSynchronization:
 
     def _apply_runtime_database(self) -> bool:
         """Copy repository database and manifest to runtime, update metadata."""
-        from centermanager.platform.write_recovery import require_replaceable
+        # Recovery files are not a replacement authority. Every startup path
+        # independently checks exact fetched/observed/current Git MAIN and
+        # forbids replacing the DB under an active local editor.
+        from centermanager.database.mutation_authority import gate_for
+        gate = gate_for()
+        with gate.lock:
+            if not gate.closed:
+                raise RuntimeError("Active WRITE editor prevents MAIN install")
+        accepted = self._accepted_startup_main_oid
+        if (not accepted
+                or self._provider.get_fetched_remote_main_commit() != accepted
+                or self._provider.observe_remote_main_commit() != accepted
+                or self._provider.get_local_main_commit() != accepted):
+            raise RuntimeError("Git MAIN generation changed before database materialization")
         manual_archive = getattr(self, "_manual_review_backup", None)
-        if getattr(self, "_review_only_reset_requested", False):
-            # Startup-scoped exception only. Remote MAIN must still be
-            # freshly observed, writer closed, and source commit pinned.
-            from centermanager.database.mutation_authority import gate_for
-            gate = gate_for()
-            with gate.lock:
-                if not gate.closed:
-                    raise RuntimeError("Active writer prevents MAIN install")
-            accepted = self._accepted_startup_main_oid
-            if (self._provider.get_fetched_remote_main_commit() != accepted
-                    or self._provider.observe_remote_main_commit() != accepted
-                    or self._provider.get_local_main_commit() != accepted):
-                raise RuntimeError("Authoritative MAIN changed before install")
-        elif manual_archive is None:
-            require_replaceable()
-        else:
-            # A verified manual archive replaces ONLY the old startup
-            # replacement gate; it does not grant any WRITE authority.
+        if manual_archive is not None:
             from centermanager.platform.sync.manual_review_backup import (
                 verify_manual_review_backup,
             )
-            from centermanager.database.mutation_authority import gate_for
             verify_manual_review_backup(manual_archive)
-            gate = gate_for()
-            with gate.lock:
-                if not gate.closed:
-                    raise RuntimeError("Active editor prevents Git MAIN database replacement.")
-            if (self._provider.get_fetched_remote_main_commit() != self._accepted_startup_main_oid
-                    or self._provider.observe_remote_main_commit() != self._accepted_startup_main_oid
-                    or self._provider.get_local_main_commit() != self._accepted_startup_main_oid):
-                raise RuntimeError("Git MAIN generation changed before database materialization.")
         repo_db = self._repo_path / "database" / "center.db"
         if not repo_db.exists():
             logger.error(f"Repository database not found: {repo_db}")
