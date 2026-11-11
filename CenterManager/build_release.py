@@ -240,8 +240,10 @@ def release_channel() -> str:
 
 
 def write_release_manifest(source_commit: str) -> Path:
+    from scripts.verify_startup_release import migration_digest
     manifest_path = PACKAGE_ROOT / "RELEASE_MANIFEST.json"
     manifest = {
+        "migration_sha256": migration_digest(PROJECT_ROOT),
         "application": APP_NAME, "version": VERSION, "release_channel": release_channel(),
         "source_commit": source_commit, "platform": "windows-x64",
         "portable_git_version": PORTABLE_GIT_VERSION, "admin_provisioning_tool": f"AdminTools/{ADMIN_TOOL_NAME}.exe",
@@ -358,6 +360,10 @@ def create_release_package(executable: Path, admin_executable: Path, source_comm
     write_release_manifest(source_commit)
     write_release_readme(source_commit)
     write_uat_checklist()
+    # Refuse release before zipping if the copied migration tree differs from
+    # this exact source tree or the package contains runtime secrets.
+    from scripts.verify_startup_release import verify_package
+    verify_package(PACKAGE_ROOT, source_commit)
     archive = Path(shutil.make_archive(str(RELEASE_ROOT / RELEASE_NAME), "zip", root_dir=RELEASE_ROOT, base_dir=RELEASE_NAME))
     checksum = write_archive_checksum(archive)
     return archive, checksum
