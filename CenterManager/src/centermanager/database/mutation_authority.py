@@ -129,22 +129,27 @@ class MutationAuthorityGate:
         return hashlib.sha256(config.read_bytes()).hexdigest()
 
     def open(self):
-        """Explicit entry only, after journal preparation and remote validation."""
+        """Enter using Git MAIN/remote lease, never Recovery metadata.
+
+        Perform potentially slow remote OID observations OUTSIDE the DB
+        mutation mutex; the independent lease must also be rechecked below.
+        """
+        tx = self.transaction
+        if tx is None:
+            raise MutationAuthorityError("WRITE transaction has not been bound")
+        provider = getattr(tx._collab_manager, "_sync_provider", None)
+        if provider is not None:
+            pinned = tx._base_main_commit
+            if (not pinned
+                    or provider.get_local_main_commit() != pinned
+                    or provider.observe_remote_main_commit() != pinned):
+                raise MutationAuthorityError(
+                    "Authoritative Git MAIN changed before mutation admission"
+                )
         with self.lock:
-            tx = self.transaction
-            # Historical Recovery and current log availability do not confer
-            # or deny WRITE. The real authorization is the remote lease, the
-            # handoff's pinned MAIN and the current runtime DB identity.
+            # An old or unwritable Recovery journal cannot grant or deny an
+            # authenticated lease, provided the same runtime is still active.
             self.session_id = tx._collab_manager.get_session_id()
-            provider = getattr(tx._collab_manager, "_sync_provider", None)
-            if provider is not None:
-                pinned = tx._base_main_commit
-                if (not pinned
-                        or provider.get_local_main_commit() != pinned
-                        or provider.observe_remote_main_commit() != pinned):
-                    raise MutationAuthorityError(
-                        "Authoritative Git MAIN changed before mutation admission"
-                    )
             self.repository_config_hash = self._config_hash()
             self.repository_id = hashlib.sha256(
                 str(self._repository_path()).encode("utf-8")
