@@ -166,8 +166,19 @@ def record_for_active_write(
 
     from centermanager.platform.write_recovery import WriteRecoveryJournal
     from centermanager.core.current_user import get_current_user
-    journal = WriteRecoveryJournal()
-    doc = journal.inspect()
+    try:
+        journal = WriteRecoveryJournal()
+        doc = journal.inspect()
+    except Exception:
+        # Old/corrupt/unwritable Recovery metadata must never veto business
+        # DML. The independent SQLCipher mutation gate already authenticates
+        # remote WRITE and domain permissions; omit only ancillary outbox data.
+        import logging
+        logging.getLogger(__name__).exception(
+            "Recovery change log unavailable; business transaction continues "
+            "under independent WRITE authority"
+        )
+        return None
     if (not doc or doc.get("status") != "OPEN"
             or doc.get("mutation_authority_lost")
             or not doc.get("session_id") or not doc.get("base_main_oid")):
