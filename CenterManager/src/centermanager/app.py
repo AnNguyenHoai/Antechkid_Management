@@ -190,24 +190,25 @@ def main() -> int:
         # Legacy Recovery may be malformed: it is already archived as raw
         # evidence. Never parse it as active metadata for this new MAIN session.
         schema_receipt_before = None
-        if manual_reset_main is None and review_reset_main is None:
+        recovery_advisory_present = bool(manual_reset_main or review_reset_main)
+        if not recovery_advisory_present:
             try:
                 schema_receipt_before = startup_journal.inspect()
-                if (schema_receipt_before is not None
-                        and schema_receipt_before.get("status") == "CLEAN"):
-                    startup_journal.assert_replaceable()
-            except Exception:
-                # Git MAIN was independently verified and materialized by
-                # bootstrap, but an unverifiable recovery receipt cannot
-                # authorize mutation. Continue ONLY with readonly schema
-                # verification and deny all WRITE/editing until repaired.
-                logger.exception("Recovery receipt pre-schema check failed")
-                schema_receipt_before = None
-                _degrade_startup_to_verified_read(
-                    bootstrap, sync_provider, "pre-schema recovery check",
+                recovery_advisory_present = (
+                    schema_receipt_before is not None
+                    and schema_receipt_before.get("status") not in ("CLEAN", "PUBLISHED")
                 )
-
-        if bootstrap._offline_read:
+            except Exception:
+                # After independent Git MAIN identity/SQLCipher verification,
+                # unreadable historical Recovery metadata is never a startup
+                # admission or WRITE authority decision.
+                logger.exception("Historical Recovery receipt unreadable; review is advisory")
+                recovery_advisory_present = True
+        # An interrupted local WRITE may have left unaccepted WAL bytes.
+        # The authoritative MAIN was already reinstalled by BootstrapManager.
+        # Verify that MAIN's packaged schema without executing DDL through an
+        # obsolete Recovery guard; never auto-stamp the historical journal.
+        if bootstrap._offline_read or recovery_advisory_present:
             # A cached READ must never implicitly stamp/migrate accepted data.
             from centermanager.database.migration import verify_runtime_schema_readonly
             verify_runtime_schema_readonly()
@@ -245,13 +246,12 @@ def main() -> int:
                     provider=sync_provider, before=schema_receipt_before
                 )
         except Exception:
-            # Optional WRITE authorization could not be sealed after the
-            # independently verified MAIN/schema gates. This is NOT a reason
-            # to reopen an older local DB or to grant editing rights. Preserve
-            # evidence and expose only the now-verified runtime in READ.
-            logger.exception("Recovery WRITE receipt seal failed after schema verification")
-            _degrade_startup_to_verified_read(
-                bootstrap, sync_provider, "post-schema recovery receipt",
+            # Recovery is an audit record, never a WRITE permission source.
+            # Git MAIN, SQLCipher, schema and remote lease remain independent
+            # hard guards. Keep historical evidence and allow normal editing.
+            logger.exception(
+                "Recovery receipt unavailable; accepted Git MAIN remains usable "
+                "for READ and independently authorized WRITE"
             )
 
         permission_service = PermissionService(session_factory)
