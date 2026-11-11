@@ -23,6 +23,7 @@ from centermanager.services.attendance_service import AttendanceService
 from centermanager.ui.session.session_note_widget import SessionNoteWidget
 from centermanager.ui.session.student_highlight_widget import StudentHighlightWidget
 from centermanager.ui.session.session_attendance_widget import SessionAttendanceWidget
+from centermanager.core.clock import get_clock
 from centermanager.ui.design_system.tokens import COLORS
 from centermanager.ui.design_system.components import SecondaryButton
 
@@ -54,6 +55,7 @@ class SessionDetailDialog(QDialog):
         self._session_id = session_id
         self._session: Optional[Session] = None
         self._class_id: Optional[int] = None
+        self._historical_read_only = False
 
         self.setWindowTitle("Teaching Workspace")
         self.setMinimumSize(700, 600)
@@ -66,6 +68,35 @@ class SessionDetailDialog(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(8)
+
+        # Prominent lifecycle action lives ABOVE attendance and teaching tabs.
+        # Status is refreshed from SessionService; this surface never computes tuition.
+        completion_card = QFrame(self)
+        completion_card.setObjectName("sessionCompletionCard")
+        completion_layout = QVBoxLayout(completion_card)
+        completion_layout.setContentsMargins(16, 12, 16, 12)
+        completion_layout.setSpacing(8)
+        self.completion_title = QLabel()
+        self.completion_title.setObjectName("sessionCompletionTitle")
+        self.completion_title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        self.completion_description = QLabel()
+        self.completion_description.setWordWrap(True)
+        self.complete_session_btn = QPushButton("✓  Hoàn thành buổi học")
+        self.complete_session_btn.setObjectName("completeSessionButton")
+        self.complete_session_btn.setMinimumHeight(44)
+        self.complete_session_btn.clicked.connect(self._on_complete_session_clicked)
+        self.complete_session_btn.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['primary']}; color: white; "
+            "font-size: 14px; font-weight: 700; border-radius: 6px; "
+            "padding: 8px 16px; }}"
+            f"QPushButton:hover {{ background: {COLORS['primary_dark']}; }}"
+            "QPushButton:disabled { background: #cbd5e1; color: #475569; }"
+        )
+        completion_layout.addWidget(self.completion_title)
+        completion_layout.addWidget(self.completion_description)
+        completion_layout.addWidget(self.complete_session_btn)
+        self.completion_card = completion_card
+        main_layout.addWidget(completion_card)
 
         # ----- Tabs -----
         self.tab_widget = QTabWidget()
@@ -119,6 +150,7 @@ class SessionDetailDialog(QDialog):
 
     def set_historical_read_only(self, enabled: bool = True) -> None:
         """Archive history is inspectable, never editable from session detail."""
+        self._historical_read_only = enabled
         self.edit_btn.setEnabled(not enabled)
         # These composite widgets contain note/highlight and Attendance write
         # controls. Disabling them leaves their loaded historical content visible
@@ -128,6 +160,7 @@ class SessionDetailDialog(QDialog):
         self.highlight_widget.setEnabled(not enabled)
         if enabled:
             self.setWindowTitle("Teaching History — Read Only")
+        self.refresh_completion_controls()
 
     def _create_overview_tab(self) -> QWidget:
         """Create the Overview tab containing session info, attendance summary, note and highlights."""
@@ -328,6 +361,7 @@ class SessionDetailDialog(QDialog):
             # Load attendance for both editing tab and summary
             self.attendance_widget.set_session(self._session_id, self._class_id)
             self._update_attendance_summary()
+            self.refresh_completion_controls()
 
         except Exception as e:
             logger.exception("Error loading session detail")
@@ -354,6 +388,148 @@ class SessionDetailDialog(QDialog):
         }.get(status_text, "#999")
         self.status_label.setText(f"Status: {status_text}")
         self.status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+    def refresh_completion_controls(self) -> None:
+        """Render Session lifecycle without introducing a new mutation path.
+
+        READ and archived history still show the exact current status. A
+        disabled action remains visibly discoverable, but never grants WRITE.
+        """
+        if self._session is None:
+            self.completion_card.hide()
+            return
+        self.completion_card.show()
+        status = self._session.status
+        self.complete_session_btn.hide()
+        if status == SessionStatus.COMPLETED.value:
+            self.completion_card.setStyleSheet(
+                "QFrame#sessionCompletionCard { background: #ecfdf5; "
+                "border: 1px solid #86efac; border-radius: 8px; }"
+            )
+            self.completion_title.setText("✓  Đã hoàn thành buổi học")
+            self.completion_description.setText(
+                "Session đã được xác nhận Completed. Học phí được tính "
+                "theo chính sách của từng Enrollment."
+            )
+            return
+        if status != SessionStatus.SCHEDULED.value:
+            self.completion_card.setStyleSheet(
+                "QFrame#sessionCompletionCard { background: #f1f5f9; "
+                "border: 1px solid #cbd5e1; border-radius: 8px; }"
+            )
+            self.completion_title.setText(f"Session: {status}")
+            self.completion_description.setText(
+                "Không thể hoàn tất từ trạng thái này. "
+                "Kiểm tra lịch học và trạng thái trong Edit Session."
+            )
+            return
+
+        self.completion_card.setStyleSheet(
+            "QFrame#sessionCompletionCard { background: #fffbeb; "
+            "border: 1px solid #fbbf24; border-radius: 8px; }"
+        )
+        self.completion_title.setText("⚠  Buổi học chưa xác nhận hoàn thành")
+        effective_date = self._session.actual_date or self._session.scheduled_date
+        if effective_date > get_clock().today():
+            self.completion_description.setText(
+                "Buổi học chưa tới ngày thực tế. "
+                "Chưa được phép chuyển sang Completed."
+            )
+            return
+        self.complete_session_btn.show()
+        can_write = (
+            not self._historical_read_only
+            and self.attendance_widget.isEnabled()
+            and self.attendance_widget._can_write()
+        )
+        self.complete_session_btn.setEnabled(can_write)
+        self.completion_description.setText(
+            "Buổi học đã tới ngày dự kiến nhưng vẫn Scheduled. "
+            "Session chưa phát sinh học phí. Xác nhận khi đã dạy xong."
+            if can_write else
+            "Session vẫn Scheduled và chưa phát sinh học phí. "
+            "Cần quyền WRITE và quyền cập nhật buổi học để hoàn tất."
+        )
+
+    def _on_complete_session_clicked(self) -> None:
+        """Explicit action, separate from Save Attendance and Edit Session."""
+        if self._historical_read_only or not self.attendance_widget._can_write():
+            self.refresh_completion_controls()
+            QMessageBox.warning(
+                self, "READ mode", "Cần quyền WRITE để hoàn thành buổi học."
+            )
+            return
+        try:
+            # Refresh persisted state to avoid trusting stale UI status.
+            current = self._session_service.get_session(self._session_id)
+        except Exception as exc:
+            logger.exception("Cannot refresh Session before explicit completion")
+            QMessageBox.warning(self, "Không thể kiểm tra buổi học", str(exc))
+            return
+        self._session = current
+        self._update_header()
+        self.refresh_completion_controls()
+        if (
+            current.status != SessionStatus.SCHEDULED.value
+            or (current.actual_date or current.scheduled_date) > get_clock().today()
+        ):
+            return
+        # Attendance and Session completion remain independent. Explicitly
+        # warn if the roster still contains unmarked students: the existing
+        # enrollment billing policy may bill missing Attendance on completion.
+        try:
+            overview = self._attendance_service.get_session_attendance_overview(
+                self._session_id
+            )
+        except Exception as exc:
+            logger.exception("Cannot verify attendance coverage before completion")
+            QMessageBox.warning(
+                self, "Chưa xác minh điểm danh",
+                "Không thể kiểm tra danh sách học sinh chưa điểm danh. "
+                "Chưa chuyển Session sang Completed.\\n" + str(exc),
+            )
+            return
+        unmarked = int(overview.get("Unmarked", 0))
+        warning = (
+            f"\\n\\n⚠ Có {unmarked} học sinh chưa điểm danh. "
+            "Theo chính sách hiện tại, thiếu điểm danh vẫn có thể bị tính phí. "
+            "Vui lòng kiểm tra Attendance trước khi xác nhận."
+            if unmarked else ""
+        )
+        answer = QMessageBox.question(
+            self,
+            "Xác nhận hoàn thành buổi học",
+            f"Xác nhận buổi #{current.session_number} đã được tổ chức "
+            "và kết thúc thực tế?\\n\\n"
+            "Sau khi Completed, hệ thống sẽ tính học phí theo "
+            "chính sách của từng Enrollment. Không tự thay đổi điểm danh."
+            + warning,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._historical_read_only or not self.attendance_widget._can_write():
+            QMessageBox.warning(
+                self, "READ mode", "Quyền WRITE đã thay đổi. Chưa hoàn tất Session."
+            )
+            self.refresh_completion_controls()
+            return
+        try:
+            self._session = self._session_service.complete_scheduled_session(self._session_id)
+        except Exception as exc:
+            logger.exception("Explicit completion from Session Detail failed")
+            QMessageBox.warning(
+                self, "Chưa hoàn tất Session",
+                "Không thay đổi Attendance hoặc học phí.\\n" + str(exc),
+            )
+            self.refresh_completion_controls()
+            return
+        self._update_header()
+        self._update_summary()
+        self.refresh_completion_controls()
+        self.attendance_widget.refresh()
+        self.session_updated.emit()
 
     def _update_attendance_summary(self) -> None:
         """Update the read-only roster-aware attendance summary in Overview tab."""
@@ -451,6 +627,7 @@ class SessionDetailDialog(QDialog):
             return
         self._update_header()
         self._update_summary()
+        self.refresh_completion_controls()
         self.attendance_widget.refresh()
         self.session_updated.emit()
 

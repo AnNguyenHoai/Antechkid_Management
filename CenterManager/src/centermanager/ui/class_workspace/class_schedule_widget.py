@@ -284,6 +284,12 @@ class ClassScheduleWidget(QWidget):
                 self._collaboration_manager.ensure_write,
                 self._notification_service,
             )
+            # Completion banner is created before the parent supplies the live
+            # WRITE guard. Refresh once after binding, and update this list even
+            # if the dialog is subsequently closed with X/Esc.
+            dialog.refresh_completion_controls()
+            dialog.session_updated.connect(self._load_sessions)
+            dialog.session_updated.connect(lambda: self.session_updated.emit())
             if dialog.exec() == SessionDetailDialog.DialogCode.Accepted:
                 self._load_sessions()
                 self.session_updated.emit()
