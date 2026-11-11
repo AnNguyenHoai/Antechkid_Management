@@ -106,3 +106,30 @@ def test_approved_review_skip_only_changes_advisory_notice(tmp_path):
     queue.acknowledge(case["id"])
     assert not queue.pending()
     assert journal.read_bytes() == raw  # Review does not alter business data
+
+
+def test_corrupt_recovery_audit_does_not_reject_authorized_business_adapter(
+    tmp_path, monkeypatch,
+):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from centermanager.services import recovery_change_outbox as outbox
+    from centermanager.platform import write_recovery
+
+    def fail_journal():
+        raise OSError("Recovery disk is unavailable")
+
+    monkeypatch.setattr(write_recovery, "WriteRecoveryJournal", fail_journal)
+    engine = create_engine("sqlite:///:memory:")
+    engine._cm_runtime_owned = True
+    try:
+        with Session(engine) as session:
+            assert outbox.record_for_active_write(
+                session, module="student", action="UPDATE",
+                entity_type="Student", entity_id=101,
+            ) is None
+            # Audit failure must not poison the business SQL transaction.
+            session.execute(__import__("sqlalchemy").text("SELECT 1"))
+            session.commit()
+    finally:
+        engine.dispose()
