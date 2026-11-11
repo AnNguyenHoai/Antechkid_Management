@@ -160,8 +160,10 @@ Every workflow records **actor/trigger → prerequisites → steps → accepted 
 1. Open Class → Sessions → Create Session (number, title, planned date/time, teacher/class context).
 2. Save planned session through SessionService under WRITE and permission.
 3. During teaching, open exact session; set teaching note/progress and outcomes with explicit Save/Close behavior, using relevant services.
-4. Complete/cancel session through allowed state transitions; completion and actual date affect tuition billing eligibility.
+4. Complete/cancel session through allowed state transitions; completion and actual date affect tuition billing eligibility. When Attendance is saved successfully on an eligible Scheduled Session, prompt separately **"Buổi học đã kết thúc?"** default No. Yes invokes permission/WRITE guarded SessionService completion with in-transaction Scheduled/active-class/not-future recheck; No keeps Scheduled. Attendance saving is never rolled back or re-run if completion is declined or fails.
 5. Changes update Class/Student projections and timeline; do not mark an unheld/canceled session billable merely because it was scheduled.
+
+5. Class Schedule shows past-dated **Scheduled** lessons, even with no attendance, as a read-only warning list with a Session Status column and a View route. Never auto-finish based only on date or presence of attendance. Cancelled/Postponed are not unfinished-delivery alerts.
 
 **Exceptions:** class archived, invalid time range, duplicate/out-of-range session, wrong teacher permission, attempted editing of closed state. **Code:** `services/session_service.py`, `ui/class_workspace/`.
 
