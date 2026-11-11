@@ -15,8 +15,8 @@ from centermanager.platform.sync.startup_install_replay import (
 )
 
 
-def test_baseline_cleanup_error_is_a_startup_failure(monkeypatch, tmp_path):
-    """Characterize current defect: cleanup IOError escapes finalization."""
+def test_locked_obsolete_cleanup_is_advisory_after_acceptance(monkeypatch, tmp_path):
+    """Once accepted, cleanup cannot veto MAIN or erase previous evidence."""
     artifact = tmp_path / "old-employee-backup"
     artifact.mkdir()
     (artifact / "old.txt").write_text("prior evidence")
@@ -26,10 +26,43 @@ def test_baseline_cleanup_error_is_a_startup_failure(monkeypatch, tmp_path):
     def locked(_path):
         raise PermissionError("simulated Windows locked backup")
     monkeypatch.setattr(startup_module.shutil, "rmtree", locked)
-    with pytest.raises(PermissionError, match="locked backup"):
-        sync._finalize_startup_assets()
+    sync._finalize_startup_assets()
     assert artifact.exists()
-    assert sync._startup_assets is not None
+    assert sync._startup_assets is None
+
+
+def test_locked_old_database_backup_never_blocks_after_verified_install(
+    monkeypatch, tmp_path,
+):
+    db = tmp_path / "Database" / "center.db"
+    db.parent.mkdir()
+    db.write_bytes(b"verified-main")
+    obsolete = tmp_path / "previous-old.db"
+    obsolete.write_bytes(b"older-data")
+    sync = StartupSynchronization.__new__(StartupSynchronization)
+    sync._startup_db_install_backup = (db, obsolete, True, ())
+    original_unlink = Path.unlink
+    def locked_unlink(path, *args, **kwargs):
+        if path == obsolete:
+            raise PermissionError("Windows file lock")
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", locked_unlink)
+    sync._finalize_startup_database_install()
+    assert db.read_bytes() == b"verified-main"
+    assert obsolete.read_bytes() == b"older-data"
+    assert sync._startup_db_install_backup is None
+
+
+def test_review_mode_preserves_old_employee_archive_without_recursing(tmp_path):
+    archive = tmp_path / "very-long-existing-archive"
+    archive.mkdir()
+    (archive / "evidence.txt").write_text("old unsent data")
+    sync = StartupSynchronization.__new__(StartupSynchronization)
+    sync._startup_assets = ([(tmp_path / "Employees", archive, True)], None)
+    sync._review_only_reset_requested = True
+    sync._finalize_startup_assets()
+    assert (archive / "evidence.txt").read_text() == "old unsent data"
+    assert sync._startup_assets is None
 
 
 def test_crash_snapshot_copy_failure_keeps_original_and_no_acceptance_marker(
