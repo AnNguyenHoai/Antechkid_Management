@@ -35,9 +35,64 @@ class StudentImportService:
         self._student_service = student_service
         self._repository_provider = repository_provider or create_default_repository_provider()
 
+    IMPORT_HEADERS = (
+        "Code", "Full Name", "Preferred Name", "Date of Birth",
+        "Gender", "Status", "Level", "Notes",
+    )
+
+    def preview_from_excel(self, file_path: Path) -> tuple[int, List[str]]:
+        """Read-only validation before operator explicitly starts importing."""
+        path = Path(file_path)
+        if path.suffix.lower() != ".xlsx":
+            raise ValueError("Only .xlsx Excel files are supported.")
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            ws = wb.active
+            headers = tuple(str(cell or "").strip() for cell in next(
+                ws.iter_rows(min_row=1, max_row=1, values_only=True), ()
+            )[:8])
+            if headers != self.IMPORT_HEADERS:
+                raise ValueError("Invalid Student Excel template; expected: " + ", ".join(self.IMPORT_HEADERS))
+            seen = set()
+            errors = []
+            rows = 0
+            for index, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+                if not row or not any(cell is not None and str(cell).strip() for cell in row):
+                    continue
+                rows += 1
+                if len(row) < 8:
+                    errors.append(f"Row {index}: expected 8 columns")
+                    continue
+                if not str(row[1] or "").strip():
+                    errors.append(f"Row {index}: Full name is required")
+                code = str(row[0]).strip().upper() if row[0] else ""
+                if code:
+                    import re
+                    if not re.fullmatch(r"HS[0-9]+", code):
+                        errors.append(f"Row {index}: Invalid Student code (expected HS followed by digits)")
+                    if code in seen:
+                        errors.append(f"Row {index}: duplicate Student code within file: {code}")
+                    seen.add(code)
+                status = str(row[5]).strip().upper() if row[5] else "ACTIVE"
+                if status not in ("ACTIVE", "ARCHIVED"):
+                    errors.append(f"Row {index}: Invalid status {status}")
+                if row[3]:
+                    from datetime import date
+                    if not isinstance(row[3], (datetime, date)):
+                        try:
+                            datetime.strptime(str(row[3]), "%Y-%m-%d")
+                        except ValueError:
+                            errors.append(f"Row {index}: Invalid date format (use YYYY-MM-DD)")
+            return rows, errors
+        finally:
+            wb.close()
+
     def import_from_excel(self, file_path: Path) -> Tuple[int, int, List[str]]:
-        """Import students from Excel file."""
-        wb = openpyxl.load_workbook(file_path)
+        """Import students from a confirmed, validated Excel file."""
+        count, validation_errors = self.preview_from_excel(file_path)
+        if validation_errors:
+            return 0, len(validation_errors), validation_errors
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         ws = wb.active
         errors: List[str] = []
         success = 0
@@ -47,7 +102,7 @@ class StudentImportService:
                 continue
 
             try:
-                code = row[0] if row[0] else None
+                code = str(row[0]).strip().upper() if row[0] else None
                 full_name = row[1]
                 if not full_name:
                     errors.append(f"Row {row_idx}: Full name is required")
@@ -74,10 +129,11 @@ class StudentImportService:
 
                 student = self._student_service.create_student(
                     full_name=str(full_name).strip(),
+                    student_code=str(code).strip() if code else None,
                     preferred_name=str(row[2]).strip() if row[2] else None,
                     date_of_birth=dob,
                     gender=str(row[4]).strip() if row[4] else None,
-                    status=str(row[5]).strip() if row[5] else "ACTIVE",
+                    status=str(row[5]).strip().upper() if row[5] else "ACTIVE",
                     current_level=str(row[6]).strip() if row[6] else None,
                     notes=str(row[7]).strip() if row[7] else None,
                 )
@@ -89,4 +145,5 @@ class StudentImportService:
                 logger.exception("Error importing row %s", row_idx)
                 errors.append(f"Row {row_idx}: {str(e)}")
 
+        wb.close()
         return success, len(errors), errors

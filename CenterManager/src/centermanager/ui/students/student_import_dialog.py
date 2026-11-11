@@ -32,6 +32,7 @@ class StudentImportDialog(QDialog):
         self.setModal(True)
 
         self._file_path: Optional[Path] = None
+        self._did_import = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -60,18 +61,24 @@ class StudentImportDialog(QDialog):
         self.import_btn.setEnabled(False)
         self.import_btn.clicked.connect(self._import)
         self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.accept)
+        self.close_btn.clicked.connect(self._close)
         btn_layout.addStretch()
         btn_layout.addWidget(self.import_btn)
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
+
+    def _close(self) -> None:
+        if self._did_import:
+            self.accept()
+        else:
+            self.reject()
 
     def _browse(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Excel File",
             "",
-            "Excel Files (*.xlsx *.xls)"
+            "Excel Files (*.xlsx)"
         )
         if file_path:
             self._file_path = Path(file_path)
@@ -85,6 +92,26 @@ class StudentImportDialog(QDialog):
             QMessageBox.warning(self, "Error", "File does not exist.")
             return
 
+        try:
+            total, validation_errors = self._service.preview_from_excel(self._file_path)
+            if validation_errors:
+                QMessageBox.warning(self, "Invalid import file",
+                    "\\n".join(validation_errors[:15]))
+                return
+            answer = QMessageBox.question(
+                self, "Confirm Student import",
+                f"{total} students will be imported. Existing Student codes will be skipped; "
+                "no Enrollment or tuition data will be created. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        except Exception as exc:
+            logger.exception("Student import preview failed")
+            QMessageBox.critical(self, "Invalid import file", str(exc))
+            return
+
         self.import_btn.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
@@ -92,6 +119,7 @@ class StudentImportDialog(QDialog):
         try:
             success, errors, error_list = self._service.import_from_excel(self._file_path)
             self.log_text.clear()
+            self._did_import = self._did_import or success > 0
             self.log_text.append(f"Import completed: {success} succeeded, {errors} failed.")
             if error_list:
                 self.log_text.append("\n--- Errors ---")
