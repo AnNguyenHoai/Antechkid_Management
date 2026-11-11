@@ -45,7 +45,9 @@ def test_bootstrap_only_falls_back_after_remote_fetch_failure():
 def test_offline_does_not_migrate_shared_database_or_trigger_daily_side_effects():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
     migration = (ROOT / "database" / "migration.py").read_text(encoding="utf-8")
-    assert "if bootstrap._offline_read:" in source
+    # A verified Git MAIN may require read-only schema checking after
+    # interrupted publication. Network-offline must always select this path.
+    assert "if bootstrap._offline_read or recovery_advisory_present:" in source
     assert "verify_runtime_schema_readonly()" in source
     assert "if not bootstrap._offline_read:" in source
     assert "def verify_runtime_schema_readonly()" in migration
