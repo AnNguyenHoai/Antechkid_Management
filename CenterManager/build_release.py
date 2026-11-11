@@ -235,6 +235,25 @@ def resolve_source_commit() -> str:
     raise RuntimeError("Could not resolve the source Git commit for release provenance.")
 
 
+def assert_clean_source_checkout(source_commit: str) -> None:
+    """Refuse to label uncommitted code with the last committed source SHA."""
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    state = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=False,
+    )
+    if (head.returncode != 0 or state.returncode != 0
+            or head.stdout.strip().lower() != source_commit.lower()
+            or state.stdout.strip()):
+        raise RuntimeError(
+            "Release build requires an exact clean Git checkout matching "
+            "RELEASE_MANIFEST source_commit. Commit or discard working tree changes."
+        )
+
+
 def release_channel() -> str:
     return "release-candidate" if "-rc" in VERSION else "production"
 
@@ -382,6 +401,7 @@ def create_release_package(executable: Path, admin_executable: Path, source_comm
 def main() -> None:
     clean_outputs()
     source_commit = resolve_source_commit()
+    assert_clean_source_checkout(source_commit)
     print(f"Building {APP_NAME} {VERSION} from {source_commit}...")
     executable = build_executable()
     admin_executable = build_admin_provisioning_executable()
