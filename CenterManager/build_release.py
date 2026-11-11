@@ -293,7 +293,7 @@ def write_uat_checklist() -> None:
         "- [ ] Restarting the executable preserves expected runtime data.\n- [ ] No source checkout or Python installation is required to launch either executable.\n"
         "- [ ] Git synchronization works without a system Git installation.\n- [ ] With Git configured, startup uses the repository database rather than a stale local database.\n"
         "- [ ] If the authoritative repository database is unavailable, startup refuses to continue with a stale local database.\n"
-        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n",
+        "- [ ] A write/publish from one machine is visible after startup on a second machine.\n"
         "- [ ] Three Windows pytest shards PASS on the EXACT release source SHA.\n"
         "- [ ] Verify RELEASE_MANIFEST.json migration_sha256 with scripts/verify_startup_release.py.\n"
         "- [ ] On a COPY of the production-format SQLCipher database, verify clean and existing installation startup and READ login.\n"
@@ -303,7 +303,7 @@ def write_uat_checklist() -> None:
         "- [ ] Wrong key, signed identity or Alembic revision rejects unsafe startup; no stamp or data rewrite.\n"
         "- [ ] Git offline READ only with verified cached CLEAN receipt; never grant WRITE.\n"
         "- [ ] Two machines: single WRITE owner, Start Editing, Finish Editing CAS, second-client restart sees MAIN.\n"
-        "- [ ] Record EXE SHA, encrypted test DB provenance, logs and maintainer approval BEFORE release.\n"
+        "- [ ] Record EXE SHA, encrypted test DB provenance, logs and maintainer approval BEFORE release.\n",
         encoding="utf-8",
     )
 
